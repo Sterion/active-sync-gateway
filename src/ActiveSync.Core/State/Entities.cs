@@ -104,6 +104,13 @@ public class CollectionState
 	/// <summary>Snapshot as of SyncKey-1, kept so a replayed key can be honored.</summary>
 	public string? PreviousSnapshotJson { get; set; }
 
+	/// <summary>
+	///   JSON: ClientId → applied-Add outcome for the request that produced SyncKey. A client
+	///   that never saw that response re-sends the same Adds with the same ClientIds; this map
+	///   lets the replay reuse the already-created items instead of duplicating them.
+	/// </summary>
+	public string? LastClientAddsJson { get; set; }
+
 	public int FilterType { get; set; }
 
 	/// <summary>Cached client sync options (body preference, window, etc.) for empty Sync requests.</summary>

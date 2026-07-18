@@ -84,6 +84,9 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.Property<int>("FilterType")
                         .HasColumnType("integer");
 
+                    b.Property<string>("LastClientAddsJson")
+                        .HasColumnType("text");
+
                     b.Property<string>("OptionsJson")
                         .HasColumnType("text");
 

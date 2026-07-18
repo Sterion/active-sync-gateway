@@ -216,6 +216,13 @@ public sealed partial class SyncHandler(
 		bool snapshotDirty = false;
 
 		// ---- client → server commands ----
+		// On a replayed key the client never saw our previous response and re-sends the same
+		// Adds with the same ClientIds; the map of already-applied Adds lets us reuse the
+		// items created the first time instead of duplicating them (MS-ASCMD retry semantics).
+		Dictionary<string, AppliedClientAdd> replayedAdds = validation == SyncKeyValidation.Replay
+			? SyncStateService.ReadAppliedAdds(state)
+			: [];
+		Dictionary<string, AppliedClientAdd> appliedAdds = new(StringComparer.Ordinal);
 		int clientAdds = 0, clientChanges = 0, clientDeletes = 0;
 		XElement? commands = collectionElement.Element(AS + "Commands");
 		if (commands is not null)
@@ -231,7 +238,8 @@ public sealed partial class SyncHandler(
 				try
 				{
 					XElement? handled = await ApplyClientCommandAsync(
-						context, folder, store, command, snapshot, bodyPreference, deletesAsMoves, ct);
+						context, folder, store, command, snapshot, bodyPreference, deletesAsMoves,
+						replayedAdds, appliedAdds, ct);
 					if (handled is not null)
 						clientResponses.Add(handled);
 					snapshotDirty = true;
@@ -323,7 +331,7 @@ public sealed partial class SyncHandler(
 
 		state.OptionsJson = JsonSerializer.Serialize(collectionOptions);
 		int newKey = await context.State.CommitCollectionStateAsync(
-			state, newSnapshot, collectionOptions.FilterType, ct);
+			state, newSnapshot, collectionOptions.FilterType, ct, appliedAdds);
 
 		XElement response = new(AS + "Collection",
 			new XElement(AS + "SyncKey", newKey.ToString()),
@@ -374,7 +382,9 @@ public sealed partial class SyncHandler(
 	/// <summary>Applies one client command; returns a Responses child (null when success is implicit).</summary>
 	private async Task<XElement?> ApplyClientCommandAsync(
 		EasContext context, UserFolder folder, IContentStore store, XElement command,
-		Dictionary<string, string> snapshot, BodyPreference bodyPreference, bool deletesAsMoves, CancellationToken ct)
+		Dictionary<string, string> snapshot, BodyPreference bodyPreference, bool deletesAsMoves,
+		Dictionary<string, AppliedClientAdd> replayedAdds, Dictionary<string, AppliedClientAdd> appliedAdds,
+		CancellationToken ct)
 	{
 		// Global ReadOnly mode and per-folder read-only shared-calendar grants share the
 		// same enforcement: reject Adds, silently revert Changes/Deletes.
@@ -394,12 +404,32 @@ public sealed partial class SyncHandler(
 					return ClientCommandStatus(command, "6");
 				}
 
+				// Retried Add (the client never saw our response): reuse the outcome of the
+				// first attempt — no second backend item, no second iMIP invitation, no
+				// second draft submission.
+				if (clientId.Length > 0 && replayedAdds.TryGetValue(clientId, out AppliedClientAdd? replayed))
+				{
+					appliedAdds[clientId] = replayed;
+					if (replayed.ItemKey is null)
+						return new XElement(AS + "Add",
+							new XElement(AS + "ClientId", clientId),
+							new XElement(AS + "Status", "1"));
+					snapshot[replayed.ItemKey] = replayed.Revision ?? "";
+					string replayedServerId = await folders.ComposeServerIdAsync(folder, store, replayed.ItemKey, ct);
+					return new XElement(AS + "Add",
+						new XElement(AS + "ClientId", clientId),
+						new XElement(AS + "ServerId", replayedServerId),
+						new XElement(AS + "Status", "1"));
+				}
+
 				// 16.x: email2:Send on a draft Add means "submit instead of storing" — the
 				// message goes out via SMTP + Sent Items and never materializes in Drafts.
 				if (HasSendElement(command, appData) &&
 				    store.EasClass.Equals(EasClass.Email, StringComparison.OrdinalIgnoreCase))
 				{
 					await SubmitDraftAsync(context, appData, null, null, ct);
+					if (clientId.Length > 0)
+						appliedAdds[clientId] = new AppliedClientAdd(null, null);
 					return new XElement(AS + "Add",
 						new XElement(AS + "ClientId", clientId),
 						new XElement(AS + "Status", "1"));
@@ -407,6 +437,8 @@ public sealed partial class SyncHandler(
 
 				(string itemKey, string revision) = await store.CreateItemAsync(folder.BackendKey, appData, ct);
 				snapshot[itemKey] = revision;
+				if (clientId.Length > 0)
+					appliedAdds[clientId] = new AppliedClientAdd(itemKey, revision);
 				if (IsCalendarClass(store))
 					await invitations.AfterCreateAsync(context, store, folder.BackendKey, itemKey, ct);
 				string serverId = await folders.ComposeServerIdAsync(folder, store, itemKey, ct);

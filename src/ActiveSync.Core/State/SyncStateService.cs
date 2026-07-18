@@ -23,6 +23,14 @@ public enum SyncKeyValidation
 
 public sealed record FolderChange(string ServerId, string DisplayName, string? ParentServerId, int Type);
 
+/// <summary>
+///   Outcome of one applied client Add, kept for one generation so a retried Sync (lost
+///   response) reuses the created item instead of creating a duplicate. A null
+///   <see cref="ItemKey" /> marks an Add that stored nothing (16.x draft submitted via
+///   email2:Send) — replayed as a bare success without re-sending the mail.
+/// </summary>
+public sealed record AppliedClientAdd(string? ItemKey, string? Revision);
+
 public sealed record FolderHierarchyDiff(
 	IReadOnlyList<FolderChange> Adds,
 	IReadOnlyList<FolderChange> Updates,
@@ -276,6 +284,7 @@ public class SyncStateService(SyncDbContext db)
 			state.SyncKey = 0;
 			state.SnapshotJson = "{}";
 			state.PreviousSnapshotJson = null;
+			state.LastClientAddsJson = null;
 			state.UpdatedUtc = DateTime.UtcNow;
 			await db.SaveChangesAsync(ct).ConfigureAwait(false);
 			return (SyncKeyValidation.Initial, state);
@@ -294,6 +303,8 @@ public class SyncStateService(SyncDbContext db)
 		if (key == state.SyncKey - 1 && state.PreviousSnapshotJson is not null)
 		{
 			// Client never saw our last response: roll back one generation.
+			// LastClientAddsJson is deliberately KEPT — it describes the Adds of the discarded
+			// generation, which are exactly the ones the client is about to re-send.
 			state.SyncKey = key;
 			state.SnapshotJson = state.PreviousSnapshotJson;
 			state.PreviousSnapshotJson = null;
@@ -335,11 +346,23 @@ public class SyncStateService(SyncDbContext db)
 		return JsonSerializer.Deserialize<Dictionary<string, string>>(state.SnapshotJson, JsonOpts) ?? [];
 	}
 
+	/// <summary>The applied-Add map of the generation that produced the current SyncKey.</summary>
+	public static Dictionary<string, AppliedClientAdd> ReadAppliedAdds(CollectionState state)
+	{
+		return state.LastClientAddsJson is null
+			? []
+			: JsonSerializer.Deserialize<Dictionary<string, AppliedClientAdd>>(state.LastClientAddsJson, JsonOpts) ?? [];
+	}
+
 	public async Task<int> CommitCollectionStateAsync(
-		CollectionState state, Dictionary<string, string> newSnapshot, int filterType, CancellationToken ct)
+		CollectionState state, Dictionary<string, string> newSnapshot, int filterType, CancellationToken ct,
+		Dictionary<string, AppliedClientAdd>? appliedAdds = null)
 	{
 		state.PreviousSnapshotJson = state.SnapshotJson;
 		state.SnapshotJson = JsonSerializer.Serialize(newSnapshot, JsonOpts);
+		state.LastClientAddsJson = appliedAdds is { Count: > 0 }
+			? JsonSerializer.Serialize(appliedAdds, JsonOpts)
+			: null;
 		state.SyncKey++;
 		state.FilterType = filterType;
 		state.UpdatedUtc = DateTime.UtcNow;

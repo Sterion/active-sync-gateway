@@ -6,9 +6,10 @@ using ActiveSync.Protocol.Wbxml;
 namespace ActiveSync.Integration.Tests.Scenarios;
 
 /// <summary>
-///   Regressions for two sync-state correctness bugs: GetItemEstimate must not mutate the
-///   collection sync state, and a SyncKey-0 FolderSync must return the full hierarchy even
-///   when the device previously acknowledged it (re-provisioning).
+///   Regressions for sync-state correctness bugs: GetItemEstimate must not mutate the
+///   collection sync state, a SyncKey-0 FolderSync must return the full hierarchy even
+///   when the device previously acknowledged it (re-provisioning), and a retried Sync Add
+///   (lost response) must not create a duplicate item on the backend.
 /// </summary>
 [Collection("gateway")]
 [Trait("Category", "Integration")]
@@ -16,6 +17,7 @@ public class SyncStateCorrectnessTests(GatewayFixture gateway)
 {
 	private static readonly XNamespace GIE = EasNamespaces.GetItemEstimate;
 	private static readonly XNamespace AS = EasNamespaces.AirSync;
+	private static readonly XNamespace C = EasNamespaces.Contacts;
 
 	[BackendFact]
 	public async Task GetItemEstimate_WithStaleSyncKey0_DoesNotResetCollectionState()
@@ -56,5 +58,50 @@ public class SyncStateCorrectnessTests(GatewayFixture gateway)
 		List<EasFolder> folders = await reprovisioned.FolderSyncAsync();
 		Assert.NotEmpty(folders);
 		Assert.Contains(folders, f => f.Type == EasFolderType.Inbox);
+	}
+
+	[BackendFact]
+	public async Task Sync_RetriedAddAfterLostResponse_DoesNotDuplicateItem()
+	{
+		EasTestClient client = gateway.CreateLocalStoresEasClient(TestBackend.User1);
+		await client.HandshakeAsync();
+		string contacts = client.FolderOfType(EasFolderType.Contacts).ServerId;
+		await client.InitialSyncAsync(contacts);
+		await client.PullAllAsync(contacts);
+
+		string marker = $"Retry{Guid.NewGuid():N}"[..12];
+		string keyBeforeAdd = client.SyncKeys[contacts];
+		SyncResult first = await client.AddItemAsync(contacts, "r1",
+			new XElement(C + "FirstName", "Once"),
+			new XElement(C + "LastName", marker));
+		string firstServerId = AssertAdded(first);
+
+		// The response "never arrived": the client re-posts the identical Add (same ClientId,
+		// same data) under the previous sync key. The server must replay, not create again.
+		client.SyncKeys[contacts] = keyBeforeAdd;
+		SyncResult retry = await client.AddItemAsync(contacts, "r1",
+			new XElement(C + "FirstName", "Once"),
+			new XElement(C + "LastName", marker));
+		string retryServerId = AssertAdded(retry);
+		Assert.Equal(firstServerId, retryServerId);
+		Assert.Equal(first.SyncKey, retry.SyncKey);
+
+		// A fresh device (same user, shared local store) sees exactly one copy on the backend.
+		EasTestClient verifier = gateway.CreateLocalStoresEasClient(TestBackend.User1);
+		await verifier.HandshakeAsync();
+		string verifierContacts = verifier.FolderOfType(EasFolderType.Contacts).ServerId;
+		await verifier.InitialSyncAsync(verifierContacts);
+		SyncResult all = await verifier.PullAllAsync(verifierContacts);
+		Assert.Single(all.Adds, a => a.ApplicationData.Element(C + "LastName")?.Value == marker);
+	}
+
+	private static string AssertAdded(SyncResult result)
+	{
+		XElement? add = result.Responses.FirstOrDefault(r => r.Name.LocalName == "Add");
+		Assert.NotNull(add);
+		Assert.Equal("1", add.Element(AS + "Status")?.Value);
+		string serverId = add.Element(AS + "ServerId")?.Value ?? "";
+		Assert.False(string.IsNullOrEmpty(serverId));
+		return serverId;
 	}
 }

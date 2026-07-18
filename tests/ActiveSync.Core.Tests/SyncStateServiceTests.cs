@@ -63,6 +63,36 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task AppliedAdds_SurviveReplayRollback_AndClearOnNextCommit()
+	{
+		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
+		(_, CollectionState state) = await _service.ValidateSyncKeyAsync(device, "7", "0", CancellationToken.None);
+		await _service.CommitCollectionStateAsync(state, [], 0, CancellationToken.None);
+
+		// The request that produces key 2 applied one client Add.
+		(_, state) = await _service.ValidateSyncKeyAsync(device, "7", "1", CancellationToken.None);
+		await _service.CommitCollectionStateAsync(state,
+			new Dictionary<string, string> { ["item1"] = "r1" }, 0, CancellationToken.None,
+			new Dictionary<string, AppliedClientAdd> { ["c1"] = new AppliedClientAdd("item1", "r1") });
+
+		// Lost response: the client retries with key 1 — the rollback keeps the applied-Add
+		// map, which is exactly what the retried commands need for dedup.
+		(SyncKeyValidation validation, CollectionState rolledBack) =
+			await _service.ValidateSyncKeyAsync(device, "7", "1", CancellationToken.None);
+		Assert.Equal(SyncKeyValidation.Replay, validation);
+		Dictionary<string, AppliedClientAdd> replayed = SyncStateService.ReadAppliedAdds(rolledBack);
+		Assert.True(replayed.TryGetValue("c1", out AppliedClientAdd? add));
+		Assert.Equal("item1", add!.ItemKey);
+		Assert.Equal("r1", add.Revision);
+
+		// A commit without client Adds clears the map — it described the discarded generation.
+		await _service.CommitCollectionStateAsync(rolledBack,
+			new Dictionary<string, string> { ["item1"] = "r1" }, 0, CancellationToken.None);
+		(_, CollectionState after) = await _service.ValidateSyncKeyAsync(device, "7", "2", CancellationToken.None);
+		Assert.Empty(SyncStateService.ReadAppliedAdds(after));
+	}
+
+	[Fact]
 	public async Task FolderRegistry_AssignsStableServerIds_AndSoftDeletes()
 	{
 		List<BackendFolder> folders = new()
