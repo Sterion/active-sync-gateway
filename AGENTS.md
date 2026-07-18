@@ -527,11 +527,22 @@ banner. Rules:
   `postgresql://` URI: when set, each gateway factory creates its own fresh Postgres
   database instead of a SQLite temp file — never dropped, the CI container is discarded —
   so Npgsql migrations, URI conversion and provider inference all run in CI.
-- Two stacks, one suite: `stalwart` (default; pinned **v0.13.4** — 0.16+ moved to a
-  JSON/web-setup config that cannot be provisioned declaratively; users are created by the
-  compose `provision` one-shot via the management API) and `mailserver`
-  (docker-mailserver + Radicale; set `AS_TEST_STACK=mailserver` so the DAV `HomeSetPath`
-  preset switches to `/{user}/`).
+- Two stacks, one suite: `stalwart` (default; **v0.16.13**, self-provisioning) and
+  `mailserver` (docker-mailserver + Radicale; set `AS_TEST_STACK=mailserver` so the DAV
+  `HomeSetPath` preset switches to `/{user}/`). 0.16 dropped the mounted-TOML + REST
+  provisioning the old 0.13 stack used — config now lives in the data store and is written
+  through Stalwart's own JMAP management API (the `urn:stalwart:jmap` `x:*` methods), only
+  in a bootstrap mode that needs a restart to take effect. `docker/backends/stalwart/
+  entrypoint.sh` runs in place of the image's default command and drives that whole dance
+  in-process (bootstrap → restart → settings → restart → users) using the curl + bash
+  already in the image: it creates the users, plaintext IMAP 143 + submission 587 listeners
+  (matching the retired 0.13 ports) and a relaxed password/auth/ban policy so the trivial
+  `pass` password keeps working, then serves mail + CalDAV/CardDAV + ManageSieve + the full
+  JMAP surface (incl. calendars/contacts/vacation) from one container. It writes a
+  `.provisioned` marker when done (the compose healthcheck gates on it); re-runs are
+  idempotent. This one stack now also backs the JMAP groupware tests (formerly a separate
+  `stalwart-jmap` 0.16 stack, now removed) — `JmapGroupware*` in `TestBackend` default to it
+  with a real user.
 - Tests use **GUID subjects/markers** and poll with `WaitUntil` — never assume an empty
   mailbox and never assert on absolute counts. `MailboxJanitor` exists for best-effort
   purges when needed.
@@ -552,14 +563,14 @@ banner. Rules:
   poison host bin/obj with Linux paths). Image builds run unit tests only via the
   Dockerfile `test` stage (forced by a marker-file COPY into `runtime`).
 - GitHub workflow (`.github/workflows/build.yaml`, single pipeline): steps deliberately
-  stream everything through the docker daemon API (`docker cp` for the Stalwart config —
-  as a *directory* copy, because the image entrypoint hardwires
-  `--config /opt/stalwart/etc/config.toml` and ignores command args; stdin for
-  provision.sh) instead of bind mounts, a pattern inherited from a docker-out-of-docker
-  runner and kept for robustness — don't add bind mounts to workflow steps. A warm-up
-  canary mail runs before the suite (a cold Stalwart intermittently delays its first
-  delivery, which would flake one test). The runtime image pushes to ghcr.io with the
-  built-in GITHUB_TOKEN; no repository secrets are needed.
+  stream everything through the docker daemon API (`docker cp` the Stalwart entrypoint into
+  the container, then override the command to run it) instead of bind mounts, a pattern
+  inherited from a docker-out-of-docker runner and kept for robustness — don't add bind
+  mounts to workflow steps. The container self-provisions; the workflow waits for its
+  `.provisioned` marker before running the suite. A warm-up canary mail runs before the
+  suite (a cold Stalwart intermittently delays its first delivery, which would flake one
+  test). The runtime image pushes to ghcr.io with the built-in GITHUB_TOKEN; no repository
+  secrets are needed.
 - Release flow (`release.yaml`, workflow_dispatch): validate version → generate notes
   from commit subjects since the previous RELEASE (not tag) → push the tag → create the
   release object → **explicitly dispatch build.yaml against the tag ref** (a tag pushed

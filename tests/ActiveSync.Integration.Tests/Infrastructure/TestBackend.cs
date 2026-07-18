@@ -27,14 +27,15 @@ public static class TestBackend
 	public static string? JmapUrl { get; } = EnvOrNull("AS_TEST_JMAP_URL") ?? DavUrl;
 
 	/// <summary>
-	///   JMAP-groupware server (calendars + contacts) — the 0.13 default stack doesn't advertise
-	///   those capabilities, so this points at the 0.16 stack under
-	///   docker/backends/stalwart-jmap (single admin account, bootstrap mode).
+	///   JMAP-groupware endpoint (calendars + contacts). Stalwart 0.16 serves the full JMAP
+	///   surface — mail, calendars, contacts, vacation — on the same HTTP listener as DAV, so
+	///   the single default stack covers it; these default to that stack and a real test user.
 	/// </summary>
-	public static string JmapGroupwareUrl { get; } = Env("AS_TEST_JMAP_GROUPWARE_URL", "http://localhost:18080");
+	public static string JmapGroupwareUrl { get; } =
+		Env("AS_TEST_JMAP_GROUPWARE_URL", JmapUrl ?? $"http://{ImapHost}:5232");
 
-	public static string JmapGroupwareUser { get; } = Env("AS_TEST_JMAP_GROUPWARE_USER", "admin");
-	public static string JmapGroupwarePassword { get; } = Env("AS_TEST_JMAP_GROUPWARE_PASSWORD", "secret");
+	public static string JmapGroupwareUser { get; } = Env("AS_TEST_JMAP_GROUPWARE_USER", User1);
+	public static string JmapGroupwarePassword { get; } = Env("AS_TEST_JMAP_GROUPWARE_PASSWORD", Password);
 
 	/// <summary>ManageSieve (Oof) — Stalwart only; the mailserver stack has no sieve listener.</summary>
 	public static string SieveHost { get; } = Env("AS_TEST_SIEVE_HOST", ImapHost);
@@ -114,8 +115,10 @@ public sealed class JmapGroupwareFactAttribute : FactAttribute
 			using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(5) };
 			string token = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
 				$"{TestBackend.JmapGroupwareUser}:{TestBackend.JmapGroupwarePassword}"));
+			// The session resource directly (not /.well-known/jmap): HttpClient strips the
+			// Authorization header across the well-known redirect, which would 401 the probe.
 			HttpRequestMessage request = new(
-				HttpMethod.Get, new Uri(new Uri(TestBackend.JmapGroupwareUrl), "/.well-known/jmap"));
+				HttpMethod.Get, new Uri(new Uri(TestBackend.JmapGroupwareUrl), "/jmap/session"));
 			request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", token);
 			using HttpResponseMessage response = http.Send(request);
 			using StreamReader reader = new(response.Content.ReadAsStream());
@@ -127,7 +130,7 @@ public sealed class JmapGroupwareFactAttribute : FactAttribute
 		catch (Exception ex)
 		{
 			return $"No JMAP-groupware server at {TestBackend.JmapGroupwareUrl} " +
-			       "(start docker/backends/stalwart-jmap) — " + ex.GetBaseException().Message;
+			       "(start docker/backends/stalwart) — " + ex.GetBaseException().Message;
 		}
 	});
 

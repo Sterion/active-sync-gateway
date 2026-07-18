@@ -4,20 +4,24 @@
 #   docker compose -f docker/docker-compose.ci.yml run --rm tests
 #   docker compose -f docker/docker-compose.ci.yml down -v
 #
-# NOTE: the stalwart + provision service pair is intentionally mirrored from
-# docker/backends/stalwart/docker-compose.yml. Keep the two in sync — image tags,
-# healthcheck, and provisioning must match.
+# NOTE: the stalwart service is intentionally mirrored from
+# docker/backends/stalwart/docker-compose.yml. Keep the two in sync — image tag,
+# entrypoint, and healthcheck must match. The container self-provisions (entrypoint.sh),
+# so there is no separate provision service.
 services:
   stalwart:
-    image: stalwartlabs/stalwart:v0.13.4
-    command: ["--config", "/opt/stalwart/etc/config.toml"]
+    image: stalwartlabs/stalwart:v0.16.13
+    entrypoint: ["/usr/bin/bash", "/entrypoint.sh"]
+    environment:
+      STALWART_RECOVERY_ADMIN: "admin:secret"
     volumes:
-      - ./backends/stalwart/config.toml:/opt/stalwart/etc/config.toml:ro
+      - ./backends/stalwart/entrypoint.sh:/entrypoint.sh:ro
     healthcheck:
-      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/143"]
+      test: ["CMD-SHELL", "test -f /etc/stalwart/.provisioned && curl -fsS -o /dev/null http://127.0.0.1:8080/.well-known/jmap"]
       interval: 3s
       timeout: 3s
-      retries: 30
+      retries: 40
+      start_period: 20s
 
   # Gateway state DB: with AS_TEST_PG set, every gateway factory creates its own database
   # here, so the Npgsql provider + migrations are exercised (without it: SQLite temp files).
@@ -33,18 +37,6 @@ services:
       interval: 3s
       timeout: 3s
       retries: 30
-
-  provision:
-    image: curlimages/curl:8.21.0
-    depends_on:
-      stalwart:
-        condition: service_healthy
-    environment:
-      STALWART_URL: http://stalwart:8080
-    volumes:
-      - ./backends/stalwart/provision.sh:/provision.sh:ro
-    entrypoint: ["/bin/sh", "/provision.sh"]
-    restart: "no"
 
   tests:
     image: mcr.microsoft.com/dotnet/sdk:10.0
@@ -65,8 +57,6 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-      provision:
-        condition: service_completed_successfully
     # The repo is copied (minus build artifacts) into the container before building so the
     # host's bin/obj/NuGet assets are never touched or mixed across operating systems.
     command: >

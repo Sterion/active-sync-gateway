@@ -882,11 +882,16 @@ dedicated throwaway mailbox — the tests create and delete real items.
 ### Backend stacks
 
 Both stacks publish the same ports (IMAP 143, SMTP 587, DAV 5232) and users
-(`user1@example.com` / `user2@example.com`, password `pass`):
+(`user1@example.com` / `user2@example.com`, password `pass`); the Stalwart stack also
+publishes ManageSieve 4190 and serves the full JMAP surface (mail + calendars + contacts +
+vacation) on the DAV port:
 
 ```bash
-# Default: Stalwart all-in-one (mail with real delivery + CalDAV/CardDAV)
-docker compose -f docker/backends/stalwart/docker-compose.yml up -d
+# Default: Stalwart 0.16 all-in-one — mail with real delivery, CalDAV/CardDAV, ManageSieve,
+# and JMAP. Self-provisioning: the container creates the users, plaintext listeners and a
+# relaxed test policy on first boot (see docker/backends/stalwart/entrypoint.sh), so no
+# mounted config and no separate provisioner — just `up`.
+docker compose -f docker/backends/stalwart/docker-compose.yml up -d --wait
 
 # Alternative (manual runs): docker-mailserver (Postfix+Dovecot) + Radicale
 docker compose -f docker/backends/mailserver/docker-compose.yml up -d
@@ -905,8 +910,8 @@ AS_TEST_STACK=mailserver dotnet test --filter Category=Integration
   (`dotnet test --no-build`, joined to a network with throwaway Stalwart + Postgres
   containers), and only when the full suite is green is the runtime image assembled from
   the warm build cache and pushed to ghcr.io. The workflow deliberately avoids bind
-  mounts and streams the backend config and provision script through the docker API
-  instead.
+  mounts — it `docker cp`s the self-provisioning entrypoint into the Stalwart container
+  and waits for its `.provisioned` marker before running the suite.
 
   Local reproduction of the CI suite:
 

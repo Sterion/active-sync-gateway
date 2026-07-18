@@ -55,17 +55,18 @@ jobs:
           docker info -f '{{ .DriverStatus }}' | grep -q containerd
 
       # Backends start first (detached) so they boot while the solution compiles.
-      # The image entrypoint hardwires `--config /opt/stalwart/etc/config.toml` (command
-      # args are ignored), and that directory does not exist in the unstarted container —
-      # so the config is copied as a directory to create the path before first start.
+      # Stalwart 0.16 self-provisions through its own JMAP management API — the entrypoint
+      # wrapper is copied in and run in place of the default command (see
+      # docker/backends/stalwart/entrypoint.sh); it creates the users, plaintext listeners
+      # and relaxed test policy on first boot. No mounted config, no separate provisioner.
       - name: Start Stalwart backend
         run: |
           docker network create "$NET"
           docker create --name "$BACKEND" --network "$NET" --network-alias stalwart \
-            stalwartlabs/stalwart:v0.13.4
-          mkdir -p .ci-stalwart-etc
-          cp docker/backends/stalwart/config.toml .ci-stalwart-etc/
-          docker cp .ci-stalwart-etc "$BACKEND":/opt/stalwart/etc
+            -e STALWART_RECOVERY_ADMIN=admin:secret \
+            --entrypoint /usr/bin/bash \
+            stalwartlabs/stalwart:v0.16.13 /entrypoint.sh
+          docker cp docker/backends/stalwart/entrypoint.sh "$BACKEND":/entrypoint.sh
           docker start "$BACKEND"
 
       # The gateway state DB for the suite: with AS_TEST_PG set, every gateway factory
@@ -135,19 +136,21 @@ jobs:
 
       # Fail hard when a backend never comes up: the test suite auto-skips integration
       # tests against an unreachable backend, which would otherwise turn a dead backend
-      # into a green (but meaningless) run.
-      - name: Wait for IMAP
+      # into a green (but meaningless) run. The `.provisioned` marker appears only after
+      # the entrypoint has finished setup (bootstrap -> restart -> settings -> restart ->
+      # users), so it is the correct readiness signal (the mail listeners bind mid-way).
+      - name: Wait for Stalwart provisioning
         run: |
           ok=0
-          for i in $(seq 1 60); do
-            if docker exec "$BACKEND" /bin/bash -c 'exec 3<>/dev/tcp/127.0.0.1/143' 2>/dev/null; then
+          for i in $(seq 1 90); do
+            if docker exec "$BACKEND" test -f /etc/stalwart/.provisioned 2>/dev/null; then
               ok=1
               break
             fi
             sleep 2
           done
           if [ "$ok" != "1" ]; then
-            echo "Stalwart did not come up:" >&2
+            echo "Stalwart did not finish provisioning:" >&2
             docker logs "$BACKEND" >&2 || true
             exit 1
           fi
@@ -167,12 +170,6 @@ jobs:
             docker logs "$POSTGRES" >&2 || true
             exit 1
           fi
-
-      - name: Provision test users
-        run: |
-          docker run --rm -i --network "$NET" -e STALWART_URL=http://stalwart:8080 \
-            --entrypoint /bin/sh curlimages/curl:8.11.1 -s \
-            < docker/backends/stalwart/provision.sh
 
       # A freshly provisioned Stalwart stalls the FIRST delivery into each mailbox,
       # which would flake one test per direction. Warm BOTH inboxes before the suite

@@ -15,32 +15,24 @@ services:
     depends_on:
       stalwart:
         condition: service_healthy
-      provision:
-        condition: service_completed_successfully
 
+  # 0.16 line: self-provisioning via entrypoint.sh (no mounted config, no provisioner).
   stalwart:
-    image: stalwartlabs/stalwart:v0.13.4
-    command: ["--config", "/opt/stalwart/etc/config.toml"]
+    image: stalwartlabs/stalwart:v0.16.13
+    entrypoint: ["/usr/bin/bash", "/entrypoint.sh"]
+    environment:
+      STALWART_RECOVERY_ADMIN: "admin:secret"
     volumes:
-      - ../docker/backends/stalwart/config.toml:/opt/stalwart/etc/config.toml:ro
-      - stalwart-data:/opt/stalwart/data
+      - ../docker/backends/stalwart/entrypoint.sh:/entrypoint.sh:ro
+      - stalwart-etc:/etc/stalwart
+      - stalwart-data:/var/lib/stalwart
     healthcheck:
-      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/143"]
+      test: ["CMD-SHELL", "test -f /etc/stalwart/.provisioned && curl -fsS -o /dev/null http://127.0.0.1:8080/.well-known/jmap"]
       interval: 3s
       timeout: 3s
-      retries: 30
-
-  provision:
-    image: curlimages/curl:latest
-    depends_on:
-      stalwart:
-        condition: service_healthy
-    environment:
-      STALWART_URL: http://stalwart:8080
-    volumes:
-      - ../docker/backends/stalwart/provision.sh:/provision.sh:ro
-    entrypoint: ["/bin/sh", "/provision.sh"]
-    restart: "no"
+      retries: 40
+      start_period: 20s
 
 volumes:
+  stalwart-etc:
   stalwart-data:
