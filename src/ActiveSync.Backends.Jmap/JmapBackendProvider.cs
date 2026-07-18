@@ -18,7 +18,8 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 {
 	private static readonly IReadOnlySet<BackendRole> Roles = new HashSet<BackendRole>
 	{
-		BackendRole.MailStore, BackendRole.MailSubmit, BackendRole.Oof, BackendRole.Contacts
+		BackendRole.MailStore, BackendRole.MailSubmit, BackendRole.Oof,
+		BackendRole.Contacts, BackendRole.Calendar
 	};
 
 	private readonly ActiveSyncOptions _options;
@@ -79,6 +80,9 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 					break;
 				case BackendRole.Contacts:
 					stores.Add(new JmapContactStore(client, _options.Eas.DavPollSeconds));
+					break;
+				case BackendRole.Calendar:
+					stores.Add(new JmapCalendarStore(client, context.MailAddress, _options.Eas.DavPollSeconds));
 					break;
 			}
 

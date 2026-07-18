@@ -222,11 +222,12 @@ the **provider** that serves it. Edit `src/ActiveSync.Server/appsettings.json`:
   `BaseUrl` — `"MailStore": { "Provider": "jmap", "BaseUrl": "https://mail.example.com" }`
   and the same for `MailSubmit`. The gateway discovers the session resource at
   `{BaseUrl}/.well-known/jmap`, reuses the raw-RFC822 blob for message bodies, and submits
-  via `EmailSubmission`. OOF (`Oof` role) uses JMAP `VacationResponse`, and contacts
-  (`Contacts` role) map JSContact ↔ EAS. Tasks and Notes have no JMAP standard — keep them
-  on `caldav`/`local`; JMAP calendar lands in a later release (contacts and calendar also
-  stay available over CalDAV/CardDAV, which serve the same data). JMAP calendars/contacts
-  need a current Stalwart (0.16+); the 0.13 line advertises only mail/OOF over JMAP.
+  via `EmailSubmission`. OOF (`Oof` role) uses JMAP `VacationResponse`; contacts (`Contacts`
+  role) map JSContact ↔ EAS; calendar (`Calendar` role) bridges JSCalendar ↔ iCalendar ↔ EAS
+  (common event fields — advanced recurrence overrides are not yet round-tripped). Tasks and
+  Notes have no JMAP standard — keep them on `caldav`/`local`. Contacts and calendar also
+  stay available over CalDAV/CardDAV (same data), and JMAP calendars/contacts need a current
+  Stalwart (0.16+) — the 0.13 line advertises only mail/OOF over JMAP.
 - **MailStore and MailSubmit are mandatory** — startup fails with a clear validation error
   when either role is missing (a mail gateway without mail access makes no sense).
 - **Calendar / Tasks / Contacts / Notes are optional**: omit the role (or don't assign a

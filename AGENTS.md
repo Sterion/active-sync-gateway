@@ -122,12 +122,13 @@ src/ActiveSync.Backends.Common/  Shared building blocks: MIME/iCal/vCard ⇄ EAS
 src/ActiveSync.Backends.Imap/    "imap" provider (MailKit). Depends on Core + Common.
 src/ActiveSync.Backends.Jmap/    "jmap" provider (Stalwart JMAP over HttpClient +
                             System.Text.Json). Serves MailStore + MailSubmit + Oof
-                            (VacationResponse) + Contacts (JSContact) today (Calendar next),
-                            all over one HTTP session. JSContact/JSCalendar converters live
-                            here (vCard/iCal converters don't apply — JMAP groupware is
-                            JSON). Contact listing/GAL use ContactCard/get ids:null, not the
-                            FTS-backed /query (eventually-consistent). Tasks/Notes are NOT
-                            JMAP (no standard) — leave them on caldav/local. Core + Common.
+                            (VacationResponse) + Contacts (JSContact) + Calendar (JSCalendar)
+                            over one HTTP session. JSContact maps direct to EAS; JSCalendar
+                            bridges via iCalendar and reuses CalendarConverter (iCal↔EAS).
+                            Listing uses */get ids:null, not the FTS-backed /query
+                            (eventually-consistent). Calendar update strips read-only members
+                            (isDraft/isOrigin/…) to avoid invalidProperties. Tasks/Notes are
+                            NOT JMAP (no standard) — leave them on caldav/local. Core+Common.
 src/ActiveSync.Backends.Smtp/    "smtp" provider (MailKit). Depends on Core + Common.
 src/ActiveSync.Backends.Dav/     "caldav" + "carddav" providers (one assembly — shared
                             WebDavClient/DavStoreBase/DavDiscovery). Depends on Core + Common.
