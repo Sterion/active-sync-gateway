@@ -31,6 +31,14 @@ public sealed record FolderChange(string ServerId, string DisplayName, string? P
 /// </summary>
 public sealed record AppliedClientAdd(string? ItemKey, string? Revision);
 
+/// <summary>
+///   Outcome of one applied client Change (or occurrence cancel), kept for one generation so
+///   a retried Sync (lost response) acknowledges the edit instead of re-applying it — which
+///   would re-send iMIP update mails to attendees. A null <see cref="Revision" /> marks a
+///   Change that removed the item (16.x draft submitted and deleted via email2:Send).
+/// </summary>
+public sealed record AppliedClientChange(string? ItemKey, string? Revision);
+
 public sealed record FolderHierarchyDiff(
 	IReadOnlyList<FolderChange> Adds,
 	IReadOnlyList<FolderChange> Updates,
@@ -285,6 +293,7 @@ public class SyncStateService(SyncDbContext db)
 			state.SnapshotJson = "{}";
 			state.PreviousSnapshotJson = null;
 			state.LastClientAddsJson = null;
+			state.LastClientChangesJson = null;
 			state.UpdatedUtc = DateTime.UtcNow;
 			await db.SaveChangesAsync(ct).ConfigureAwait(false);
 			return (SyncKeyValidation.Initial, state);
@@ -303,8 +312,9 @@ public class SyncStateService(SyncDbContext db)
 		if (key == state.SyncKey - 1 && state.PreviousSnapshotJson is not null)
 		{
 			// Client never saw our last response: roll back one generation.
-			// LastClientAddsJson is deliberately KEPT — it describes the Adds of the discarded
-			// generation, which are exactly the ones the client is about to re-send.
+			// LastClientAddsJson/LastClientChangesJson are deliberately KEPT — they describe
+			// the commands of the discarded generation, which are exactly the ones the client
+			// is about to re-send.
 			state.SyncKey = key;
 			state.SnapshotJson = state.PreviousSnapshotJson;
 			state.PreviousSnapshotJson = null;
@@ -354,14 +364,27 @@ public class SyncStateService(SyncDbContext db)
 			: JsonSerializer.Deserialize<Dictionary<string, AppliedClientAdd>>(state.LastClientAddsJson, JsonOpts) ?? [];
 	}
 
+	/// <summary>The applied-Change map of the generation that produced the current SyncKey.</summary>
+	public static Dictionary<string, AppliedClientChange> ReadAppliedChanges(CollectionState state)
+	{
+		return state.LastClientChangesJson is null
+			? []
+			: JsonSerializer.Deserialize<Dictionary<string, AppliedClientChange>>(state.LastClientChangesJson, JsonOpts)
+			  ?? [];
+	}
+
 	public async Task<int> CommitCollectionStateAsync(
 		CollectionState state, Dictionary<string, string> newSnapshot, int filterType, CancellationToken ct,
-		Dictionary<string, AppliedClientAdd>? appliedAdds = null)
+		Dictionary<string, AppliedClientAdd>? appliedAdds = null,
+		Dictionary<string, AppliedClientChange>? appliedChanges = null)
 	{
 		state.PreviousSnapshotJson = state.SnapshotJson;
 		state.SnapshotJson = JsonSerializer.Serialize(newSnapshot, JsonOpts);
 		state.LastClientAddsJson = appliedAdds is { Count: > 0 }
 			? JsonSerializer.Serialize(appliedAdds, JsonOpts)
+			: null;
+		state.LastClientChangesJson = appliedChanges is { Count: > 0 }
+			? JsonSerializer.Serialize(appliedChanges, JsonOpts)
 			: null;
 		state.SyncKey++;
 		state.FilterType = filterType;

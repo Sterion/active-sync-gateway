@@ -217,12 +217,17 @@ public sealed partial class SyncHandler(
 
 		// ---- client → server commands ----
 		// On a replayed key the client never saw our previous response and re-sends the same
-		// Adds with the same ClientIds; the map of already-applied Adds lets us reuse the
-		// items created the first time instead of duplicating them (MS-ASCMD retry semantics).
+		// commands; the maps of already-applied Adds/Changes let us reuse the first attempt's
+		// outcome instead of re-executing it (MS-ASCMD retry semantics) — no duplicate items,
+		// no re-sent iMIP mails.
 		Dictionary<string, AppliedClientAdd> replayedAdds = validation == SyncKeyValidation.Replay
 			? SyncStateService.ReadAppliedAdds(state)
 			: [];
+		Dictionary<string, AppliedClientChange> replayedChanges = validation == SyncKeyValidation.Replay
+			? SyncStateService.ReadAppliedChanges(state)
+			: [];
 		Dictionary<string, AppliedClientAdd> appliedAdds = new(StringComparer.Ordinal);
+		Dictionary<string, AppliedClientChange> appliedChanges = new(StringComparer.Ordinal);
 		int clientAdds = 0, clientChanges = 0, clientDeletes = 0;
 		XElement? commands = collectionElement.Element(AS + "Commands");
 		if (commands is not null)
@@ -239,7 +244,7 @@ public sealed partial class SyncHandler(
 				{
 					XElement? handled = await ApplyClientCommandAsync(
 						context, folder, store, command, snapshot, bodyPreference, deletesAsMoves,
-						replayedAdds, appliedAdds, ct);
+						replayedAdds, appliedAdds, replayedChanges, appliedChanges, ct);
 					if (handled is not null)
 						clientResponses.Add(handled);
 					snapshotDirty = true;
@@ -331,7 +336,7 @@ public sealed partial class SyncHandler(
 
 		state.OptionsJson = JsonSerializer.Serialize(collectionOptions);
 		int newKey = await context.State.CommitCollectionStateAsync(
-			state, newSnapshot, collectionOptions.FilterType, ct, appliedAdds);
+			state, newSnapshot, collectionOptions.FilterType, ct, appliedAdds, appliedChanges);
 
 		XElement response = new(AS + "Collection",
 			new XElement(AS + "SyncKey", newKey.ToString()),
@@ -384,6 +389,7 @@ public sealed partial class SyncHandler(
 		EasContext context, UserFolder folder, IContentStore store, XElement command,
 		Dictionary<string, string> snapshot, BodyPreference bodyPreference, bool deletesAsMoves,
 		Dictionary<string, AppliedClientAdd> replayedAdds, Dictionary<string, AppliedClientAdd> appliedAdds,
+		Dictionary<string, AppliedClientChange> replayedChanges, Dictionary<string, AppliedClientChange> appliedChanges,
 		CancellationToken ct)
 	{
 		// Global ReadOnly mode and per-folder read-only shared-calendar grants share the
@@ -450,6 +456,25 @@ public sealed partial class SyncHandler(
 			case "Change":
 			{
 				string serverId = command.Element(AS + "ServerId")?.Value ?? "";
+
+				// Retried Change (the client never saw our response): the edit already sits on
+				// the backend — acknowledge the recorded outcome instead of re-applying it,
+				// which would re-send iMIP update mails (or re-submit a draft). Checked before
+				// resolution: a replayed draft-submit Change no longer resolves.
+				if (replayedChanges.TryGetValue(serverId, out AppliedClientChange? replayedChange))
+				{
+					appliedChanges[serverId] = replayedChange;
+					if (replayedChange.ItemKey is not null)
+					{
+						if (replayedChange.Revision is not null)
+							snapshot[replayedChange.ItemKey] = replayedChange.Revision;
+						else
+							snapshot.Remove(replayedChange.ItemKey); // draft submitted and removed
+					}
+
+					return null; // implicit success, as the lost response reported
+				}
+
 				string itemKey = await folders.ResolveItemKeyAsync(folder, store, serverId, ct)
 				                 ?? throw new BackendItemNotFoundException(serverId);
 				if (appData is null)
@@ -473,6 +498,7 @@ public sealed partial class SyncHandler(
 					await SubmitDraftAsync(context, appData, folder.BackendKey, itemKey, ct);
 					await store.DeleteItemAsync(folder.BackendKey, itemKey, ct, true);
 					snapshot.Remove(itemKey);
+					appliedChanges[serverId] = new AppliedClientChange(itemKey, null);
 					return null;
 				}
 
@@ -483,6 +509,7 @@ public sealed partial class SyncHandler(
 					: null;
 				string revision = await store.UpdateItemAsync(folder.BackendKey, itemKey, appData, ct);
 				snapshot[itemKey] = revision;
+				appliedChanges[serverId] = new AppliedClientChange(itemKey, revision);
 				if (IsCalendarClass(store))
 					await invitations.AfterChangeAsync(
 						context, store, folder.BackendKey, itemKey, previousIcs, ct);
@@ -500,6 +527,17 @@ public sealed partial class SyncHandler(
 				if (itemKey is not null && instanceId is not null && !readOnly &&
 				    store.EasClass.Equals(EasClass.Calendar, StringComparison.OrdinalIgnoreCase))
 				{
+					// Occurrence cancels ride the Change replay map too — re-applying one
+					// would re-mail the occurrence CANCEL to attendees.
+					string occurrenceKey = serverId + "\n" + instanceId;
+					if (replayedChanges.TryGetValue(occurrenceKey, out AppliedClientChange? replayedCancel))
+					{
+						appliedChanges[occurrenceKey] = replayedCancel;
+						if (replayedCancel.ItemKey is not null && replayedCancel.Revision is not null)
+							snapshot[replayedCancel.ItemKey] = replayedCancel.Revision;
+						return null;
+					}
+
 					DateTime occurrence;
 					try
 					{
@@ -519,6 +557,7 @@ public sealed partial class SyncHandler(
 					string occurrenceRevision =
 						await store.UpdateItemAsync(folder.BackendKey, itemKey, occurrenceDelete, ct);
 					snapshot[itemKey] = occurrenceRevision;
+					appliedChanges[occurrenceKey] = new AppliedClientChange(itemKey, occurrenceRevision);
 					await invitations.AfterOccurrenceCancelAsync(
 						context, store, folder.BackendKey, itemKey, occurrence, ct);
 					return null;

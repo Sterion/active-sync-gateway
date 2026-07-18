@@ -111,6 +111,14 @@ public class CollectionState
 	/// </summary>
 	public string? LastClientAddsJson { get; set; }
 
+	/// <summary>
+	///   JSON: replay key (item ServerId; ServerId + '\n' + InstanceId for occurrence
+	///   cancels) → applied-Change outcome for the request that produced SyncKey. Lets a
+	///   replayed Change acknowledge the edit already on the backend instead of re-applying
+	///   it — and re-mailing iMIP updates to attendees.
+	/// </summary>
+	public string? LastClientChangesJson { get; set; }
+
 	public int FilterType { get; set; }
 
 	/// <summary>Cached client sync options (body preference, window, etc.) for empty Sync requests.</summary>

@@ -74,6 +74,81 @@ public sealed class MeetingInvitationTests(GatewayFixture gateway)
 	}
 
 	[BackendFact]
+	public async Task LocalStore_ReplayedMeetingEdits_DoNotResendMails()
+	{
+		EasTestClient organizer = gateway.CreateLocalStoresEasClient(TestBackend.User1);
+		await organizer.HandshakeAsync();
+		string marker = $"MR{Guid.NewGuid():N}"[..12];
+		string calendar = organizer.FolderOfType(EasFolderType.Calendar).ServerId;
+		await organizer.InitialSyncAsync(calendar);
+		await organizer.PullAllAsync(calendar);
+
+		// A recurring meeting, so one occurrence can be cancelled later.
+		DateTime start = DateTime.UtcNow.Date.AddDays(6).AddHours(10);
+		XElement[] Recurring(DateTime startUtc)
+		{
+			return
+			[
+				.. Meeting(marker, startUtc, TestBackend.User2),
+				new XElement(Cal + "Recurrence",
+					new XElement(Cal + "Type", "0"),
+					new XElement(Cal + "Interval", "1"),
+					new XElement(Cal + "Occurrences", "5"))
+			];
+		}
+
+		SyncResult add = await organizer.AddItemAsync(calendar, "mr1", Recurring(start));
+		XElement? addResponse = add.Responses.FirstOrDefault(r => r.Name.LocalName == "Add");
+		Assert.Equal("1", addResponse?.Element(EasNamespaces.AirSync + "Status")?.Value);
+		string serverId = addResponse!.Element(EasNamespaces.AirSync + "ServerId")!.Value;
+		await WaitUntil.TrueAsync(
+			() => ImapProbe.MessageExistsAsync(TestBackend.User2, "INBOX", $"Invitation: {marker}"),
+			$"invitation for '{marker}' in the attendee's inbox");
+
+		// Scheduling-significant change (series moved an hour) → one update mail; the
+		// replayed identical Change (lost response) must acknowledge, not re-mail.
+		string keyBeforeChange = organizer.SyncKeys[calendar];
+		SyncResult change = await organizer.ChangeItemAsync(calendar, serverId, Recurring(start.AddHours(1)));
+		Assert.Equal("1", change.Status ?? "1");
+		organizer.SyncKeys[calendar] = keyBeforeChange;
+		SyncResult changeRetry = await organizer.ChangeItemAsync(calendar, serverId, Recurring(start.AddHours(1)));
+		Assert.Equal("1", changeRetry.Status ?? "1");
+		Assert.Equal(change.SyncKey, changeRetry.SyncKey);
+
+		// Occurrence cancel → exactly one occurrence CANCEL mail; the replayed identical
+		// Delete+InstanceId must not re-mail it (the send there is unconditional).
+		string instanceId = start.AddHours(1).AddDays(1).ToString(
+			"yyyy-MM-dd'T'HH':'mm':'ss'.'fff'Z'", System.Globalization.CultureInfo.InvariantCulture);
+		XElement OccurrenceDelete()
+		{
+			return new XElement(EasNamespaces.AirSync + "Commands",
+				new XElement(EasNamespaces.AirSync + "Delete",
+					new XElement(EasNamespaces.AirSync + "ServerId", serverId),
+					new XElement(EasNamespaces.AirSyncBase + "InstanceId", instanceId)));
+		}
+
+		string keyBeforeCancel = organizer.SyncKeys[calendar];
+		SyncResult cancel = await organizer.SyncAsync(calendar, OccurrenceDelete());
+		Assert.Equal("1", cancel.Status ?? "1");
+		organizer.SyncKeys[calendar] = keyBeforeCancel;
+		SyncResult cancelRetry = await organizer.SyncAsync(calendar, OccurrenceDelete());
+		Assert.Equal("1", cancelRetry.Status ?? "1");
+		Assert.Equal(cancel.SyncKey, cancelRetry.SyncKey);
+
+		// The series delete's CANCEL is the ordering barrier: once it arrived, any duplicate
+		// update/occurrence mail from the replays above would have long landed.
+		Assert.Equal("1", (await organizer.DeleteItemAsync(calendar, serverId, false)).Status ?? "1");
+		await WaitUntil.TrueAsync(
+			() => ImapProbe.MessageExistsAsync(TestBackend.User2, "INBOX", $"Cancelled: {marker}"),
+			$"series cancellation for '{marker}' in the attendee's inbox");
+
+		Assert.Equal(1, await ImapProbe.CountMessagesAsync(
+			TestBackend.User2, "INBOX", $"Updated invitation: {marker}"));
+		Assert.Equal(1, await ImapProbe.CountMessagesAsync(
+			TestBackend.User2, "INBOX", $"Cancelled occurrence: {marker}"));
+	}
+
+	[BackendFact]
 	public async Task CalDav_AutoProbe_LeavesSchedulingToTheServer()
 	{
 		EasTestClient organizer = gateway.CreateEasClient(TestBackend.User1);

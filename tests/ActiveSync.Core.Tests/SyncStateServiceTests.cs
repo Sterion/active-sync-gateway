@@ -93,6 +93,39 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task AppliedChanges_SurviveReplayRollback_AndClearOnNextCommit()
+	{
+		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
+		(_, CollectionState state) = await _service.ValidateSyncKeyAsync(device, "9", "0", CancellationToken.None);
+		await _service.CommitCollectionStateAsync(state,
+			new Dictionary<string, string> { ["item1"] = "r1" }, 0, CancellationToken.None);
+
+		// The request that produces key 2 applied one client Change.
+		(_, state) = await _service.ValidateSyncKeyAsync(device, "9", "1", CancellationToken.None);
+		await _service.CommitCollectionStateAsync(state,
+			new Dictionary<string, string> { ["item1"] = "r2" }, 0, CancellationToken.None,
+			appliedChanges: new Dictionary<string, AppliedClientChange>
+			{
+				["41:7"] = new AppliedClientChange("item1", "r2")
+			});
+
+		// Lost response: the client retries with key 1 — the rollback keeps the map.
+		(SyncKeyValidation validation, CollectionState rolledBack) =
+			await _service.ValidateSyncKeyAsync(device, "9", "1", CancellationToken.None);
+		Assert.Equal(SyncKeyValidation.Replay, validation);
+		Dictionary<string, AppliedClientChange> replayed = SyncStateService.ReadAppliedChanges(rolledBack);
+		Assert.True(replayed.TryGetValue("41:7", out AppliedClientChange? change));
+		Assert.Equal("item1", change!.ItemKey);
+		Assert.Equal("r2", change.Revision);
+
+		// A commit without client Changes clears the map — it described the discarded generation.
+		await _service.CommitCollectionStateAsync(rolledBack,
+			new Dictionary<string, string> { ["item1"] = "r2" }, 0, CancellationToken.None);
+		(_, CollectionState after) = await _service.ValidateSyncKeyAsync(device, "9", "2", CancellationToken.None);
+		Assert.Empty(SyncStateService.ReadAppliedChanges(after));
+	}
+
+	[Fact]
 	public async Task FolderRegistry_AssignsStableServerIds_AndSoftDeletes()
 	{
 		List<BackendFolder> folders = new()
