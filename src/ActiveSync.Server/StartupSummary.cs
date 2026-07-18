@@ -1,21 +1,25 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
 using ActiveSync.Core.Accounts;
+using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
 
 namespace ActiveSync.Server;
 
 /// <summary>
-///   Emits a human-readable summary of the effective configuration at startup: which backends
-///   are wired up, which database is in use, whether the gateway is read-only, and the EAS
-///   tuning knobs. Secrets (passwords in a Postgres connection string) are redacted; backend
-///   user credentials never live in config — they arrive per request via Basic auth.
+///   Emits a human-readable summary of the effective configuration at startup: one line per
+///   backend role (described by the role's provider, which redacts its own secrets), the
+///   database in use, whether the gateway is read-only, and the EAS tuning knobs. Secrets
+///   (passwords in a Postgres connection string) are redacted; backend user credentials
+///   never live in config — they arrive per request via Basic auth.
 /// </summary>
 public static partial class StartupSummary
 {
 	/// <param name="logger">Sink for the banner lines.</param>
 	/// <param name="options">Bound configuration.</param>
+	/// <param name="roles">The global role assignments; null omits the backend lines.</param>
+	/// <param name="registry">Provider registry describing each role; null omits the backend lines.</param>
 	/// <param name="mergedUsers">
 	///   The merged config ⊕ database user view (<see cref="AccountResolver.MergedUsers" />);
 	///   null falls back to config-only (hosts without a reachable database).
@@ -27,6 +31,8 @@ public static partial class StartupSummary
 	/// </param>
 	public static void Log(
 		ILogger logger, ActiveSyncOptions options,
+		BackendRolesConfig? roles = null,
+		BackendProviderRegistry? registry = null,
 		IReadOnlyDictionary<string, MergedAccount>? mergedUsers = null,
 		string? httpsSummary = null)
 	{
@@ -41,7 +47,7 @@ public static partial class StartupSummary
 			?? new Dictionary<string, MergedAccount>();
 
 		logger.LogInformation("========================================================");
-		logger.LogInformation("ActiveSync gateway v{Version} — EAS 16.1 → IMAP/SMTP/DAV", version);
+		logger.LogInformation("ActiveSync gateway v{Version} — EAS 16.1 → mail/DAV backends", version);
 		logger.LogInformation(
 			options.ReadOnly
 				? "Mode:     READ-ONLY (all client writes are suppressed/reverted)"
@@ -50,7 +56,7 @@ public static partial class StartupSummary
 		{
 			int fromDb = users.Values.Count(u => u.FromDatabase);
 			logger.LogInformation(
-				"Auth:     IMAP pass-through + {Count} user override entr{Plural} " +
+				"Auth:     backend pass-through + {Count} user override entr{Plural} " +
 				"({ConfigCount} config, {DbCount} database){Restricted}",
 				users.Count, users.Count == 1 ? "y" : "ies", users.Count - fromDb, fromDb,
 				options.RequireDeclaredUsers ? " (declared users only)" : "");
@@ -66,29 +72,17 @@ public static partial class StartupSummary
 		}
 		else
 		{
-			logger.LogInformation("Auth:     IMAP pass-through (EAS credentials forwarded to backends)");
+			logger.LogInformation("Auth:     backend pass-through (EAS credentials forwarded to backends)");
 			if (options.RequireDeclaredUsers)
 				logger.LogWarning(
 					"Auth:     RequireDeclaredUsers is ON but no users are declared (config or database) — " +
 					"every login will be rejected. Declare users or run 'eas user add'.");
 		}
 
-		logger.LogInformation("IMAP:     {Host}:{Port}  ssl={Ssl} security={Security} idle={Idle} certs={Certs}",
-			options.Imap.Host, options.Imap.Port, options.Imap.UseSsl,
-			options.Imap.Security ?? "(auto)", options.Eas.UseImapIdle ? "on" : "off",
-			CertMode(options.Imap.AllowInvalidCertificates, options.Imap.CaCertificatePath));
-		logger.LogInformation("SMTP:     {Host}:{Port}  ssl={Ssl} security={Security} certs={Certs}",
-			options.Smtp.Host, options.Smtp.Port, options.Smtp.UseSsl,
-			options.Smtp.Security ?? "(auto)",
-			CertMode(options.Smtp.AllowInvalidCertificates, options.Smtp.CaCertificatePath));
-
-		logger.LogInformation("CalDAV:   {State}", DescribeDav(options.CalDav));
-		logger.LogInformation("CardDAV:  {State}", DescribeDav(options.CardDav));
-		logger.LogInformation("Tasks:    {State}",
-			options.CalDav is not null && !string.IsNullOrWhiteSpace(options.CalDav.TaskFolder)
-				? $"CalDAV folder \"{options.CalDav.TaskFolder}\" (when present)"
-				: "local storage (gateway database)");
-		logger.LogInformation("Notes:    local storage (gateway database)");
+		if (roles is not null && registry is not null)
+			foreach ((BackendRole role, RoleAssignment assignment) in roles.Assignments.OrderBy(a => a.Key))
+				logger.LogInformation("{Role}: {Description}",
+					$"{role}".PadRight(8), DescribeAssignment(registry, role, assignment));
 
 		string databaseProvider = PostgresConnectionUri.EffectiveProvider(options.Database);
 		logger.LogInformation("Database: {Provider} — {ConnectionString}",
@@ -109,12 +103,13 @@ public static partial class StartupSummary
 
 		logger.LogInformation(
 			"EAS:      heartbeat {MinHeartbeat}-{MaxHeartbeat}s, window {DefaultWindow}/{MaxWindow}, " +
-			"DAV poll {DavPoll}s, watchdog {Watchdog}, session idle {SessionIdleMin}min",
+			"DAV poll {DavPoll}s, watchdog {Watchdog}, session idle {SessionIdleMin}min, IMAP IDLE {Idle}",
 			options.Eas.MinHeartbeatSeconds, options.Eas.MaxHeartbeatSeconds,
 			options.Eas.DefaultWindowSize, options.Eas.MaxWindowSize,
 			options.Eas.DavPollSeconds,
 			options.Eas.WatchdogSeconds > 0 ? $"{options.Eas.WatchdogSeconds}s" : "off",
-			options.Eas.SessionIdleMinutes);
+			options.Eas.SessionIdleMinutes,
+			options.Eas.UseImapIdle ? "on" : "off");
 		logger.LogInformation(
 			"Auth:     throttle {Throttle}, auth cache {SuccessCache}, negative cache {NegativeCache}",
 			options.Auth.MaxFailures > 0
@@ -126,14 +121,25 @@ public static partial class StartupSummary
 			logger.LogInformation("HTTPS:    {State}", httpsSummary);
 		if (!string.IsNullOrWhiteSpace(options.PublicUrl))
 			logger.LogInformation("Public:   {PublicUrl} (advertised by Autodiscover)", options.PublicUrl);
-		if (options.Smtp.ForceFrom)
-			logger.LogInformation("SMTP:     From header forced to the authenticated user");
 		logger.LogInformation("========================================================");
+	}
+
+	private static string DescribeAssignment(
+		BackendProviderRegistry registry, BackendRole role, RoleAssignment assignment)
+	{
+		try
+		{
+			return registry.GetFor(assignment.ProviderName, role).DescribeRole(role, assignment.Settings);
+		}
+		catch (InvalidOperationException ex)
+		{
+			return $"{assignment.ProviderName} — INVALID: {ex.Message}";
+		}
 	}
 
 	/// <summary>
 	///   One-line, full-detail description of a declared user — origin, mail address and every
-	///   overridden field. Passwords never render; only a masked marker with their format.
+	///   overridden role. Passwords never render; only a masked marker with their format.
 	/// </summary>
 	internal static string DescribeUser(MergedAccount account)
 	{
@@ -148,112 +154,30 @@ public static partial class StartupSummary
 			parts.Add(GatewayPasswordHasher.IsHashed(o.Password)
 				? "password=***(pbkdf2)"
 				: "password=***(PLAINTEXT)");
-		if (o.Imap is not null)
-			parts.Add($"imap[{DescribeImapOverride(o.Imap)}]");
-		if (o.Smtp is not null)
-			parts.Add($"smtp[{DescribeSmtpOverride(o.Smtp)}]");
-		if (DescribeDavOverride("caldav", o.CalDav) is { } caldav)
-			parts.Add(caldav);
-		if (DescribeDavOverride("carddav", o.CardDav) is { } carddav)
-			parts.Add(carddav);
+		foreach ((string roleName, BackendRoleOverride roleOverride) in
+		         (o.Backends ?? []).OrderBy(b => b.Key, StringComparer.OrdinalIgnoreCase))
+			parts.Add($"{roleName.ToLowerInvariant()}[{DescribeRoleOverride(roleOverride)}]");
 		if (parts.Count == 1)
 			parts.Add("(allowlist grant — pure pass-through)");
 		return string.Join("  ", parts);
 	}
 
-	private static string DescribeImapOverride(ImapAccountOptions imap)
+	private static string DescribeRoleOverride(BackendRoleOverride roleOverride)
 	{
+		if (roleOverride.Enabled == false)
+			return "off";
 		List<string> fields = [];
-		if (imap.UserName is not null)
-			fields.Add($"user={imap.UserName}");
-		if (imap.Password is not null)
-			fields.Add(SecretMarker(imap.Password));
-		if (imap.Host is not null)
-			fields.Add($"host={imap.Host}");
-		if (imap.Port is not null)
-			fields.Add($"port={imap.Port}");
-		if (imap.UseSsl is not null)
-			fields.Add($"ssl={imap.UseSsl}");
-		if (imap.Security is not null)
-			fields.Add($"security={imap.Security}");
-		if (imap.AllowInvalidCertificates == true)
-			fields.Add("certs=ACCEPT-ANY");
-		else if (imap.CaCertificatePath is not null)
-			fields.Add("certs=custom-ca");
-		if (imap.PathSeparator is not null)
-			fields.Add($"sep={imap.PathSeparator}");
+		if (roleOverride.Provider is not null)
+			fields.Add($"provider={roleOverride.Provider}");
+		if (roleOverride.UserName is not null)
+			fields.Add($"user={roleOverride.UserName}");
+		if (roleOverride.Password is not null)
+			fields.Add(SecretValue.IsSealed(roleOverride.Password) ? "pw=***(sealed)" : "pw=***(PLAINTEXT)");
+		foreach ((string key, string? value) in
+		         (roleOverride.Settings ?? []).OrderBy(s => s.Key, StringComparer.OrdinalIgnoreCase))
+			if (value is not null)
+				fields.Add($"{key}={value}");
 		return string.Join(" ", fields);
-	}
-
-	private static string DescribeSmtpOverride(SmtpAccountOptions smtp)
-	{
-		List<string> fields = [];
-		if (smtp.UserName is not null)
-			fields.Add($"user={smtp.UserName}");
-		if (smtp.Password is not null)
-			fields.Add(SecretMarker(smtp.Password));
-		if (smtp.Host is not null)
-			fields.Add($"host={smtp.Host}");
-		if (smtp.Port is not null)
-			fields.Add($"port={smtp.Port}");
-		if (smtp.UseSsl is not null)
-			fields.Add($"ssl={smtp.UseSsl}");
-		if (smtp.Security is not null)
-			fields.Add($"security={smtp.Security}");
-		if (smtp.AllowInvalidCertificates == true)
-			fields.Add("certs=ACCEPT-ANY");
-		else if (smtp.CaCertificatePath is not null)
-			fields.Add("certs=custom-ca");
-		if (smtp.ForceFrom is not null)
-			fields.Add($"forceFrom={smtp.ForceFrom}");
-		return string.Join(" ", fields);
-	}
-
-	private static string? DescribeDavOverride(string name, DavAccountOptions? dav)
-	{
-		if (dav is null)
-			return null;
-		if (dav.Enabled == false)
-			return $"{name}=off";
-		List<string> fields = [];
-		if (dav.UserName is not null)
-			fields.Add($"user={dav.UserName}");
-		if (dav.Password is not null)
-			fields.Add(SecretMarker(dav.Password));
-		if (dav.BaseUrl is not null)
-			fields.Add($"url={dav.BaseUrl}");
-		if (dav.HomeSetPath is not null)
-			fields.Add($"homeSet={dav.HomeSetPath}");
-		if (dav.TaskFolder is not null)
-			fields.Add($"tasks={(dav.TaskFolder.Length == 0 ? "(off)" : dav.TaskFolder)}");
-		if (dav.AllowInvalidCertificates == true)
-			fields.Add("certs=ACCEPT-ANY");
-		else if (dav.CaCertificatePath is not null)
-			fields.Add("certs=custom-ca");
-		return $"{name}[{string.Join(" ", fields)}]";
-	}
-
-	private static string SecretMarker(string value)
-	{
-		return SecretValue.IsSealed(value) ? "pw=***(sealed)" : "pw=***(PLAINTEXT)";
-	}
-
-	private static string DescribeDav(DavServerOptions? dav)
-	{
-		if (dav is null)
-			return "local storage (gateway database)";
-		string? homeSet = string.IsNullOrEmpty(dav.HomeSetPath) ? "RFC 6764 discovery" : dav.HomeSetPath;
-		string shared = dav.SharedCollections is { Count: > 0 } list
-			? $", shared: {list.Count} configured"
-			: "";
-		return
-			$"{dav.BaseUrl}  (home set: {homeSet}, certs={CertMode(dav.AllowInvalidCertificates, dav.CaCertificatePath)}{shared})";
-	}
-
-	/// <summary>Certificate-validation mode marker; ACCEPT-ANY shouts on purpose.</summary>
-	private static string CertMode(bool allowInvalid, string? caPath)
-	{
-		return allowInvalid ? "ACCEPT-ANY" : string.IsNullOrWhiteSpace(caPath) ? "system" : "custom-ca";
 	}
 
 	internal static string Redact(string provider, string connectionString)

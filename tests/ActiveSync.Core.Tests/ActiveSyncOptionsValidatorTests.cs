@@ -9,14 +9,11 @@ public class ActiveSyncOptionsValidatorTests
 
 	private static readonly string TestKey = Convert.ToBase64String(new byte[32]);
 
+	// Backend endpoints live in the role sections and are validated by the providers via
+	// BackendConfigurationValidator — this validator only covers the host options.
 	private static ActiveSyncOptions Valid()
 	{
-		return new ActiveSyncOptions
-		{
-			Imap = new ImapOptions { Host = "imap.example.com" },
-			Smtp = new SmtpOptions { Host = "smtp.example.com" },
-			Encryption = new EncryptionOptions { Key = TestKey }
-		};
+		return new ActiveSyncOptions { Encryption = new EncryptionOptions { Key = TestKey } };
 	}
 
 	[Fact]
@@ -24,66 +21,6 @@ public class ActiveSyncOptionsValidatorTests
 	{
 		ValidateOptionsResult result = Validator.Validate(null, Valid());
 		Assert.True(result.Succeeded);
-	}
-
-	[Fact]
-	public void MissingImapHost_Fails_WithClearMessage()
-	{
-		ActiveSyncOptions options = Valid();
-		options.Imap.Host = "";
-		ValidateOptionsResult result = Validator.Validate(null, options);
-		Assert.True(result.Failed);
-		Assert.Contains("Imap:Host", string.Join(";", result.Failures!));
-		Assert.Contains("cannot run without mail access", string.Join(";", result.Failures!));
-	}
-
-	[Fact]
-	public void MissingSmtpHost_Fails()
-	{
-		ActiveSyncOptions options = Valid();
-		options.Smtp.Host = " ";
-		ValidateOptionsResult result = Validator.Validate(null, options);
-		Assert.True(result.Failed);
-	}
-
-	[Fact]
-	public void AbsentDavSections_AreFine()
-	{
-		ActiveSyncOptions options = Valid();
-		options.CalDav = null;
-		options.CardDav = null;
-		Assert.True(Validator.Validate(null, options).Succeeded);
-	}
-
-	[Fact]
-	public void DavWithValidUrl_Passes()
-	{
-		ActiveSyncOptions options = Valid();
-		options.CalDav = new DavServerOptions { BaseUrl = "https://dav.example.com" };
-		Assert.True(Validator.Validate(null, options).Succeeded);
-	}
-
-	[Theory]
-	[InlineData("")]
-	[InlineData("not-a-url")]
-	[InlineData("ftp://dav.example.com")]
-	public void DavWithBadBaseUrl_Fails(string baseUrl)
-	{
-		ActiveSyncOptions options = Valid();
-		options.CardDav = new DavServerOptions { BaseUrl = baseUrl };
-		ValidateOptionsResult result = Validator.Validate(null, options);
-		Assert.True(result.Failed);
-		Assert.Contains("CardDav", string.Join(";", result.Failures!));
-	}
-
-	[Theory]
-	[InlineData(0)]
-	[InlineData(70000)]
-	public void PortOutOfRange_Fails(int port)
-	{
-		ActiveSyncOptions options = Valid();
-		options.Imap.Port = port;
-		Assert.True(Validator.Validate(null, options).Failed);
 	}
 
 	[Theory]
@@ -206,36 +143,6 @@ public class ActiveSyncOptionsValidatorTests
 	}
 
 	[Fact]
-	public void UserOverrides_EmptyAndPartialEntries_Pass()
-	{
-		ActiveSyncOptions options = Valid();
-		options.Users = new Dictionary<string, AccountOptions>
-		{
-			["empty@example.com"] = new(), // allowlist-style grant: nothing overridden
-			["smtp-only@example.com"] = new()
-			{
-				Smtp = new SmtpAccountOptions { UserName = "relay", Password = "relay-pw" }
-			}
-		};
-		ValidateOptionsResult result = Validator.Validate(null, options);
-		Assert.True(result.Succeeded, string.Join(";", result.Failures ?? []));
-	}
-
-	[Fact]
-	public void GlobalHosts_RemainMandatory_EvenWhenUsersOverrideThem()
-	{
-		ActiveSyncOptions options = Valid();
-		options.Imap.Host = "";
-		options.Users = new Dictionary<string, AccountOptions>
-		{
-			["u"] = new() { Imap = new ImapAccountOptions { Host = "imap.example.com" } }
-		};
-		ValidateOptionsResult result = Validator.Validate(null, options);
-		Assert.True(result.Failed);
-		Assert.Contains("Imap:Host is required", string.Join(";", result.Failures!));
-	}
-
-	[Fact]
 	public void RequireDeclaredUsers_WithoutConfigUsers_IsValid()
 	{
 		// Declared users may live in the state database (eas user add), which the validator
@@ -244,19 +151,6 @@ public class ActiveSyncOptionsValidatorTests
 		options.RequireDeclaredUsers = true;
 		ValidateOptionsResult result = Validator.Validate(null, options);
 		Assert.True(result.Succeeded);
-	}
-
-	[Fact]
-	public void MalformedGatewayPasswordHash_Fails()
-	{
-		ActiveSyncOptions options = Valid();
-		options.Users = new Dictionary<string, AccountOptions>
-		{
-			["u"] = new() { Password = "pbkdf2$broken" }
-		};
-		ValidateOptionsResult result = Validator.Validate(null, options);
-		Assert.True(result.Failed);
-		Assert.Contains("not a valid pbkdf2$ value", string.Join(";", result.Failures!));
 	}
 
 	[Fact]

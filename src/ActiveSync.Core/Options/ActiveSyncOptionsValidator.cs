@@ -1,35 +1,20 @@
 using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
-using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Security;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Core.Options;
 
 /// <summary>
-///   Startup validation: IMAP and SMTP are mandatory (the gateway is pointless without mail
-///   access); CalDAV/CardDAV are optional but must be well-formed when configured.
+///   Startup validation of the HOST options (database, EAS, auth, encryption, policy, ...).
+///   Backend role sections and declared users are validated by
+///   <see cref="BackendConfigurationValidator" /> after the service provider is built — it
+///   needs the provider registry so each provider can validate its own settings.
 /// </summary>
 public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOptions>
 {
 	public ValidateOptionsResult Validate(string? name, ActiveSyncOptions options)
 	{
 		List<string> failures = new();
-
-		if (string.IsNullOrWhiteSpace(options.Imap.Host))
-			failures.Add("ActiveSync:Imap:Host is required — this gateway cannot run without mail access.");
-		if (string.IsNullOrWhiteSpace(options.Smtp.Host))
-			failures.Add("ActiveSync:Smtp:Host is required — this gateway cannot run without mail access.");
-
-		if (options.Imap.Port is < 1 or > 65535)
-			failures.Add($"ActiveSync:Imap:Port {options.Imap.Port} is out of range (1-65535).");
-		if (options.Smtp.Port is < 1 or > 65535)
-			failures.Add($"ActiveSync:Smtp:Port {options.Smtp.Port} is out of range (1-65535).");
-
-		ValidateAccounts(options, failures);
-
-		ValidateDav(options.CalDav, "CalDav", failures);
-		ValidateDav(options.CardDav, "CardDav", failures);
 
 		if (string.IsNullOrWhiteSpace(options.Database.ConnectionString))
 			failures.Add("ActiveSync:Database:ConnectionString is required.");
@@ -72,44 +57,9 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 
 		ValidateEncryption(options.Encryption, failures);
 
-		if (options.Sieve.Port is < 1 or > 65535)
-			failures.Add($"ActiveSync:Sieve:Port {options.Sieve.Port} is out of range (1-65535).");
-
-		ValidateCaPath(options.Imap.CaCertificatePath, "Imap", failures);
-		ValidateCaPath(options.Smtp.CaCertificatePath, "Smtp", failures);
-		ValidateCaPath(options.CalDav?.CaCertificatePath, "CalDav", failures);
-		ValidateCaPath(options.CardDav?.CaCertificatePath, "CardDav", failures);
-		ValidateCaPath(options.Sieve.CaCertificatePath, "Sieve", failures);
-
 		return failures.Count > 0
 			? ValidateOptionsResult.Fail(failures)
 			: ValidateOptionsResult.Success;
-	}
-
-	private static void ValidateAccounts(ActiveSyncOptions options, List<string> failures)
-	{
-		// RequireDeclaredUsers with an empty config Users list is NOT a validation failure:
-		// declared users may live in the state database (eas user add), which the validator
-		// cannot see. StartupSummary warns when the MERGED set is also empty.
-		if (options.Users is not { Count: > 0 })
-			return;
-
-		// ValidateUsers appends per-user failures (merge completeness, sealed values,
-		// logins); pass the key only if it loads — key problems are already reported by
-		// ValidateEncryption, and any enc: values are then flagged as unresolvable.
-		byte[]? key = EncryptionKeyLoader.TryLoadKey(options.Encryption, out string? _);
-		AccountResolver.ValidateUsers(options, key, failures);
-		if (key is not null)
-			CryptographicOperations.ZeroMemory(key);
-
-		// Effective CA paths per user (globals are validated below as usual).
-		foreach ((string login, AccountOptions account) in options.Users)
-		{
-			ValidateCaPath(account.Imap?.CaCertificatePath, $"Users:{login}:Imap", failures);
-			ValidateCaPath(account.Smtp?.CaCertificatePath, $"Users:{login}:Smtp", failures);
-			ValidateCaPath(account.CalDav?.CaCertificatePath, $"Users:{login}:CalDav", failures);
-			ValidateCaPath(account.CardDav?.CaCertificatePath, $"Users:{login}:CardDav", failures);
-		}
 	}
 
 	private static void ValidatePolicy(PolicyOptions policy, List<string> failures)
@@ -155,55 +105,9 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 			CryptographicOperations.ZeroMemory(key);
 	}
 
-	private static void ValidateCaPath(string? path, string sectionName, List<string> failures)
-	{
-		if (string.IsNullOrWhiteSpace(path))
-			return;
-		if (!File.Exists(path))
-		{
-			failures.Add($"ActiveSync:{sectionName}:CaCertificatePath '{path}' does not exist.");
-			return;
-		}
-
-		try
-		{
-			X509Certificate2Collection collection = new();
-			collection.ImportFromPemFile(path);
-			if (collection.Count == 0)
-				failures.Add($"ActiveSync:{sectionName}:CaCertificatePath '{path}' contains no certificates.");
-		}
-		catch (Exception ex)
-		{
-			failures.Add(
-				$"ActiveSync:{sectionName}:CaCertificatePath '{path}' is not a valid PEM certificate file: {ex.Message}");
-		}
-	}
-
 	private static void ValidateMetrics(MetricsOptions metrics, List<string> failures)
 	{
 		if (metrics.Port is { } port and (< 1 or > 65535))
 			failures.Add($"ActiveSync:Metrics:Port {port} is out of range (1-65535).");
-	}
-
-	private static void ValidateDav(DavServerOptions? dav, string sectionName, List<string> failures)
-	{
-		if (dav is null)
-			return; // absent section = feature disabled, perfectly fine
-		if (!Uri.TryCreate(dav.BaseUrl, UriKind.Absolute, out Uri? uri) ||
-		    (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-			failures.Add(
-				$"ActiveSync:{sectionName}:BaseUrl '{dav.BaseUrl}' must be an absolute http(s) URL " +
-				$"(or remove the {sectionName} section entirely to disable it).");
-		if (dav.CalendarAttachments.ToLowerInvariant() is not ("auto" or "on" or "off"))
-			failures.Add(
-				$"ActiveSync:{sectionName}:CalendarAttachments '{dav.CalendarAttachments}' is unknown " +
-				"(use Auto, On or Off).");
-		if (dav.SendInvitations.ToLowerInvariant() is not ("auto" or "on" or "off"))
-			failures.Add(
-				$"ActiveSync:{sectionName}:SendInvitations '{dav.SendInvitations}' is unknown " +
-				"(use Auto, On or Off).");
-		foreach (string entry in dav.SharedCollections ?? [])
-			if (Backend.SharedCollection.Validate(entry, dav.BaseUrl) is { } failure)
-				failures.Add($"ActiveSync:{sectionName}:SharedCollections: {failure}");
 	}
 }

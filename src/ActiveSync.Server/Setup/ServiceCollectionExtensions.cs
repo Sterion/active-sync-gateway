@@ -1,4 +1,11 @@
 using System.Security.Cryptography;
+using ActiveSync.Backends.Dav;
+using ActiveSync.Backends.Imap;
+using ActiveSync.Backends.Local;
+using ActiveSync.Backends.Sieve;
+using ActiveSync.Backends.Smtp;
+using ActiveSync.Core.Accounts;
+using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
@@ -12,6 +19,35 @@ namespace ActiveSync.Server.Setup;
 /// <summary>DI registration helpers that keep Program.cs a thin composition script.</summary>
 public static class ServiceCollectionExtensions
 {
+	/// <summary>
+	///   The in-repo backend providers, the registry indexing them by name, the parsed
+	///   role assignments, and the post-build configuration validator. Used by the server
+	///   host and the CLI alike (the CLI validates `eas user` writes with the same rules).
+	/// </summary>
+	public static IServiceCollection AddBackendProviders(this IServiceCollection services)
+	{
+		services.AddSingleton<IBackendProvider, ImapBackendProvider>();
+		services.AddSingleton<IBackendProvider, SmtpBackendProvider>();
+		services.AddSingleton<IBackendProvider, CalDavBackendProvider>();
+		services.AddSingleton<IBackendProvider, CardDavBackendProvider>();
+		services.AddSingleton<IBackendProvider, SieveBackendProvider>();
+		services.AddSingleton<IBackendProvider, LocalBackendProvider>();
+		services.AddSingleton<BackendProviderRegistry>();
+		services.AddSingleton<BackendConfigurationValidator>();
+		// The validator reports section problems as a full list first; this factory is for
+		// consumers after startup validation, so it fails hard.
+		services.AddSingleton(sp =>
+		{
+			List<string> failures = new();
+			BackendRolesConfig roles = BackendRolesConfig.Load(
+				sp.GetRequiredService<IConfiguration>(), failures);
+			return failures.Count == 0
+				? roles
+				: throw new InvalidOperationException(string.Join(Environment.NewLine, failures));
+		});
+		return services;
+	}
+
 	/// <summary>
 	///   Registers the EF Core state store for the configured provider. Each provider has its
 	///   own migration set, so we register the matching context subclass but expose it to the

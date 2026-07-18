@@ -37,7 +37,7 @@ public sealed class MetricsTests(GatewayFixture gateway)
 		Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
 		string readyBody = await ready.Content.ReadAsStringAsync();
 		Assert.Contains("\"database\":true", readyBody);
-		Assert.Contains("\"imap\":true", readyBody);
+		Assert.Contains("\"mailstore\":true", readyBody);
 	}
 
 	[BackendFact]
@@ -55,14 +55,14 @@ public sealed class MetricsTests(GatewayFixture gateway)
 			new Dictionary<string, string?>
 			{
 				// A port nothing listens on: readiness must flip without restarting the pod.
-				["ActiveSync:Imap:Port"] = "59982"
+				["ActiveSync:Backends:MailStore:Port"] = "59982"
 			});
 		using HttpClient http = factory.CreateClient(
 			new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
 		using HttpResponseMessage ready = await http.GetAsync("/readyz");
 		Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
-		Assert.Contains("\"imap\":false", await ready.Content.ReadAsStringAsync());
+		Assert.Contains("\"mailstore\":false", await ready.Content.ReadAsStringAsync());
 
 		using HttpResponseMessage health = await http.GetAsync("/healthz");
 		Assert.Equal(HttpStatusCode.OK, health.StatusCode);

@@ -119,6 +119,41 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 		return true;
 	}
 
+	/// <summary>
+	///   One-time startup upgrade of pre-role-model rows to the role-keyed shape (see
+	///   <see cref="LegacyAccountJson" />). Rows that cannot be converted are left in place
+	///   and reported as ERRORS — the resolver will then skip them loudly rather than
+	///   silently dropping their overrides.
+	/// </summary>
+	public async Task UpgradeLegacyRowsAsync(ILogger logger, CancellationToken ct)
+	{
+		await using SyncDbContext db = contextFactory.CreateDbContext();
+		List<AccountEntry> entries = await db.AccountEntries.ToListAsync(ct).ConfigureAwait(false);
+		int upgraded = 0;
+		foreach (AccountEntry entry in entries)
+		{
+			string? converted = LegacyAccountJson.TryConvert(entry.Json, out string? error);
+			if (error is not null)
+			{
+				logger.LogError("Account row for {User} could not be upgraded: {Error}", entry.UserName, error);
+				continue;
+			}
+
+			if (converted is null)
+				continue;
+			entry.Json = converted;
+			entry.UpdatedUtc = DateTime.UtcNow;
+			upgraded++;
+			logger.LogInformation("Upgraded legacy account row for {User} to the role-keyed shape", entry.UserName);
+		}
+
+		if (upgraded > 0)
+		{
+			await BumpStampAsync(db, ct).ConfigureAwait(false);
+			await db.SaveChangesAsync(ct).ConfigureAwait(false);
+		}
+	}
+
 	private static async Task BumpStampAsync(SyncDbContext db, CancellationToken ct)
 	{
 		AccountsStamp? stamp = await db.AccountsStamps

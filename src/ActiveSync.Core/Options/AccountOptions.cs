@@ -1,93 +1,38 @@
 namespace ActiveSync.Core.Options;
 
 /// <summary>
-///   Per-user IMAP override. Every field is nullable on purpose: null means "inherit the
-///   global section" — with non-nullable fields the config binder could not distinguish an
-///   omitted value from a default (e.g. Port 993).
+///   Per-user override of one backend role. The host owns Enabled/Provider/UserName/Password;
+///   everything else lives in <see cref="Settings" /> as flat configuration keys the role's
+///   provider binds itself ("Host", "Port", "SharedCollections:0", ...) — provider-agnostic,
+///   JSON-serializable for database account rows, and open to plugin providers.
 /// </summary>
-public sealed class ImapAccountOptions
+public sealed class BackendRoleOverride
 {
-	/// <summary>IMAP login; defaults to the account's MailAddress, else the gateway login.</summary>
-	public string? UserName { get; set; }
-
-	/// <summary>Plaintext or "enc:v1:..." sealed value. Required in Accounts mode.</summary>
-	public string? Password { get; set; }
-
-	public string? Host { get; set; }
-	public int? Port { get; set; }
-	public bool? UseSsl { get; set; }
-	public string? Security { get; set; }
-	public bool? AllowInvalidCertificates { get; set; }
-	public string? CaCertificatePath { get; set; }
-	public char? PathSeparator { get; set; }
-}
-
-/// <summary>Per-user SMTP override; unset fields inherit the global section.</summary>
-public sealed class SmtpAccountOptions
-{
-	/// <summary>SMTP login; defaults to the account's effective IMAP user name.</summary>
-	public string? UserName { get; set; }
-
-	/// <summary>Plaintext or "enc:v1:..."; defaults to the effective IMAP password.</summary>
-	public string? Password { get; set; }
-
-	public string? Host { get; set; }
-	public int? Port { get; set; }
-	public bool? UseSsl { get; set; }
-	public string? Security { get; set; }
-	public bool? AllowInvalidCertificates { get; set; }
-	public string? CaCertificatePath { get; set; }
-	public bool? ForceFrom { get; set; }
-}
-
-/// <summary>Per-user CalDAV/CardDAV override; unset fields inherit the global section.</summary>
-public sealed class DavAccountOptions
-{
-	/// <summary>false = disable this DAV backend for this user even when configured globally.</summary>
+	/// <summary>
+	///   false = turn this role off for the user: content roles fall back to the "local"
+	///   provider, Oof is disabled. Not valid on MailStore/MailSubmit.
+	/// </summary>
 	public bool? Enabled { get; set; }
 
-	/// <summary>DAV login; defaults to the account's effective IMAP user name.</summary>
+	/// <summary>Serve this role with a different provider than the global assignment.</summary>
+	public string? Provider { get; set; }
+
+	/// <summary>Backend login; defaults to the effective MailStore user name (gateway login for MailStore).</summary>
 	public string? UserName { get; set; }
-
-	/// <summary>Plaintext or "enc:v1:..."; defaults to the effective IMAP password.</summary>
-	public string? Password { get; set; }
-
-	public string? BaseUrl { get; set; }
-	public string? HomeSetPath { get; set; }
-	public string? TaskFolder { get; set; }
-	public bool? AllowInvalidCertificates { get; set; }
-	public string? CaCertificatePath { get; set; }
-
-	/// <inheritdoc cref="DavServerOptions.CalendarAttachments" />
-	public string? CalendarAttachments { get; set; }
 
 	/// <summary>
-	///   <inheritdoc cref="DavServerOptions.SharedCollections" /> null = inherit the global
-	///   list; a non-null list REPLACES it (consistent with every other override).
+	///   Backend password, plaintext or "enc:v1:..." sealed; defaults to the effective
+	///   MailStore password (the presented EAS password for MailStore itself).
 	/// </summary>
-	public List<string>? SharedCollections { get; set; }
-
-	/// <inheritdoc cref="DavServerOptions.SendInvitations" />
-	public string? SendInvitations { get; set; }
-}
-
-/// <summary>Per-user ManageSieve override; unset fields inherit the global section.</summary>
-public sealed class SieveAccountOptions
-{
-	/// <summary>false = disable Sieve/Oof for this user even when enabled globally.</summary>
-	public bool? Enabled { get; set; }
-
-	/// <summary>Sieve login; defaults to the account's effective IMAP user name.</summary>
-	public string? UserName { get; set; }
-
-	/// <summary>Plaintext or "enc:v1:..."; defaults to the effective IMAP password.</summary>
 	public string? Password { get; set; }
 
-	public string? Host { get; set; }
-	public int? Port { get; set; }
-	public bool? UseTls { get; set; }
-	public bool? AllowInvalidCertificates { get; set; }
-	public string? CaCertificatePath { get; set; }
+	/// <summary>
+	///   Flat configuration keys overlaid on the global role section — but ONLY when the
+	///   effective provider matches the global assignment (a switched provider starts from
+	///   these settings alone). Setting any list element ("X:0") REPLACES the whole global
+	///   list "X". Null values are ignored.
+	/// </summary>
+	public Dictionary<string, string?>? Settings { get; set; }
 }
 
 /// <summary>
@@ -99,10 +44,10 @@ public sealed class SieveAccountOptions
 public sealed class AccountOptions
 {
 	/// <summary>
-	///   Optional gateway password override — decouples the phone's password from IMAP:
-	///   a "pbkdf2$..." hash (hash-password verb; preferred) or plaintext (startup warning).
-	///   When unset, the phone's password is validated against Imap:Password if configured,
-	///   else by an IMAP login probe.
+	///   Optional gateway password override — decouples the phone's password from the mail
+	///   backend: a "pbkdf2$..." hash (hash-password verb; preferred) or plaintext (startup
+	///   warning). When unset, the phone's password is validated against the MailStore
+	///   role's Password override if configured, else by the MailStore provider's probe.
 	/// </summary>
 	public string? Password { get; set; }
 
@@ -112,9 +57,6 @@ public sealed class AccountOptions
 	/// </summary>
 	public string? MailAddress { get; set; }
 
-	public ImapAccountOptions? Imap { get; set; }
-	public SmtpAccountOptions? Smtp { get; set; }
-	public DavAccountOptions? CalDav { get; set; }
-	public DavAccountOptions? CardDav { get; set; }
-	public SieveAccountOptions? Sieve { get; set; }
+	/// <summary>Per-role overrides, keyed by role name (MailStore, Calendar, Oof, ...).</summary>
+	public Dictionary<string, BackendRoleOverride>? Backends { get; set; }
 }

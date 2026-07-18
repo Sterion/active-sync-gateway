@@ -114,26 +114,24 @@ public class ServerCertificateValidatorTests : IDisposable
 	}
 
 	[Fact]
-	public void OptionsValidator_RejectsMissingCaFile()
+	public void SettingsValidation_RejectsMissingCaFile()
 	{
-		ActiveSyncOptions options = ValidOptions();
-		options.Imap.CaCertificatePath = Path.Combine(Path.GetTempPath(), "does-not-exist.pem");
-		ValidateOptionsResult result = new ActiveSyncOptionsValidator().Validate(null, options);
-		Assert.True(result.Failed);
-		Assert.Contains("does not exist", result.FailureMessage);
+		List<string> failures = new();
+		BackendSettingsValidation.CaPath(
+			Path.Combine(Path.GetTempPath(), "does-not-exist.pem"), "imap (MailStore)", failures);
+		Assert.Contains("does not exist", string.Join(";", failures));
 	}
 
 	[Fact]
-	public void OptionsValidator_RejectsGarbageCaFile()
+	public void SettingsValidation_RejectsGarbageCaFile()
 	{
 		string garbage = Path.Combine(Path.GetTempPath(), $"as-test-garbage-{Guid.NewGuid():N}.pem");
 		File.WriteAllText(garbage, "this is not a certificate");
 		try
 		{
-			ActiveSyncOptions options = ValidOptions();
-			options.Smtp.CaCertificatePath = garbage;
-			ValidateOptionsResult result = new ActiveSyncOptionsValidator().Validate(null, options);
-			Assert.True(result.Failed);
+			List<string> failures = new();
+			BackendSettingsValidation.CaPath(garbage, "smtp (MailSubmit)", failures);
+			Assert.NotEmpty(failures);
 		}
 		finally
 		{
@@ -142,21 +140,10 @@ public class ServerCertificateValidatorTests : IDisposable
 	}
 
 	[Fact]
-	public void OptionsValidator_AcceptsRealCaFile()
+	public void SettingsValidation_AcceptsRealCaFile()
 	{
-		ActiveSyncOptions options = ValidOptions();
-		options.Imap.CaCertificatePath = _caPemPath;
-		ValidateOptionsResult result = new ActiveSyncOptionsValidator().Validate(null, options);
-		Assert.True(result.Succeeded);
-	}
-
-	private static ActiveSyncOptions ValidOptions()
-	{
-		return new ActiveSyncOptions
-		{
-			Imap = new ImapOptions { Host = "imap.example.com" },
-			Smtp = new SmtpOptions { Host = "smtp.example.com" },
-			Encryption = new EncryptionOptions { AllowPlaintext = true }
-		};
+		List<string> failures = new();
+		BackendSettingsValidation.CaPath(_caPemPath, "imap (MailStore)", failures);
+		Assert.Empty(failures);
 	}
 }

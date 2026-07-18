@@ -18,7 +18,7 @@ namespace ActiveSync.Backends.Imap;
 ///   live sessions.
 /// </summary>
 public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier, IPerUserResourceOwner,
-	IAsyncDisposable
+	IReadinessSource, IAsyncDisposable
 {
 	private static readonly IReadOnlySet<BackendRole> Roles = new HashSet<BackendRole> { BackendRole.MailStore };
 
@@ -45,10 +45,34 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 	public string Name => "imap";
 	public IReadOnlySet<BackendRole> SupportedRoles => Roles;
 
+	public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures)
+	{
+		ImapOptions options = settings.Bind<ImapOptions>();
+		string context = $"imap ({role})";
+		BackendSettingsValidation.RequiredHost(options.Host, context, failures);
+		BackendSettingsValidation.Port(options.Port, context, failures);
+		BackendSettingsValidation.Choice(options.Security, "Security", context, failures,
+			"None", "SslOnConnect", "StartTls", "StartTlsWhenAvailable", "Auto");
+		BackendSettingsValidation.CaPath(options.CaCertificatePath, context, failures);
+	}
+
+	public string DescribeRole(BackendRole role, ProviderSettings settings)
+	{
+		ImapOptions options = settings.Bind<ImapOptions>();
+		return $"imap {options.Host}:{options.Port} " +
+		       $"(ssl={(options.UseSsl ? "on" : "off")}, security={options.Security ?? "auto"}, " +
+		       $"cert={DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
+	}
+
+	internal static string DescribeCert(bool allowInvalid, string? caPath)
+	{
+		return allowInvalid ? "any (insecure)" : caPath is null ? "system" : "system+custom CA";
+	}
+
 	public IBackendConnection CreateConnection(BackendConnectionContext context)
 	{
 		ResolvedRole role = context.Roles.Single(r => r.Role == BackendRole.MailStore);
-		ImapOptions options = (ImapOptions)role.Settings!;
+		ImapOptions options = role.Settings.Bind<ImapOptions>();
 		string gatewayLogin = context.GatewayCredentials.UserName;
 		ImapSession session = new(options, role.Credentials, _logger, _wireLogger);
 
@@ -68,7 +92,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		try
 		{
 			using ImapClient client = await ImapConnectionFactory
-				.ConnectAsync((ImapOptions)role.Settings!, role.Credentials, ct, _wireLogger)
+				.ConnectAsync(role.Settings.Bind<ImapOptions>(), role.Credentials, ct, _wireLogger)
 				.ConfigureAwait(false);
 			await client.DisconnectAsync(true, ct).ConfigureAwait(false);
 			return true;
@@ -82,6 +106,15 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 			_logger.LogError(ex, "IMAP authentication probe failed for {User}", role.Credentials.UserName);
 			throw new BackendException("Mail backend unreachable.", ex);
 		}
+	}
+
+	/// <summary>Reachability only — a TCP connect to the configured listener, no credentials.</summary>
+	public async Task<bool> ProbeReadinessAsync(ProviderSettings settings, CancellationToken ct)
+	{
+		ImapOptions options = settings.Bind<ImapOptions>();
+		using System.Net.Sockets.TcpClient client = new();
+		await client.ConnectAsync(options.Host, options.Port, ct).ConfigureAwait(false);
+		return true;
 	}
 
 	public void TrimUserResources(IReadOnlySet<string> activeGatewayLogins)

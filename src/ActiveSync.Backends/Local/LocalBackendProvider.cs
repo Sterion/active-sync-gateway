@@ -22,6 +22,18 @@ public sealed class LocalBackendProvider(
 	public string Name => "local";
 	public IReadOnlySet<BackendRole> SupportedRoles => Roles;
 
+	public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures)
+	{
+		// Deliberately lenient: the local provider ignores settings rather than rejecting
+		// them, so a role falling back to local (Enabled=false, upgraded legacy rows) can
+		// never invalidate an account because stale provider settings ride along.
+	}
+
+	public string DescribeRole(BackendRole role, ProviderSettings settings)
+	{
+		return "gateway database (encrypted at rest)";
+	}
+
 	public IBackendConnection CreateConnection(BackendConnectionContext context)
 	{
 		BackendCredentials gateway = context.GatewayCredentials;

@@ -28,21 +28,21 @@ public class UserOverrideTests(GatewayFixture gateway) : IDisposable
 			// phone1: explicit gateway password (rule 1) + full IMAP credential override.
 			["ActiveSync:Users:phone1@gw.local:Password"] = GatewayPassword,
 			["ActiveSync:Users:phone1@gw.local:MailAddress"] = TestBackend.User1,
-			["ActiveSync:Users:phone1@gw.local:Imap:UserName"] = TestBackend.User1,
-			["ActiveSync:Users:phone1@gw.local:Imap:Password"] = TestBackend.Password,
+			["ActiveSync:Users:phone1@gw.local:Backends:MailStore:UserName"] = TestBackend.User1,
+			["ActiveSync:Users:phone1@gw.local:Backends:MailStore:Password"] = TestBackend.Password,
 			// phone2: pbkdf2 gateway password + enc:v1:-sealed backend password, both
 			// computed here so nothing bakes in and goes stale.
 			["ActiveSync:Users:phone2@gw.local:Password"] = GatewayPasswordHasher.Hash(GatewayPassword),
 			["ActiveSync:Users:phone2@gw.local:MailAddress"] = TestBackend.User2,
-			["ActiveSync:Users:phone2@gw.local:Imap:UserName"] = TestBackend.User2,
-			["ActiveSync:Users:phone2@gw.local:Imap:Password"] = SecretValue.Seal(
+			["ActiveSync:Users:phone2@gw.local:Backends:MailStore:UserName"] = TestBackend.User2,
+			["ActiveSync:Users:phone2@gw.local:Backends:MailStore:Password"] = SecretValue.Seal(
 				TestBackend.Password, Convert.FromBase64String(GatewayFixture.TestEncryptionKey)),
 			// phone3: only a user-name override — the phone must present the real IMAP
 			// password, validated by a probe against the overridden identity (rule 3).
-			["ActiveSync:Users:phone3@gw.local:Imap:UserName"] = TestBackend.User2,
+			["ActiveSync:Users:phone3@gw.local:Backends:MailStore:UserName"] = TestBackend.User2,
 			// pinned: a configured Imap:Password pins the phone password to it (rule 2).
-			["ActiveSync:Users:pinned@gw.local:Imap:UserName"] = TestBackend.User1,
-			["ActiveSync:Users:pinned@gw.local:Imap:Password"] = TestBackend.Password
+			["ActiveSync:Users:pinned@gw.local:Backends:MailStore:UserName"] = TestBackend.User1,
+			["ActiveSync:Users:pinned@gw.local:Backends:MailStore:Password"] = TestBackend.Password
 		});
 
 	public void Dispose()

@@ -1,12 +1,14 @@
-using System.Reflection;
+using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 
 namespace ActiveSync.Server.Cli;
 
 /// <summary>
-///   Config-path access to <see cref="AccountOptions" /> fields ("MailAddress",
-///   "Imap:Host", "CalDav:Enabled", ...), reflected once from the options classes so the
-///   CLI's valid-key list can never drift from what config binding accepts.
+///   Config-path access to <see cref="AccountOptions" /> fields. Reserved keys are fixed
+///   ("MailAddress", "Password", "Backends:&lt;Role&gt;:Provider|Enabled|UserName|Password");
+///   provider settings are free-form under "Backends:&lt;Role&gt;:Settings:&lt;Key&gt;" — the
+///   host cannot enumerate them (each provider binds its own options), so they are accepted
+///   as-is and validated by the role's provider on save.
 /// </summary>
 internal static class AccountFieldPaths
 {
@@ -14,21 +16,68 @@ internal static class AccountFieldPaths
 		string Key,
 		Type ValueType,
 		bool IsSecret,
-		Func<AccountOptions, object?> Get,
 		Action<AccountOptions, object?> Set);
 
-	private static readonly Dictionary<string, FieldPath> Paths = Build();
-
 	internal static IReadOnlyCollection<string> Keys { get; } =
-		Paths.Values.Select(p => p.Key).OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToArray();
+	[
+		"MailAddress", "Password",
+		"Backends:<Role>:Provider", "Backends:<Role>:Enabled",
+		"Backends:<Role>:UserName", "Backends:<Role>:Password",
+		"Backends:<Role>:Settings:<Key>",
+		$"  (roles: {string.Join(", ", Enum.GetNames<BackendRole>())})"
+	];
 
-	/// <summary>The four backend password keys accepted by `user secret`.</summary>
+	/// <summary>The per-role backend password keys accepted by `user secret`.</summary>
 	internal static IReadOnlyCollection<string> BackendSecretKeys { get; } =
-		Paths.Values.Where(p => p.IsSecret && p.Key.Contains(':')).Select(p => p.Key).ToArray();
+		Enum.GetNames<BackendRole>().Select(role => $"Backends:{role}:Password").ToArray();
 
 	internal static FieldPath? Find(string key)
 	{
-		return Paths.GetValueOrDefault(key);
+		if (key.Equals("MailAddress", StringComparison.OrdinalIgnoreCase))
+			return new FieldPath("MailAddress", typeof(string), false,
+				(account, value) => account.MailAddress = (string?)value);
+		if (key.Equals("Password", StringComparison.OrdinalIgnoreCase))
+			return new FieldPath("Password", typeof(string), true,
+				(account, value) => account.Password = (string?)value);
+
+		string[] parts = key.Split(':');
+		if (parts.Length < 3 ||
+		    !parts[0].Equals("Backends", StringComparison.OrdinalIgnoreCase) ||
+		    !Enum.TryParse(parts[1], true, out BackendRole role))
+			return null;
+
+		string roleName = role.ToString();
+		if (parts.Length == 3)
+			return parts[2].ToLowerInvariant() switch
+			{
+				"provider" => RoleField(roleName, "Provider", typeof(string), false,
+					(o, v) => o.Provider = (string?)v),
+				"enabled" => RoleField(roleName, "Enabled", typeof(bool?), false,
+					(o, v) => o.Enabled = (bool?)v),
+				"username" => RoleField(roleName, "UserName", typeof(string), false,
+					(o, v) => o.UserName = (string?)v),
+				"password" => RoleField(roleName, "Password", typeof(string), true,
+					(o, v) => o.Password = (string?)v),
+				_ => null
+			};
+
+		if (!parts[2].Equals("Settings", StringComparison.OrdinalIgnoreCase) || parts.Length < 4)
+			return null;
+		string settingKey = string.Join(':', parts[3..]);
+		return RoleField(roleName, $"Settings:{settingKey}", typeof(string), false, (o, value) =>
+		{
+			if (value is null)
+			{
+				o.Settings?.Remove(settingKey);
+				if (o.Settings is { Count: 0 })
+					o.Settings = null;
+			}
+			else
+			{
+				(o.Settings ??= new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase))
+					[settingKey] = (string)value;
+			}
+		});
 	}
 
 	/// <summary>Parses a CLI string into the field's scalar type; error message on failure.</summary>
@@ -43,78 +92,41 @@ internal static class AccountFieldPaths
 			return true;
 		}
 
-		if (type == typeof(int))
+		if (type == typeof(bool) && bool.TryParse(raw, out bool parsed))
 		{
-			if (int.TryParse(raw, out int i))
-			{
-				value = i;
-				return true;
-			}
-		}
-		else if (type == typeof(bool))
-		{
-			if (bool.TryParse(raw, out bool b))
-			{
-				value = b;
-				return true;
-			}
-		}
-		else if (type == typeof(char))
-		{
-			if (raw.Length == 1)
-			{
-				value = raw[0];
-				return true;
-			}
+			value = parsed;
+			return true;
 		}
 
 		error = $"'{raw}' is not a valid {type.Name} for {path.Key}.";
 		return false;
 	}
 
-	private static Dictionary<string, FieldPath> Build()
+	/// <summary>A field inside one role's override, creating/pruning the override as needed.</summary>
+	private static FieldPath RoleField(
+		string roleName, string field, Type valueType, bool isSecret,
+		Action<BackendRoleOverride, object?> apply)
 	{
-		Dictionary<string, FieldPath> paths = new(StringComparer.OrdinalIgnoreCase);
-		foreach (PropertyInfo property in typeof(AccountOptions).GetProperties())
+		return new FieldPath($"Backends:{roleName}:{field}", valueType, isSecret, (account, value) =>
 		{
-			Type type = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
-			if (type == typeof(string))
+			Dictionary<string, BackendRoleOverride> backends = account.Backends
+				??= new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase);
+			if (!backends.TryGetValue(roleName, out BackendRoleOverride? roleOverride))
 			{
-				PropertyInfo p = property;
-				paths[p.Name] = new FieldPath(p.Name, p.PropertyType, p.Name == "Password",
-					account => p.GetValue(account),
-					(account, value) => p.SetValue(account, value));
+				if (value is null)
+					return;
+				backends[roleName] = roleOverride = new BackendRoleOverride();
 			}
-			else if (type.IsClass)
+
+			apply(roleOverride, value);
+			// Nulling the last field of a role removes the empty override (and section).
+			if (value is null && roleOverride is
+			    { Enabled: null, Provider: null, UserName: null, Password: null, Settings: null or { Count: 0 } })
 			{
-				foreach (PropertyInfo sub in type.GetProperties())
-				{
-					PropertyInfo section = property;
-					PropertyInfo p = sub;
-					string key = $"{section.Name}:{p.Name}";
-					paths[key] = new FieldPath(key, p.PropertyType, p.Name == "Password",
-						account => section.GetValue(account) is { } s ? p.GetValue(s) : null,
-						(account, value) =>
-						{
-							object? s = section.GetValue(account);
-							if (s is null)
-							{
-								if (value is null)
-									return;
-								s = Activator.CreateInstance(section.PropertyType)!;
-								section.SetValue(account, s);
-							}
-
-							p.SetValue(s, value);
-							// Nulling the last field of a section removes the empty section.
-							if (value is null &&
-							    section.PropertyType.GetProperties().All(q => q.GetValue(s) is null))
-								section.SetValue(account, null);
-						});
-				}
+				backends.Remove(roleName);
+				if (backends.Count == 0)
+					account.Backends = null;
 			}
-		}
-
-		return paths;
+		});
 	}
 }

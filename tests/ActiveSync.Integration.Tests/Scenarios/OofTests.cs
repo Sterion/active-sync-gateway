@@ -111,7 +111,7 @@ public sealed class OofTests(GatewayFixture gateway)
 		return new ManageSieveClient(
 			new SieveOptions
 			{
-				Enabled = true, Host = TestBackend.SieveHost, Port = TestBackend.SievePort,
+				Host = TestBackend.SieveHost, Port = TestBackend.SievePort,
 				AllowInvalidCertificates = true
 			},
 			new BackendCredentials(user, TestBackend.Password));

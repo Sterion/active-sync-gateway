@@ -4,6 +4,8 @@ using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Core.Tests;
 
@@ -36,8 +38,6 @@ public sealed class AccountStoreTests : IDisposable
 	{
 		return new ActiveSyncOptions
 		{
-			Imap = new ImapOptions { Host = "imap.global", Port = 143, UseSsl = false, Security = "None" },
-			Smtp = new SmtpOptions { Host = "smtp.global", Port = 587, UseSsl = false },
 			Encryption = new EncryptionOptions { AllowPlaintext = true },
 			Auth = new AuthOptions { UsersRefreshSeconds = refreshSeconds },
 		};
@@ -45,7 +45,26 @@ public sealed class AccountStoreTests : IDisposable
 
 	private AccountResolver Resolver(ActiveSyncOptions options)
 	{
-		return new AccountResolver(Microsoft.Extensions.Options.Options.Create(options), _store);
+		IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection(
+			new Dictionary<string, string?>
+			{
+				["ActiveSync:Backends:MailStore:Provider"] = "imap",
+				["ActiveSync:Backends:MailStore:Host"] = "imap.global",
+				["ActiveSync:Backends:MailStore:Port"] = "143",
+				["ActiveSync:Backends:MailSubmit:Provider"] = "smtp",
+				["ActiveSync:Backends:MailSubmit:Host"] = "smtp.global",
+			}).Build();
+		List<string> failures = new();
+		BackendRolesConfig roles = BackendRolesConfig.Load(config, failures);
+		Assert.Empty(failures);
+		BackendProviderRegistry registry = new(
+		[
+			new ActiveSync.Backends.Imap.ImapBackendProvider(
+				Microsoft.Extensions.Options.Options.Create(new ActiveSyncOptions()), NullLoggerFactory.Instance),
+			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
+			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!)
+		], NullLogger<BackendProviderRegistry>.Instance);
+		return new AccountResolver(Microsoft.Extensions.Options.Options.Create(options), roles, registry, _store);
 	}
 
 	[Fact]
@@ -57,7 +76,7 @@ public sealed class AccountStoreTests : IDisposable
 			["phone1"] = new()
 			{
 				MailAddress = "config@x",
-				Imap = new ImapAccountOptions { UserName = "config-imap-user" },
+				Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { UserName = "config-imap-user" } },
 			},
 		};
 		AccountResolver resolver = Resolver(options);
@@ -67,12 +86,12 @@ public sealed class AccountStoreTests : IDisposable
 		// DB row for the same login: REPLACES the config entry wholesale — the config
 		// MailAddress must not leak through the DB entry that doesn't set one.
 		await _store.UpsertAsync("phone1",
-			new AccountOptions { Imap = new ImapAccountOptions { UserName = "db-imap-user" } },
+			new AccountOptions { Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { UserName = "db-imap-user" } } },
 			CancellationToken.None);
 		await resolver.EnsureFreshAsync(false, CancellationToken.None);
 
 		ResolvedAccount fromDb = resolver.Resolve(new BackendCredentials("phone1", "pw"));
-		Assert.Equal("db-imap-user", fromDb.Imap.Credentials.UserName);
+		Assert.Equal("db-imap-user", fromDb.Roles[BackendRole.MailStore].Credentials.UserName);
 		Assert.Null(fromDb.MailAddress);
 		Assert.True(resolver.MergedUsers["phone1"].FromDatabase);
 		Assert.True(resolver.MergedUsers["phone1"].ShadowsConfig);
@@ -81,7 +100,7 @@ public sealed class AccountStoreTests : IDisposable
 		Assert.True(await _store.DeleteAsync("phone1", CancellationToken.None));
 		await resolver.EnsureFreshAsync(false, CancellationToken.None);
 		ResolvedAccount fromConfig = resolver.Resolve(new BackendCredentials("phone1", "pw"));
-		Assert.Equal("config-imap-user", fromConfig.Imap.Credentials.UserName);
+		Assert.Equal("config-imap-user", fromConfig.Roles[BackendRole.MailStore].Credentials.UserName);
 		Assert.Equal("config@x", fromConfig.MailAddress);
 		Assert.False(resolver.MergedUsers["phone1"].FromDatabase);
 	}
@@ -165,7 +184,7 @@ public sealed class AccountStoreTests : IDisposable
 		// Out-of-range port makes the DB entry invalid — it must be skipped (lenient), and
 		// the shadowed config entry stays active.
 		await _store.UpsertAsync("phone1",
-			new AccountOptions { Imap = new ImapAccountOptions { Port = 99999 } }, CancellationToken.None);
+			new AccountOptions { Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { Settings = new Dictionary<string, string?> { ["Port"] = "99999" } } } }, CancellationToken.None);
 
 		AccountResolver resolver = Resolver(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);

@@ -100,6 +100,12 @@ public class BackendProviderTests
 		public string Name => name;
 		public IReadOnlySet<BackendRole> SupportedRoles { get; } = new HashSet<BackendRole>(roles);
 
+		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures)
+		{
+		}
+
+		public string DescribeRole(BackendRole role, ProviderSettings settings) => $"{name} fake";
+
 		public IBackendConnection CreateConnection(BackendConnectionContext context)
 		{
 			Connections++;

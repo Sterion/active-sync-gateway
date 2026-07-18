@@ -13,14 +13,21 @@ public class StartupSummaryRedactionTests
 		{
 			Password = "plain-gw-secret",
 			MailAddress = "alice@example.com",
-			Imap = new ImapAccountOptions
+			Backends = new Dictionary<string, BackendRoleOverride>
 			{
-				UserName = "imapuser", Host = "imap.example.com", Port = 993,
-				Password = "enc:v1:AAAAsealedvalue",
+				["MailStore"] = new()
+				{
+					UserName = "imapuser", Password = "enc:v1:AAAAsealedvalue",
+					Settings = new Dictionary<string, string?> { ["Host"] = "imap.example.com", ["Port"] = "993" },
+				},
+				["MailSubmit"] = new() { Password = "plain-smtp-secret" },
+				["Calendar"] = new() { Enabled = false },
+				["Contacts"] = new()
+				{
+					Provider = "carddav", Password = "plain-dav-secret",
+					Settings = new Dictionary<string, string?> { ["BaseUrl"] = "https://dav.example.com" },
+				},
 			},
-			Smtp = new SmtpAccountOptions { Password = "plain-smtp-secret" },
-			CalDav = new DavAccountOptions { Enabled = false },
-			CardDav = new DavAccountOptions { BaseUrl = "https://dav.example.com", Password = "plain-dav-secret" },
 		};
 
 		string line = StartupSummary.DescribeUser(new MergedAccount(options, true, true));
@@ -34,9 +41,9 @@ public class StartupSummaryRedactionTests
 		Assert.Contains("pw=***(PLAINTEXT)", line);
 		Assert.Contains("[db, shadows config]", line);
 		Assert.Contains("mail=alice@example.com", line);
-		Assert.Contains("host=imap.example.com", line);
-		Assert.Contains("caldav=off", line);
-		Assert.Contains("url=https://dav.example.com", line);
+		Assert.Contains("Host=imap.example.com", line);
+		Assert.Contains("calendar[off]", line);
+		Assert.Contains("BaseUrl=https://dav.example.com", line);
 	}
 
 	[Fact]

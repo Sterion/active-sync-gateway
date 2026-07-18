@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using ActiveSync.Core.Accounts;
+using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
@@ -18,11 +19,16 @@ namespace ActiveSync.Server.Cli;
 internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : DatabaseCommand<TSettings>(terminal)
 	where TSettings : CommandSettings
 {
+	protected BackendRolesConfig Roles { get; private set; } = null!;
+	protected BackendProviderRegistry Registry { get; private set; } = null!;
+
 	protected sealed override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, TSettings settings, CancellationToken cancellationToken)
 	{
 		AccountStore store = services.GetRequiredService<AccountStore>();
 		ActiveSyncOptions options = services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value;
+		Roles = services.GetRequiredService<BackendRolesConfig>();
+		Registry = services.GetRequiredService<BackendProviderRegistry>();
 		return await RunAsync(store, options, settings, cancellationToken);
 	}
 
@@ -50,7 +56,7 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 	protected async Task<int> ValidateAndSaveAsync(
 		AccountStore store, ActiveSyncOptions options, string login, AccountOptions entry, CancellationToken ct)
 	{
-		List<string> failures = AccountResolver.ValidateEntry(options, login, entry);
+		List<string> failures = AccountResolver.ValidateEntry(options, Roles, Registry, login, entry);
 		if (failures.Count > 0)
 		{
 			await Console.Error.WriteLineAsync("The entry would be invalid — nothing was saved:");
@@ -108,14 +114,13 @@ internal sealed class UserListCommand(IAnsiConsole terminal) : UserCommandBase<U
 				? "-"
 				: GatewayPasswordHasher.IsHashed(effective.Password) ? "***(pbkdf2)" : "***(PLAINTEXT)";
 			List<string> sections = [];
-			if (effective.Imap is not null)
-				sections.Add("imap");
-			if (effective.Smtp is not null)
-				sections.Add("smtp");
-			if (effective.CalDav is not null)
-				sections.Add(effective.CalDav.Enabled == false ? "caldav=off" : "caldav");
-			if (effective.CardDav is not null)
-				sections.Add(effective.CardDav.Enabled == false ? "carddav=off" : "carddav");
+			foreach ((string roleName, BackendRoleOverride roleOverride) in
+			         (effective.Backends ?? []).OrderBy(b => b.Key, StringComparer.OrdinalIgnoreCase))
+				sections.Add(roleOverride.Enabled == false
+					? $"{roleName.ToLowerInvariant()}=off"
+					: roleOverride.Provider is { } switched
+						? $"{roleName.ToLowerInvariant()}={switched}"
+						: roleName.ToLowerInvariant());
 			AddRow(table, login, origin, effective.MailAddress ?? "-", password,
 				sections.Count > 0 ? string.Join(", ", sections) : "-");
 		}
@@ -217,7 +222,7 @@ internal sealed class UserSetCommand(IAnsiConsole terminal) : UserCommandBase<Us
 		public required string Login { get; init; }
 
 		[CommandArgument(1, "<key>")]
-		[Description("Field path, e.g. MailAddress, Imap:Host, CalDav:Enabled.")]
+		[Description("Field path, e.g. MailAddress, Backends:MailStore:Settings:Host, Backends:Calendar:Enabled.")]
 		public required string Key { get; init; }
 
 		[CommandArgument(2, "<value>")]
@@ -379,7 +384,7 @@ internal sealed class UserSecretCommand(IAnsiConsole terminal)
 		public required string Login { get; init; }
 
 		[CommandArgument(1, "<key>")]
-		[Description("One of: Imap:Password, Smtp:Password, CalDav:Password, CardDav:Password.")]
+		[Description("A per-role backend password, e.g. Backends:MailStore:Password.")]
 		public required string Key { get; init; }
 	}
 

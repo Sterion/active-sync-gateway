@@ -101,8 +101,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// provider probes the user's EFFECTIVE endpoint/username, so per-user overrides
 		// apply. A provider without verification support cannot admit pass-through logins.
 		ResolvedAccount probeAccount = _resolver.Resolve(credentials);
-		ResolvedRole mailRole = RoleMapper.Map(probeAccount, credentials)
-			.First(r => r.Role == BackendRole.MailStore);
+		ResolvedRole mailRole = probeAccount.Roles[BackendRole.MailStore];
 		if (_registry.GetFor(mailRole.ProviderName, BackendRole.MailStore) is not ICredentialVerifier verifier)
 		{
 			_logger.LogWarning(
@@ -121,13 +120,14 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	{
 		await _resolver.EnsureFreshAsync(false, ct).ConfigureAwait(false);
 		ResolvedAccount account = _resolver.Resolve(credentials);
-		IReadOnlyList<ResolvedRole> roles = RoleMapper.Map(account, credentials);
+		IReadOnlyList<ResolvedRole> roles = account.OrderedRoles;
 
 		// Shared-calendar grants are read here (async) because the session constructor is
 		// synchronous; a session therefore carries the grants from its build time — `eas
 		// share` changes apply when the session is next rebuilt (idle eviction, restart).
+		// The calendar provider merges these with its own configured SharedCollections.
 		IReadOnlyList<SharedCollection> sharedCalendars =
-			await LoadSharedCalendarsAsync(account, credentials.UserName, ct).ConfigureAwait(false);
+			await LoadShareGrantsAsync(credentials.UserName, ct).ConfigureAwait(false);
 
 		// Cache keys and rotation compares stay on the GATEWAY login/password — per-backend
 		// user names never become identity, and in Accounts mode the backend credentials are
@@ -162,28 +162,20 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	}
 
 	/// <summary>
-	///   Config SharedCollections ∪ database `eas share` grants for this user; a grant for
-	///   the same collection overrides the config entry's mode. Empty without a CalDAV side.
+	///   The user's runtime `eas share` grants — handed to every provider connection; the
+	///   calendar provider merges them with its own configured SharedCollections (a grant
+	///   for the same collection overrides the config entry's mode).
 	/// </summary>
-	private async Task<IReadOnlyList<SharedCollection>> LoadSharedCalendarsAsync(
-		ResolvedAccount account, string userName, CancellationToken ct)
+	private async Task<IReadOnlyList<SharedCollection>> LoadShareGrantsAsync(
+		string userName, CancellationToken ct)
 	{
-		if (account.CalDav is null)
-			return [];
-		List<SharedCollection> merged = (account.CalDav.Options.SharedCollections ?? [])
-			.Select(SharedCollection.Parse)
-			.ToList();
 		await using SyncDbContext db = _dbFactory.CreateDbContext();
 		List<SharedCalendarGrant> grants = await db.SharedCalendarGrants.AsNoTracking()
 			.Where(g => g.UserName == userName)
 			.ToListAsync(ct).ConfigureAwait(false);
-		foreach (SharedCalendarGrant grant in grants)
-		{
-			merged.RemoveAll(c => c.Href.TrimEnd('/') == grant.CollectionHref.TrimEnd('/'));
-			merged.Add(new SharedCollection(grant.CollectionHref, grant.ReadOnly));
-		}
-
-		return merged;
+		return grants
+			.Select(g => new SharedCollection(g.CollectionHref, g.ReadOnly))
+			.ToList();
 	}
 
 	private void CacheVerdict(string cacheKey, string passwordHash, bool verified)

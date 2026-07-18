@@ -11,6 +11,11 @@
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
 		</GlobalPackageReference>
 
+		<!-- Configuration: role-keyed backend sections are read raw and bound by the provider
+		     that owns them (plugins bind their own option types the host cannot know). -->
+		<PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.10" />
+		<PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.10" />
+
 		<!-- Data / EF Core -->
 		<PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
 		<PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10" />

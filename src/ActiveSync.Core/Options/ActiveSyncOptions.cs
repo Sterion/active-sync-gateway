@@ -105,15 +105,13 @@ public sealed class DavServerOptions
 }
 
 /// <summary>
-///   ManageSieve (RFC 5804) connection for the out-of-office feature: when enabled, the
-///   Settings→Oof command manages a gateway-owned sieve vacation script on this server.
-///   Disabled by default — Oof then stays the historical no-op stub.
+///   ManageSieve (RFC 5804) connection for the out-of-office feature: when the Oof role is
+///   assigned to the "sieve" provider, the Settings→Oof command manages a gateway-owned
+///   sieve vacation script on this server. No Oof role = the historical no-op stub.
 /// </summary>
 public sealed class SieveOptions
 {
-	public bool Enabled { get; set; }
-
-	/// <summary>ManageSieve host; defaults to the (effective) IMAP host when unset.</summary>
+	/// <summary>ManageSieve host (required — no implicit "same as IMAP" default).</summary>
 	public string? Host { get; set; }
 
 	public int Port { get; set; } = 4190;
@@ -344,13 +342,14 @@ public sealed class MetricsOptions
 	public bool PerUser { get; set; } = true;
 }
 
+/// <summary>
+///   Host options. Backend endpoints are NOT bound here — the ActiveSync:Backends section
+///   is role-keyed raw configuration each role's provider binds itself (see
+///   <see cref="Accounts.BackendRolesConfig" />); the option classes above are what the
+///   in-repo providers bind their sections onto.
+/// </summary>
 public sealed class ActiveSyncOptions
 {
-	public ImapOptions Imap { get; set; } = new();
-	public SmtpOptions Smtp { get; set; } = new();
-	public DavServerOptions? CalDav { get; set; }
-	public DavServerOptions? CardDav { get; set; }
-	public SieveOptions Sieve { get; set; } = new();
 	public DatabaseOptions Database { get; set; } = new();
 	public EasOptions Eas { get; set; } = new();
 	public AuthOptions Auth { get; set; } = new();

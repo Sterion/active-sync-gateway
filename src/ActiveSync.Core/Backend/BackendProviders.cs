@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Core.Backend;
@@ -19,12 +20,37 @@ public enum BackendRole
 }
 
 /// <summary>
+///   Effective settings of one role for one account (the global role section, overlaid with
+///   the user's per-role settings). The host never binds these — the provider that owns the
+///   role binds its OWN options type, which is what lets plugins carry option shapes the
+///   host cannot know. The section never contains credentials; those travel separately as
+///   <see cref="ResolvedRole.Credentials" />.
+/// </summary>
+public sealed class ProviderSettings(IConfigurationSection section)
+{
+	private static readonly IConfigurationSection EmptySection =
+		new ConfigurationBuilder().Build().GetSection("empty");
+
+	/// <summary>Settings with no keys at all (the "local" provider, absent sections).</summary>
+	public static ProviderSettings Empty { get; } = new(EmptySection);
+
+	public IConfigurationSection Section => section;
+
+	/// <summary>Binds the section onto a fresh instance of the provider's options type.</summary>
+	public TOptions Bind<TOptions>() where TOptions : new()
+	{
+		TOptions options = new();
+		section.Bind(options);
+		return options;
+	}
+}
+
+/// <summary>
 ///   One role resolved for one account: which provider serves it, with what settings and
-///   backend credentials. Settings is the provider's own options object — providers cast;
-///   the typed handoff is transitional until config binding moves behind the role model.
+///   backend credentials.
 /// </summary>
 public sealed record ResolvedRole(
-	BackendRole Role, string ProviderName, object? Settings, BackendCredentials Credentials);
+	BackendRole Role, string ProviderName, ProviderSettings Settings, BackendCredentials Credentials);
 
 /// <summary>
 ///   Everything a provider needs to open one account's connection: the gateway identity
@@ -91,6 +117,16 @@ public interface IBackendProvider
 
 	/// <summary>One connection serving ALL roles assigned to this provider for one account.</summary>
 	IBackendConnection CreateConnection(BackendConnectionContext context);
+
+	/// <summary>
+	///   Validates one effective role section (the provider binds its own options). Called for
+	///   the global sections at startup (strict — failures abort) and for per-user overrides
+	///   (config entries strict, database entries skip-with-warning).
+	/// </summary>
+	void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures);
+
+	/// <summary>One redacted human-readable line for the startup banner (never secrets).</summary>
+	string DescribeRole(BackendRole role, ProviderSettings settings);
 }
 
 /// <summary>
@@ -112,6 +148,16 @@ public interface IPerUserResourceOwner
 {
 	/// <summary>Synchronous by design — disposal of trimmed resources happens in the background.</summary>
 	void TrimUserResources(IReadOnlySet<string> activeGatewayLogins);
+}
+
+/// <summary>
+///   Optional provider capability: a cheap reachability probe of the globally configured
+///   endpoint for /readyz (no credentials — connectivity only, e.g. TCP banner or HTTP
+///   OPTIONS). Providers without it simply do not appear in the readiness report.
+/// </summary>
+public interface IReadinessSource
+{
+	Task<bool> ProbeReadinessAsync(ProviderSettings settings, CancellationToken ct);
 }
 
 /// <summary>All registered providers, addressable by name. Names must be unique.</summary>

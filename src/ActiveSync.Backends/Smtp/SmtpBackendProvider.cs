@@ -1,3 +1,4 @@
+using ActiveSync.Backends.Imap;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using Microsoft.Extensions.Logging;
@@ -15,11 +16,31 @@ public sealed class SmtpBackendProvider(ILoggerFactory loggerFactory) : IBackend
 	public string Name => "smtp";
 	public IReadOnlySet<BackendRole> SupportedRoles => Roles;
 
+	public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures)
+	{
+		SmtpOptions options = settings.Bind<SmtpOptions>();
+		string context = $"smtp ({role})";
+		BackendSettingsValidation.RequiredHost(options.Host, context, failures);
+		BackendSettingsValidation.Port(options.Port, context, failures);
+		BackendSettingsValidation.Choice(options.Security, "Security", context, failures,
+			"None", "SslOnConnect", "StartTls", "StartTlsWhenAvailable", "Auto");
+		BackendSettingsValidation.CaPath(options.CaCertificatePath, context, failures);
+	}
+
+	public string DescribeRole(BackendRole role, ProviderSettings settings)
+	{
+		SmtpOptions options = settings.Bind<SmtpOptions>();
+		return $"smtp {options.Host}:{options.Port} " +
+		       $"(ssl={(options.UseSsl ? "on" : "off")}, security={options.Security ?? "auto"}, " +
+		       $"forceFrom={(options.ForceFrom ? "on" : "off")}, " +
+		       $"cert={ImapBackendProvider.DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
+	}
+
 	public IBackendConnection CreateConnection(BackendConnectionContext context)
 	{
 		ResolvedRole role = context.Roles.Single(r => r.Role == BackendRole.MailSubmit);
 		SmtpSubmitBackend submit = new(
-			(SmtpOptions)role.Settings!, role.Credentials, context.MailAddress, _logger, _wireLogger);
+			role.Settings.Bind<SmtpOptions>(), role.Credentials, context.MailAddress, _logger, _wireLogger);
 		return new BackendConnection([], submit);
 	}
 }

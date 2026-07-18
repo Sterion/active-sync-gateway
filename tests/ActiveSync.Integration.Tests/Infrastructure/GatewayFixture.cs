@@ -187,14 +187,16 @@ public sealed class GatewayFixture : IAsyncLifetime
 
 		Dictionary<string, string?> settings = new()
 		{
-			["ActiveSync:Imap:Host"] = TestBackend.ImapHost,
-			["ActiveSync:Imap:Port"] = TestBackend.ImapPort.ToString(),
-			["ActiveSync:Imap:UseSsl"] = "false",
-			["ActiveSync:Imap:Security"] = "None",
-			["ActiveSync:Smtp:Host"] = TestBackend.SmtpHost,
-			["ActiveSync:Smtp:Port"] = TestBackend.SmtpPort.ToString(),
-			["ActiveSync:Smtp:UseSsl"] = "false",
-			["ActiveSync:Smtp:Security"] = "None",
+			["ActiveSync:Backends:MailStore:Provider"] = "imap",
+			["ActiveSync:Backends:MailStore:Host"] = TestBackend.ImapHost,
+			["ActiveSync:Backends:MailStore:Port"] = TestBackend.ImapPort.ToString(),
+			["ActiveSync:Backends:MailStore:UseSsl"] = "false",
+			["ActiveSync:Backends:MailStore:Security"] = "None",
+			["ActiveSync:Backends:MailSubmit:Provider"] = "smtp",
+			["ActiveSync:Backends:MailSubmit:Host"] = TestBackend.SmtpHost,
+			["ActiveSync:Backends:MailSubmit:Port"] = TestBackend.SmtpPort.ToString(),
+			["ActiveSync:Backends:MailSubmit:UseSsl"] = "false",
+			["ActiveSync:Backends:MailSubmit:Security"] = "None",
 			["ActiveSync:Database:ConnectionString"] = connectionString,
 			["ActiveSync:Encryption:Key"] = TestEncryptionKey,
 			["ActiveSync:ReadOnly"] = readOnly ? "true" : "false",
@@ -211,19 +213,22 @@ public sealed class GatewayFixture : IAsyncLifetime
 			// even in the lab config (ENCRYPT-NEEDED), so STARTTLS against its self-signed
 			// certificate it is — which conveniently exercises the production TLS path.
 			// Only contacted on Settings->Oof Set, so stacks without sieve are unaffected.
-			["ActiveSync:Sieve:Enabled"] = "true",
-			["ActiveSync:Sieve:Host"] = TestBackend.SieveHost,
-			["ActiveSync:Sieve:Port"] = TestBackend.SievePort.ToString(),
-			["ActiveSync:Sieve:AllowInvalidCertificates"] = "true"
+			["ActiveSync:Backends:Oof:Provider"] = "sieve",
+			["ActiveSync:Backends:Oof:Host"] = TestBackend.SieveHost,
+			["ActiveSync:Backends:Oof:Port"] = TestBackend.SievePort.ToString(),
+			["ActiveSync:Backends:Oof:AllowInvalidCertificates"] = "true"
 		};
 		if (fastWatchdogNoIdle)
 			settings["ActiveSync:Eas:WatchdogSeconds"] = "15";
 		if (!withoutDav && TestBackend.DavUrl is { } davUrl)
 		{
-			settings["ActiveSync:CalDav:BaseUrl"] = davUrl;
-			settings["ActiveSync:CalDav:HomeSetPath"] = TestBackend.DavHomeSetPath;
-			settings["ActiveSync:CardDav:BaseUrl"] = davUrl;
-			settings["ActiveSync:CardDav:HomeSetPath"] = TestBackend.DavHomeSetPath;
+			settings["ActiveSync:Backends:Calendar:Provider"] = "caldav";
+			settings["ActiveSync:Backends:Calendar:BaseUrl"] = davUrl;
+			settings["ActiveSync:Backends:Calendar:HomeSetPath"] = TestBackend.DavHomeSetPath;
+			settings["ActiveSync:Backends:Tasks:Provider"] = "caldav";
+			settings["ActiveSync:Backends:Contacts:Provider"] = "carddav";
+			settings["ActiveSync:Backends:Contacts:BaseUrl"] = davUrl;
+			settings["ActiveSync:Backends:Contacts:HomeSetPath"] = TestBackend.DavHomeSetPath;
 		}
 
 		if (overrides is not null)

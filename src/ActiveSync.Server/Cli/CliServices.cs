@@ -35,11 +35,27 @@ internal static class CliServices
 
 		ServiceCollection services = new();
 		services.AddLogging();
+		services.AddSingleton<IConfiguration>(config);
 		services.AddOptions<ActiveSyncOptions>().Bind(config.GetSection("ActiveSync"));
 		services.AddSyncDatabase(PostgresConnectionUri.EffectiveProvider(options.Database));
 		services.AddLocalContentProtection();
+		services.AddSingleton<ActiveSync.Backends.Local.LocalChangeNotifier>();
+		services.AddBackendProviders();
 		services.AddSingleton<ActiveSync.Core.Accounts.AccountStore>();
 		ServiceProvider provider = services.BuildServiceProvider();
+
+		// `eas user` writes are validated with the exact rules serve applies at startup —
+		// a broken role section must surface here, not corrupt an account row.
+		try
+		{
+			provider.GetRequiredService<BackendConfigurationValidator>().Validate();
+		}
+		catch (InvalidOperationException ex)
+		{
+			await Console.Error.WriteLineAsync(ex.Message);
+			await provider.DisposeAsync();
+			return null;
+		}
 
 		// CLI commands never migrate; refuse to query a missing or outdated schema instead of
 		// failing with a provider error mid-command.

@@ -118,15 +118,7 @@ public partial class Program
 		builder.Services.AddSingleton<AccountResolver>();
 		builder.Services.AddSingleton<AuthThrottle>();
 		builder.Services.AddSingleton<LocalChangeNotifier>();
-		// Backend providers: named implementations the session factory composes per account.
-		// Explicit registrations for the in-repo providers; the registry indexes them by name.
-		builder.Services.AddSingleton<IBackendProvider, ImapBackendProvider>();
-		builder.Services.AddSingleton<IBackendProvider, SmtpBackendProvider>();
-		builder.Services.AddSingleton<IBackendProvider, CalDavBackendProvider>();
-		builder.Services.AddSingleton<IBackendProvider, CardDavBackendProvider>();
-		builder.Services.AddSingleton<IBackendProvider, SieveBackendProvider>();
-		builder.Services.AddSingleton<IBackendProvider, LocalBackendProvider>();
-		builder.Services.AddSingleton<BackendProviderRegistry>();
+		builder.Services.AddBackendProviders();
 		builder.Services.AddSingleton<BackendSessionFactory>();
 		builder.Services.AddSingleton<IBackendSessionFactory>(sp => sp.GetRequiredService<BackendSessionFactory>());
 		builder.Services.AddEasHandlers();
@@ -135,9 +127,19 @@ public partial class Program
 
 		ILogger startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ActiveSync.Startup");
 
+		// Backend role sections + declared users are validated here (not via ValidateOnStart)
+		// because every named provider must exist in the registry and validate its own
+		// settings — this must run before anything resolves the role config or the resolver.
+		app.Services.GetRequiredService<BackendConfigurationValidator>().Validate();
+
 		// Apply EF Core migrations first so the accounts snapshot (and the banner reading it)
 		// can query the database on a fresh install.
 		await app.ApplyMigrationsAsync(startupLogger);
+
+		// One-time upgrade of pre-role-model account rows (imap/calDav/... JSON shapes) —
+		// without it the deserializer would silently DROP those overrides.
+		await app.Services.GetRequiredService<AccountStore>()
+			.UpgradeLegacyRowsAsync(startupLogger, CancellationToken.None);
 
 		// Load (or generate once) the self-signed certificate — the Kestrel selector above
 		// picks it up when the server starts listening a few lines further down.
@@ -159,8 +161,9 @@ public partial class Program
 
 		// Log the effective configuration (reads the resolved IOptions, so test/override values show).
 		StartupSummary.Log(startupLogger,
-			app.Services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value, resolver.MergedUsers,
-			httpsSummary);
+			app.Services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value,
+			resolver.Roles, app.Services.GetRequiredService<BackendProviderRegistry>(),
+			resolver.MergedUsers, httpsSummary);
 
 		// Report the bound addresses and public endpoints once the server is listening.
 		app.Lifetime.ApplicationStarted.Register(() =>

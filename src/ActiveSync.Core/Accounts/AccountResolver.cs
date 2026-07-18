@@ -3,6 +3,7 @@ using System.Text;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -12,10 +13,10 @@ namespace ActiveSync.Core.Accounts;
 public sealed record MergedAccount(AccountOptions Options, bool FromDatabase, bool ShadowsConfig);
 
 /// <summary>
-///   Maps a gateway login to its effective backend endpoints and credentials. Pass-through
-///   is the baseline: undeclared logins use the global sections with the presented
-///   credentials everywhere. A declared entry is a pure overlay — only the fields it sets
-///   differ, and unset passwords inherit the presented EAS password per backend. Entries
+///   Maps a gateway login to its effective backend roles and credentials. Pass-through is
+///   the baseline: undeclared logins use the global role sections with the presented
+///   credentials everywhere. A declared entry is a pure overlay — only the role fields it
+///   sets differ, and unset passwords inherit the presented EAS password per role. Entries
 ///   come from config (<see cref="ActiveSyncOptions.Users" />, restart to change) and the
 ///   database (<see cref="AccountStore" />, a row REPLACES the whole config entry for that
 ///   login). The compiled snapshot is immutable and swapped atomically; database changes
@@ -25,6 +26,8 @@ public sealed record MergedAccount(AccountOptions Options, bool FromDatabase, bo
 public sealed class AccountResolver
 {
 	private readonly ActiveSyncOptions _options;
+	private readonly BackendRolesConfig _roles;
+	private readonly BackendProviderRegistry _registry;
 	private readonly AccountStore? _store;
 	private readonly ILogger<AccountResolver>? _logger;
 	private readonly SemaphoreSlim _refreshGate = new(1, 1);
@@ -38,16 +41,23 @@ public sealed class AccountResolver
 
 	public AccountResolver(
 		IOptions<ActiveSyncOptions> options,
+		BackendRolesConfig roles,
+		BackendProviderRegistry registry,
 		AccountStore? store = null,
 		ILogger<AccountResolver>? logger = null)
 	{
 		_options = options.Value;
+		_roles = roles;
+		_registry = registry;
 		_store = store;
 		_logger = logger;
 		// Config-only snapshot first; database entries arrive with the first EnsureFreshAsync
 		// (the server forces one right after migrations, before any request).
-		_snapshot = BuildSnapshot(_options, null, logger);
+		_snapshot = BuildSnapshot(_options, _roles, _registry, null, logger);
 	}
+
+	/// <summary>The global role assignments (for banners, readiness probes and the CLI).</summary>
+	public BackendRolesConfig Roles => _roles;
 
 	/// <summary>The merged, effective user view (database entries replacing config ones).</summary>
 	public IReadOnlyDictionary<string, MergedAccount> MergedUsers => _snapshot.Users;
@@ -81,7 +91,7 @@ public sealed class AccountResolver
 				Dictionary<string, AccountOptions>? dbUsers = stamp is null
 					? null
 					: await _store.LoadAllAsync(_logger, ct).ConfigureAwait(false);
-				_snapshot = BuildSnapshot(_options, dbUsers, _logger);
+				_snapshot = BuildSnapshot(_options, _roles, _registry, dbUsers, _logger);
 				_lastStamp = stamp;
 				_logger?.LogInformation(
 					"Accounts snapshot rebuilt: {Count} declared user(s) ({Db} from database)",
@@ -108,10 +118,10 @@ public sealed class AccountResolver
 	}
 
 	/// <summary>
-	///   Local gateway-password verdict, or null when only an IMAP login probe can decide.
-	///   Precedence: explicit gateway Password (hash/plaintext) → configured Imap:Password
-	///   (presented must equal it) → null (probe). Undeclared logins: definitive false when
-	///   <see cref="ActiveSyncOptions.RequireDeclaredUsers" /> is set, else null.
+	///   Local gateway-password verdict, or null when only a backend login probe can decide.
+	///   Precedence: explicit gateway Password (hash/plaintext) → configured MailStore
+	///   Password (presented must equal it) → null (probe). Undeclared logins: definitive
+	///   false when <see cref="ActiveSyncOptions.RequireDeclaredUsers" /> is set, else null.
 	/// </summary>
 	public bool? VerifyLocally(string login, string presented)
 	{
@@ -120,8 +130,8 @@ public sealed class AccountResolver
 			return _options.RequireDeclaredUsers ? false : null;
 		if (template.GatewayPassword is not null)
 			return GatewayPasswordHasher.Verify(template.GatewayPassword, presented);
-		if (template.Imap.Password is not null)
-			return TimingSafeEquals(template.Imap.Password, presented);
+		if (template.Roles.GetValueOrDefault(BackendRole.MailStore)?.Password is { } mailPassword)
+			return TimingSafeEquals(mailPassword, presented);
 		return null;
 	}
 
@@ -131,77 +141,61 @@ public sealed class AccountResolver
 		string login = presented.UserName;
 		AccountTemplate? template = _snapshot.Templates?.GetValueOrDefault(login);
 		if (template is null)
-			// Pass-through: same credentials everywhere, global endpoints, login-as-address-if-@.
+		{
+			// Pass-through: same credentials everywhere, the global role sections verbatim.
+			Dictionary<BackendRole, ResolvedRole> passThrough = new();
+			foreach ((BackendRole role, RoleAssignment assignment) in _roles.Assignments)
+				passThrough[role] = new ResolvedRole(role, assignment.ProviderName, assignment.Settings, presented);
 			return new ResolvedAccount(
-				login,
-				login.Contains('@') ? login : null,
-				false,
-				new ResolvedBackend<ImapOptions>(_options.Imap, presented),
-				new ResolvedBackend<SmtpOptions>(_options.Smtp, presented),
-				_options.CalDav is null
-					? null
-					: new ResolvedBackend<DavServerOptions>(_options.CalDav, presented),
-				_options.CardDav is null
-					? null
-					: new ResolvedBackend<DavServerOptions>(_options.CardDav, presented),
-				_options.Sieve.Enabled
-					? new ResolvedBackend<SieveOptions>(
-						WithSieveHostDefault(_options.Sieve, _options.Imap.Host), presented)
-					: null);
+				login, login.Contains('@') ? login : null, false, passThrough);
+		}
 
-		// Credential inheritance: IMAP anchors on (override ?? login, override ?? presented);
-		// SMTP and DAV default to the effective IMAP pair.
-		string imapUser = template.Imap.UserName ?? login;
-		string imapPassword = template.Imap.Password ?? presented.Password;
+		// Credential inheritance: MailStore anchors on (override ?? login, override ?? presented);
+		// every other role defaults to the effective MailStore pair.
+		RoleTemplate? mailStore = template.Roles.GetValueOrDefault(BackendRole.MailStore);
+		string mailUser = mailStore?.UserName ?? login;
+		string mailPassword = mailStore?.Password ?? presented.Password;
+		Dictionary<BackendRole, ResolvedRole> roles = new();
+		foreach ((BackendRole role, RoleTemplate roleTemplate) in template.Roles)
+			roles[role] = new ResolvedRole(role, roleTemplate.ProviderName, roleTemplate.Settings,
+				role == BackendRole.MailStore
+					? new BackendCredentials(mailUser, mailPassword)
+					: new BackendCredentials(roleTemplate.UserName ?? mailUser, roleTemplate.Password ?? mailPassword));
 		return new ResolvedAccount(
 			login,
 			template.MailAddress ?? (login.Contains('@') ? login : null),
 			template.MailAddress is not null,
-			new ResolvedBackend<ImapOptions>(template.Imap.Options, new BackendCredentials(imapUser, imapPassword)),
-			new ResolvedBackend<SmtpOptions>(template.Smtp.Options,
-				new BackendCredentials(template.Smtp.UserName ?? imapUser, template.Smtp.Password ?? imapPassword)),
-			ResolveDav(template.CalDav, imapUser, imapPassword),
-			ResolveDav(template.CardDav, imapUser, imapPassword),
-			template.Sieve is null
-				? null
-				: new ResolvedBackend<SieveOptions>(template.Sieve.Options,
-					new BackendCredentials(template.Sieve.UserName ?? imapUser, template.Sieve.Password ?? imapPassword)));
-	}
-
-	/// <summary>The Sieve host default is "same box as IMAP" — filled in without mutating the singleton options.</summary>
-	private static SieveOptions WithSieveHostDefault(SieveOptions sieve, string imapHost)
-	{
-		if (!string.IsNullOrWhiteSpace(sieve.Host))
-			return sieve;
-		return new SieveOptions
-		{
-			Enabled = sieve.Enabled,
-			Host = imapHost,
-			Port = sieve.Port,
-			UseTls = sieve.UseTls,
-			AllowInvalidCertificates = sieve.AllowInvalidCertificates,
-			CaCertificatePath = sieve.CaCertificatePath
-		};
+			roles);
 	}
 
 	/// <summary>Validation entry point — same merge/unseal code the runtime templates use.</summary>
-	public static void ValidateUsers(ActiveSyncOptions options, byte[]? encryptionKey, List<string> failures)
+	public static void ValidateUsers(
+		ActiveSyncOptions options, BackendRolesConfig roles, BackendProviderRegistry registry,
+		byte[]? encryptionKey, List<string> failures)
 	{
-		BuildAll(options, encryptionKey, failures);
+		if (options.Users is null)
+			return;
+		foreach ((string login, AccountOptions account) in options.Users)
+		{
+			ValidateLogin(login, failures);
+			BuildOne(roles, registry, login, account, encryptionKey, failures);
+		}
 	}
 
 	/// <summary>
-	///   Validates one would-be entry (CLI writes) against the global options — identical
-	///   rules to config entries. Returns the failure messages; empty = valid.
+	///   Validates one would-be entry (CLI writes) against the global role sections —
+	///   identical rules to config entries. Returns the failure messages; empty = valid.
 	/// </summary>
-	public static List<string> ValidateEntry(ActiveSyncOptions options, string login, AccountOptions entry)
+	public static List<string> ValidateEntry(
+		ActiveSyncOptions options, BackendRolesConfig roles, BackendProviderRegistry registry,
+		string login, AccountOptions entry)
 	{
 		byte[]? key = EncryptionKeyLoader.TryLoadKey(options.Encryption, out string? keyError);
 		List<string> failures = new();
 		if (keyError is not null)
 			failures.Add(keyError);
 		ValidateLogin(login, failures);
-		BuildOne(options, login, entry, key, failures);
+		BuildOne(roles, registry, login, entry, key, failures);
 		if (key is not null)
 			CryptographicOperations.ZeroMemory(key);
 		return failures;
@@ -214,7 +208,8 @@ public sealed class AccountResolver
 	///   older/newer CLI can never take authentication down.
 	/// </summary>
 	private static Snapshot BuildSnapshot(
-		ActiveSyncOptions options, Dictionary<string, AccountOptions>? dbUsers, ILogger? logger)
+		ActiveSyncOptions options, BackendRolesConfig roles, BackendProviderRegistry registry,
+		Dictionary<string, AccountOptions>? dbUsers, ILogger? logger)
 	{
 		Dictionary<string, AccountTemplate> templates = new(StringComparer.OrdinalIgnoreCase);
 		Dictionary<string, MergedAccount> merged = new(StringComparer.OrdinalIgnoreCase);
@@ -235,7 +230,7 @@ public sealed class AccountResolver
 				foreach ((string login, AccountOptions account) in options.Users)
 				{
 					ValidateLogin(login, failures);
-					templates[login] = BuildOne(options, login, account, key, failures);
+					templates[login] = BuildOne(roles, registry, login, account, key, failures);
 					merged[login] = new MergedAccount(account, false, false);
 				}
 
@@ -250,7 +245,7 @@ public sealed class AccountResolver
 				{
 					List<string> failures = new();
 					ValidateLogin(login, failures);
-					AccountTemplate template = BuildOne(options, login, account, key, failures);
+					AccountTemplate template = BuildOne(roles, registry, login, account, key, failures);
 					if (failures.Count > 0)
 					{
 						logger?.LogWarning(
@@ -274,91 +269,153 @@ public sealed class AccountResolver
 		return new Snapshot(templates.Count > 0 ? templates : null, merged);
 	}
 
-	private static ResolvedBackend<DavServerOptions>? ResolveDav(
-		BackendTemplate<DavServerOptions>? template, string imapUser, string imapPassword)
-	{
-		return template is null
-			? null
-			: new ResolvedBackend<DavServerOptions>(template.Options,
-				new BackendCredentials(template.UserName ?? imapUser, template.Password ?? imapPassword));
-	}
-
-	private static Dictionary<string, AccountTemplate> BuildAll(
-		ActiveSyncOptions options, byte[]? encryptionKey, List<string> failures)
-	{
-		Dictionary<string, AccountTemplate> templates = new(StringComparer.OrdinalIgnoreCase);
-		if (options.Users is null)
-			return templates;
-
-		foreach ((string login, AccountOptions account) in options.Users)
-		{
-			ValidateLogin(login, failures);
-			templates[login] = BuildOne(options, login, account, encryptionKey, failures);
-		}
-
-		return templates;
-	}
-
-	/// <summary>Merges one entry against the global sections, collecting validation failures.</summary>
+	/// <summary>Merges one entry against the global role assignments, collecting validation failures.</summary>
 	private static AccountTemplate BuildOne(
-		ActiveSyncOptions options, string login, AccountOptions account,
-		byte[]? encryptionKey, List<string> failures)
+		BackendRolesConfig roles, BackendProviderRegistry registry, string login,
+		AccountOptions account, byte[]? encryptionKey, List<string> failures)
 	{
 		if (account.Password is not null &&
 		    GatewayPasswordHasher.IsHashed(account.Password) &&
 		    !GatewayPasswordHasher.TryParse(account.Password, out string? parseError))
 			failures.Add($"ActiveSync:Users:{login}: Password is not a valid pbkdf2$ value: {parseError}.");
 
-		ImapOptions imap = MergeImap(options.Imap, account.Imap);
-		if (string.IsNullOrWhiteSpace(imap.Host))
-			failures.Add(
-				$"ActiveSync:Users:{login}: effective Imap:Host is empty — set it globally " +
-				"under ActiveSync:Imap or override it for this user.");
-		ValidatePort(imap.Port, login, "Imap", failures);
+		// Overrides keyed by role name; unknown keys are configuration mistakes, not silence.
+		Dictionary<BackendRole, BackendRoleOverride> overrides = new();
+		foreach ((string roleName, BackendRoleOverride roleOverride) in account.Backends ?? [])
+		{
+			if (!Enum.TryParse(roleName, true, out BackendRole role))
+			{
+				failures.Add(
+					$"ActiveSync:Users:{login}:Backends:{roleName} is not a backend role " +
+					$"(roles: {string.Join(", ", Enum.GetNames<BackendRole>())}).");
+				continue;
+			}
 
-		SmtpOptions smtp = MergeSmtp(options.Smtp, account.Smtp);
-		if (string.IsNullOrWhiteSpace(smtp.Host))
-			failures.Add(
-				$"ActiveSync:Users:{login}: effective Smtp:Host is empty — set it globally " +
-				"under ActiveSync:Smtp or override it for this user.");
-		ValidatePort(smtp.Port, login, "Smtp", failures);
+			if (!overrides.TryAdd(role, roleOverride))
+				failures.Add($"ActiveSync:Users:{login}:Backends declares the {role} role twice.");
+		}
+
+		Dictionary<BackendRole, RoleTemplate> templates = new();
+		foreach (BackendRole role in Enum.GetValues<BackendRole>())
+		{
+			RoleAssignment? global = roles.Assignments.GetValueOrDefault(role);
+			BackendRoleOverride? user = overrides.GetValueOrDefault(role);
+			if (user is null)
+			{
+				if (global is not null)
+					templates[role] = new RoleTemplate(role, global.ProviderName, global.Settings, null, null);
+				continue;
+			}
+
+			if (user.Enabled == false)
+			{
+				if (role is BackendRole.MailStore or BackendRole.MailSubmit)
+				{
+					failures.Add($"ActiveSync:Users:{login}:Backends:{role}: Enabled=false is not valid " +
+					             "for the mail roles — the gateway cannot run without mail access.");
+					continue;
+				}
+
+				// Content roles fall back to the gateway database; Oof turns off entirely.
+				if (role != BackendRole.Oof)
+					templates[role] = new RoleTemplate(role, "local", ProviderSettings.Empty, null, null);
+				continue;
+			}
+
+			if (global is null && user.Provider is null && role == BackendRole.Oof)
+			{
+				failures.Add($"ActiveSync:Users:{login}:Backends:Oof: no global Oof role is configured — " +
+				             "set Provider (e.g. \"sieve\") to enable it for this user.");
+				continue;
+			}
+
+			string providerName = user.Provider ?? global?.ProviderName ?? "local";
+			// Settings inherit the global section ONLY when the provider is unchanged — a
+			// switched provider's keys mean something else entirely.
+			bool inheritGlobal = global is not null &&
+			                     providerName.Equals(global.ProviderName, StringComparison.OrdinalIgnoreCase);
+			ProviderSettings settings = MergeSettings(
+				inheritGlobal ? global!.Settings : null, user.Settings, login, role, failures);
+			string? password = ResolveSecret(user.Password, encryptionKey, $"{login}:{role}", failures);
+			templates[role] = new RoleTemplate(role, providerName, settings,
+				string.IsNullOrWhiteSpace(user.UserName) ? null : user.UserName, password);
+		}
+
+		// Provider-delegated validation of every effective role.
+		foreach ((BackendRole role, RoleTemplate template) in templates)
+			try
+			{
+				registry.GetFor(template.ProviderName, role)
+					.ValidateConfiguration(role, template.Settings, failures);
+			}
+			catch (InvalidOperationException ex)
+			{
+				failures.Add($"ActiveSync:Users:{login}:Backends:{role}: {ex.Message}");
+			}
 
 		return new AccountTemplate(
 			string.IsNullOrWhiteSpace(account.Password) ? null : account.Password,
 			string.IsNullOrWhiteSpace(account.MailAddress) ? null : account.MailAddress.Trim(),
-			new BackendTemplate<ImapOptions>(imap, account.Imap?.UserName,
-				ResolveSecret(account.Imap?.Password, encryptionKey, $"{login}:Imap", failures)),
-			new BackendTemplate<SmtpOptions>(smtp, account.Smtp?.UserName,
-				ResolveSecret(account.Smtp?.Password, encryptionKey, $"{login}:Smtp", failures)),
-			MergeDav(options.CalDav, account.CalDav, encryptionKey, login, "CalDav", failures),
-			MergeDav(options.CardDav, account.CardDav, encryptionKey, login, "CardDav", failures),
-			MergeSieve(options.Sieve, account.Sieve, imap.Host, encryptionKey, login, failures));
+			templates);
 	}
 
-	private static BackendTemplate<SieveOptions>? MergeSieve(
-		SieveOptions global, SieveAccountOptions? user, string effectiveImapHost,
-		byte[]? encryptionKey, string login, List<string> failures)
+	/// <summary>
+	///   Global role section flattened ⊕ the user's flat keys. Any user key replaces the
+	///   whole global subtree it addresses — for list keys ("X:0") the numeric tail is
+	///   stripped first so a shorter user list can never inherit trailing global elements.
+	/// </summary>
+	private static ProviderSettings MergeSettings(
+		ProviderSettings? global, Dictionary<string, string?>? userSettings,
+		string login, BackendRole role, List<string> failures)
 	{
-		bool enabled = user?.Enabled ?? global.Enabled;
-		if (!enabled)
-			return null;
+		if (userSettings is not { Count: > 0 })
+			return global ?? ProviderSettings.Empty;
 
-		SieveOptions merged = new()
+		Dictionary<string, string?> flat = new(StringComparer.OrdinalIgnoreCase);
+		if (global is not null)
+			foreach (KeyValuePair<string, string?> pair in global.Section.AsEnumerable(true))
+				if (pair.Value is not null)
+					flat[pair.Key] = pair.Value;
+		flat.Remove(BackendRolesConfig.ProviderKey);
+
+		foreach (string userKey in userSettings.Keys)
 		{
-			Enabled = true,
-			Host = user?.Host ?? global.Host,
-			Port = user?.Port ?? global.Port,
-			UseTls = user?.UseTls ?? global.UseTls,
-			AllowInvalidCertificates = user?.AllowInvalidCertificates ?? global.AllowInvalidCertificates,
-			CaCertificatePath = user?.CaCertificatePath ?? global.CaCertificatePath
-		};
-		if (string.IsNullOrWhiteSpace(merged.Host))
-			merged.Host = effectiveImapHost;
-		if (merged.Port is < 1 or > 65535)
-			failures.Add($"ActiveSync:Users:{login}: effective Sieve:Port {merged.Port} is out of range (1-65535).");
+			if (userKey.Equals(BackendRolesConfig.ProviderKey, StringComparison.OrdinalIgnoreCase))
+			{
+				failures.Add(
+					$"ActiveSync:Users:{login}:Backends:{role}:Settings: 'Provider' is not a setting — " +
+					"use the Provider field of the override.");
+				continue;
+			}
 
-		return new BackendTemplate<SieveOptions>(merged, user?.UserName,
-			ResolveSecret(user?.Password, encryptionKey, $"{login}:Sieve", failures));
+			string root = ListRoot(userKey);
+			foreach (string existing in flat.Keys
+				         .Where(k => k.Equals(root, StringComparison.OrdinalIgnoreCase) ||
+				                     k.StartsWith(root + ":", StringComparison.OrdinalIgnoreCase))
+				         .ToList())
+				flat.Remove(existing);
+		}
+
+		foreach ((string userKey, string? value) in userSettings)
+			if (value is not null && !userKey.Equals(BackendRolesConfig.ProviderKey, StringComparison.OrdinalIgnoreCase))
+				flat[userKey] = value;
+
+		IConfigurationRoot materialized = new ConfigurationBuilder()
+			.AddInMemoryCollection(flat.ToDictionary(pair => "S:" + pair.Key, string? (pair) => pair.Value))
+			.Build();
+		return new ProviderSettings(materialized.GetSection("S"));
+	}
+
+	/// <summary>"SharedCollections:0" → "SharedCollections"; "Host" → "Host".</summary>
+	private static string ListRoot(string key)
+	{
+		while (true)
+		{
+			int separator = key.LastIndexOf(':');
+			if (separator < 0 || !int.TryParse(key[(separator + 1)..], out int _))
+				return key;
+			key = key[..separator];
+		}
 	}
 
 	private static void ValidateLogin(string login, List<string> failures)
@@ -373,12 +430,6 @@ public sealed class AccountResolver
 		// would corrupt the session/watcher key separator and the encryption AAD.
 		if (login.Contains(':') || login.Any(char.IsControl))
 			failures.Add($"ActiveSync:Users:{login}: login must not contain ':' or control characters.");
-	}
-
-	private static void ValidatePort(int port, string login, string section, List<string> failures)
-	{
-		if (port is < 1 or > 65535)
-			failures.Add($"ActiveSync:Users:{login}: effective {section}:Port {port} is out of range (1-65535).");
 	}
 
 	private static string? ResolveSecret(
@@ -406,78 +457,6 @@ public sealed class AccountResolver
 		return plaintext;
 	}
 
-	private static ImapOptions MergeImap(ImapOptions global, ImapAccountOptions? user)
-	{
-		return new ImapOptions
-		{
-			Host = user?.Host ?? global.Host,
-			Port = user?.Port ?? global.Port,
-			UseSsl = user?.UseSsl ?? global.UseSsl,
-			Security = user?.Security ?? global.Security,
-			AllowInvalidCertificates = user?.AllowInvalidCertificates ?? global.AllowInvalidCertificates,
-			CaCertificatePath = user?.CaCertificatePath ?? global.CaCertificatePath,
-			PathSeparator = user?.PathSeparator ?? global.PathSeparator
-		};
-	}
-
-	private static SmtpOptions MergeSmtp(SmtpOptions global, SmtpAccountOptions? user)
-	{
-		return new SmtpOptions
-		{
-			Host = user?.Host ?? global.Host,
-			Port = user?.Port ?? global.Port,
-			UseSsl = user?.UseSsl ?? global.UseSsl,
-			Security = user?.Security ?? global.Security,
-			AllowInvalidCertificates = user?.AllowInvalidCertificates ?? global.AllowInvalidCertificates,
-			CaCertificatePath = user?.CaCertificatePath ?? global.CaCertificatePath,
-			ForceFrom = user?.ForceFrom ?? global.ForceFrom
-		};
-	}
-
-	private static BackendTemplate<DavServerOptions>? MergeDav(
-		DavServerOptions? global, DavAccountOptions? user,
-		byte[]? encryptionKey, string login, string section, List<string> failures)
-	{
-		// Enabled: false is the explicit per-user off switch; otherwise the side exists when
-		// there is a global section or the user brings their own BaseUrl.
-		if (user?.Enabled == false)
-			return null;
-		if (global is null && string.IsNullOrWhiteSpace(user?.BaseUrl))
-			return null;
-
-		DavServerOptions merged = new()
-		{
-			BaseUrl = user?.BaseUrl ?? global?.BaseUrl ?? "",
-			HomeSetPath = user?.HomeSetPath ?? global?.HomeSetPath,
-			// "Tasks" is the section default; an explicit "" (user or global) disables tasks.
-			TaskFolder = user?.TaskFolder ?? global?.TaskFolder ?? "Tasks",
-			AllowInvalidCertificates = user?.AllowInvalidCertificates ?? global?.AllowInvalidCertificates ?? false,
-			CaCertificatePath = user?.CaCertificatePath ?? global?.CaCertificatePath,
-			CalendarAttachments = user?.CalendarAttachments ?? global?.CalendarAttachments ?? "Auto",
-			SharedCollections = user?.SharedCollections ?? global?.SharedCollections,
-			SendInvitations = user?.SendInvitations ?? global?.SendInvitations ?? "Auto"
-		};
-		if (merged.SendInvitations.ToLowerInvariant() is not ("auto" or "on" or "off"))
-			failures.Add(
-				$"ActiveSync:Users:{login}: effective {section}:SendInvitations " +
-				$"'{merged.SendInvitations}' is unknown (use Auto, On or Off).");
-		if (merged.CalendarAttachments.ToLowerInvariant() is not ("auto" or "on" or "off"))
-			failures.Add(
-				$"ActiveSync:Users:{login}: effective {section}:CalendarAttachments " +
-				$"'{merged.CalendarAttachments}' is unknown (use Auto, On or Off).");
-		foreach (string entry in merged.SharedCollections ?? [])
-			if (Backend.SharedCollection.Validate(entry, merged.BaseUrl) is { } sharedFailure)
-				failures.Add($"ActiveSync:Users:{login}: effective {section}:SharedCollections: {sharedFailure}");
-		if (!Uri.TryCreate(merged.BaseUrl, UriKind.Absolute, out Uri? uri) ||
-		    (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-			failures.Add(
-				$"ActiveSync:Users:{login}: effective {section}:BaseUrl '{merged.BaseUrl}' " +
-				"must be an absolute http(s) URL.");
-
-		return new BackendTemplate<DavServerOptions>(merged, user?.UserName,
-			ResolveSecret(user?.Password, encryptionKey, $"{login}:{section}", failures));
-	}
-
 	/// <summary>Length-independent comparison via fixed-size digests.</summary>
 	private static bool TimingSafeEquals(string expected, string presented)
 	{
@@ -486,17 +465,14 @@ public sealed class AccountResolver
 		return CryptographicOperations.FixedTimeEquals(expectedDigest, presentedDigest);
 	}
 
-	/// <summary>Configured (non-inherited) parts of one backend: unset = inherit at resolve time.</summary>
-	private sealed record BackendTemplate<TOptions>(TOptions Options, string? UserName, string? Password);
+	/// <summary>Configured (non-inherited) parts of one role: unset = inherit at resolve time.</summary>
+	private sealed record RoleTemplate(
+		BackendRole Role, string ProviderName, ProviderSettings Settings, string? UserName, string? Password);
 
 	private sealed record AccountTemplate(
 		string? GatewayPassword,
 		string? MailAddress,
-		BackendTemplate<ImapOptions> Imap,
-		BackendTemplate<SmtpOptions> Smtp,
-		BackendTemplate<DavServerOptions>? CalDav,
-		BackendTemplate<DavServerOptions>? CardDav,
-		BackendTemplate<SieveOptions>? Sieve);
+		IReadOnlyDictionary<BackendRole, RoleTemplate> Roles);
 
 	/// <summary>Immutable compiled view, swapped atomically on database changes.</summary>
 	private sealed record Snapshot(

@@ -66,21 +66,38 @@ internal static class CliVerbs
 			return 1;
 		}
 
+		ServiceCollection services = new();
+		services.AddLogging();
+		services.AddSingleton<IConfiguration>(config);
+		services.AddOptions<ActiveSyncOptions>().Bind(config.GetSection("ActiveSync"));
+		services.AddSyncDatabase(PostgresConnectionUri.EffectiveProvider(options.Database));
+		services.AddLocalContentProtection();
+		services.AddSingleton<ActiveSync.Backends.Local.LocalChangeNotifier>();
+		services.AddBackendProviders();
+		services.AddSingleton<AccountStore>();
+		services.AddSingleton<AccountResolver>();
+		await using ServiceProvider provider = services.BuildServiceProvider();
+
+		// The role sections + declared users get the same post-build validation serve runs.
+		try
+		{
+			provider.GetRequiredService<BackendConfigurationValidator>().Validate();
+		}
+		catch (InvalidOperationException ex)
+		{
+			await Console.Error.WriteLineAsync("The gateway would refuse to start with this configuration:");
+			await Console.Error.WriteLineAsync(ex.Message);
+			return 1;
+		}
+
+		AccountResolver resolver = provider.GetRequiredService<AccountResolver>();
 		IReadOnlyDictionary<string, MergedAccount>? merged = null;
 		string? databaseNote = null;
 		try
 		{
-			ServiceCollection services = new();
-			services.AddLogging();
-			services.AddOptions<ActiveSyncOptions>().Bind(config.GetSection("ActiveSync"));
-			services.AddSyncDatabase(PostgresConnectionUri.EffectiveProvider(options.Database));
-			services.AddSingleton<AccountStore>();
-			await using ServiceProvider provider = services.BuildServiceProvider();
-			AccountStore store = provider.GetRequiredService<AccountStore>();
 			// Probe first so an unreachable/unmigrated database lands in the catch (the
 			// resolver's refresh would swallow it and silently show config-only).
-			await store.ReadStampAsync(CancellationToken.None);
-			AccountResolver resolver = new(Microsoft.Extensions.Options.Options.Create(options), store);
+			await provider.GetRequiredService<AccountStore>().ReadStampAsync(CancellationToken.None);
 			await resolver.EnsureFreshAsync(true, CancellationToken.None);
 			merged = resolver.MergedUsers;
 		}
@@ -96,7 +113,8 @@ internal static class CliVerbs
 		Serilog.Core.Logger serilog = serilogConfiguration.CreateLogger();
 		using SerilogLoggerFactory loggerFactory = new(serilog, true);
 		ILogger logger = loggerFactory.CreateLogger("ActiveSync.Startup");
-		StartupSummary.Log(logger, options, merged);
+		StartupSummary.Log(logger, options, resolver.Roles,
+			provider.GetRequiredService<ActiveSync.Core.Backend.BackendProviderRegistry>(), merged);
 
 		Console.WriteLine();
 		if (databaseNote is not null)

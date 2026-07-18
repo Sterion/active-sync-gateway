@@ -51,11 +51,14 @@ public class DbAccountTests(GatewayFixture gateway)
 		{
 			Password = GatewayPasswordHasher.Hash(GatewayPassword),
 			MailAddress = TestBackend.User1,
-			Imap = new ImapAccountOptions
+			Backends = new Dictionary<string, BackendRoleOverride>
 			{
-				UserName = TestBackend.User1,
-				Password = SecretValue.Seal(
-					TestBackend.Password, Convert.FromBase64String(GatewayFixture.TestEncryptionKey)),
+				["MailStore"] = new()
+				{
+					UserName = TestBackend.User1,
+					Password = SecretValue.Seal(
+						TestBackend.Password, Convert.FromBase64String(GatewayFixture.TestEncryptionKey)),
+				},
 			},
 		}, CancellationToken.None);
 
@@ -96,7 +99,7 @@ public class DbAccountTests(GatewayFixture gateway)
 		AccountOptions entry = new()
 		{
 			Password = GatewayPasswordHasher.Hash("first-password"),
-			Imap = new ImapAccountOptions { UserName = TestBackend.User1, Password = TestBackend.Password },
+			Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { UserName = TestBackend.User1, Password = TestBackend.Password } },
 		};
 		await store.UpsertAsync("rotating@gw.local", entry, CancellationToken.None);
 		await AssertSyncsInboxAsync(CreateClient(factory, "rotating@gw.local", "first-password"));

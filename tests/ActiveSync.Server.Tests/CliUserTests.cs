@@ -30,6 +30,10 @@ public sealed class CliUserTests : IDisposable
 		SetEnv("ActiveSync__Database__ConnectionString", $"Data Source={_dbPath}");
 		SetEnv("ActiveSync__Encryption__Key", KeyBase64);
 		SetEnv("ActiveSync__Users__confuser__MailAddress", "cfg@example.com");
+		SetEnv("ActiveSync__Backends__MailStore__Provider", "imap");
+		SetEnv("ActiveSync__Backends__MailStore__Host", "imap.test");
+		SetEnv("ActiveSync__Backends__MailSubmit__Provider", "smtp");
+		SetEnv("ActiveSync__Backends__MailSubmit__Host", "smtp.test");
 	}
 
 	public void Dispose()
@@ -98,27 +102,29 @@ public sealed class CliUserTests : IDisposable
 	[Fact]
 	public void Set_TypedValues_AndUnknownKeyFails()
 	{
-		(int portExit, _, string portOutput) = Run(null, "user", "set", "u1", "Imap:Port", "993");
+		(int portExit, _, string portOutput) = Run(null, "user", "set", "u1", "Backends:MailStore:Settings:Port", "993");
 		Assert.Equal(0, portExit);
-		Assert.Contains("port=993", portOutput);
+		Assert.Contains("Port=993", portOutput);
 
-		(int davExit, _, string davOutput) = Run(null, "user", "set", "u1", "CalDav:Enabled", "false");
+		(int davExit, _, string davOutput) = Run(null, "user", "set", "u1", "Backends:Calendar:Enabled", "false");
 		Assert.Equal(0, davExit);
-		Assert.Contains("caldav=off", davOutput);
+		Assert.Contains("calendar[off]", davOutput);
 
 		(int unknownExit, string unknownErr, _) = Run(null, "user", "set", "u1", "Imap:Nope", "x");
 		Assert.Equal(1, unknownExit);
 		Assert.Contains("Valid fields", unknownErr);
 
-		(int parseExit, string parseErr, _) = Run(null, "user", "set", "u1", "Imap:Port", "abc");
+		// Settings are free-form strings; a non-numeric port is caught by the provider's
+		// own validation (the config binder), not by CLI-side typing.
+		(int parseExit, string parseErr, _) = Run(null, "user", "set", "u1", "Backends:MailStore:Settings:Port", "abc");
 		Assert.Equal(1, parseExit);
-		Assert.Contains("not a valid Int32", parseErr);
+		Assert.Contains("invalid", parseErr, StringComparison.OrdinalIgnoreCase);
 	}
 
 	[Fact]
 	public void Set_InvalidEffectivePort_RefusedByValidation()
 	{
-		(int exitCode, string stderr, _) = Run(null, "user", "set", "u9", "Imap:Port", "99999");
+		(int exitCode, string stderr, _) = Run(null, "user", "set", "u9", "Backends:MailStore:Settings:Port", "99999");
 		Assert.Equal(1, exitCode);
 		Assert.Contains("out of range", stderr);
 
@@ -150,7 +156,7 @@ public sealed class CliUserTests : IDisposable
 		Assert.Contains("pbkdf2", badErr);
 
 		// A backend password must not be a hash — the backend could never verify it.
-		(int hashExit, string hashErr, _) = Run(null, "user", "set", "u3", "Imap:Password", hashed);
+		(int hashExit, string hashErr, _) = Run(null, "user", "set", "u3", "Backends:MailStore:Password", hashed);
 		Assert.Equal(1, hashExit);
 		Assert.Contains("backend password", hashErr);
 	}
@@ -158,7 +164,7 @@ public sealed class CliUserTests : IDisposable
 	[Fact]
 	public void Set_PlaintextBackendPassword_IsSealed_WithWarning()
 	{
-		(int exitCode, string stderr, string output) = Run(null, "user", "set", "u4", "Imap:Password", "imap-pw");
+		(int exitCode, string stderr, string output) = Run(null, "user", "set", "u4", "Backends:MailStore:Password", "imap-pw");
 		Assert.Equal(0, exitCode);
 		Assert.Contains("shell history", stderr);
 		Assert.Contains("pw=***(sealed)", output);
@@ -172,23 +178,23 @@ public sealed class CliUserTests : IDisposable
 		Assert.Equal(0, pwExit);
 		Assert.Contains("password=***(pbkdf2)", pwOutput);
 
-		(int secretExit, _, string secretOutput) = Run("dav-pw", "user", "secret", "u5", "CardDav:Password");
+		(int secretExit, _, string secretOutput) = Run("dav-pw", "user", "secret", "u5", "Backends:Contacts:Password");
 		Assert.Equal(0, secretExit);
 		Assert.Contains("pw=***(sealed)", secretOutput);
 
 		(int badKeyExit, string badKeyErr, _) = Run("x", "user", "secret", "u5", "MailAddress");
 		Assert.Equal(1, badKeyExit);
-		Assert.Contains("Imap:Password", badKeyErr);
+		Assert.Contains("Backends:MailStore:Password", badKeyErr);
 	}
 
 	[Fact]
 	public void Set_OnConfigUser_CopiesTheConfigEntry()
 	{
-		(int exitCode, _, string output) = Run(null, "user", "set", "confuser", "Imap:Host", "imap.override");
+		(int exitCode, _, string output) = Run(null, "user", "set", "confuser", "Backends:MailStore:Settings:Host", "imap.override");
 		Assert.Equal(0, exitCode);
 		// The database entry starts as a copy, so the config MailAddress survives the edit.
 		Assert.Contains("mail=cfg@example.com", output);
-		Assert.Contains("host=imap.override", output);
+		Assert.Contains("Host=imap.override", output);
 		Assert.Contains("[db, shadows config]", output);
 
 		(int removeExit, _, string removeOutput) = Run(null, "user", "remove", "confuser");
@@ -199,10 +205,10 @@ public sealed class CliUserTests : IDisposable
 	[Fact]
 	public void Unset_ClearsField_AndEmptySectionCollapses()
 	{
-		(int _, _, _) = Run(null, "user", "set", "u6", "Smtp:Host", "smtp.x");
-		(int unsetExit, _, string output) = Run(null, "user", "unset", "u6", "Smtp:Host");
+		(int _, _, _) = Run(null, "user", "set", "u6", "Backends:MailSubmit:Settings:Host", "smtp.x");
+		(int unsetExit, _, string output) = Run(null, "user", "unset", "u6", "Backends:MailSubmit:Settings:Host");
 		Assert.Equal(0, unsetExit);
-		Assert.DoesNotContain("smtp[", output);
+		Assert.DoesNotContain("mailsubmit[", output);
 		Assert.Contains("allowlist grant", output);
 	}
 }
