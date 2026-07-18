@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- The "jmap" backend provider: mail (store + submit), out-of-office, contacts and
+	     calendar over a single JMAP HTTP session (RFC 8620/8621 + JMAP calendars/contacts).
+	     JSON is System.Text.Json (framework); the MIME/JSCalendar/JSContact converters and
+	     TLS helpers come from Backends.Common. -->
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
+		<ProjectReference Include="..\ActiveSync.Backends.Common\ActiveSync.Backends.Common.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="ActiveSync.Core.Tests" />
+	</ItemGroup>
+
+</Project>

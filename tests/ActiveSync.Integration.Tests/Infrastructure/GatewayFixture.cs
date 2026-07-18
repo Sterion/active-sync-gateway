@@ -30,9 +30,18 @@ public sealed class GatewayFixture : IAsyncLifetime
 	private WebApplicationFactory<Program>? _localStoresFactory;
 	private WebApplicationFactory<Program>? _readOnlyFactory;
 	private WebApplicationFactory<Program>? _watchdogFactory;
+	private WebApplicationFactory<Program>? _jmapFactory;
 
 	public WebApplicationFactory<Program> Factory =>
 		_factory ??= CreateFactory(false);
+
+	/// <summary>
+	///   Mail served over JMAP (MailStore + MailSubmit → the "jmap" provider against Stalwart's
+	///   HTTP listener); calendar/contacts stay on CalDAV/CardDAV. Proves the JMAP mail path
+	///   end-to-end.
+	/// </summary>
+	public WebApplicationFactory<Program> JmapFactory =>
+		_jmapFactory ??= CreateFactory(false, jmap: true);
 
 	public WebApplicationFactory<Program> ReadOnlyFactory =>
 		_readOnlyFactory ??= CreateFactory(true);
@@ -110,6 +119,8 @@ public sealed class GatewayFixture : IAsyncLifetime
 			await _watchdogFactory.DisposeAsync();
 		if (_localStoresFactory is not null)
 			await _localStoresFactory.DisposeAsync();
+		if (_jmapFactory is not null)
+			await _jmapFactory.DisposeAsync();
 		foreach (string db in _tempDbs)
 			try
 			{
@@ -149,6 +160,13 @@ public sealed class GatewayFixture : IAsyncLifetime
 			user, TestBackend.Password, $"DEV{Guid.NewGuid():N}"[..16].ToUpperInvariant());
 	}
 
+	public EasTestClient CreateJmapEasClient(string user)
+	{
+		return new EasTestClient(
+			JmapFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }),
+			user, TestBackend.Password, $"DEV{Guid.NewGuid():N}"[..16].ToUpperInvariant());
+	}
+
 	/// <summary>
 	///   A private gateway instance the caller owns and disposes — for tests that stop the
 	///   host (shutdown behavior) or need special settings, without touching the shared
@@ -162,7 +180,7 @@ public sealed class GatewayFixture : IAsyncLifetime
 
 	private WebApplicationFactory<Program> CreateFactory(
 		bool readOnly, bool fastWatchdogNoIdle = false, bool withoutDav = false,
-		Dictionary<string, string?>? overrides = null)
+		Dictionary<string, string?>? overrides = null, bool jmap = false)
 	{
 		string connectionString;
 		if (TestBackend.PostgresUri is { } adminUri)
@@ -187,16 +205,6 @@ public sealed class GatewayFixture : IAsyncLifetime
 
 		Dictionary<string, string?> settings = new()
 		{
-			["ActiveSync:Backends:MailStore:Provider"] = "imap",
-			["ActiveSync:Backends:MailStore:Host"] = TestBackend.ImapHost,
-			["ActiveSync:Backends:MailStore:Port"] = TestBackend.ImapPort.ToString(),
-			["ActiveSync:Backends:MailStore:UseSsl"] = "false",
-			["ActiveSync:Backends:MailStore:Security"] = "None",
-			["ActiveSync:Backends:MailSubmit:Provider"] = "smtp",
-			["ActiveSync:Backends:MailSubmit:Host"] = TestBackend.SmtpHost,
-			["ActiveSync:Backends:MailSubmit:Port"] = TestBackend.SmtpPort.ToString(),
-			["ActiveSync:Backends:MailSubmit:UseSsl"] = "false",
-			["ActiveSync:Backends:MailSubmit:Security"] = "None",
 			["ActiveSync:Database:ConnectionString"] = connectionString,
 			["ActiveSync:Encryption:Key"] = TestEncryptionKey,
 			["ActiveSync:ReadOnly"] = readOnly ? "true" : "false",
@@ -218,6 +226,31 @@ public sealed class GatewayFixture : IAsyncLifetime
 			["ActiveSync:Backends:Oof:Port"] = TestBackend.SievePort.ToString(),
 			["ActiveSync:Backends:Oof:AllowInvalidCertificates"] = "true"
 		};
+		if (jmap)
+		{
+			// Stalwart serves JMAP on the same HTTP listener as DAV; one session fills both
+			// mail roles. AllowInvalidCertificates is harmless over the plaintext test URL.
+			settings["ActiveSync:Backends:MailStore:Provider"] = "jmap";
+			settings["ActiveSync:Backends:MailStore:BaseUrl"] = TestBackend.JmapUrl;
+			settings["ActiveSync:Backends:MailStore:AllowInvalidCertificates"] = "true";
+			settings["ActiveSync:Backends:MailSubmit:Provider"] = "jmap";
+			settings["ActiveSync:Backends:MailSubmit:BaseUrl"] = TestBackend.JmapUrl;
+			settings["ActiveSync:Backends:MailSubmit:AllowInvalidCertificates"] = "true";
+		}
+		else
+		{
+			settings["ActiveSync:Backends:MailStore:Provider"] = "imap";
+			settings["ActiveSync:Backends:MailStore:Host"] = TestBackend.ImapHost;
+			settings["ActiveSync:Backends:MailStore:Port"] = TestBackend.ImapPort.ToString();
+			settings["ActiveSync:Backends:MailStore:UseSsl"] = "false";
+			settings["ActiveSync:Backends:MailStore:Security"] = "None";
+			settings["ActiveSync:Backends:MailSubmit:Provider"] = "smtp";
+			settings["ActiveSync:Backends:MailSubmit:Host"] = TestBackend.SmtpHost;
+			settings["ActiveSync:Backends:MailSubmit:Port"] = TestBackend.SmtpPort.ToString();
+			settings["ActiveSync:Backends:MailSubmit:UseSsl"] = "false";
+			settings["ActiveSync:Backends:MailSubmit:Security"] = "None";
+		}
+
 		if (fastWatchdogNoIdle)
 			settings["ActiveSync:Eas:WatchdogSeconds"] = "15";
 		if (!withoutDav && TestBackend.DavUrl is { } davUrl)

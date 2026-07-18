@@ -214,10 +214,17 @@ the **provider** that serves it. Edit `src/ActiveSync.Server/appsettings.json`:
 
 - **Roles**: `MailStore`, `MailSubmit`, `Calendar`, `Tasks`, `Contacts`, `Notes`, `Oof`.
   Each role section has one host-reserved key — `Provider` (the backend implementation:
-  `imap`, `smtp`, `caldav`, `carddav`, `sieve`, `local`, and in future third-party
-  providers like `jmap`) — plus provider-owned settings the host never interprets. One
+  `imap`, `jmap`, `smtp`, `caldav`, `carddav`, `sieve`, `local`, plus any third-party
+  plugin providers) — plus provider-owned settings the host never interprets. One
   provider can fill several roles: `caldav` serves both Calendar and Tasks over one
-  connection.
+  connection, and `jmap` serves MailStore + MailSubmit over one HTTP session.
+- **JMAP** (e.g. Stalwart): assign the mail roles to the `jmap` provider with a single
+  `BaseUrl` — `"MailStore": { "Provider": "jmap", "BaseUrl": "https://mail.example.com" }`
+  and the same for `MailSubmit`. The gateway discovers the session resource at
+  `{BaseUrl}/.well-known/jmap`, reuses the raw-RFC822 blob for message bodies, and submits
+  via `EmailSubmission`. Tasks and Notes have no JMAP standard — keep them on `caldav`/
+  `local`; calendar and contacts over JMAP land in later releases (they also stay available
+  over CalDAV/CardDAV).
 - **MailStore and MailSubmit are mandatory** — startup fails with a clear validation error
   when either role is missing (a mail gateway without mail access makes no sense).
 - **Calendar / Tasks / Contacts / Notes are optional**: omit the role (or don't assign a
@@ -240,8 +247,8 @@ the **provider** that serves it. Edit `src/ActiveSync.Server/appsettings.json`:
 - **An `Encryption` key is mandatory** — locally-stored content is encrypted at rest (see
   the `Encryption` option table below). Startup fails without a key unless
   `Encryption.AllowPlaintext=true` is set explicitly (dev/test only).
-- **Backend TLS**: every network provider (`imap`, `smtp`, `caldav`, `carddav`, `sieve`)
-  supports two certificate knobs in its role section. `"CaCertificatePath": "/path/to/ca.pem"`
+- **Backend TLS**: every network provider (`imap`, `jmap`, `smtp`, `caldav`, `carddav`,
+  `sieve`) supports two certificate knobs in its role section. `"CaCertificatePath": "/path/to/ca.pem"`
   trusts the CAs in that PEM file *in addition to* the system store — the right choice for a
   private PKI / self-signed setup. `"AllowInvalidCertificates": true` disables certificate
   validation entirely (lab use only; it wins over `CaCertificatePath` and is called out as

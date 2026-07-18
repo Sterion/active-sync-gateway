@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using ActiveSync.Backends.Dav;
 using ActiveSync.Backends.Imap;
+using ActiveSync.Backends.Jmap;
 using ActiveSync.Backends.Local;
 using ActiveSync.Backends.Sieve;
 using ActiveSync.Backends.Smtp;
@@ -27,6 +28,7 @@ public static class ServiceCollectionExtensions
 	public static IServiceCollection AddBackendProviders(this IServiceCollection services)
 	{
 		services.AddSingleton<IBackendProvider, ImapBackendProvider>();
+		services.AddSingleton<IBackendProvider, JmapBackendProvider>();
 		services.AddSingleton<IBackendProvider, SmtpBackendProvider>();
 		services.AddSingleton<IBackendProvider, CalDavBackendProvider>();
 		services.AddSingleton<IBackendProvider, CardDavBackendProvider>();

@@ -19,6 +19,7 @@
 	<ItemGroup>
 		<ProjectReference Include="..\ActiveSync.Backends.Common\ActiveSync.Backends.Common.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Imap\ActiveSync.Backends.Imap.csproj" />
+		<ProjectReference Include="..\ActiveSync.Backends.Jmap\ActiveSync.Backends.Jmap.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Smtp\ActiveSync.Backends.Smtp.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Dav\ActiveSync.Backends.Dav.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Sieve\ActiveSync.Backends.Sieve.csproj" />

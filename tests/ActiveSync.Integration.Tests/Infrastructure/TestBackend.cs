@@ -20,6 +20,12 @@ public static class TestBackend
 	public static int SmtpPort { get; } = int.Parse(Env("AS_TEST_SMTP_PORT", "587"));
 	public static string? DavUrl { get; } = EnvOrNull("AS_TEST_DAV_URL") ?? $"http://{ImapHost}:5232";
 
+	/// <summary>
+	///   JMAP session base URL (Stalwart serves JMAP on the same HTTP listener as DAV). Defaults
+	///   to the DAV URL so a single local stack covers both; CI/devcontainer may override.
+	/// </summary>
+	public static string? JmapUrl { get; } = EnvOrNull("AS_TEST_JMAP_URL") ?? DavUrl;
+
 	/// <summary>ManageSieve (Oof) — Stalwart only; the mailserver stack has no sieve listener.</summary>
 	public static string SieveHost { get; } = Env("AS_TEST_SIEVE_HOST", ImapHost);
 

@@ -2,13 +2,14 @@
 
 The gateway's backends are **providers**: named implementations that fill one or more
 **roles** (`MailStore`, `MailSubmit`, `Calendar`, `Tasks`, `Contacts`, `Notes`, `Oof`).
-The in-repo providers (`imap`, `smtp`, `caldav`, `carddav`, `sieve`, `local`) are ordinary
-providers registered at startup; an **out-of-repo plugin** is the same thing shipped as a
-separate assembly the gateway loads from a directory. Nothing about a plugin provider is
-second-class — config assigns it to a role by name exactly like a built-in.
+The in-repo providers (`imap`, `jmap`, `smtp`, `caldav`, `carddav`, `sieve`, `local`) are
+ordinary providers registered at startup; an **out-of-repo plugin** is the same thing
+shipped as a separate assembly the gateway loads from a directory. Nothing about a plugin
+provider is second-class — config assigns it to a role by name exactly like a built-in.
 
-This is the seam JMAP will land on, and the one you use to add a backend the project
-doesn't ship.
+The in-repo `jmap` provider (`src/ActiveSync.Backends.Jmap`) is the reference for a
+multi-role HTTP backend built on this seam — the pattern you use to add a backend the
+project doesn't ship.
 
 ## The contract
 

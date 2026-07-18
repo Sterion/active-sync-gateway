@@ -120,6 +120,11 @@ src/ActiveSync.Backends.Common/  Shared building blocks: MIME/iCal/vCard ⇄ EAS
                             + TLS/wire-logging helpers. Depends on Core (+ MailKit, Ical.Net,
                             FolkerKinzel.VCards) so those deps stay OUT of Core.
 src/ActiveSync.Backends.Imap/    "imap" provider (MailKit). Depends on Core + Common.
+src/ActiveSync.Backends.Jmap/    "jmap" provider (Stalwart JMAP over HttpClient +
+                            System.Text.Json). Serves MailStore + MailSubmit today (OOF,
+                            Contacts, Calendar in later stages), all over one HTTP session.
+                            Tasks/Notes are NOT JMAP (no standard) — leave them on
+                            caldav/local. Depends on Core + Common.
 src/ActiveSync.Backends.Smtp/    "smtp" provider (MailKit). Depends on Core + Common.
 src/ActiveSync.Backends.Dav/     "caldav" + "carddav" providers (one assembly — shared
                             WebDavClient/DavStoreBase/DavDiscovery). Depends on Core + Common.
@@ -128,7 +133,7 @@ src/ActiveSync.Backends.Local/   always-shipped "local" fallback stores (gateway
                             LocalChangeNotifier. Depends on Core + Common.
 src/ActiveSync.Server/      Kestrel host, /Microsoft-Server-ActiveSync endpoint, Basic auth,
                             one IEasCommandHandler per EAS command, provider DI registration
-                            (AddBackendProviders). References Core + all six backend assemblies.
+                            (AddBackendProviders). References Core + all seven backend assemblies.
 tests/ActiveSync.Protocol.Tests/   WBXML round-trip + query parser tests
 tests/ActiveSync.Core.Tests/       diff engine, sync-key state machine, options validator,
                                    provider engine + resolver, AND the backend unit tests
