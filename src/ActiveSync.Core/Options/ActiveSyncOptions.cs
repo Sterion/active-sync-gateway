@@ -324,6 +324,26 @@ public sealed class PolicyOptions
 	public bool PasswordRecoveryEnabled { get; set; }
 }
 
+/// <summary>
+///   Prometheus metrics (OpenTelemetry exporter). Off by default; when <see cref="Port" />
+///   is set, /metrics answers ONLY on that extra listener (scrape it inside the cluster),
+///   otherwise it shares the main listeners — protect it via ingress/network policy then.
+/// </summary>
+public sealed class MetricsOptions
+{
+	public bool Enabled { get; set; }
+
+	/// <summary>Dedicated plain-HTTP port for /metrics; unset = /metrics on the main listeners.</summary>
+	public int? Port { get; set; }
+
+	/// <summary>
+	///   Per-account labels (user=...) on requests, item counts, mail and session gauges.
+	///   Each active account adds label values — disable on large multi-tenant fleets where
+	///   the cardinality would hurt, collapsing the label to "-".
+	/// </summary>
+	public bool PerUser { get; set; } = true;
+}
+
 public sealed class ActiveSyncOptions
 {
 	public ImapOptions Imap { get; set; } = new();
@@ -338,6 +358,7 @@ public sealed class ActiveSyncOptions
 	public SelfSignedTlsOptions SelfSignedTls { get; set; } = new();
 	public LogOptions Log { get; set; } = new();
 	public PolicyOptions Policy { get; set; } = new();
+	public MetricsOptions Metrics { get; set; } = new();
 
 	/// <summary>
 	///   Public base URL of this gateway (e.g. https://eas.example.com) advertised by

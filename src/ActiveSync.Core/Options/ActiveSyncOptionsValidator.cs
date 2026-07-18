@@ -63,6 +63,7 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 			failures.Add($"ActiveSync:SelfSignedTls:Port {options.SelfSignedTls.Port} is out of range (1-65535).");
 
 		ValidatePolicy(options.Policy, failures);
+		ValidateMetrics(options.Metrics, failures);
 
 		if (options.Log.Mode.ToLowerInvariant() is not ("simple" or "standard" or "extended"))
 			failures.Add($"ActiveSync:Log:Mode '{options.Log.Mode}' is unknown (use Simple, Standard or Extended).");
@@ -176,6 +177,12 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 			failures.Add(
 				$"ActiveSync:{sectionName}:CaCertificatePath '{path}' is not a valid PEM certificate file: {ex.Message}");
 		}
+	}
+
+	private static void ValidateMetrics(MetricsOptions metrics, List<string> failures)
+	{
+		if (metrics.Port is { } port and (< 1 or > 65535))
+			failures.Add($"ActiveSync:Metrics:Port {port} is out of range (1-65535).");
 	}
 
 	private static void ValidateDav(DavServerOptions? dav, string sectionName, List<string> failures)

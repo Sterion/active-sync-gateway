@@ -16,6 +16,9 @@ public static class EasEndpoint
 	/// <summary>HttpContext.Items key carrying "EAS {Cmd} {User} ({DeviceId})" for request logging.</summary>
 	public const string RequestSummaryKey = "EasRequestSummary";
 
+	/// <summary>HttpContext.Items key carrying (command, user) for the metrics middleware.</summary>
+	public const string MetricsKey = "EasMetrics";
+
 	// 2.5/12.0 were dropped from the advertisement when 16.x arrived: this gateway never
 	// implemented their exclusive commands (GetHierarchy, *Collection), so advertising
 	// them was always a lie a real 2.5 client would have tripped over.
@@ -112,6 +115,8 @@ public static class EasEndpoint
 		// Username and command are client-controlled text — sanitized before logging.
 		http.Items[RequestSummaryKey] =
 			$"EAS {LogText.Clean(parameters.Command, 32)} {LogText.Clean(credentials.UserName, 128)} ({parameters.DeviceId})";
+		http.Items[MetricsKey] =
+			(LogText.Clean(parameters.Command, 32), LogText.Clean(credentials.UserName, 128));
 
 		if (!await EndpointAuth.AuthenticateAsync(
 			    http, sessionFactory, authThrottle, clientKey, credentials, logger, ct))

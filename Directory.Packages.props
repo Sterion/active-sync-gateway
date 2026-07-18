@@ -24,6 +24,11 @@
 
 		<!-- Web host -->
 		<PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
+		<!-- Metrics: BCL Meters exported via OpenTelemetry. The Prometheus exporter has
+		     shipped as -beta for years while being the ecosystem-standard scrape endpoint;
+		     fall back to prometheus-net 8.x if the pre-release status ever becomes a problem. -->
+		<PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
+		<PackageVersion Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.17.0-beta.1" />
 		<PackageVersion Include="Serilog.Enrichers.Environment" Version="3.0.1" />
 		<PackageVersion Include="Serilog.Enrichers.Thread" Version="4.0.0" />
 		<PackageVersion Include="Serilog.Formatting.Compact" Version="3.0.0" />

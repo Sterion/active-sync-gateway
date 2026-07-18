@@ -592,6 +592,31 @@ docker run -p 443:5443 -v /path/to/certs:/certs:ro \
   here) and map `443` on the outside — EAS clients default to 443.
 - Restart the container after renewing the certificate; the files are read at startup.
 
+### Metrics and readiness
+
+Prometheus metrics are off by default; enable and (recommended) pin them to a dedicated
+scrape port that stays inside the cluster:
+
+```bash
+docker run ... \
+  -e ActiveSync__Metrics__Enabled=true \
+  -e ActiveSync__Metrics__Port=9090 ...
+```
+
+`/metrics` then answers **only** on that port (gated on the connection's local port, not
+spoofable headers); without `Port` it shares the main listeners — protect it via ingress
+or network policy then. Everything is labeled **per account** by default (`user=...` on
+request counts, synced-item counts by class/direction/operation, sent-mail counts by
+kind, live session/IDLE-watcher/long-poll gauges); set `Metrics:PerUser=false` on large
+multi-tenant fleets where that label cardinality would hurt. Backend errors count by
+protocol, throttle rejections globally.
+
+`/readyz` is a real readiness probe: cached (~10 s) checks of the state database, the
+IMAP listener (TCP, no credentials) and the DAV base URLs (any HTTP answer counts,
+including 401) — 503 with per-component JSON when something is down. `/healthz` stays a
+trivial liveness 200 on purpose: a dead mail server should drain traffic, not restart
+gateway pods.
+
 ### Device security policies
 
 Off by default. Enable `ActiveSync:Policy` to require a device PIN and more before mail

@@ -70,6 +70,31 @@ public static class WebApplicationExtensions
 	}
 
 	/// <summary>
+	///   Records eas_requests / eas_request_duration_seconds for every request the EAS
+	///   endpoint identified (command + user stashed in HttpContext.Items) — including 401,
+	///   403 and 449 outcomes. Non-EAS requests (healthz, autodiscover) are not counted.
+	/// </summary>
+	public static WebApplication UseEasMetrics(this WebApplication app)
+	{
+		app.Use(async (context, next) =>
+		{
+			long started = System.Diagnostics.Stopwatch.GetTimestamp();
+			try
+			{
+				await next();
+			}
+			finally
+			{
+				if (context.Items[Eas.EasEndpoint.MetricsKey] is (string command, string user))
+					Core.Observability.GatewayMetrics.RecordEasRequest(
+						command, context.Response.StatusCode, user,
+						System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalSeconds);
+			}
+		});
+		return app;
+	}
+
+	/// <summary>
 	///   Adds <c>X-Content-Type-Options: nosniff</c> to every response. Attachments are served
 	///   with the Content-Type declared inside the (untrusted) email, so browsers must not
 	///   second-guess content types.

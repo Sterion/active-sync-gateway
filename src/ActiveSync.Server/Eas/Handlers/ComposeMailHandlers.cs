@@ -53,6 +53,12 @@ public abstract class ComposeMailHandlerBase(
 			}
 
 			await context.Session.Mail.SendAsync(outgoing, ct);
+			Core.Observability.GatewayMetrics.RecordMailSent(context.Device.UserName, Command switch
+			{
+				"SmartReply" => "smart_reply",
+				"SmartForward" => "smart_forward",
+				_ => "send"
+			});
 			(string to, string subject) = await PeekHeadersAsync(outgoing, ct);
 			logger.LogInformation("{Command} by {User}: to {To}, subject {Subject}",
 				Command, context.Device.UserName, to, subject);

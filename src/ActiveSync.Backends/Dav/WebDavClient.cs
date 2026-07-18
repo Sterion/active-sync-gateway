@@ -295,6 +295,7 @@ public sealed class WebDavClient : IDisposable
 	{
 		if (response.IsSuccessStatusCode)
 			return;
+		Core.Observability.GatewayMetrics.RecordBackendError("dav");
 		if (response.StatusCode == HttpStatusCode.PreconditionFailed)
 			throw new BackendException($"DAV {method} {href}: precondition failed (ETag conflict).");
 		// Body omitted from the message — it may contain PII and this reaches the logs.

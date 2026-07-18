@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 using System.Security.Cryptography;
 using System.Text;
 using ActiveSync.Backends.Imap;
 using ActiveSync.Backends.Local;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Observability;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
@@ -64,6 +66,18 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			_authCache.Clear();
 			_authNegativeCache.Clear();
 		};
+		// Per-user live-count gauges. Keys are "user\ndevice" / "user\nfolder"; only
+		// materialized Lazy values count (an unrealized slot is not a live connection).
+		GatewayMetrics.SetSessionsObserver(() => _sessions
+			.Where(pair => pair.Value.IsValueCreated)
+			.GroupBy(pair => pair.Key.Split('\n')[0], StringComparer.OrdinalIgnoreCase)
+			.Select(g => new Measurement<long>(g.Count(),
+				new KeyValuePair<string, object?>("user", GatewayMetrics.PerUserLabels ? g.Key : "-"))));
+		GatewayMetrics.SetIdleWatchersObserver(() => _watchers
+			.Where(pair => pair.Value.IsValueCreated)
+			.GroupBy(pair => pair.Key.Split('\n')[0], StringComparer.OrdinalIgnoreCase)
+			.Select(g => new Measurement<long>(g.Count(),
+				new KeyValuePair<string, object?>("user", GatewayMetrics.PerUserLabels ? g.Key : "-"))));
 	}
 
 	public async ValueTask DisposeAsync()

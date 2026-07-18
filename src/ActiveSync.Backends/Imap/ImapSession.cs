@@ -57,6 +57,7 @@ public sealed class ImapSession(
 			}
 			catch (Exception ex) when (ex is IOException or ImapProtocolException or ServiceNotConnectedException)
 			{
+				Core.Observability.GatewayMetrics.RecordBackendError("imap");
 				logger.LogWarning(ex, "IMAP connection dropped for {User}; reconnecting", credentials.UserName);
 				await DisposeClientAsync().ConfigureAwait(false);
 				client = await EnsureConnectedAsync(ct).ConfigureAwait(false);

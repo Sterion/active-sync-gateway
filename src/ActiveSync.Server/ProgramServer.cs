@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Metrics;
 using Serilog;
 using ILogger = Microsoft.Extensions.Logging.ILogger;
 
@@ -89,12 +90,24 @@ public partial class Program
 					{
 						ServerCertificateSelector = (_, _) => selfSignedCertificate,
 					}));
+			// Dedicated scrape listener: /metrics only answers on this port (see the map
+			// below), keeping the metric surface off the phone-facing listeners entirely.
+			if (options.Metrics is { Enabled: true, Port: { } metricsPort })
+				kestrel.ListenAnyIP(metricsPort);
 		});
 
 		builder.Services.AddSyncDatabase(PostgresConnectionUri.EffectiveProvider(options.Database));
 		builder.Services.AddLocalContentProtection();
 		builder.Services.AddSingleton<GatewayCertificateStore>();
 
+		// Metrics: BCL Meter instruments (GatewayMetrics) exported via OpenTelemetry.
+		ActiveSync.Core.Observability.GatewayMetrics.PerUserLabels = options.Metrics.PerUser;
+		if (options.Metrics.Enabled)
+			builder.Services.AddOpenTelemetry().WithMetrics(metrics => metrics
+				.AddMeter(ActiveSync.Core.Observability.GatewayMetrics.MeterName)
+				.AddPrometheusExporter());
+
+		builder.Services.AddSingleton<ReadinessProbe>();
 		builder.Services.AddScoped<SyncStateService>();
 		builder.Services.AddScoped<FolderService>();
 		builder.Services.AddSingleton<AccountStore>();
@@ -143,16 +156,40 @@ public partial class Program
 				.Features.Get<IServerAddressesFeature>()?
 				.Addresses;
 			startupLogger.LogInformation(
-				"ActiveSync gateway ready. Listening on {Addresses}. EAS: {Eas}  Autodiscover: {Autodiscover}  Health: /healthz",
+				"ActiveSync gateway ready. Listening on {Addresses}. EAS: {Eas}  Autodiscover: {Autodiscover}  Health: /healthz  Ready: /readyz{Metrics}",
 				addresses is { Count: > 0 } ? string.Join(", ", addresses) : "(see Kestrel config)",
-				EasEndpoint.Path, "/autodiscover/autodiscover.xml");
+				EasEndpoint.Path, "/autodiscover/autodiscover.xml",
+				options.Metrics.Enabled
+					? options.Metrics.Port is { } port ? $"  Metrics: /metrics (port {port})" : "  Metrics: /metrics"
+					: "");
 		});
 
+		app.UseEasMetrics();
 		app.UseEasRequestLogging();
 		app.UseNosniffHeader();
 
 		app.MapGet("/", () => Results.Text("ActiveSync gateway is running. EAS endpoint: /Microsoft-Server-ActiveSync"));
 		app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+		app.MapGet("/readyz", async (ReadinessProbe probe, CancellationToken ct) =>
+		{
+			(bool ready, Dictionary<string, bool> components) = await probe.CheckAsync(ct);
+			return ready
+				? Results.Ok(new { status = "ready", components })
+				: Results.Json(new { status = "not ready", components }, statusCode: 503);
+		});
+		if (options.Metrics.Enabled)
+		{
+			// With a dedicated port, gate on Connection.LocalPort (not spoofable, unlike
+			// Host-header checks); without one, /metrics shares the main listeners and the
+			// operator protects it via ingress/network policy.
+			int? metricsPort = options.Metrics.Port;
+			app.MapPrometheusScrapingEndpoint()
+				.AddEndpointFilter(async (context, next) =>
+					metricsPort is null || context.HttpContext.Connection.LocalPort == metricsPort
+						? await next(context)
+						: Results.NotFound());
+		}
+
 		EasEndpoint.Map(app);
 		AutodiscoverEndpoint.Map(app);
 

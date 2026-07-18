@@ -26,6 +26,7 @@ internal static class EndpointAuth
 	{
 		if (throttle.BlockedForSeconds(clientKey, throttle.IpWideLimit) is not { } retryAfter)
 			return false;
+		Core.Observability.GatewayMetrics.RecordThrottleRejection();
 		http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
 		http.Response.Headers.RetryAfter = retryAfter.ToString();
 		return true;
@@ -51,6 +52,7 @@ internal static class EndpointAuth
 		string userKey = $"{clientKey}\n{credentials.UserName}";
 		if (throttle.BlockedForSeconds(userKey) is { } retryAfter)
 		{
+			Core.Observability.GatewayMetrics.RecordThrottleRejection();
 			http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
 			http.Response.Headers.RetryAfter = retryAfter.ToString();
 			return false;

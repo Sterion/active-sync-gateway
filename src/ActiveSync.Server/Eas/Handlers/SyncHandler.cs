@@ -121,6 +121,8 @@ public sealed partial class SyncHandler(
 		if (!anyPayload && responses.Count == 0 && waitSeconds is { } wait && pendingWaitCollections.Count > 0)
 		{
 			wait = Math.Clamp(wait, options.Value.Eas.MinHeartbeatSeconds, options.Value.Eas.MaxHeartbeatSeconds);
+			using IDisposable longPoll =
+				Core.Observability.GatewayMetrics.TrackLongPoll(context.Device.UserName);
 			bool changed = await WaitWithWatchdogAsync(
 				context, pendingWaitCollections, TimeSpan.FromSeconds(wait), ct);
 			if (changed)
@@ -233,6 +235,9 @@ public sealed partial class SyncHandler(
 					if (handled is not null)
 						clientResponses.Add(handled);
 					snapshotDirty = true;
+					Core.Observability.GatewayMetrics.RecordSyncItems(
+						context.Device.UserName, store.EasClass, "client_to_server",
+						command.Name.LocalName.ToLowerInvariant(), 1);
 				}
 				catch (BackendItemNotFoundException)
 				{
@@ -267,6 +272,12 @@ public sealed partial class SyncHandler(
 			CollectionChanges diff = CollectionDiff.Compute(snapshot, current, windowSize);
 			moreAvailable = diff.MoreAvailable;
 			newSnapshot = diff.NewSnapshot;
+			Core.Observability.GatewayMetrics.RecordSyncItems(
+				context.Device.UserName, store.EasClass, "server_to_client", "add", diff.Adds.Count);
+			Core.Observability.GatewayMetrics.RecordSyncItems(
+				context.Device.UserName, store.EasClass, "server_to_client", "change", diff.Changes.Count);
+			Core.Observability.GatewayMetrics.RecordSyncItems(
+				context.Device.UserName, store.EasClass, "server_to_client", "delete", diff.Deletes.Count);
 
 			foreach (ItemChange add in diff.Adds)
 			{
@@ -557,6 +568,7 @@ public sealed partial class SyncHandler(
 		byte[] mime = buffer.ToArray();
 		await context.Session.Mail.SendAsync(mime, ct);
 		await context.Session.Mail.SaveToSentAsync(mime, ct);
+		Core.Observability.GatewayMetrics.RecordMailSent(context.Device.UserName, "draft_submit");
 	}
 
 	private static XElement ClientCommandStatus(XElement command, string status)

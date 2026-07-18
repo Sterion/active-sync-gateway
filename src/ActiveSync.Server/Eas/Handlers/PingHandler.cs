@@ -140,6 +140,8 @@ public sealed class PingHandler(
 
 		TimeSpan timeout = TimeSpan.FromSeconds(parameters.HeartbeatSeconds);
 		DateTime deadline = DateTime.UtcNow + timeout;
+		using IDisposable longPoll =
+			Core.Observability.GatewayMetrics.TrackLongPoll(context.Device.UserName);
 		// Also observe host shutdown: an active long-poll must never delay process exit.
 		using CancellationTokenSource cts =
 			CancellationTokenSource.CreateLinkedTokenSource(ct, lifetime.ApplicationStopping);

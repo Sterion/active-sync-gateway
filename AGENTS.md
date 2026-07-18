@@ -213,6 +213,19 @@ live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
   Status 3; EmptyFolderContents/MeetingResponse Status 2. Settings/Provision stay writable
   (they only touch our own state DB). If you add a new write path, wire it into this
   scheme.
+- **Metrics** (`GatewayMetrics`, static Meter "ActiveSync.Gateway" in Core/Observability):
+  instruments are incremented from handlers/backends directly (no DI); the OTel Prometheus
+  exporter in Server subscribes by meter name only when `Metrics:Enabled`. eas_requests
+  ride a tiny middleware reading the (command, user) tuple EasEndpoint stashes in
+  HttpContext.Items — NOT the Serilog middleware. Per-user labels collapse to "-" when
+  `Metrics:PerUser=false` (set once into `GatewayMetrics.PerUserLabels` at startup —
+  ALWAYS emit the user tag so Prometheus series shapes stay consistent). With
+  `Metrics:Port` set, /metrics is gated on `Connection.LocalPort` (not Host headers).
+  /readyz = cached ReadinessProbe (DB SELECT 1, IMAP TCP, DAV OPTIONS where any HTTP
+  status counts); /healthz stays trivial liveness — the container healthcheck depends on
+  that. Test-fixture gotcha: `Metrics:Enabled` gates EAGER service registrations, so
+  isolated-factory overrides must travel via UseSetting (GatewayFixture does this for all
+  overrides now).
 - **Outbound iMIP** (`MeetingInvitationService`, hooks in `SyncHandler.ApplyClientCommandAsync`
   for the Calendar class): REQUEST on create / significant change / attendee add, CANCEL
   on delete, occurrence delete (RECURRENCE-ID) and attendee removal. Three duplicate-mail

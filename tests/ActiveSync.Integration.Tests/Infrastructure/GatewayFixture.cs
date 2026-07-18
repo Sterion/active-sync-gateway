@@ -241,6 +241,11 @@ public sealed class GatewayFixture : IAsyncLifetime
 			if (TestBackend.PostgresUri is not null)
 				builder.UseSetting("ActiveSync:Database:ConnectionString",
 					settings["ActiveSync:Database:ConnectionString"]);
+			// Caller overrides go through the same host-settings channel: several of them
+			// gate eager reads too (Metrics:Enabled decides service registrations).
+			if (overrides is not null)
+				foreach ((string key, string? value) in overrides)
+					builder.UseSetting(key, value);
 			builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(settings));
 		});
 	}
