@@ -40,6 +40,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The containerd image store lets the engine's own builder do BOTH jobs — build the
+      # amd64 test image straight into the daemon (no tarball export/import) AND produce
+      # the multi-arch manifest for the push step, with one shared layer cache in between.
+      # The docker-container builder + GHA-cache alternative measured ~3 minutes of pure
+      # overhead per run (load: tarball round-trip + mode=max upload of SDK-stage layers).
+      # First step on purpose: the daemon restart would kill the backend containers.
+      - name: Enable containerd image store
+        run: |
+          [ -f /etc/docker/daemon.json ] || echo '{}' | sudo tee /etc/docker/daemon.json
+          sudo jq '.features["containerd-snapshotter"] = true' /etc/docker/daemon.json > /tmp/daemon.json
+          sudo mv /tmp/daemon.json /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker info -f '{{ .DriverStatus }}' | grep -q containerd
+
       # Backends start first (detached) so they boot while the solution compiles.
       # The image entrypoint hardwires `--config /opt/stalwart/etc/config.toml` (command
       # args are ignored), and that directory does not exist in the unstarted container —
@@ -92,15 +106,15 @@ jobs:
       # BUILDPLATFORM-pinned in the Dockerfile, so compilation is always a native
       # cross-publish, never emulated.
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
-      # One docker-container builder for BOTH build steps, with the GitHub Actions cache
-      # backend: the amd64 layers (restore + compile + tests) from the test build are
-      # reused by the multi-arch push build, and warm layers survive across runs — which
-      # the old engine-embedded driver could not offer (no cache export). The price is
-      # `load:` doing a real image transfer for the test build.
+      # Explicitly the engine's builder (multi-arch capable thanks to the containerd
+      # store above): the push build reuses the test build's amd64 layers directly from
+      # the daemon — no cache export, no image transfer.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
+        with:
+          driver: docker
 
       # The amd64 compile: restore, publish, and the unit test suite (Dockerfile test
       # stage). Loaded into the daemon so the integration step can `docker run` it.
@@ -116,8 +130,6 @@ jobs:
           load: true
           push: false
           tags: ${{ env.TEST_IMAGE }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
 
@@ -273,9 +285,9 @@ jobs:
 
       # The only pushing step, strictly after BOTH test steps — a unit or integration
       # failure aborts the job before anything is published. amd64 layers up to the test
-      # stage come from the gha cache (same builder as the unit-test build); arm64 adds
-      # one native cross-compile + QEMU-executed runtime RUNs. Multi-arch manifests
-      # cannot `load:`, hence push-only.
+      # stage sit warm in the daemon from the unit-test build; arm64 adds one native
+      # cross-compile + QEMU-executed runtime RUNs. Multi-arch manifests cannot `load:`,
+      # hence push-only.
       - name: Docker Build and push
         uses: docker/build-push-action@v7
         with:
@@ -285,8 +297,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
 
