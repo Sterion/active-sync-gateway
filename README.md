@@ -440,11 +440,13 @@ use).
 | `RequireDeclaredUsers` | `false` | Allowlist switch: only logins with a `Users` entry (config or database) may authenticate — anyone else gets 401 without a backend probe. An empty entry (`{}`) is a valid grant. |
 | `UsersFile` | `null` | Path to a JSON file merged into configuration at startup (full shape: `{ "ActiveSync": { "Users": { ... } } }`) — the natural fit for a mounted Kubernetes Secret/ConfigMap. Changes require a restart. |
 
-**`Backends:MailStore` (required, provider `imap`)**
+**`Backends:MailStore` (required, provider `imap` or `jmap`)**
+
+The `imap` settings are below; for `jmap` see [the JMAP subsection](#backends-provider-jmap).
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `Provider` | — | `imap`. **Required.** |
+| `Provider` | — | `imap` (settings below) or `jmap`. **Required.** |
 | `Host` | — | IMAP server host. **Required** — startup fails without it. |
 | `Port` | `993` | IMAP port. |
 | `UseSsl` | `true` | Implicit TLS on connect (used when `Security` is unset). |
@@ -453,11 +455,13 @@ use).
 | `CaCertificatePath` | `null` | PEM file with CA certificates trusted in addition to the system store (private PKI). Validated at startup. |
 | `PathSeparator` | `null` | IMAP folder path separator override; autodetected when unset. |
 
-**`Backends:MailSubmit` (required, provider `smtp`)**
+**`Backends:MailSubmit` (required, provider `smtp` or `jmap`)**
+
+The `smtp` settings are below; for `jmap` see [the JMAP subsection](#backends-provider-jmap).
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `Provider` | — | `smtp`. **Required.** |
+| `Provider` | — | `smtp` (settings below) or `jmap`. **Required.** |
 | `Host` | — | SMTP server host. **Required.** |
 | `Port` | `465` | SMTP port. |
 | `UseSsl` | `true` | Implicit TLS on connect (used when `Security` is unset). |
@@ -466,16 +470,47 @@ use).
 | `CaCertificatePath` | `null` | As above. |
 | `ForceFrom` | `false` | Rewrite the `From` header of outgoing mail to the authenticated user before submission (display name is kept). Off by default because most SMTP servers already enforce sender alignment for authenticated submissions — enable it when yours does not. |
 
-**`Backends:Calendar` / `Backends:Tasks` / `Backends:Contacts` (provider `caldav`/`carddav`)**
+<a id="backends-provider-jmap"></a>
+**`Backends:*` (provider `jmap`)** — one HTTP session for mail, OOF, contacts and calendar
 
-Omit a role (or leave it on the `local` provider) and that content class is served from the
-gateway database (local storage) instead. `Calendar`/`Tasks` use `caldav`, `Contacts` uses
-`carddav`. When `Tasks` shares the `caldav` provider with `Calendar` it inherits the
-Calendar section as its base, so it usually sets only `Provider` (and maybe `TaskFolder`).
+The `jmap` provider (RFC 8620/8621, e.g. Stalwart) can fill **MailStore**, **MailSubmit**,
+**Oof**, **Contacts** and **Calendar** — assign it to each role you want it to serve and
+repeat the same `BaseUrl`; a single JMAP session then backs them all (one auth, EventSource
+push for mail). Tasks and Notes have no JMAP standard — keep them on `caldav`/`local`. The
+option set is the same in every role section:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `Provider` | — | `caldav` (Calendar/Tasks) or `carddav` (Contacts). |
+| `Provider` | — | `jmap`. **Required.** |
+| `BaseUrl` | — | Absolute http(s) base URL of the JMAP server (e.g. `https://mail.example.com`). **Required.** The session resource is discovered at `{BaseUrl}/.well-known/jmap`; the server's advertised api/download/upload URLs are re-anchored onto this authority (scheme/host/port), so a reverse proxy or container-network address still works. |
+| `AllowInvalidCertificates` | `false` | Accept any TLS certificate (lab use; wins over `CaCertificatePath`). |
+| `CaCertificatePath` | `null` | PEM file with CA certificates trusted in addition to the system store (private PKI). Validated at startup. |
+
+```jsonc
+"MailStore":  { "Provider": "jmap", "BaseUrl": "https://mail.example.com" },
+"MailSubmit": { "Provider": "jmap", "BaseUrl": "https://mail.example.com" },
+"Oof":        { "Provider": "jmap", "BaseUrl": "https://mail.example.com" },
+"Contacts":   { "Provider": "jmap", "BaseUrl": "https://mail.example.com" },
+"Calendar":   { "Provider": "jmap", "BaseUrl": "https://mail.example.com" }
+```
+
+What each role covers (and where it's lossy vs CalDAV/CardDAV — no photos, no recurrence
+overrides, etc.) is in the [Backend capability matrix](#backend-capability-matrix). JMAP
+calendars/contacts need a current server (Stalwart 0.16+); the 0.13 line advertised only
+mail/OOF over JMAP. Mixing is fine — e.g. mail on `jmap`, calendar/contacts on `caldav`/`carddav`.
+
+**`Backends:Calendar` / `Backends:Tasks` / `Backends:Contacts` (provider `caldav`/`carddav`, or `jmap` for Calendar/Contacts)**
+
+Omit a role (or leave it on the `local` provider) and that content class is served from the
+gateway database (local storage) instead. `Calendar`/`Tasks` use `caldav`, `Contacts` uses
+`carddav` — or `Calendar`/`Contacts` can use `jmap` ([above](#backends-provider-jmap); `Tasks`
+cannot). When `Tasks` shares the `caldav` provider with `Calendar` it inherits the Calendar
+section as its base, so it usually sets only `Provider` (and maybe `TaskFolder`). The settings
+below are the `caldav`/`carddav` ones.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `Provider` | — | `caldav` (Calendar/Tasks) or `carddav` (Contacts); Calendar/Contacts may also be `jmap`. |
 | `BaseUrl` | — | Absolute http(s) URL of the DAV server. Required (Tasks may inherit it from Calendar). |
 | `HomeSetPath` | `null` | Home-set path template; `{user}` and `{localpart}` are substituted (Radicale/Baikal style: `"/{user}/"`). Unset → RFC 6764 discovery via `.well-known` + `current-user-principal`. |
 | `TaskFolder` | `"Tasks"` | *(caldav only)* Name of the VTODO (tasks) collection in the calendar home set; the collection with this display name or path segment becomes the ActiveSync Tasks folder (Axigen ships one named "Tasks"). Recurring tasks sync (regenerating "n days after completion" tasks have no iCalendar equivalent and keep their fixed schedule). |
@@ -485,9 +520,12 @@ Calendar section as its base, so it usually sets only `Provider` (and maybe `Tas
 | `AllowInvalidCertificates` | `false` | As above. |
 | `CaCertificatePath` | `null` | As above. |
 
-**`Backends:Oof` (optional, provider `sieve`)** (out-of-office via ManageSieve)
+**`Backends:Oof` (optional, provider `sieve` or `jmap`)** (out-of-office)
 
-Assign the `Oof` role to the `sieve` provider and the phone's out-of-office settings page
+Out-of-office can be served two ways. With `jmap` ([above](#backends-provider-jmap)) it maps
+to JMAP `VacationResponse` (HTML body + exact start/end times) — just add the `Oof` role with
+the same `BaseUrl`. The `sieve` provider (settings below) manages a ManageSieve vacation
+script instead. Assign the `Oof` role to the `sieve` provider and the phone's out-of-office settings page
 works: Settings→Oof Set uploads a gateway-owned sieve script named `eas-gateway` (RFC 5230
 `vacation`, wrapped in a `currentdate` window for scheduled Oof) and makes it the active
 script; disabling restores the previously active script. The state database is the source
