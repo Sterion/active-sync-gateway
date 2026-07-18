@@ -218,10 +218,14 @@ jobs:
             "$TEST_IMAGE" \
             dotnet test ActiveSync.slnx -c Release --nologo --no-build --filter "Category=Integration"
 
-      # Contract packages for out-of-repo plugin authors: pack Protocol, Core and
-      # Backends.Common inside the test image (solution + NuGet cache already warm) and
-      # push to GitHub Packages with the built-in token. Tagged releases only, strictly
-      # after the tests. nuget.org too when a NUGET_API_KEY secret exists.
+      # Contract packages for out-of-repo plugin authors, pushed to GitHub Packages with
+      # the built-in token (nuget.org too when a NUGET_API_KEY secret exists). Tagged
+      # releases only, strictly after the tests. Packing the whole solution inside the
+      # test image (solution + NuGet cache already warm) publishes exactly the projects
+      # that set <IsPackable>true> — currently Protocol, Core and Backends.Common — so a
+      # new contract package ships by flipping that one csproj flag, no workflow edit.
+      # -p:Version (not PackageVersion) stamps the assembly too: the plugin loader gates
+      # on the packed ActiveSync.Core assembly's major version, so it must match the tag.
       - name: Pack and publish NuGet packages
         if: steps.version.outputs.version != ''
         env:
@@ -232,10 +236,7 @@ jobs:
             -e VERSION='${{ steps.version.outputs.version }}' \
             -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
             "$TEST_IMAGE" sh -ec '
-              for proj in Protocol Core Backends.Common; do
-                dotnet pack "src/ActiveSync.$proj/ActiveSync.$proj.csproj" -c Release \
-                  -o /out/nupkg -p:Version="$VERSION" --nologo
-              done
+              dotnet pack ActiveSync.slnx -c Release -o /out/nupkg -p:Version="$VERSION" --nologo
             '
           mkdir -p dist/nupkg
           docker cp "$PKG"-nuget:/out/nupkg/. dist/nupkg/

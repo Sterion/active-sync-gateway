@@ -23,6 +23,12 @@
 		<PublishRepositoryUrl>true</PublishRepositoryUrl>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<!-- One folder for every produced package (only packable projects emit). Lets a
+		     local `dotnet pack ActiveSync.slnx` land where CI expects; CI's explicit -o wins. -->
+		<PackageOutputPath>$(MSBuildThisFileDirectory)artifacts\nupkg</PackageOutputPath>
+		<!-- `dotnet pack ActiveSync.slnx` intentionally skips the app/test/backend projects;
+		     don't warn about each one — IsPackable is the deliberate allow-list. -->
+		<WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
 		<!-- Deterministic builds on CI (Continuous Integration Build). -->
 		<ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
 	</PropertyGroup>
