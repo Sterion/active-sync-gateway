@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="FolkerKinzel.VCards" />
+		<PackageReference Include="Ical.Net" />
+		<PackageReference Include="MailKit" />
+	</ItemGroup>
+
+</Project>

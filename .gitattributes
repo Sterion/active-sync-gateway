@@ -1,0 +1,9 @@
+# House line-ending policy: git stores a normalized LF blob but checks the working tree
+# out as CRLF (the tabs+CRLF house style). Making the eol explicit here silences the
+# "LF will be replaced by CRLF" churn warnings that `text=auto` alone produced on Windows.
+* text=auto eol=crlf
+
+# Files consumed inside Linux containers must stay LF regardless of the policy above.
+*.sh text eol=lf
+docker/backends/mailserver/config/postfix-accounts.cf text eol=lf
+docker/backends/mailserver/radicale/users text eol=lf

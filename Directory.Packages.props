@@ -1,0 +1,43 @@
+<Project>
+	<PropertyGroup>
+		<ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+		<CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- Analyzers: applied to every project automatically, no per-csproj reference needed. -->
+		<GlobalPackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.7.23">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+		</GlobalPackageReference>
+
+		<!-- Data / EF Core -->
+		<PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
+		<PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10" />
+		<PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+		<PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+
+		<!-- Mail / calendar / contacts backends -->
+		<PackageVersion Include="FolkerKinzel.VCards" Version="8.2.0" />
+		<PackageVersion Include="Ical.Net" Version="5.2.3" />
+		<PackageVersion Include="MailKit" Version="4.17.0" />
+
+		<!-- Web host -->
+		<PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
+		<PackageVersion Include="Serilog.Enrichers.Environment" Version="3.0.1" />
+		<PackageVersion Include="Serilog.Enrichers.Thread" Version="4.0.0" />
+		<PackageVersion Include="Serilog.Formatting.Compact" Version="3.0.0" />
+		<PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
+
+		<!-- CLI -->
+		<PackageVersion Include="Spectre.Console" Version="0.57.2" />
+		<PackageVersion Include="Spectre.Console.Cli" Version="0.55.0" />
+		<PackageVersion Include="Spectre.Console.Cli.Testing" Version="0.55.0" />
+
+		<!-- Testing -->
+		<PackageVersion Include="coverlet.collector" Version="10.0.1" />
+		<PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+		<PackageVersion Include="xunit" Version="2.9.3" />
+		<PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+	</ItemGroup>
+</Project>

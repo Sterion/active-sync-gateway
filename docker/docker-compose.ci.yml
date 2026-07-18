@@ -1,0 +1,76 @@
+# CI entry point (Gitea workflow): runs the FULL test suite — unit + integration — against
+# a throwaway stalwart backend on a private compose network.
+#
+#   docker compose -f docker/docker-compose.ci.yml run --rm tests
+#   docker compose -f docker/docker-compose.ci.yml down -v
+#
+# NOTE: the stalwart + provision service pair is intentionally mirrored from
+# docker/backends/stalwart/docker-compose.yml. Keep the two in sync — image tags,
+# healthcheck, and provisioning must match.
+services:
+  stalwart:
+    image: stalwartlabs/stalwart:v0.13.4
+    command: ["--config", "/opt/stalwart/etc/config.toml"]
+    volumes:
+      - ./backends/stalwart/config.toml:/opt/stalwart/etc/config.toml:ro
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/143"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # Gateway state DB: with AS_TEST_PG set, every gateway factory creates its own database
+  # here, so the Npgsql provider + migrations are exercised (without it: SQLite temp files).
+  # Throwaway — databases are never dropped; `down -v` discards the whole container.
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: activesync
+      POSTGRES_PASSWORD: ci-pw
+      POSTGRES_DB: activesync
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "activesync", "-d", "activesync", "-q"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  provision:
+    image: curlimages/curl:8.21.0
+    depends_on:
+      stalwart:
+        condition: service_healthy
+    environment:
+      STALWART_URL: http://stalwart:8080
+    volumes:
+      - ./backends/stalwart/provision.sh:/provision.sh:ro
+    entrypoint: ["/bin/sh", "/provision.sh"]
+    restart: "no"
+
+  tests:
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    working_dir: /repo
+    volumes:
+      - ..:/repo:ro
+    environment:
+      AS_TEST_STACK: stalwart
+      AS_TEST_IMAP_HOST: stalwart
+      AS_TEST_IMAP_PORT: "143"
+      AS_TEST_SMTP_HOST: stalwart
+      AS_TEST_SMTP_PORT: "587"
+      AS_TEST_DAV_URL: http://stalwart:8080
+      AS_TEST_PG: postgresql://activesync:ci-pw@postgres:5432/activesync
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+    depends_on:
+      stalwart:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      provision:
+        condition: service_completed_successfully
+    # The repo is copied (minus build artifacts) into the container before building so the
+    # host's bin/obj/NuGet assets are never touched or mixed across operating systems.
+    command: >
+      sh -c "mkdir -p /build
+      && tar -C /repo --exclude=bin --exclude=obj --exclude=.git -cf - . | tar -C /build -xf -
+      && cd /build
+      && dotnet test ActiveSync.slnx -c Release --nologo"

@@ -1,0 +1,19 @@
+{
+	"name": "ActiveSync Gateway",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"postCreateCommand": "dotnet restore ActiveSync.slnx",
+	"forwardPorts": [5080],
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-dotnettools.csdevkit",
+				"ms-azuretools.vscode-docker"
+			],
+			"settings": {
+				"dotnet.defaultSolution": "ActiveSync.slnx"
+			}
+		}
+	}
+}

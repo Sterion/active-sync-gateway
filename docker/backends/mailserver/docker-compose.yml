@@ -1,0 +1,53 @@
+# Alternative test backend (manual runs): docker-mailserver (Postfix + Dovecot) for mail
+# and Radicale for CalDAV/CardDAV. Same published ports and users as the stalwart stack.
+#
+#   docker compose -f docker/backends/mailserver/docker-compose.yml up -d --wait
+#   $env:AS_TEST_STACK = "mailserver"      (sets DAV HomeSetPath to "/{user}/")
+#   dotnet test --filter Category=Integration
+#
+# Users are declared in config/postfix-accounts.cf (password "pass").
+# Plaintext everywhere — test use exclusively.
+services:
+  mailserver:
+    image: mailserver/docker-mailserver:15.1.0
+    hostname: mail.example.com
+    ports:
+      - "143:143"
+      - "587:587"
+    environment:
+      SSL_TYPE: ""              # no TLS — test only
+      ENABLE_CLAMAV: "0"
+      ENABLE_AMAVIS: "0"
+      ENABLE_RSPAMD: "0"
+      ENABLE_SPAMASSASSIN: "0"
+      ENABLE_OPENDKIM: "0"
+      ENABLE_OPENDMARC: "0"
+      ENABLE_POLICYD_SPF: "0"
+      ENABLE_FAIL2BAN: "0"
+      SPOOF_PROTECTION: "0"
+      PERMIT_DOCKER: connected-network
+      LOG_LEVEL: warn
+    volumes:
+      - ./config/:/tmp/docker-mailserver/
+      - mailserver-data:/var/mail
+      - mailserver-state:/var/mail-state
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 143 && nc -z 127.0.0.1 587"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+
+  radicale:
+    image: tomsquest/docker-radicale:3.7.6.0
+    ports:
+      - "5232:5232"
+    volumes:
+      - radicale-data:/data
+      - ./radicale/config:/config/config:ro
+      - ./radicale/users:/config/users:ro
+
+volumes:
+  mailserver-data:
+  mailserver-state:
+  radicale-data:

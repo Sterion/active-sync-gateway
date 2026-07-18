@@ -1,0 +1,46 @@
+# Devcontainer topology: the dev workspace plus the default (stalwart) test backend.
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/dotnet:10.0
+    volumes:
+      - ..:/workspace:cached
+    command: sleep infinity
+    environment:
+      AS_TEST_STACK: stalwart
+      AS_TEST_IMAP_HOST: stalwart
+      AS_TEST_IMAP_PORT: "143"
+      AS_TEST_SMTP_HOST: stalwart
+      AS_TEST_SMTP_PORT: "587"
+      AS_TEST_DAV_URL: http://stalwart:8080
+    depends_on:
+      stalwart:
+        condition: service_healthy
+      provision:
+        condition: service_completed_successfully
+
+  stalwart:
+    image: stalwartlabs/stalwart:v0.13.4
+    command: ["--config", "/opt/stalwart/etc/config.toml"]
+    volumes:
+      - ../docker/backends/stalwart/config.toml:/opt/stalwart/etc/config.toml:ro
+      - stalwart-data:/opt/stalwart/data
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/143"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  provision:
+    image: curlimages/curl:latest
+    depends_on:
+      stalwart:
+        condition: service_healthy
+    environment:
+      STALWART_URL: http://stalwart:8080
+    volumes:
+      - ../docker/backends/stalwart/provision.sh:/provision.sh:ro
+    entrypoint: ["/bin/sh", "/provision.sh"]
+    restart: "no"
+
+volumes:
+  stalwart-data:

@@ -1,0 +1,14 @@
+<Solution>
+	<Folder Name="/src/">
+		<Project Path="src/ActiveSync.Backends/ActiveSync.Backends.csproj" />
+		<Project Path="src/ActiveSync.Core/ActiveSync.Core.csproj" />
+		<Project Path="src/ActiveSync.Protocol/ActiveSync.Protocol.csproj" />
+		<Project Path="src/ActiveSync.Server/ActiveSync.Server.csproj" />
+	</Folder>
+	<Folder Name="/tests/">
+		<Project Path="tests/ActiveSync.Core.Tests/ActiveSync.Core.Tests.csproj" />
+		<Project Path="tests/ActiveSync.Integration.Tests/ActiveSync.Integration.Tests.csproj" />
+		<Project Path="tests/ActiveSync.Protocol.Tests/ActiveSync.Protocol.Tests.csproj" />
+		<Project Path="tests/ActiveSync.Server.Tests/ActiveSync.Server.Tests.csproj" />
+	</Folder>
+</Solution>

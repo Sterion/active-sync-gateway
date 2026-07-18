@@ -1,0 +1,207 @@
+using ActiveSync.Core.Accounts;
+using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
+using ActiveSync.Core.State;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+
+namespace ActiveSync.Core.Tests;
+
+/// <summary>
+///   Database-declared accounts: store CRUD + stamp, and the resolver's merged snapshot
+///   (DB entry replaces the whole config entry; stamp-driven live refresh).
+/// </summary>
+public sealed class AccountStoreTests : IDisposable
+{
+	private readonly SqliteConnection _connection;
+	private readonly TestContextFactory _factory;
+	private readonly AccountStore _store;
+
+	public AccountStoreTests()
+	{
+		_connection = new SqliteConnection("Data Source=:memory:");
+		_connection.Open();
+		_factory = new TestContextFactory(_connection);
+		using SyncDbContext db = _factory.CreateDbContext();
+		db.Database.EnsureCreated();
+		_store = new AccountStore(_factory);
+	}
+
+	public void Dispose()
+	{
+		_connection.Dispose();
+	}
+
+	private static ActiveSyncOptions BaseOptions(double refreshSeconds = 0)
+	{
+		return new ActiveSyncOptions
+		{
+			Imap = new ImapOptions { Host = "imap.global", Port = 143, UseSsl = false, Security = "None" },
+			Smtp = new SmtpOptions { Host = "smtp.global", Port = 587, UseSsl = false },
+			Encryption = new EncryptionOptions { AllowPlaintext = true },
+			Auth = new AuthOptions { UsersRefreshSeconds = refreshSeconds },
+		};
+	}
+
+	private AccountResolver Resolver(ActiveSyncOptions options)
+	{
+		return new AccountResolver(Microsoft.Extensions.Options.Options.Create(options), _store);
+	}
+
+	[Fact]
+	public async Task DbEntry_ReplacesWholeConfigEntry_AndFallsBackOnDelete()
+	{
+		ActiveSyncOptions options = BaseOptions();
+		options.Users = new Dictionary<string, AccountOptions>
+		{
+			["phone1"] = new()
+			{
+				MailAddress = "config@x",
+				Imap = new ImapAccountOptions { UserName = "config-imap-user" },
+			},
+		};
+		AccountResolver resolver = Resolver(options);
+		await resolver.EnsureFreshAsync(true, CancellationToken.None);
+		Assert.Equal("config@x", resolver.Resolve(new BackendCredentials("phone1", "pw")).MailAddress);
+
+		// DB row for the same login: REPLACES the config entry wholesale — the config
+		// MailAddress must not leak through the DB entry that doesn't set one.
+		await _store.UpsertAsync("phone1",
+			new AccountOptions { Imap = new ImapAccountOptions { UserName = "db-imap-user" } },
+			CancellationToken.None);
+		await resolver.EnsureFreshAsync(false, CancellationToken.None);
+
+		ResolvedAccount fromDb = resolver.Resolve(new BackendCredentials("phone1", "pw"));
+		Assert.Equal("db-imap-user", fromDb.Imap.Credentials.UserName);
+		Assert.Null(fromDb.MailAddress);
+		Assert.True(resolver.MergedUsers["phone1"].FromDatabase);
+		Assert.True(resolver.MergedUsers["phone1"].ShadowsConfig);
+
+		// Deleting the row falls back to the config entry.
+		Assert.True(await _store.DeleteAsync("phone1", CancellationToken.None));
+		await resolver.EnsureFreshAsync(false, CancellationToken.None);
+		ResolvedAccount fromConfig = resolver.Resolve(new BackendCredentials("phone1", "pw"));
+		Assert.Equal("config-imap-user", fromConfig.Imap.Credentials.UserName);
+		Assert.Equal("config@x", fromConfig.MailAddress);
+		Assert.False(resolver.MergedUsers["phone1"].FromDatabase);
+	}
+
+	[Fact]
+	public async Task StampChange_TriggersRefresh_AndRaisesSnapshotChanged()
+	{
+		AccountResolver resolver = Resolver(BaseOptions());
+		await resolver.EnsureFreshAsync(true, CancellationToken.None);
+		int changedEvents = 0;
+		resolver.SnapshotChanged += () => changedEvents++;
+
+		// Unchanged stamp: refresh is a no-op.
+		await resolver.EnsureFreshAsync(false, CancellationToken.None);
+		Assert.Equal(0, changedEvents);
+
+		await _store.UpsertAsync("newuser",
+			new AccountOptions { Password = "topsecret" }, CancellationToken.None);
+		await resolver.EnsureFreshAsync(false, CancellationToken.None);
+
+		Assert.Equal(1, changedEvents);
+		Assert.True(resolver.VerifyLocally("newuser", "topsecret"));
+		Assert.False(resolver.VerifyLocally("newuser", "wrong"));
+
+		// Second unchanged check: still one event.
+		await resolver.EnsureFreshAsync(false, CancellationToken.None);
+		Assert.Equal(1, changedEvents);
+	}
+
+	[Fact]
+	public async Task MalformedRow_IsSkipped_OthersSurvive()
+	{
+		await _store.UpsertAsync("good", new AccountOptions { Password = "pw1" }, CancellationToken.None);
+		await using (SyncDbContext db = _factory.CreateDbContext())
+		{
+			// DbSet.Add is synchronous and local (no I/O) — AddAsync exists only to support
+			// async value generators (e.g. HiLo/Cosmos), which this project doesn't use.
+#pragma warning disable VSTHRD103
+			db.AccountEntries.Add(new AccountEntry
+			{
+				UserName = "broken", Json = "{not json", UpdatedUtc = DateTime.UtcNow,
+			});
+#pragma warning restore VSTHRD103
+			await db.SaveChangesAsync();
+		}
+
+		AccountResolver resolver = Resolver(BaseOptions());
+		await resolver.EnsureFreshAsync(true, CancellationToken.None);
+
+		Assert.True(resolver.VerifyLocally("good", "pw1"));
+		Assert.False(resolver.MergedUsers.ContainsKey("broken"));
+	}
+
+	[Fact]
+	public async Task RequireDeclaredUsers_DbGrantAdmits_UndeclaredStaysRejected()
+	{
+		ActiveSyncOptions options = BaseOptions();
+		options.RequireDeclaredUsers = true;
+		AccountResolver resolver = Resolver(options);
+		await resolver.EnsureFreshAsync(true, CancellationToken.None);
+
+		// Nothing declared anywhere yet: everything is rejected locally.
+		Assert.False(resolver.VerifyLocally("someone", "pw"));
+
+		// An empty DB entry is a pure allowlist grant — auth still probes IMAP (null).
+		await _store.UpsertAsync("someone", new AccountOptions(), CancellationToken.None);
+		await resolver.EnsureFreshAsync(false, CancellationToken.None);
+		Assert.Null(resolver.VerifyLocally("someone", "pw"));
+		Assert.False(resolver.VerifyLocally("otherone", "pw"));
+	}
+
+	[Fact]
+	public async Task InvalidDbEntry_IsSkipped_ConfigEntrySurvives()
+	{
+		ActiveSyncOptions options = BaseOptions();
+		options.Users = new Dictionary<string, AccountOptions>
+		{
+			["phone1"] = new() { MailAddress = "config@x" },
+		};
+
+		// Out-of-range port makes the DB entry invalid — it must be skipped (lenient), and
+		// the shadowed config entry stays active.
+		await _store.UpsertAsync("phone1",
+			new AccountOptions { Imap = new ImapAccountOptions { Port = 99999 } }, CancellationToken.None);
+
+		AccountResolver resolver = Resolver(options);
+		await resolver.EnsureFreshAsync(true, CancellationToken.None);
+
+		Assert.Equal("config@x", resolver.Resolve(new BackendCredentials("phone1", "pw")).MailAddress);
+		Assert.False(resolver.MergedUsers["phone1"].FromDatabase);
+	}
+
+	[Fact]
+	public async Task Store_ListAndGet_RoundTrip()
+	{
+		Assert.Null(await _store.ReadStampAsync(CancellationToken.None));
+		await _store.UpsertAsync("a", new AccountOptions { MailAddress = "a@x" }, CancellationToken.None);
+		Guid? stamp1 = await _store.ReadStampAsync(CancellationToken.None);
+		Assert.NotNull(stamp1);
+
+		await _store.UpsertAsync("b", new AccountOptions(), CancellationToken.None);
+		Assert.NotEqual(stamp1, await _store.ReadStampAsync(CancellationToken.None));
+
+		AccountOptions? a = await _store.GetAsync("a", CancellationToken.None);
+		Assert.Equal("a@x", a?.MailAddress);
+		Assert.Null(await _store.GetAsync("missing", CancellationToken.None));
+
+		List<(string UserName, AccountOptions Options, DateTime UpdatedUtc)> all =
+			await _store.ListAsync(CancellationToken.None);
+		Assert.Equal(["a", "b"], all.Select(e => e.UserName));
+	}
+
+	private sealed class TestContextFactory(SqliteConnection connection) : ISyncDbContextFactory
+	{
+		public SyncDbContext CreateDbContext()
+		{
+			DbContextOptions<SqliteSyncDbContext> options = new DbContextOptionsBuilder<SqliteSyncDbContext>()
+				.UseSqlite(connection)
+				.Options;
+			return new SqliteSyncDbContext(options);
+		}
+	}
+}

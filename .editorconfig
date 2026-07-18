@@ -1,0 +1,19 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+indent_style = tab
+indent_size = 2
+
+# YAML forbids tabs for indentation — compose/workflow files stay space-indented.
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+[*.cs]
+# Async discipline: block sync-over-async patterns.
+dotnet_diagnostic.VSTHRD002.severity = error   # Avoid problematic synchronous waits
+dotnet_diagnostic.VSTHRD103.severity = error   # Call async methods when in an async method
+dotnet_diagnostic.VSTHRD200.severity = none    # No mandatory Async suffix

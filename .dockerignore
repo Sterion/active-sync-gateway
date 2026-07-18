@@ -1,0 +1,13 @@
+# Keep host build artifacts and VCS metadata out of the build context so the image
+# builds cleanly and reproducibly regardless of what was compiled on the host.
+**/bin/
+**/obj/
+.git/
+.vs/
+.idea/
+.devcontainer/
+*.user
+*.db
+*.db-shm
+*.db-wal
+TestResults/

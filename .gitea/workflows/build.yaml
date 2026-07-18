@@ -1,0 +1,317 @@
+name: ActiveSync Build
+on:
+  push:
+    paths:
+      - 'src/**'
+      - '.gitea/workflows/**'
+      - 'docker/**'
+      - 'tests/**'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+  workflow_dispatch:
+
+# Single pipeline, single compile: the Dockerfile `test` stage builds the solution and runs
+# the unit tests; the integration tests then run FROM that same image (`--no-build`) against
+# throwaway Stalwart/Postgres containers, and only when the full suite is green is the
+# runtime image assembled (from the already-hot build cache) and pushed.
+#
+# The job runs inside a runner container while the docker daemon belongs to the host
+# (docker-out-of-docker), so bind mounts would resolve against the runner HOST filesystem
+# and silently mount empty directories. Everything is therefore streamed through the
+# daemon API instead: `docker cp` for the backend config and stdin for provision.sh.
+# For local runs use docker/docker-compose.ci.yml.
+jobs:
+  Build:
+    runs-on: ubuntu-latest
+    env:
+      RUNNER_TOOL_CACHE: /toolcache
+      NET: as-ci-${{ gitea.run_id }}
+      BACKEND: as-ci-stalwart-${{ gitea.run_id }}
+      POSTGRES: as-ci-postgres-${{ gitea.run_id }}
+      TEST_IMAGE: as-ci-build:${{ gitea.run_id }}
+      PKG: as-ci-pkg-${{ gitea.run_id }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      # Backends start first (detached) so they boot while the solution compiles.
+      # The image entrypoint hardwires `--config /opt/stalwart/etc/config.toml` (command
+      # args are ignored), and that directory does not exist in the unstarted container —
+      # so the config is copied as a directory to create the path before first start.
+      - name: Start Stalwart backend
+        run: |
+          docker network create "$NET"
+          docker create --name "$BACKEND" --network "$NET" --network-alias stalwart \
+            stalwartlabs/stalwart:v0.13.4
+          mkdir -p .ci-stalwart-etc
+          cp docker/backends/stalwart/config.toml .ci-stalwart-etc/
+          docker cp .ci-stalwart-etc "$BACKEND":/opt/stalwart/etc
+          docker start "$BACKEND"
+
+      # The gateway state DB for the suite: with AS_TEST_PG set, every gateway factory
+      # creates its own database here, so the Npgsql provider + migrations run in CI
+      # (locally the suite defaults to SQLite temp files). Throwaway, like Stalwart.
+      - name: Start Postgres state DB
+        run: |
+          docker run -d --name "$POSTGRES" --network "$NET" --network-alias postgres \
+            -e POSTGRES_USER=activesync -e POSTGRES_PASSWORD=ci-pw -e POSTGRES_DB=activesync \
+            postgres:17-alpine
+
+      # Tagged releases (X.Y.Z or vX.Y.Z) bake the tag into the assemblies so the
+      # startup banner reports the deployed version instead of the 1.0.0 default.
+      - name: Derive version from tag
+        id: version
+        run: |
+          ref="${{ gitea.ref_name }}"
+          version=""
+          if echo "$ref" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-.].*)?$'; then
+            version="${ref#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Docker Tags and Labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ vars.REGISTRY }}/${{ gitea.repository }}
+
+      - name: Login to Gitea
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ vars.REGISTRY }}
+          username: ${{ gitea.actor }}
+          password: ${{ secrets.BUILD_TOKEN }}
+
+      # The engine-embedded BuildKit (docker driver), not an isolated builder container:
+      # `load:` becomes a no-op (the test image builds straight into the engine store
+      # instead of a ~1.5 GB tarball round-trip), and base images + layer cache persist
+      # on the runner across CI runs.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+        with:
+          driver: docker
+
+      # The ONLY compile: restore, publish, and the unit test suite (Dockerfile test
+      # stage). Loaded into the daemon so the integration step can `docker run` it.
+      # VERSION must match the push build below, or the cache would be busted and the
+      # solution compiled twice on tagged builds.
+      - name: Build and run unit tests
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: test
+          load: true
+          push: false
+          tags: ${{ env.TEST_IMAGE }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+
+      # Fail hard when a backend never comes up: the test suite auto-skips integration
+      # tests against an unreachable backend, which would otherwise turn a dead backend
+      # into a green (but meaningless) run.
+      - name: Wait for IMAP
+        run: |
+          ok=0
+          for i in $(seq 1 60); do
+            if docker exec "$BACKEND" /bin/bash -c 'exec 3<>/dev/tcp/127.0.0.1/143' 2>/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ok" != "1" ]; then
+            echo "Stalwart did not come up:" >&2
+            docker logs "$BACKEND" >&2 || true
+            exit 1
+          fi
+
+      - name: Wait for Postgres
+        run: |
+          ok=0
+          for i in $(seq 1 30); do
+            if docker exec "$POSTGRES" pg_isready -U activesync -d activesync -q; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ok" != "1" ]; then
+            echo "Postgres did not come up:" >&2
+            docker logs "$POSTGRES" >&2 || true
+            exit 1
+          fi
+
+      - name: Provision test users
+        run: |
+          docker run --rm -i --network "$NET" -e STALWART_URL=http://stalwart:8080 \
+            --entrypoint /bin/sh curlimages/curl:8.11.1 -s \
+            < docker/backends/stalwart/provision.sh
+
+      # A freshly provisioned Stalwart stalls the FIRST delivery into each mailbox,
+      # which would flake one test per direction. Warm BOTH inboxes before the suite
+      # (the test fixture also warms as a second line of defense).
+      - name: Warm up mail delivery
+        run: |
+          docker run --rm --network "$NET" --entrypoint /bin/sh curlimages/curl:8.11.1 -c '
+            send() {
+              printf "From: %s\r\nTo: %s\r\nSubject: ci-warmup\r\n\r\nwarmup\r\n" "$1" "$2" |
+                curl -sS smtp://stalwart:587 --mail-from "$1" --mail-rcpt "$2" -T - --user "$1:pass"
+            }
+            send user1@example.com user2@example.com
+            send user2@example.com user1@example.com
+            for user in user1@example.com user2@example.com; do
+              ok=0
+              for i in $(seq 1 45); do
+                if curl -sS "imap://stalwart:143/" -X "STATUS INBOX (MESSAGES)" \
+                     --user "$user:pass" | grep -Eq "MESSAGES [1-9]"; then
+                  ok=1
+                  break
+                fi
+                sleep 2
+              done
+              if [ "$ok" != "1" ]; then
+                echo "warmup mail for $user never arrived" >&2
+                exit 1
+              fi
+            done
+            echo "delivery warm (both directions)"
+          '
+
+      # Unit tests already ran inside the build (hence the positive filter); the
+      # test-stage image carries the built solution, so nothing recompiles here.
+      - name: Run integration tests
+        run: |
+          docker run --rm --network "$NET" \
+            -e AS_TEST_STACK=stalwart \
+            -e AS_TEST_IMAP_HOST=stalwart -e AS_TEST_IMAP_PORT=143 \
+            -e AS_TEST_SMTP_HOST=stalwart -e AS_TEST_SMTP_PORT=587 \
+            -e AS_TEST_DAV_URL=http://stalwart:8080 \
+            -e AS_TEST_PG=postgresql://activesync:ci-pw@postgres:5432/activesync \
+            -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+            "$TEST_IMAGE" \
+            dotnet test ActiveSync.slnx -c Release --nologo --no-build --filter "Category=Integration"
+
+      # Download bundles for people who prefer a zip over a container: framework-dependent
+      # publishes (need the ASP.NET Core Runtime) WITH the native launcher binaries, one
+      # per platform, named after the tag (v1.0.7) or branch (main). Published inside a
+      # container from the test image — the solution and NuGet cache are already there
+      # (linux-x64 recompiles nothing; win-x64 restores its runtime pack and recompiles),
+      # and the runner is docker-out-of-docker so files travel via `docker cp`, never
+      # bind mounts. Zipping happens in the container too (Debian SDK image; the runner's
+      # own tooling is unknown).
+      - name: Package download zips
+        id: package
+        run: |
+          label=$(echo "${{ gitea.ref_name }}" | tr '/' '-')
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+          docker run --name "$PKG" \
+            -e VERSION='${{ steps.version.outputs.version }}' -e LABEL="$label" \
+            -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+            "$TEST_IMAGE" sh -ec '
+              apt-get update -qq && apt-get install -y -qq zip >/dev/null
+              publish() {
+                dotnet publish src/ActiveSync.Server/ActiveSync.Server.csproj -c Release \
+                  -o "/out/$1" -r "$1" --self-contained false \
+                  -p:SatelliteResourceLanguages=en ${VERSION:+-p:Version=$VERSION} --nologo
+                printf "%s\n" \
+                  "ActiveSync gateway (EAS 14.1 -> IMAP/SMTP/CalDAV/CardDAV) - $2 build ($LABEL)" \
+                  "" \
+                  "Requires the ASP.NET Core Runtime 10 on this machine:" \
+                  "  https://dotnet.microsoft.com/download/dotnet/10.0" \
+                  "" \
+                  "Run:      $3 serve      (or: dotnet ActiveSync.Server.dll serve)" \
+                  "Bare $3 prints the effective-configuration banner; \"help\" lists commands." \
+                  "Configure via appsettings.json next to the binaries, or environment variables." \
+                  "Docs:     ${{ gitea.server_url }}/${{ gitea.repository }}" \
+                  > "/out/$1/README.txt"
+              }
+              publish linux-x64 Linux ./ActiveSync.Server
+              publish win-x64 Windows ActiveSync.Server.exe
+              (cd /out/linux-x64 && zip -qr "/out/eas-gateway-linux-x64-$LABEL.zip" .)
+              (cd /out/win-x64 && zip -qr "/out/eas-gateway-windows-x64-$LABEL.zip" .)
+            '
+          mkdir -p dist
+          docker cp "$PKG":/out/. dist/
+          docker rm "$PKG"
+          ls -l dist/*.zip
+
+      # Same artifact action as the caddy repo. The artifact NAME carries the platform
+      # and label while the path is the publish DIRECTORY — Gitea serves artifacts zipped
+      # under the artifact name, so the run page offers eas-gateway-linux-x64-main.zip
+      # without double-zipping. (The .zip files in dist/ are for the release step below.)
+      - name: Upload Linux artifact
+        uses: https://gitea.com/actions/gitea-upload-artifact@v4
+        with:
+          name: eas-gateway-linux-x64-${{ steps.package.outputs.label }}
+          path: dist/linux-x64
+
+      - name: Upload Windows artifact
+        uses: https://gitea.com/actions/gitea-upload-artifact@v4
+        with:
+          name: eas-gateway-windows-x64-${{ steps.package.outputs.label }}
+          path: dist/win-x64
+
+      # The only pushing step, strictly after BOTH test steps — a unit or integration
+      # failure aborts the job before anything is published. Every layer up to and
+      # including the test stage is CACHED from the unit-test build (same builder), so
+      # this only assembles the runtime stage.
+      - name: Docker Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+
+      # Version tags only, and strictly after the image push: attach the download zips to
+      # the Gitea release for this tag. An existing release (hand-written notes via UI or
+      # API) is reused untouched; otherwise a minimal one is created. Re-runs are
+      # idempotent — a same-named asset is deleted before upload. GITHUB_TOKEN is the
+      # runner's auto-provided repo-scoped token; if this Gitea build ever refuses it for
+      # the releases API, substitute a PAT secret here.
+      - name: Attach zips to release
+        if: steps.version.outputs.version != ''
+        run: |
+          api='${{ gitea.server_url }}/api/v1/repos/${{ gitea.repository }}'
+          tag='${{ gitea.ref_name }}'
+          auth="Authorization: token ${{ secrets.GITHUB_TOKEN }}"
+          # The job shell is `bash -e -o pipefail`: every grep here may legitimately find
+          # nothing (fresh release, no assets yet), so each extraction pipeline carries
+          # `|| true` — otherwise a no-match exit 1 silently kills the step.
+          release=$(curl -s -H "$auth" "$api/releases/tags/$tag" || true)
+          # Gitea (Go structs) serializes the top-level id first.
+          id=$(echo "$release" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2 || true)
+          if [ -z "$id" ]; then
+            release=$(curl -sSf -X POST -H "$auth" -H 'Content-Type: application/json' \
+              -d "{\"tag_name\":\"$tag\",\"name\":\"$tag\",\"body\":\"Automated build for $tag.\"}" \
+              "$api/releases") || { echo "failed to create release for $tag" >&2; exit 1; }
+            id=$(echo "$release" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2 || true)
+          fi
+          [ -n "$id" ] || { echo "could not resolve release id for $tag" >&2; exit 1; }
+          echo "release id for $tag: $id"
+          for file in dist/eas-gateway-*.zip; do
+            name=$(basename "$file")
+            existing=$(curl -s -H "$auth" "$api/releases/$id/assets" |
+              grep -o "\"id\":[0-9]*,\"name\":\"$name\"" | head -1 | cut -d: -f2 | cut -d, -f1 || true)
+            if [ -n "$existing" ]; then
+              echo "replacing existing asset $name (id $existing)"
+              curl -sSf -X DELETE -H "$auth" "$api/releases/$id/assets/$existing"
+            fi
+            curl -sSf -o /dev/null -X POST -H "$auth" \
+              -F "attachment=@$file" "$api/releases/$id/assets?name=$name" \
+              || { echo "failed to attach $name" >&2; exit 1; }
+            echo "attached $name"
+          done
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f "$BACKEND" 2>/dev/null || true
+          docker rm -f "$POSTGRES" 2>/dev/null || true
+          docker rm -f "$PKG" 2>/dev/null || true
+          docker network rm "$NET" 2>/dev/null || true
+          docker rmi "$TEST_IMAGE" 2>/dev/null || true

@@ -1,0 +1,46 @@
+# Stalwart all-in-one test backend (default stack): IMAP + SMTP submission with real
+# local delivery + CalDAV/CardDAV, one container. Test users are provisioned by the
+# one-shot "provision" service. Plaintext only — test use exclusively.
+#
+#   docker compose -f docker/backends/stalwart/docker-compose.yml up -d --wait
+#
+# Published host ports: IMAP 143, SMTP 587, DAV/HTTP 5232.
+# Users: user1@example.com / user2@example.com, password "pass".
+services:
+  stalwart:
+    # Pinned to the 0.13 line: TOML config + declarative bootstrap. 0.16+ switched to a
+    # JSON/web-setup flow that cannot be provisioned from a mounted config file.
+    image: stalwartlabs/stalwart:v0.13.4
+    command: ["--config", "/opt/stalwart/etc/config.toml"]
+    ports:
+      - "143:143"
+      - "587:587"
+      - "5232:8080"
+      - "4190:4190"
+    volumes:
+      - ./config.toml:/opt/stalwart/etc/config.toml:ro
+      - stalwart-data:/opt/stalwart/data
+    healthcheck:
+      # The image has no curl/wget; bash /dev/tcp suffices to detect the open IMAP port.
+      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/143"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # NOTE: the stalwart + provision service pair here is intentionally mirrored in
+  # docker/docker-compose.ci.yml (which adds a `tests` runner). Keep the two in sync —
+  # image tags, healthcheck, and provisioning must match.
+  provision:
+    image: curlimages/curl:8.21.0
+    depends_on:
+      stalwart:
+        condition: service_healthy
+    environment:
+      STALWART_URL: http://stalwart:8080
+    volumes:
+      - ./provision.sh:/provision.sh:ro
+    entrypoint: ["/bin/sh", "/provision.sh"]
+    restart: "no"
+
+volumes:
+  stalwart-data:

@@ -1,0 +1,159 @@
+using ActiveSync.Core.Backend;
+using ActiveSync.Core.State;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+
+namespace ActiveSync.Core.Tests;
+
+public sealed class SyncStateServiceTests : IDisposable
+{
+	private readonly SqliteConnection _connection;
+	private readonly SyncDbContext _db;
+	private readonly SyncStateService _service;
+
+	public SyncStateServiceTests()
+	{
+		_connection = new SqliteConnection("Data Source=:memory:");
+		_connection.Open();
+		DbContextOptions<SqliteSyncDbContext> options = new DbContextOptionsBuilder<SqliteSyncDbContext>()
+			.UseSqlite(_connection)
+			.Options;
+		_db = new SqliteSyncDbContext(options);
+		// Unit tests build the schema from the model directly; startup uses MigrateAsync.
+		_db.Database.EnsureCreated();
+		_service = new SyncStateService(_db);
+	}
+
+	public void Dispose()
+	{
+		_db.Dispose();
+		_connection.Dispose();
+	}
+
+	[Fact]
+	public async Task SyncKeyLifecycle_InitialCurrentReplayInvalid()
+	{
+		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
+
+		// Initial (key 0)
+		(SyncKeyValidation validation, CollectionState state) =
+			await _service.ValidateSyncKeyAsync(device, "5", "0", CancellationToken.None);
+		Assert.Equal(SyncKeyValidation.Initial, validation);
+		int key1 = await _service.CommitCollectionStateAsync(
+			state, new Dictionary<string, string> { ["a"] = "1" }, 0, CancellationToken.None);
+		Assert.Equal(1, key1);
+
+		// Current key accepted
+		(validation, state) = await _service.ValidateSyncKeyAsync(device, "5", "1", CancellationToken.None);
+		Assert.Equal(SyncKeyValidation.Current, validation);
+		Assert.Equal("1", SyncStateService.ReadSnapshot(state)["a"]);
+
+		int key2 = await _service.CommitCollectionStateAsync(
+			state, new Dictionary<string, string> { ["a"] = "1", ["b"] = "2" }, 0, CancellationToken.None);
+		Assert.Equal(2, key2);
+
+		// Replay: client resends the previous key → state rolls back one generation
+		(validation, state) = await _service.ValidateSyncKeyAsync(device, "5", "1", CancellationToken.None);
+		Assert.Equal(SyncKeyValidation.Replay, validation);
+		Assert.False(SyncStateService.ReadSnapshot(state).ContainsKey("b"));
+
+		// Unknown key → invalid
+		(validation, _) = await _service.ValidateSyncKeyAsync(device, "5", "42", CancellationToken.None);
+		Assert.Equal(SyncKeyValidation.Invalid, validation);
+	}
+
+	[Fact]
+	public async Task FolderRegistry_AssignsStableServerIds_AndSoftDeletes()
+	{
+		List<BackendFolder> folders = new()
+		{
+			new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
+			new BackendFolder("imap:Sent", "Sent", null, 5, "Email")
+		};
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@x", folders, CancellationToken.None);
+		Assert.Equal(2, registry.Count);
+		string inboxId = registry.Single(f => f.BackendKey == "imap:INBOX").ServerId;
+
+		// Second refresh keeps the same ServerId
+		registry = await _service.RefreshFolderRegistryAsync("u@x", folders, CancellationToken.None);
+		Assert.Equal(inboxId, registry.Single(f => f.BackendKey == "imap:INBOX").ServerId);
+
+		// A folder disappearing from the backend is soft-deleted
+		registry = await _service.RefreshFolderRegistryAsync("u@x", [folders[0]], CancellationToken.None);
+		Assert.Single(registry);
+		Assert.Equal("imap:INBOX", registry[0].BackendKey);
+	}
+
+	[Fact]
+	public async Task FolderDiff_ReportsAddsUpdatesDeletes()
+	{
+		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
+		List<BackendFolder> folders = new() { new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email") };
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@x", folders, CancellationToken.None);
+
+		FolderHierarchyDiff diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
+		Assert.Single(diff.Adds);
+
+		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
+		diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
+		Assert.Empty(diff.Adds);
+		Assert.Empty(diff.Updates);
+		Assert.Empty(diff.Deletes);
+
+		// Rename → update
+		folders = [new BackendFolder("imap:INBOX", "Postboks", null, 2, "Email")];
+		registry = await _service.RefreshFolderRegistryAsync("u@x", folders, CancellationToken.None);
+		diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
+		Assert.Single(diff.Updates);
+	}
+
+	[Fact]
+	public async Task CommitCollectionState_ConcurrentWrite_LosesNoUpdate_ThrowsOnStale()
+	{
+		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
+		(_, CollectionState seed) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
+		await _service.CommitCollectionStateAsync(seed, new Dictionary<string, string> { ["a"] = "1" }, 0,
+			CancellationToken.None);
+
+		// A second request (its own context, same DB) loads the same generation...
+		DbContextOptions<SqliteSyncDbContext> options = new DbContextOptionsBuilder<SqliteSyncDbContext>()
+			.UseSqlite(_connection).Options;
+		await using SqliteSyncDbContext db2 = new(options);
+		SyncStateService service2 = new(db2);
+		Device device2 = await db2.Devices.FirstAsync(d => d.DeviceId == "DEV1");
+		(_, CollectionState stateB) = await service2.ValidateSyncKeyAsync(device2, "c", "1", CancellationToken.None);
+		(_, CollectionState stateA) = await _service.ValidateSyncKeyAsync(device, "c", "1", CancellationToken.None);
+
+		// A commits first and wins.
+		int keyA = await _service.CommitCollectionStateAsync(stateA,
+			new Dictionary<string, string> { ["a"] = "1", ["fromA"] = "2" }, 0, CancellationToken.None);
+		Assert.Equal(2, keyA);
+
+		// B committing off the now-stale generation is rejected, not silently applied.
+		BackendException ex = await Assert.ThrowsAsync<BackendException>(() =>
+			service2.CommitCollectionStateAsync(stateB,
+				new Dictionary<string, string> { ["a"] = "1", ["fromB"] = "3" }, 0, CancellationToken.None));
+		Assert.Contains("Concurrent sync", ex.Message);
+
+		// A's write survived intact — no lost update.
+		(_, CollectionState after) = await _service.ValidateSyncKeyAsync(device, "c", "2", CancellationToken.None);
+		Assert.True(SyncStateService.ReadSnapshot(after).ContainsKey("fromA"));
+		Assert.False(SyncStateService.ReadSnapshot(after).ContainsKey("fromB"));
+	}
+
+	[Fact]
+	public async Task DavItemMap_RoundTripsHrefs()
+	{
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@x",
+			[new BackendFolder("carddav:/ab/", "Contacts", null, 9, "Contacts")], CancellationToken.None);
+		UserFolder folder = registry[0];
+
+		string id1 = await _service.GetOrAddDavItemIdAsync(folder, "/ab/x.vcf", CancellationToken.None);
+		string id2 = await _service.GetOrAddDavItemIdAsync(folder, "/ab/x.vcf", CancellationToken.None);
+		Assert.Equal(id1, id2);
+
+		string? href = await _service.ResolveDavHrefAsync(folder, id1, CancellationToken.None);
+		Assert.Equal("/ab/x.vcf", href);
+		Assert.Null(await _service.ResolveDavHrefAsync(folder, "99999", CancellationToken.None));
+	}
+}
