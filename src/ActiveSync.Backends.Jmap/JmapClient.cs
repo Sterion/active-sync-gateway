@@ -39,6 +39,7 @@ public sealed record JmapSessionResource(
 	Uri ApiUrl,
 	string DownloadUrlTemplate,
 	string UploadUrlTemplate,
+	string? EventSourceUrlTemplate,
 	IReadOnlyDictionary<string, string> PrimaryAccounts,
 	IReadOnlySet<string> Capabilities,
 	string State)
@@ -225,6 +226,27 @@ public sealed class JmapClient : IDisposable
 		return await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
 	}
 
+	/// <summary>
+	///   Opens the JMAP EventSource (SSE) stream, or null when the server advertises none. The
+	///   caller owns the returned response and reads its content stream line by line.
+	/// </summary>
+	public async Task<HttpResponseMessage?> OpenEventSourceAsync(int pingSeconds, CancellationToken ct)
+	{
+		JmapSessionResource session = await GetSessionAsync(ct).ConfigureAwait(false);
+		if (session.EventSourceUrlTemplate is not { } template)
+			return null;
+		string url = template
+			.Replace("{types}", "*")
+			.Replace("{closeafter}", "no")
+			.Replace("{ping}", pingSeconds.ToString());
+		HttpRequestMessage request = new(HttpMethod.Get, new Uri(url));
+		request.Headers.Accept.ParseAdd("text/event-stream");
+		HttpResponseMessage response = await _http
+			.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+		await EnsureSuccessAsync(response, "GET", "eventsource", ct).ConfigureAwait(false);
+		return response;
+	}
+
 	/// <summary>Uploads a blob and returns its server-assigned blobId.</summary>
 	public async Task<string> UploadBlobAsync(string accountId, byte[] content, string contentType, CancellationToken ct)
 	{
@@ -262,6 +284,10 @@ public sealed class JmapClient : IDisposable
 			string apiUrl = RequireString(root, "apiUrl");
 			string downloadUrl = RequireString(root, "downloadUrl");
 			string uploadUrl = RequireString(root, "uploadUrl");
+			string? eventSourceUrl = root.TryGetProperty("eventSourceUrl", out JsonElement es) &&
+			                         es.GetString() is { Length: > 0 } esUrl
+				? Rebase(esUrl)
+				: null;
 
 			Dictionary<string, string> primary = new(StringComparer.Ordinal);
 			if (root.TryGetProperty("primaryAccounts", out JsonElement pa) && pa.ValueKind == JsonValueKind.Object)
@@ -277,7 +303,8 @@ public sealed class JmapClient : IDisposable
 			string state = root.TryGetProperty("state", out JsonElement s) ? s.GetString() ?? "" : "";
 
 			return new JmapSessionResource(
-				new Uri(Rebase(apiUrl)), Rebase(downloadUrl), Rebase(uploadUrl), primary, capabilities, state);
+				new Uri(Rebase(apiUrl)), Rebase(downloadUrl), Rebase(uploadUrl), eventSourceUrl,
+				primary, capabilities, state);
 		}
 	}
 

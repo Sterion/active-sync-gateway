@@ -127,7 +127,10 @@ src/ActiveSync.Backends.Jmap/    "jmap" provider (Stalwart JMAP over HttpClient 
                             bridges via iCalendar and reuses CalendarConverter (iCal↔EAS).
                             Listing uses */get ids:null, not the FTS-backed /query
                             (eventually-consistent). Calendar update strips read-only members
-                            (isDraft/isOrigin/…) to avoid invalidProperties. Tasks/Notes are
+                            (isDraft/isOrigin/…) to avoid invalidProperties. Mail Ping/Sync
+                            waits accelerate off a shared per-user EventSource (SSE) watcher
+                            (JmapEventSourceWatcher; poll stays the backstop), trimmed via
+                            IPerUserResourceOwner like the IMAP IDLE watcher. Tasks/Notes are
                             NOT JMAP (no standard) — leave them on caldav/local. Core+Common.
 src/ActiveSync.Backends.Smtp/    "smtp" provider (MailKit). Depends on Core + Common.
 src/ActiveSync.Backends.Dav/     "caldav" + "carddav" providers (one assembly — shared

@@ -18,7 +18,8 @@ namespace ActiveSync.Backends.Jmap;
 public sealed class JmapMailStore(
 	JmapClient client,
 	string? mailAddress,
-	int pollSeconds) : IContentStore, IMailStoreOperations
+	int pollSeconds,
+	Func<DateTime, CancellationToken, Task>? waitForPush = null) : IContentStore, IMailStoreOperations
 {
 	public const string KeyPrefix = "jmap-mail:";
 
@@ -321,8 +322,23 @@ public sealed class JmapMailStore(
 			TimeSpan delay = TimeSpan.FromSeconds(Math.Min(delaySeconds, ceiling));
 			if (delay > remaining)
 				delay = remaining;
+			// The EventSource push, when available, wakes the wait as soon as the server
+			// signals a change; the poll (token diff below) stays the correctness backstop.
+			DateTime since = DateTime.UtcNow;
 			if (delay > TimeSpan.Zero)
-				await Task.Delay(delay, ct).ConfigureAwait(false);
+			{
+				if (waitForPush is not null)
+				{
+					using CancellationTokenSource race = CancellationTokenSource.CreateLinkedTokenSource(ct);
+					await Task.WhenAny(Task.Delay(delay, race.Token), waitForPush(since, race.Token)).ConfigureAwait(false);
+					await race.CancelAsync().ConfigureAwait(false);
+				}
+				else
+				{
+					await Task.Delay(delay, ct).ConfigureAwait(false);
+				}
+			}
+
 			delaySeconds = Math.Min(delaySeconds * 2, ceiling);
 
 			Dictionary<string, string> current = await FolderTokensAsync(account, ids, ct).ConfigureAwait(false);

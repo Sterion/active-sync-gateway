@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Security;
 using ActiveSync.Backends;
 using ActiveSync.Backends.Common;
@@ -14,7 +15,8 @@ namespace ActiveSync.Backends.Jmap;
 ///   session. Verifies credentials by fetching the session resource, and probes readiness
 ///   with an unauthenticated session-resource GET.
 /// </summary>
-public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier, IReadinessSource
+public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier, IReadinessSource,
+	IPerUserResourceOwner, IAsyncDisposable
 {
 	private static readonly IReadOnlySet<BackendRole> Roles = new HashSet<BackendRole>
 	{
@@ -25,6 +27,10 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 	private readonly ActiveSyncOptions _options;
 	private readonly ILogger _logger;
 	private readonly ILogger _wireLogger;
+
+	// One shared EventSource (SSE) watcher per gateway user — all their sessions reuse it, and
+	// the session factory's eviction sweep trims watchers for users with no live session.
+	private readonly ConcurrentDictionary<string, Lazy<JmapEventSourceWatcher>> _watchers = new();
 
 	public JmapBackendProvider(IOptions<ActiveSyncOptions> options, ILoggerFactory loggerFactory)
 	{
@@ -63,6 +69,13 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 			new Uri(options.BaseUrl), primary.Credentials,
 			options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger);
 
+		// Mail Ping/Sync waits accelerate off a shared per-user EventSource watcher (poll is the
+		// backstop). The watcher self-disables if the server advertises no eventSourceUrl.
+		Func<DateTime, CancellationToken, Task>? waitForPush = null;
+		if (context.Roles.Any(r => r.Role == BackendRole.MailStore))
+			waitForPush = GetOrCreateWatcher(context.GatewayCredentials.UserName, options, primary.Credentials)
+				.WaitForChangeAsync;
+
 		List<IContentStore> stores = new();
 		IMailSubmitOperations? submit = null;
 		IOofBackend? oof = null;
@@ -70,7 +83,7 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 			switch (role.Role)
 			{
 				case BackendRole.MailStore:
-					stores.Add(new JmapMailStore(client, context.MailAddress, _options.Eas.DavPollSeconds));
+					stores.Add(new JmapMailStore(client, context.MailAddress, _options.Eas.DavPollSeconds, waitForPush));
 					break;
 				case BackendRole.MailSubmit:
 					submit = new JmapMailSubmit(client, context.MailAddress, _logger);
@@ -130,5 +143,60 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 		using HttpResponseMessage response = await http.GetAsync(
 			new Uri(baseUri, "/.well-known/jmap"), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
 		return true;
+	}
+
+	public void TrimUserResources(IReadOnlySet<string> activeGatewayLogins)
+	{
+		foreach ((string user, Lazy<JmapEventSourceWatcher> lazy) in _watchers)
+			if (!activeGatewayLogins.Contains(user) && _watchers.TryRemove(user, out Lazy<JmapEventSourceWatcher>? removed))
+			{
+				_logger.LogDebug("Evicting JMAP EventSource watcher for {User}", user);
+				if (removed.IsValueCreated)
+					_ = DisposeWatcherAsync(removed.Value);
+				_ = lazy;
+			}
+	}
+
+	public async ValueTask DisposeAsync()
+	{
+		foreach ((string _, Lazy<JmapEventSourceWatcher> lazy) in _watchers)
+			if (lazy.IsValueCreated)
+				await DisposeWatcherAsync(lazy.Value).ConfigureAwait(false);
+		_watchers.Clear();
+	}
+
+	/// <summary>One shared EventSource watcher per gateway user; rebuilt on password rotation.</summary>
+	private JmapEventSourceWatcher GetOrCreateWatcher(string gatewayLogin, JmapOptions options, BackendCredentials credentials)
+	{
+		JmapEventSourceWatcher Build()
+		{
+			JmapClient watcherClient = new(
+				new Uri(options.BaseUrl), credentials,
+				options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger);
+			return new JmapEventSourceWatcher(watcherClient, credentials, _logger);
+		}
+
+		JmapEventSourceWatcher watcher = _watchers
+			.GetOrAdd(gatewayLogin, _ => new Lazy<JmapEventSourceWatcher>(Build)).Value;
+		if (watcher.Credentials.Password != credentials.Password)
+		{
+			if (_watchers.TryRemove(gatewayLogin, out Lazy<JmapEventSourceWatcher>? stale) && stale.IsValueCreated)
+				_ = DisposeWatcherAsync(stale.Value);
+			watcher = _watchers.GetOrAdd(gatewayLogin, _ => new Lazy<JmapEventSourceWatcher>(Build)).Value;
+		}
+
+		return watcher;
+	}
+
+	private async Task DisposeWatcherAsync(JmapEventSourceWatcher watcher)
+	{
+		try
+		{
+			await watcher.DisposeAsync().ConfigureAwait(false);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogDebug(ex, "Error disposing JMAP EventSource watcher");
+		}
 	}
 }
