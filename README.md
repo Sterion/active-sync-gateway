@@ -163,8 +163,12 @@ docker run -p 443:5443 -p 5080:5080 -v activesync-data:/data \
   activesync-gateway
 ```
 
+The published container image is **multi-arch** (`linux/amd64` + `linux/arm64`) — it runs
+as-is on a Raspberry Pi or any ARM box.
+
 Prefer running without docker? Every release on the releases page also ships
-`eas-gateway-linux-x64-<tag>.zip` and `eas-gateway-windows-x64-<tag>.zip` — install the
+`eas-gateway-linux-x64-<tag>.zip`, `eas-gateway-linux-arm64-<tag>.zip` and
+`eas-gateway-windows-x64-<tag>.zip` — install the
 [ASP.NET Core Runtime 10](https://dotnet.microsoft.com/download/dotnet/10.0), unzip, and
 run `./ActiveSync.Server serve` (`ActiveSync.Server.exe serve` on Windows). Branch builds
 of the same zips hang off each CI run as artifacts.

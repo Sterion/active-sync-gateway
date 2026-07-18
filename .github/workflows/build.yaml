@@ -88,16 +88,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The engine-embedded BuildKit (docker driver), not an isolated builder container:
-      # `load:` becomes a no-op (the test image builds straight into the engine store
-      # instead of a ~1.5 GB tarball round-trip). GitHub-hosted runners are ephemeral,
-      # so there is no cross-run layer cache either way.
+      # QEMU only executes the runtime stage's few RUNs for arm64 — the SDK stages are
+      # BUILDPLATFORM-pinned in the Dockerfile, so compilation is always a native
+      # cross-publish, never emulated.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # One docker-container builder for BOTH build steps, with the GitHub Actions cache
+      # backend: the amd64 layers (restore + compile + tests) from the test build are
+      # reused by the multi-arch push build, and warm layers survive across runs — which
+      # the old engine-embedded driver could not offer (no cache export). The price is
+      # `load:` doing a real image transfer for the test build.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-        with:
-          driver: docker
 
-      # The ONLY compile: restore, publish, and the unit test suite (Dockerfile test
+      # The amd64 compile: restore, publish, and the unit test suite (Dockerfile test
       # stage). Loaded into the daemon so the integration step can `docker run` it.
       # VERSION must match the push build below, or the cache would be busted and the
       # solution compiled twice on tagged builds.
@@ -107,9 +112,12 @@ jobs:
           context: .
           file: docker/Dockerfile
           target: test
+          platforms: linux/amd64
           load: true
           push: false
           tags: ${{ env.TEST_IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
 
@@ -231,8 +239,10 @@ jobs:
                   > "/out/$1/README.txt"
               }
               publish linux-x64 Linux ./ActiveSync.Server
+              publish linux-arm64 Linux-arm64 ./ActiveSync.Server
               publish win-x64 Windows ActiveSync.Server.exe
               (cd /out/linux-x64 && zip -qr "/out/eas-gateway-linux-x64-$LABEL.zip" .)
+              (cd /out/linux-arm64 && zip -qr "/out/eas-gateway-linux-arm64-$LABEL.zip" .)
               (cd /out/win-x64 && zip -qr "/out/eas-gateway-windows-x64-$LABEL.zip" .)
             '
           mkdir -p dist
@@ -249,6 +259,12 @@ jobs:
           name: eas-gateway-linux-x64-${{ steps.package.outputs.label }}
           path: dist/linux-x64
 
+      - name: Upload Linux arm64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eas-gateway-linux-arm64-${{ steps.package.outputs.label }}
+          path: dist/linux-arm64
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
@@ -256,17 +272,21 @@ jobs:
           path: dist/win-x64
 
       # The only pushing step, strictly after BOTH test steps — a unit or integration
-      # failure aborts the job before anything is published. Every layer up to and
-      # including the test stage is CACHED from the unit-test build (same builder), so
-      # this only assembles the runtime stage.
+      # failure aborts the job before anything is published. amd64 layers up to the test
+      # stage come from the gha cache (same builder as the unit-test build); arm64 adds
+      # one native cross-compile + QEMU-executed runtime RUNs. Multi-arch manifests
+      # cannot `load:`, hence push-only.
       - name: Docker Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
 

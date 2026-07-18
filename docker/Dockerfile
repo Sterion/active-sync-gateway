@@ -1,23 +1,34 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# BUILDPLATFORM pin: the SDK stages always run natively on the build host and
+# CROSS-publish for TARGETARCH (.NET does this without emulation) — only the small
+# runtime-stage RUNs below go through QEMU on a foreign-arch build.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG TARGETARCH=amd64
+# Map docker arch -> .NET RID (amd64->linux-x64, arm64->linux-arm64).
+RUN case "$TARGETARCH" in \
+      amd64) echo linux-x64 > /rid ;; \
+      arm64) echo linux-arm64 > /rid ;; \
+      *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac
 WORKDIR /src
 COPY nuget.config Directory.Build.props Directory.Packages.props ActiveSync.slnx .editorconfig ./
 COPY src/ src/
 COPY tests/ tests/
-RUN dotnet restore ActiveSync.slnx -r linux-x64
+RUN dotnet restore ActiveSync.slnx -r "$(cat /rid)"
 # Version stamp for tagged releases: CI passes the git tag (v1.0.3 -> 1.0.3) so the
 # startup banner reports the real version. Empty (local/branch builds) keeps the default.
 ARG VERSION=
-# RID-specific publish: the image is Linux-only (aspnet base), so ship only the linux-x64
-# native libraries instead of one copy per platform, and only English resource DLLs.
-# --self-contained false: the aspnet base provides the runtime. -p:UseAppHost=false: the
-# entrypoint/healthcheck/eas all invoke `dotnet ...dll`, the native apphost would be unused.
-# (A multi-arch build would map TARGETARCH to the RID instead of hardcoding linux-x64.)
+# RID-specific publish: the image is Linux-only (aspnet base), so ship only the target
+# platform's native libraries instead of one copy per platform, and only English resource
+# DLLs. --self-contained false: the aspnet base provides the runtime.
+# -p:UseAppHost=false: the entrypoint/healthcheck/eas all invoke `dotnet ...dll`, the
+# native apphost would be unused.
 RUN dotnet publish src/ActiveSync.Server/ActiveSync.Server.csproj -c Release -o /app \
-    --no-restore -r linux-x64 --self-contained false -p:UseAppHost=false \
+    --no-restore -r "$(cat /rid)" --self-contained false -p:UseAppHost=false \
     -p:SatelliteResourceLanguages=en ${VERSION:+-p:Version=$VERSION}
 
-# Unit tests gate every image build. Integration tests need sibling backend containers,
-# which do not exist inside `docker build` — run those via docker/docker-compose.ci.yml.
+# Unit tests gate every image build (natively — the stage inherits the BUILDPLATFORM
+# pin). Integration tests need sibling backend containers, which do not exist inside
+# `docker build` — run those via docker/docker-compose.ci.yml.
 FROM build AS test
 RUN dotnet test ActiveSync.slnx -c Release --nologo --filter "Category!=Integration" \
     && touch /tests-passed
