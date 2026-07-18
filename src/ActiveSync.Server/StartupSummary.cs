@@ -41,7 +41,7 @@ public static partial class StartupSummary
 			?? new Dictionary<string, MergedAccount>();
 
 		logger.LogInformation("========================================================");
-		logger.LogInformation("ActiveSync gateway v{Version} — EAS 14.1 → IMAP/SMTP/DAV", version);
+		logger.LogInformation("ActiveSync gateway v{Version} — EAS 16.1 → IMAP/SMTP/DAV", version);
 		logger.LogInformation(
 			options.ReadOnly
 				? "Mode:     READ-ONLY (all client writes are suppressed/reverted)"

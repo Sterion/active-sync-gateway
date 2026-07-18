@@ -219,7 +219,7 @@ jobs:
                   -o "/out/$1" -r "$1" --self-contained false \
                   -p:SatelliteResourceLanguages=en ${VERSION:+-p:Version=$VERSION} --nologo
                 printf "%s\n" \
-                  "ActiveSync gateway (EAS 14.1 -> IMAP/SMTP/CalDAV/CardDAV) - $2 build ($LABEL)" \
+                  "ActiveSync gateway (EAS 16.1 -> IMAP/SMTP/CalDAV/CardDAV) - $2 build ($LABEL)" \
                   "" \
                   "Requires the ASP.NET Core Runtime 10 on this machine:" \
                   "  https://dotnet.microsoft.com/download/dotnet/10.0" \

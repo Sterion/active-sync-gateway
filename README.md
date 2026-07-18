@@ -6,7 +6,7 @@
 > Claude, driven through Claude Code). A human chose the goals, reviewed the results and
 > runs the deployments — but hand-wrote none of it. Judge, audit and trust it accordingly.
 
-A .NET 10 service that speaks **Microsoft Exchange ActiveSync (EAS) 14.1** to mail clients
+A .NET 10 service that speaks **Microsoft Exchange ActiveSync (EAS) 16.1** to mail clients
 (iOS Mail, Android mail apps, Outlook) and translates everything to standard backends hosted
 elsewhere:
 
@@ -171,7 +171,7 @@ Quick protocol smoke test:
 
 ```bash
 curl -i -X OPTIONS http://localhost:5080/Microsoft-Server-ActiveSync
-# → MS-ASProtocolVersions: 2.5,12.0,12.1,14.0,14.1
+# → MS-ASProtocolVersions: 12.1,14.0,14.1,16.0,16.1
 ```
 
 ## Configuration
@@ -750,7 +750,8 @@ Two layers:
 
 - **Unit tests** (`Category!=Integration`) run anywhere, no docker needed.
 - **Integration tests** (`tests/ActiveSync.Integration.Tests`) host the gateway in-process
-  and drive it with a real mini-EAS-14.1 client (WBXML, base64 query, Provision handshake)
+  and drive it with a real mini EAS client speaking 14.1 or 16.1 (WBXML, base64 query,
+  Provision handshake)
   against **real backends** — including the flagship scenario where user1 sends a mail
   through the gateway and user2 receives it on a second EAS client. They **skip
   automatically** when no backend stack is reachable, so `dotnet test` is always safe.
