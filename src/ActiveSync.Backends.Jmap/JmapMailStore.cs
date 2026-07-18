@@ -415,7 +415,7 @@ public sealed class JmapMailStore(
 		if (folderBackendKey is not null)
 			filter["inMailbox"] = FromKey(folderBackendKey);
 		if (sinceUtc is { } since)
-			filter["after"] = since.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ");
+			filter["after"] = JmapDate.ToUtc(since);
 
 		JmapCall query = new("Email/query", new Dictionary<string, object?>
 		{
@@ -637,7 +637,7 @@ public sealed class JmapMailStore(
 	{
 		Dictionary<string, object?> f = new() { ["inMailbox"] = mailboxId };
 		if (filter.SinceUtc is { } since)
-			f["after"] = since.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ");
+			f["after"] = JmapDate.ToUtc(since);
 		return f;
 	}
 

@@ -17,7 +17,7 @@ namespace ActiveSync.Backends.Jmap;
 public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier, IReadinessSource
 {
 	private static readonly IReadOnlySet<BackendRole> Roles =
-		new HashSet<BackendRole> { BackendRole.MailStore, BackendRole.MailSubmit };
+		new HashSet<BackendRole> { BackendRole.MailStore, BackendRole.MailSubmit, BackendRole.Oof };
 
 	private readonly ActiveSyncOptions _options;
 	private readonly ILogger _logger;
@@ -62,6 +62,7 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 
 		List<IContentStore> stores = new();
 		IMailSubmitOperations? submit = null;
+		IOofBackend? oof = null;
 		foreach (ResolvedRole role in context.Roles)
 			switch (role.Role)
 			{
@@ -71,9 +72,12 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 				case BackendRole.MailSubmit:
 					submit = new JmapMailSubmit(client, context.MailAddress, _logger);
 					break;
+				case BackendRole.Oof:
+					oof = new JmapOofBackend(client);
+					break;
 			}
 
-		return new BackendConnection(stores, submit, ownedResources: [client]);
+		return new BackendConnection(stores, submit, oof, ownedResources: [client]);
 	}
 
 	public async Task<bool> VerifyCredentialsAsync(ResolvedRole role, CancellationToken ct)

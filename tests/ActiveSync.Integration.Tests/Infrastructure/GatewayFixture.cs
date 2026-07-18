@@ -236,6 +236,10 @@ public sealed class GatewayFixture : IAsyncLifetime
 			settings["ActiveSync:Backends:MailSubmit:Provider"] = "jmap";
 			settings["ActiveSync:Backends:MailSubmit:BaseUrl"] = TestBackend.JmapUrl;
 			settings["ActiveSync:Backends:MailSubmit:AllowInvalidCertificates"] = "true";
+			// OOF over JMAP VacationResponse (replaces the sieve provider for this factory).
+			settings["ActiveSync:Backends:Oof:Provider"] = "jmap";
+			settings["ActiveSync:Backends:Oof:BaseUrl"] = TestBackend.JmapUrl;
+			settings["ActiveSync:Backends:Oof:AllowInvalidCertificates"] = "true";
 		}
 		else
 		{
