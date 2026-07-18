@@ -252,6 +252,11 @@ live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
   canonicalize hrefs; `ListFoldersAsync` dedupes shared entries against the home set
   BOTH before and after the depth-0 probe for the same reason. A granted collection
   that fails its probe is skipped with a warning — never break folder sync over a share.
+- **Default-calendar pick is deterministic**: DAV multistatus order is server whim (a
+  CI Stalwart once listed a freshly MKCALENDARed collection first), so `ListFoldersAsync`
+  sorts the home set by href before crowning the first VEVENT collection Type 8 — and a
+  collection matching a share grant NEVER claims the default slot (it's a share, not the
+  user's primary calendar).
 
 ## State store
 

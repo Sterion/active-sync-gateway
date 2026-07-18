@@ -85,7 +85,7 @@ public sealed class CalDavStore(
 
 	public async Task<bool> ShouldSendInvitationsAsync(CancellationToken ct)
 	{
-		switch (options.SendInvitations.ToLowerInvariant())
+		switch (Options.SendInvitations.ToLowerInvariant())
 		{
 			case "off":
 				return false;
@@ -142,7 +142,7 @@ public sealed class CalDavStore(
 	protected override string FromApplicationData(XElement applicationData, string uid, string? existingContent)
 	{
 		return CalendarConverter.FromApplicationData(applicationData, uid, existingContent,
-			CalendarAttachmentPolicy.CapBytes(options.CalendarAttachments), partStatIdentity);
+			CalendarAttachmentPolicy.CapBytes(Options.CalendarAttachments), partStatIdentity);
 	}
 
 	/// <summary>ItemOperations fetch of an inline event attachment (calatt:: FileReference).</summary>
@@ -164,16 +164,16 @@ public sealed class CalDavStore(
 		string targetAddress, DateTime startUtc, DateTime endUtc, CancellationToken ct)
 	{
 		bool self = targetAddress.Equals(partStatIdentity, StringComparison.OrdinalIgnoreCase) ||
-		            targetAddress.Equals(credentials.UserName, StringComparison.OrdinalIgnoreCase);
+		            targetAddress.Equals(Credentials.UserName, StringComparison.OrdinalIgnoreCase);
 		List<string> collections = new();
 		if (self)
 		{
 			foreach (BackendFolder folder in await ListFoldersAsync(ct).ConfigureAwait(false))
 				collections.Add(FromBackendKey(folder.BackendKey));
 		}
-		else if (!string.IsNullOrEmpty(options.HomeSetPath))
+		else if (!string.IsNullOrEmpty(Options.HomeSetPath))
 		{
-			string home = DavDiscovery.ExpandTemplate(options.HomeSetPath, targetAddress);
+			string home = DavDiscovery.ExpandTemplate(Options.HomeSetPath, targetAddress);
 			try
 			{
 				XElement body = new(DavNs.D + "propfind",
@@ -239,7 +239,9 @@ public sealed class CalDavStore(
 
 		List<BackendFolder> folders = new();
 		bool first = true;
-		foreach (DavResource resource in resources)
+		// Multistatus order is server whim, and the first VEVENT collection below becomes THE
+		// default calendar — sort so the pick is stable across sessions and servers.
+		foreach (DavResource resource in resources.OrderBy(r => r.Href, StringComparer.OrdinalIgnoreCase))
 		{
 			XElement? type = resource.Propstat.Descendants(DavNs.D + "resourcetype").FirstOrDefault();
 			if (type?.Element(DavNs.CalDav + "calendar") is null)
@@ -255,13 +257,17 @@ public sealed class CalDavStore(
 			string? name = resource.Propstat.Descendants(DavNs.D + "displayname").FirstOrDefault()?.Value;
 			if (string.IsNullOrWhiteSpace(name))
 				name = resource.Href.TrimEnd('/').Split('/').LastOrDefault() ?? "Calendar";
+			// A collection the user also holds a share entry for is a share, not their primary
+			// calendar — it must never claim the default-calendar slot.
+			bool granted = _sharedCollections.Any(s => SharedHrefEquals(s.Href, resource.Href));
 			folders.Add(new BackendFolder(
 				ToBackendKey(resource.Href),
 				name,
 				null,
-				first ? EasFolderType.Calendar : EasFolderType.UserCalendar,
+				first && !granted ? EasFolderType.Calendar : EasFolderType.UserCalendar,
 				Protocol.EasClass.Calendar));
-			first = false;
+			if (!granted)
+				first = false;
 		}
 
 		// Shared collections (config + `eas share` grants): each is probed individually and
