@@ -1,12 +1,10 @@
 using System.Xml.Linq;
 using ActiveSync.Backends.Converters;
 using ActiveSync.Core.Backend;
-using ActiveSync.Core.Options;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using MailKit;
 using MailKit.Net.Imap;
-using MailKit.Net.Smtp;
 using MailKit.Search;
 using Microsoft.Extensions.Logging;
 using MimeKit;
@@ -14,17 +12,15 @@ using MimeKit;
 namespace ActiveSync.Backends.Imap;
 
 /// <summary>
-///   Email content store + mail side-operations over IMAP/SMTP.
-///   Item keys are IMAP UIDs (per folder); revisions encode the sync-relevant flags.
+///   Email content store + mail-store side-operations over IMAP (submission lives in
+///   <c>SmtpSubmitBackend</c>). Item keys are IMAP UIDs (per folder); revisions encode
+///   the sync-relevant flags.
 /// </summary>
 public sealed partial class ImapMailBackend(
 	ImapSession session,
-	SmtpOptions smtpOptions,
-	BackendCredentials credentials,
 	string? mailAddress,
 	Func<string, ImapIdleWatcher?> idleWatcherProvider,
-	ILogger logger,
-	ILogger? smtpWireLogger = null) : IContentStore, IMailOperations
+	ILogger logger) : IContentStore, IMailStoreOperations
 {
 	private static readonly XNamespace Email = EasNamespaces.Email;
 	private static readonly XNamespace Email2 = EasNamespaces.Email2;
@@ -368,34 +364,7 @@ public sealed partial class ImapMailBackend(
 		}, ct);
 	}
 
-	// ---------- IMailOperations ----------
-
-	public async Task SendAsync(byte[] mime, CancellationToken ct)
-	{
-		using MemoryStream stream = new(mime);
-		MimeMessage message = await MimeMessage.LoadAsync(stream, ct).ConfigureAwait(false);
-
-		if (smtpOptions.ForceFrom && mailAddress is not null)
-		{
-			string? displayName = message.From.Mailboxes.FirstOrDefault()?.Name;
-			message.From.Clear();
-			message.From.Add(new MailboxAddress(displayName, mailAddress));
-			message.Sender = null;
-		}
-
-		// Verbose wire logging (category ActiveSync.Backends.Smtp) — attached only while
-		// Trace is enabled; MailKit's secret detector masks the AUTH exchange.
-		using SmtpClient smtp = smtpWireLogger?.IsEnabled(LogLevel.Trace) == true
-			? new SmtpClient(new MailKitWireLogger(smtpWireLogger))
-			: new SmtpClient();
-		MailTransportSecurity.Apply(smtp, smtpOptions.AllowInvalidCertificates, smtpOptions.CaCertificatePath);
-		await smtp.ConnectAsync(smtpOptions.Host, smtpOptions.Port, MailTransportSecurity.ForSmtp(smtpOptions), ct)
-			.ConfigureAwait(false);
-		await smtp.AuthenticateAsync(credentials.UserName, credentials.Password, ct).ConfigureAwait(false);
-		await smtp.SendAsync(message, ct).ConfigureAwait(false);
-		await smtp.DisconnectAsync(true, ct).ConfigureAwait(false);
-		logger.LogInformation("Sent message {MessageId} for {User}", message.MessageId, credentials.UserName);
-	}
+	// ---------- IMailStoreOperations ----------
 
 	public Task SaveToSentAsync(byte[] mime, CancellationToken ct)
 	{

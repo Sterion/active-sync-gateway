@@ -2,6 +2,7 @@ using ActiveSync.Backends.Dav;
 using ActiveSync.Backends.Imap;
 using ActiveSync.Backends.Local;
 using ActiveSync.Backends.Sieve;
+using ActiveSync.Backends.Smtp;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
@@ -51,10 +52,10 @@ public sealed class BackendSession : IBackendSession
 		ILogger davWireLogger = loggerFactory.CreateLogger("ActiveSync.Backends.Dav");
 
 		_imapSession = new ImapSession(account.Imap.Options, account.Imap.Credentials, logger, imapWireLogger);
-		ImapMailBackend mailBackend = new(
-			_imapSession, account.Smtp.Options, account.Smtp.Credentials, account.MailAddress,
-			idleWatcherProvider, logger, smtpWireLogger);
-		Mail = mailBackend;
+		ImapMailBackend mailBackend = new(_imapSession, account.MailAddress, idleWatcherProvider, logger);
+		MailStore = mailBackend;
+		MailSubmit = new SmtpSubmitBackend(
+			account.Smtp.Options, account.Smtp.Credentials, account.MailAddress, logger, smtpWireLogger);
 		_stores.Add(mailBackend);
 
 		if (account.CalDav is not null)
@@ -112,7 +113,8 @@ public sealed class BackendSession : IBackendSession
 	public BackendCredentials Credentials { get; }
 	public string? MailAddress { get; }
 	public IReadOnlyList<IContentStore> Stores => _stores;
-	public IMailOperations Mail { get; }
+	public IMailStoreOperations MailStore { get; }
+	public IMailSubmitOperations MailSubmit { get; }
 	public IContactOperations? Contacts { get; }
 	public ICalendarOperations? Calendar { get; }
 	public IOofBackend? Oof { get; }

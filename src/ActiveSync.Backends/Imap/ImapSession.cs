@@ -19,6 +19,9 @@ public sealed class ImapSession(
 	private readonly SemaphoreSlim _gate = new(1, 1);
 	private ImapClient? _client;
 
+	/// <summary>The IMAP login this session authenticates as (for log lines).</summary>
+	public string UserName => credentials.UserName;
+
 	public async ValueTask DisposeAsync()
 	{
 		await _gate.WaitAsync().ConfigureAwait(false);

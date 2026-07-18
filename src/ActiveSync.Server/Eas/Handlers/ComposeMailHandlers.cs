@@ -52,7 +52,7 @@ public abstract class ComposeMailHandlerBase(
 				return;
 			}
 
-			await context.Session.Mail.SendAsync(outgoing, ct);
+			await context.Session.MailSubmit.SendAsync(outgoing, ct);
 			Core.Observability.GatewayMetrics.RecordMailSent(context.Device.UserName, Command switch
 			{
 				"SmartReply" => "smart_reply",
@@ -63,7 +63,7 @@ public abstract class ComposeMailHandlerBase(
 			logger.LogInformation("{Command} by {User}: to {To}, subject {Subject}",
 				Command, context.Device.UserName, to, subject);
 			if (request.SaveInSent)
-				await context.Session.Mail.SaveToSentAsync(outgoing, ct);
+				await context.Session.MailStore.SaveToSentAsync(outgoing, ct);
 			await MarkSourceAsync(context, request, ct);
 			await context.WriteEmptyAsync(); // success = empty 200
 		}
@@ -223,7 +223,7 @@ public sealed class SendMailHandler(
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
 		if (source is null)
 			return [];
-		return await context.Session.Mail.GetRawMessageAsync(
+		return await context.Session.MailStore.GetRawMessageAsync(
 			source.Value.FolderBackendKey, source.Value.ItemKey, ct) ?? [];
 	}
 
@@ -259,7 +259,7 @@ public sealed class SmartReplyHandler(
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
 		if (source is null)
 			return request.Mime;
-		byte[]? original = await context.Session.Mail.GetRawMessageAsync(source.Value.FolderBackendKey,
+		byte[]? original = await context.Session.MailStore.GetRawMessageAsync(source.Value.FolderBackendKey,
 			source.Value.ItemKey, ct);
 		if (original is null)
 			return request.Mime;
@@ -311,7 +311,7 @@ public sealed class SmartReplyHandler(
 	{
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
 		if (source is not null)
-			await context.Session.Mail.SetAnsweredAsync(
+			await context.Session.MailStore.SetAnsweredAsync(
 				source.Value.FolderBackendKey, source.Value.ItemKey, false, ct);
 	}
 }
@@ -332,7 +332,7 @@ public sealed class SmartForwardHandler(
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
 		if (source is null)
 			return request.Mime;
-		byte[]? original = await context.Session.Mail.GetRawMessageAsync(
+		byte[]? original = await context.Session.MailStore.GetRawMessageAsync(
 			source.Value.FolderBackendKey, source.Value.ItemKey, ct);
 		if (original is null)
 			return request.Mime;
@@ -400,7 +400,7 @@ public sealed class SmartForwardHandler(
 	{
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
 		if (source is not null)
-			await context.Session.Mail.SetAnsweredAsync(
+			await context.Session.MailStore.SetAnsweredAsync(
 				source.Value.FolderBackendKey, source.Value.ItemKey, true, ct);
 	}
 }

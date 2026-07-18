@@ -71,7 +71,7 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 				}
 
 				IReadOnlyList<(string FolderBackendKey, string ItemKey)> hits =
-					await context.Session.Mail.SearchAsync(folderBackendKey, freeText, null, fetch, ct);
+					await context.Session.MailStore.SearchAsync(folderBackendKey, freeText, null, fetch, ct);
 				List<XElement> results = new();
 				// Skip the requested offset before fetching bodies for the page.
 				foreach ((string hitFolderKey, string itemKey) in hits.Skip(start).Take(pageSize))

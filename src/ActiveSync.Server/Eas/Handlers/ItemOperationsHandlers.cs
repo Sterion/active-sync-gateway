@@ -85,7 +85,7 @@ public sealed class ItemOperationsHandler(
 			BackendAttachment? attachment =
 				fileReference.StartsWith(CalendarConverter.AttachmentReferencePrefix, StringComparison.Ordinal)
 					? await FetchCalendarAttachmentAsync(context, fileReference, ct)
-					: await context.Session.Mail.GetAttachmentAsync(fileReference, ct);
+					: await context.Session.MailStore.GetAttachmentAsync(fileReference, ct);
 			if (attachment is null)
 				return Failure("6");
 			XElement data = new(IO + "Data", Convert.ToBase64String(attachment.Content));
@@ -176,7 +176,7 @@ public sealed class ItemOperationsHandler(
 			return new XElement(IO + "EmptyFolderContents",
 				new XElement(IO + "Status", "2"),
 				new XElement(AS + "CollectionId", collectionId));
-		await context.Session.Mail.EmptyFolderAsync(resolved.Value.Folder.BackendKey, ct);
+		await context.Session.MailStore.EmptyFolderAsync(resolved.Value.Folder.BackendKey, ct);
 		return new XElement(IO + "EmptyFolderContents",
 			new XElement(IO + "Status", "1"),
 			new XElement(AS + "CollectionId", collectionId));
@@ -214,7 +214,7 @@ public sealed class GetAttachmentHandler : IEasCommandHandler
 		BackendAttachment? attachment;
 		try
 		{
-			attachment = await context.Session.Mail.GetAttachmentAsync(fileReference, ct);
+			attachment = await context.Session.MailStore.GetAttachmentAsync(fileReference, ct);
 		}
 		catch (BackendItemNotFoundException)
 		{

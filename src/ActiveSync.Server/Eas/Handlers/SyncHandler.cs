@@ -624,7 +624,7 @@ public sealed partial class SyncHandler(
 		MimeKit.MimeMessage? original = null;
 		if (folderBackendKey is not null && itemKey is not null)
 		{
-			byte[]? raw = await context.Session.Mail.GetRawMessageAsync(folderBackendKey, itemKey, ct);
+			byte[]? raw = await context.Session.MailStore.GetRawMessageAsync(folderBackendKey, itemKey, ct);
 			if (raw is not null)
 			{
 				using MemoryStream rawStream = new(raw);
@@ -637,8 +637,8 @@ public sealed partial class SyncHandler(
 		using MemoryStream buffer = new();
 		await message.WriteToAsync(buffer, ct);
 		byte[] mime = buffer.ToArray();
-		await context.Session.Mail.SendAsync(mime, ct);
-		await context.Session.Mail.SaveToSentAsync(mime, ct);
+		await context.Session.MailSubmit.SendAsync(mime, ct);
+		await context.Session.MailStore.SaveToSentAsync(mime, ct);
 		Core.Observability.GatewayMetrics.RecordMailSent(context.Device.UserName, "draft_submit");
 	}
 

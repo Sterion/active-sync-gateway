@@ -85,7 +85,7 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 
 		IContentStore mailStore = context.Session.GetStoreForClass(EasClass.Email)!;
 		IReadOnlyList<(string FolderBackendKey, string ItemKey)> hits =
-			await context.Session.Mail.SearchAsync(folderBackendKey, freeText, null, fetch, ct);
+			await context.Session.MailStore.SearchAsync(folderBackendKey, freeText, null, fetch, ct);
 
 		List<XElement> results = new();
 		foreach ((string hitFolderKey, string itemKey) in hits.Skip(start).Take(pageSize))

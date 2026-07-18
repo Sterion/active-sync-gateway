@@ -75,7 +75,7 @@ public sealed class MeetingResponseHandler(
 					continue;
 				}
 
-				byte[]? raw = await context.Session.Mail.GetRawMessageAsync(
+				byte[]? raw = await context.Session.MailStore.GetRawMessageAsync(
 					resolved.Value.Folder.BackendKey, itemKey, ct);
 				if (raw is null)
 				{
@@ -179,6 +179,6 @@ public sealed class MeetingResponseHandler(
 			user, [(organizerEmail, null)], $"{verb}: {invite.Subject}", "REPLY", replyIcs);
 		using MemoryStream output = new();
 		await reply.WriteToAsync(output, ct);
-		await context.Session.Mail.SendAsync(output.ToArray(), ct);
+		await context.Session.MailSubmit.SendAsync(output.ToArray(), ct);
 	}
 }

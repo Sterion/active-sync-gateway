@@ -2,12 +2,14 @@ using System.Xml.Linq;
 
 namespace ActiveSync.Core.Backend;
 
-/// <summary>Mail-specific operations that fall outside the generic content-store surface.</summary>
-public interface IMailOperations
+/// <summary>
+///   Mail-STORE operations that fall outside the generic content-store surface. Submission
+///   is deliberately separate (<see cref="IMailSubmitOperations" />): store and submit are
+///   different roles that may be served by different backends (IMAP + SMTP today; one JMAP
+///   session may serve both).
+/// </summary>
+public interface IMailStoreOperations
 {
-	/// <summary>Submits a raw MIME message via SMTP.</summary>
-	Task SendAsync(byte[] mime, CancellationToken ct);
-
 	/// <summary>Appends a raw MIME message to the Sent folder.</summary>
 	Task SaveToSentAsync(byte[] mime, CancellationToken ct);
 
@@ -26,6 +28,13 @@ public interface IMailOperations
 
 	/// <summary>Empties a folder (ItemOperations EmptyFolderContents).</summary>
 	Task EmptyFolderAsync(string folderBackendKey, CancellationToken ct);
+}
+
+/// <summary>Outbound mail submission (SMTP today; a JMAP backend may submit itself).</summary>
+public interface IMailSubmitOperations
+{
+	/// <summary>Submits a raw MIME message for delivery.</summary>
+	Task SendAsync(byte[] mime, CancellationToken ct);
 }
 
 /// <summary>
@@ -109,7 +118,8 @@ public interface IBackendSession : IAsyncDisposable
 	/// <summary>All content stores available for this deployment (mail always; DAV stores if configured).</summary>
 	IReadOnlyList<IContentStore> Stores { get; }
 
-	IMailOperations Mail { get; }
+	IMailStoreOperations MailStore { get; }
+	IMailSubmitOperations MailSubmit { get; }
 	IContactOperations? Contacts { get; }
 	ICalendarOperations? Calendar { get; }
 

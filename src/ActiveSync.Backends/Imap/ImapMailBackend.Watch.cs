@@ -28,7 +28,7 @@ public sealed partial class ImapMailBackend
 		logger.LogDebug(
 			"IMAP watch: {Folders} for {User} (timeout {Timeout}, idle on {IdleFolder})",
 			string.Join(", ", folderBackendKeys.Select(ImapSession.FromBackendKey)),
-			credentials.UserName, timeout,
+			session.UserName, timeout,
 			watcher is null ? "(none, STATUS polling only)" : ImapSession.FromBackendKey(idleKey!));
 
 		if (watcher is null)
@@ -92,14 +92,14 @@ public sealed partial class ImapMailBackend
 				foreach (string key in changed)
 					logger.LogInformation(
 						"IMAP STATUS: \"{Folder}\" changed for {User} (count:uidnext:unread {Baseline} -> {Current})",
-						ImapSession.FromBackendKey(key), credentials.UserName,
+						ImapSession.FromBackendKey(key), session.UserName,
 						baseline.GetValueOrDefault(key, "?"), current.GetValueOrDefault(key, "?"));
 				return changed;
 			}
 		}
 
 		logger.LogDebug("IMAP watch: no backend changes in {Folders} for {User} within the heartbeat",
-			string.Join(", ", folderBackendKeys.Select(ImapSession.FromBackendKey)), credentials.UserName);
+			string.Join(", ", folderBackendKeys.Select(ImapSession.FromBackendKey)), session.UserName);
 		return [];
 	}
 

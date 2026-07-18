@@ -177,7 +177,7 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 	{
 		using MemoryStream output = new();
 		await message.WriteToAsync(output, ct);
-		await context.Session.Mail.SendAsync(output.ToArray(), ct);
+		await context.Session.MailSubmit.SendAsync(output.ToArray(), ct);
 		logger.LogInformation("iMIP {Method} sent to {Count} recipient(s) for {User}",
 			(message.Body as MimePart)?.ContentType.Parameters["method"] ?? "?",
 			message.To.Count, context.Device.UserName);
