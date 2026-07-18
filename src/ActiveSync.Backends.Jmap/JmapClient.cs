@@ -287,12 +287,16 @@ public sealed class JmapClient : IDisposable
 	/// </summary>
 	private string Rebase(string advertised)
 	{
+		// Stalwart 0.13 advertises absolute URLs on its own hostname; 0.16 advertises
+		// relative paths. Both anchor onto the base URL's origin, keeping path + templates.
+		string origin = $"{_baseUri.Scheme}://{_baseUri.Authority}";
+		if (advertised.StartsWith('/'))
+			return origin + advertised;
 		int schemeEnd = advertised.IndexOf("://", StringComparison.Ordinal);
 		if (schemeEnd < 0)
-			return advertised; // already relative — resolve against base at use time
+			return $"{origin}/{advertised}";
 		int pathStart = advertised.IndexOf('/', schemeEnd + 3);
-		string pathAndQuery = pathStart >= 0 ? advertised[pathStart..] : "/";
-		return $"{_baseUri.Scheme}://{_baseUri.Authority}{pathAndQuery}";
+		return origin + (pathStart >= 0 ? advertised[pathStart..] : "/");
 	}
 
 	private static string RequireString(JsonElement root, string name)

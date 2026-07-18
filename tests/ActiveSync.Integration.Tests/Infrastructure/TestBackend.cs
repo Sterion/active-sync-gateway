@@ -26,6 +26,16 @@ public static class TestBackend
 	/// </summary>
 	public static string? JmapUrl { get; } = EnvOrNull("AS_TEST_JMAP_URL") ?? DavUrl;
 
+	/// <summary>
+	///   JMAP-groupware server (calendars + contacts) — the 0.13 default stack doesn't advertise
+	///   those capabilities, so this points at the 0.16 stack under
+	///   docker/backends/stalwart-jmap (single admin account, bootstrap mode).
+	/// </summary>
+	public static string JmapGroupwareUrl { get; } = Env("AS_TEST_JMAP_GROUPWARE_URL", "http://localhost:18080");
+
+	public static string JmapGroupwareUser { get; } = Env("AS_TEST_JMAP_GROUPWARE_USER", "admin");
+	public static string JmapGroupwarePassword { get; } = Env("AS_TEST_JMAP_GROUPWARE_PASSWORD", "secret");
+
 	/// <summary>ManageSieve (Oof) — Stalwart only; the mailserver stack has no sieve listener.</summary>
 	public static string SieveHost { get; } = Env("AS_TEST_SIEVE_HOST", ImapHost);
 
@@ -89,6 +99,42 @@ public sealed class BackendFactAttribute : FactAttribute
 	{
 		if (!TestBackend.IsAvailable)
 			Skip = TestBackend.SkipReason;
+	}
+}
+
+/// <summary>A [Fact] that runs only when a JMAP-groupware server (calendars + contacts) is reachable.</summary>
+public sealed class JmapGroupwareFactAttribute : FactAttribute
+{
+	private static readonly Lazy<string?> Reason = new(() =>
+	{
+		try
+		{
+			// Synchronous HttpClient.Send + ReadAsStream: this runs in the xunit discovery path
+			// (attribute ctor), where blocking on async would trip the threading analyzer.
+			using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(5) };
+			string token = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+				$"{TestBackend.JmapGroupwareUser}:{TestBackend.JmapGroupwarePassword}"));
+			HttpRequestMessage request = new(
+				HttpMethod.Get, new Uri(new Uri(TestBackend.JmapGroupwareUrl), "/.well-known/jmap"));
+			request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", token);
+			using HttpResponseMessage response = http.Send(request);
+			using StreamReader reader = new(response.Content.ReadAsStream());
+			string body = reader.ReadToEnd();
+			return body.Contains("urn:ietf:params:jmap:contacts") && body.Contains("urn:ietf:params:jmap:calendars")
+				? null
+				: $"JMAP-groupware server at {TestBackend.JmapGroupwareUrl} lacks calendars/contacts capabilities.";
+		}
+		catch (Exception ex)
+		{
+			return $"No JMAP-groupware server at {TestBackend.JmapGroupwareUrl} " +
+			       "(start docker/backends/stalwart-jmap) — " + ex.GetBaseException().Message;
+		}
+	});
+
+	public JmapGroupwareFactAttribute()
+	{
+		if (Reason.Value is not null)
+			Skip = Reason.Value;
 	}
 }
 

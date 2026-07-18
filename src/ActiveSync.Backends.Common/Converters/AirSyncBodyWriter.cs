@@ -8,7 +8,7 @@ namespace ActiveSync.Backends.Converters;
 ///   converters (plain-text, Type 1). Callers supply the full-text byte size (which the client
 ///   uses to decide whether to re-fetch untruncated) and the possibly-truncated data.
 /// </summary>
-internal static class AirSyncBodyWriter
+public static class AirSyncBodyWriter
 {
 	private static readonly XNamespace AirSyncBase = EasNamespaces.AirSyncBase;
 

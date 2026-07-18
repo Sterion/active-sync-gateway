@@ -16,8 +16,10 @@ namespace ActiveSync.Backends.Jmap;
 /// </summary>
 public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier, IReadinessSource
 {
-	private static readonly IReadOnlySet<BackendRole> Roles =
-		new HashSet<BackendRole> { BackendRole.MailStore, BackendRole.MailSubmit, BackendRole.Oof };
+	private static readonly IReadOnlySet<BackendRole> Roles = new HashSet<BackendRole>
+	{
+		BackendRole.MailStore, BackendRole.MailSubmit, BackendRole.Oof, BackendRole.Contacts
+	};
 
 	private readonly ActiveSyncOptions _options;
 	private readonly ILogger _logger;
@@ -74,6 +76,9 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 					break;
 				case BackendRole.Oof:
 					oof = new JmapOofBackend(client);
+					break;
+				case BackendRole.Contacts:
+					stores.Add(new JmapContactStore(client, _options.Eas.DavPollSeconds));
 					break;
 			}
 
