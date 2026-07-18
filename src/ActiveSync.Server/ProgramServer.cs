@@ -114,6 +114,10 @@ public partial class Program
 		builder.Services.AddSingleton<AuthThrottle>();
 		builder.Services.AddSingleton<LocalChangeNotifier>();
 		builder.Services.AddBackendProviders();
+		// Out-of-repo backend plugins register their providers here (before the registry is
+		// built). A broken/incompatible plugin fails startup — see PluginLoader.
+		ActiveSync.Core.Plugins.PluginLoader.LoadInto(builder.Services, builder.Configuration,
+			new Serilog.Extensions.Logging.SerilogLoggerFactory(Log.Logger).CreateLogger("ActiveSync.Plugins"));
 		builder.Services.AddSingleton<BackendSessionFactory>();
 		builder.Services.AddSingleton<IBackendSessionFactory>(sp => sp.GetRequiredService<BackendSessionFactory>());
 		builder.Services.AddEasHandlers();

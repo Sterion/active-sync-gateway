@@ -54,7 +54,9 @@ RUN printf '#!/bin/sh\ncd /app\nexec dotnet /app/ActiveSync.Server.dll "$@"\n' \
     && chmod 755 /usr/local/bin/eas
 
 # Run as the image's built-in non-root user; give it ownership of the state volume.
-RUN mkdir -p /data && chown -R app:app /data
+# /app/plugins is where out-of-repo backend plugins are dropped (one subdir each) —
+# bind-mount it or COPY into a derived image; see docs/plugins.md.
+RUN mkdir -p /data /app/plugins && chown -R app:app /data /app/plugins
 VOLUME /data
 USER app
 

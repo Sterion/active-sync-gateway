@@ -22,6 +22,18 @@
 		<ProjectReference Include="..\..\src\ActiveSync.Backends.Dav\ActiveSync.Backends.Dav.csproj" />
 		<ProjectReference Include="..\..\src\ActiveSync.Backends.Sieve\ActiveSync.Backends.Sieve.csproj" />
 		<ProjectReference Include="..\..\src\ActiveSync.Backends.Local\ActiveSync.Backends.Local.csproj" />
+		<!-- Built (not referenced) so PluginLoaderTests can load it from a plugins dir at
+		     runtime; the AfterBuild target below stages its DLL under testplugin/. -->
+		<ProjectReference Include="..\ActiveSync.TestPlugin\ActiveSync.TestPlugin.csproj"
+		                  ReferenceOutputAssembly="false" />
 	</ItemGroup>
+
+	<!-- Stage the fixture plugin's assembly in a subfolder of the test output (NOT the base
+	     dir — it must not be probed by the default load context) so PluginLoaderTests can copy
+	     it into a temp plugins directory and load it fresh. -->
+	<Target Name="StageTestPlugin" AfterTargets="Build">
+		<Copy SourceFiles="$(MSBuildThisFileDirectory)..\ActiveSync.TestPlugin\bin\$(Configuration)\$(TargetFramework)\ActiveSync.TestPlugin.dll"
+		      DestinationFolder="$(OutDir)testplugin" SkipUnchangedFiles="true" />
+	</Target>
 
 </Project>

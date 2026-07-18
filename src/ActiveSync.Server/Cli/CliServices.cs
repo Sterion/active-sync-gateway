@@ -41,6 +41,18 @@ internal static class CliServices
 		services.AddLocalContentProtection();
 		services.AddSingleton<ActiveSync.Backends.Local.LocalChangeNotifier>();
 		services.AddBackendProviders();
+		try
+		{
+			// Load plugins so `eas user` validation sees plugin-provided backends too.
+			ActiveSync.Core.Plugins.PluginLoader.LoadInto(services, config,
+				Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+		}
+		catch (InvalidOperationException ex)
+		{
+			await Console.Error.WriteLineAsync($"Plugin load failed: {ex.Message}");
+			return null;
+		}
+
 		services.AddSingleton<ActiveSync.Core.Accounts.AccountStore>();
 		ServiceProvider provider = services.BuildServiceProvider();
 

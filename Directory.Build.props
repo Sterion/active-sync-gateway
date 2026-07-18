@@ -7,4 +7,27 @@
 		<GenerateDocumentationFile>false</GenerateDocumentationFile>
 		<AnalysisLevel>latest</AnalysisLevel>
 	</PropertyGroup>
+
+	<!-- NuGet: nothing packs unless a project opts in with <IsPackable>true</IsPackable>.
+	     The plugin contract assemblies (Protocol, Core, Backends.Common) do; see the CI
+	     pack/push step. Metadata lives here so the three packages stay consistent. -->
+	<PropertyGroup>
+		<IsPackable>false</IsPackable>
+		<Authors>Sterion</Authors>
+		<Company>Sterion</Company>
+		<Product>ActiveSync Gateway</Product>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageProjectUrl>https://github.com/Sterion/active-sync-gateway</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/Sterion/active-sync-gateway.git</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<!-- Deterministic builds on CI (Continuous Integration Build). -->
+		<ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+	</PropertyGroup>
+
+	<ItemGroup Condition="'$(IsPackable)' == 'true'">
+		<PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
+	</ItemGroup>
 </Project>

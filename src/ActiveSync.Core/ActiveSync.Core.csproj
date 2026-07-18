@@ -1,5 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+	<!-- Published so out-of-repo plugins compile against the backend provider contract
+	     (IBackendProvider, IContentStore, IGatewayPlugin, options, account model). -->
+	<PropertyGroup>
+		<IsPackable>true</IsPackable>
+		<PackageId>ActiveSync.Core</PackageId>
+		<Description>ActiveSync Gateway — backend provider contract (IBackendProvider, IContentStore, IGatewayPlugin) and shared options/account model. The package to reference when writing a gateway backend plugin.</Description>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<ProjectReference Include="..\ActiveSync.Protocol\ActiveSync.Protocol.csproj" />
 	</ItemGroup>

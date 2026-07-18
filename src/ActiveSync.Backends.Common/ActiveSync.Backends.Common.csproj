@@ -2,7 +2,14 @@
 
 	<!-- Shared backend building blocks: the MIME/iCalendar/vCard <-> EAS converters plus the
 	     TLS/wire-logging helpers every network provider reuses. Carries the heavy converter
-	     package dependencies so Core stays free of them. -->
+	     package dependencies so Core stays free of them. Published so plugins can reuse the
+	     converters. -->
+	<PropertyGroup>
+		<IsPackable>true</IsPackable>
+		<PackageId>ActiveSync.Backends.Common</PackageId>
+		<Description>ActiveSync Gateway — shared backend building blocks (MIME/iCalendar/vCard converters, TLS/wire-logging helpers) for backend plugins.</Description>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
 	</ItemGroup>

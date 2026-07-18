@@ -937,6 +937,12 @@ src/
                          one handler class per EAS command, provider DI wiring, the `eas` CLI.
 ```
 
+**Backend plugins.** Backends are named *providers* that fill *roles*; a new backend (e.g.
+Stalwart-native JMAP, or your own) is just another provider assembly. Out-of-repo plugins
+drop into `/app/plugins` and register themselves — no fork required. The contract
+(`ActiveSync.Protocol`, `ActiveSync.Core`, `ActiveSync.Backends.Common`) is published to
+NuGet per release. See **[docs/plugins.md](docs/plugins.md)**.
+
 Design notes:
 
 - **Differential sync** (Z-Push style): each Sync round compares a stored snapshot

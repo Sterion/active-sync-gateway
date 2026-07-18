@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- A minimal out-of-repo-style plugin, compiled so PluginLoaderTests can load it from a
+	     temp plugins directory. References Core only (the published contract). Not packable
+	     and not a test project itself. -->
+	<PropertyGroup>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\src\ActiveSync.Core\ActiveSync.Core.csproj" />
+	</ItemGroup>
+
+</Project>

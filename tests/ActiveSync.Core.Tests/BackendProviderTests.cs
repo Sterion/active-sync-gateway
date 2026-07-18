@@ -41,10 +41,10 @@ public class BackendProviderTests
 		FakeProvider rest = new("rest", [BackendRole.Calendar, BackendRole.Contacts]);
 		CompositeBackendSession session = new(Registry(mail, rest), Gateway, "user@x",
 			[
-				new ResolvedRole(BackendRole.MailStore, "mail", null, Gateway),
-				new ResolvedRole(BackendRole.MailSubmit, "mail", null, Gateway),
-				new ResolvedRole(BackendRole.Calendar, "rest", null, Gateway),
-				new ResolvedRole(BackendRole.Contacts, "rest", null, Gateway)
+				new ResolvedRole(BackendRole.MailStore, "mail", ProviderSettings.Empty, Gateway),
+				new ResolvedRole(BackendRole.MailSubmit, "mail", ProviderSettings.Empty, Gateway),
+				new ResolvedRole(BackendRole.Calendar, "rest", ProviderSettings.Empty, Gateway),
+				new ResolvedRole(BackendRole.Contacts, "rest", ProviderSettings.Empty, Gateway)
 			], []);
 
 		// One connection per provider, carrying exactly the roles assigned to it.
@@ -72,10 +72,10 @@ public class BackendProviderTests
 		FakeProvider submit = new("submit", [BackendRole.MailSubmit]);
 		Assert.Throws<InvalidOperationException>(() => new CompositeBackendSession(
 			Registry(store, submit), Gateway, null,
-			[new ResolvedRole(BackendRole.MailStore, "store", null, Gateway)], []));
+			[new ResolvedRole(BackendRole.MailStore, "store", ProviderSettings.Empty, Gateway)], []));
 		Assert.Throws<InvalidOperationException>(() => new CompositeBackendSession(
 			Registry(store, submit), Gateway, null,
-			[new ResolvedRole(BackendRole.MailSubmit, "submit", null, Gateway)], []));
+			[new ResolvedRole(BackendRole.MailSubmit, "submit", ProviderSettings.Empty, Gateway)], []));
 	}
 
 	[Fact]
@@ -84,8 +84,8 @@ public class BackendProviderTests
 		FakeProvider mail = new("mail", [BackendRole.MailStore, BackendRole.MailSubmit]);
 		CompositeBackendSession session = new(Registry(mail), Gateway, null,
 			[
-				new ResolvedRole(BackendRole.MailStore, "mail", null, Gateway),
-				new ResolvedRole(BackendRole.MailSubmit, "mail", null, Gateway)
+				new ResolvedRole(BackendRole.MailStore, "mail", ProviderSettings.Empty, Gateway),
+				new ResolvedRole(BackendRole.MailSubmit, "mail", ProviderSettings.Empty, Gateway)
 			], []);
 		await session.DisposeAsync();
 		Assert.True(mail.LastResource!.Disposed);

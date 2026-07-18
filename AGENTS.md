@@ -392,6 +392,16 @@ derive an address from `UserName` with `Contains('@')`.
   `ICredentialVerifier` (auth probe — the MailStore role's provider verifies pass-through
   logins; a provider without it means declared-users-only), `IPerUserResourceOwner`
   (per-user cache trim on the eviction sweep), `IReadinessSource` (/readyz probe).
+- **Out-of-repo plugins**: `Core/Plugins/PluginLoader` loads assemblies from
+  `ActiveSync:Plugins:Directory` (default `/app/plugins`, one subdir per plugin, entry dll
+  = dir name) in a per-plugin non-collectible `AssemblyLoadContext` that resolves the
+  contract (Core/Protocol/Backends.*/framework) from the HOST — so a plugin's
+  `IBackendProvider` IS the host type the registry indexes. Each `IGatewayPlugin.Register`
+  adds its providers. Fail-fast (corrupt/incompatible/no-entry aborts startup; empty dir =
+  no-op), major-version-gated against `ActiveSync.Core`. Wired in ProgramServer AND
+  CliServices before the container is built. Protocol/Core/Backends.Common are packed to
+  NuGet on tagged CI so plugin authors compile against the contract; see docs/plugins.md
+  (contract NOT ABI-stable pre-2.0).
 - One `CompositeBackendSession` per (user, deviceId), cached in `BackendSessionFactory`
   with idle eviction; auth verdicts are cached ~5 minutes. Content roles are optional —
   when a role has no configured provider it falls back to the **local store** (below), so

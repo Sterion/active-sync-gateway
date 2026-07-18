@@ -1,3 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+	<!-- Published so out-of-repo plugins compile against the EAS/WBXML contract. -->
+	<PropertyGroup>
+		<IsPackable>true</IsPackable>
+		<PackageId>ActiveSync.Protocol</PackageId>
+		<Description>ActiveSync Gateway — EAS/WBXML protocol primitives (code pages, constants, query parser). Reference this to build a gateway backend plugin.</Description>
+	</PropertyGroup>
+
 </Project>
