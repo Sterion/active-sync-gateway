@@ -213,6 +213,16 @@ live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
   Status 3; EmptyFolderContents/MeetingResponse Status 2. Settings/Provision stay writable
   (they only touch our own state DB). If you add a new write path, wire it into this
   scheme.
+- **Shared calendars** ride the same silent-revert path per folder:
+  `IBackendSession.IsReadOnlyFolder` (CalDavStore matches the folder href against
+  read-only grants) ORs into SyncHandler's `readOnly` flag. Grants = config
+  `CalDav:SharedCollections` ("href|ro" entries) ∪ DB `SharedCalendarGrants` (`eas
+  share`, DB wins per href), loaded once per session build in BackendSessionFactory —
+  changes apply on session recycle, not immediately. Href comparison against grants is
+  deliberately lenient (`SharedHrefEquals`: unescape + case-insensitive) because servers
+  canonicalize hrefs; `ListFoldersAsync` dedupes shared entries against the home set
+  BOTH before and after the depth-0 probe for the same reason. A granted collection
+  that fails its probe is skipped with a warning — never break folder sync over a share.
 
 ## State store
 

@@ -41,6 +41,9 @@ MS-ASCNTC, MS-ASTZ) in modern async C#.
   their calendars (e.g. an explicit `HomeSetPath` template plus server-side grants) and
   degrade to a clean per-recipient "no data" status otherwise — RFC 6638 scheduling is
   not implemented because no supported backend offers it.
+- **Shared calendars**: extra CalDAV collections sync as additional calendar folders —
+  statically via `CalDav:SharedCollections` or per user at runtime via `eas share`
+  grants, each read-write or **gateway-enforced read-only**.
 - **EAS 16.x features**: server-synced **Drafts** (compose on one device, finish on
   another; `Send` submits a draft), calendar **event attachments** (stored inline in the
   event, works on any CalDAV server and the local store), 16.x calendar semantics
@@ -271,6 +274,7 @@ Omit a section entirely and that content class is served from the gateway databa
 | `HomeSetPath` | `null` | Home-set path template; `{user}` and `{localpart}` are substituted (Radicale/Baikal style: `"/{user}/"`). Unset → RFC 6764 discovery via `.well-known` + `current-user-principal`. |
 | `TaskFolder` | `"Tasks"` | *(CalDav only)* Name of the VTODO (tasks) collection in the calendar home set; when a collection with this display name or path segment exists, it becomes the ActiveSync Tasks folder (Axigen ships one named "Tasks"). Empty → tasks are stored in the gateway database instead. Recurring tasks sync (regenerating "n days after completion" tasks have no iCalendar equivalent and keep their fixed schedule). |
 | `CalendarAttachments` | `"Auto"` | *(CalDav only)* Event attachments for EAS 16.x clients: `Auto` (enabled, 1 MiB per attachment), `On` (enabled, 16 MiB) or `Off`. Attachments are stored **inline** in the event (base64 `ATTACH` property), so they work against any CalDAV server — the cap protects the DAV server from bloated items. Per-user overridable. |
+| `SharedCollections` | unset | *(CalDav only)* Extra collection hrefs synced as additional calendar folders for every user: absolute paths (`"/dav/cal/team/"`) or same-host URLs, suffix `\|ro` for gateway-enforced read-only (client edits are silently reverted). Collections the server refuses (403/404) are skipped with a warning. Per-user overridable (a user's list **replaces** the global one); per-user runtime grants via `eas share`. |
 | `AllowInvalidCertificates` | `false` | As above. |
 | `CaCertificatePath` | `null` | As above. |
 
@@ -715,6 +719,9 @@ appsettings.json in the working directory.
 | --- | --- |
 | `block <user> [deviceId]` | Refuse logins with **403** — the whole user, or one device. |
 | `unblock <user> [deviceId]` | Remove a login block. |
+| `share add <user> <collectionHref> [--read-only]` | Grant an extra CalDAV collection to a user as a shared calendar folder (`--read-only` = client edits silently reverted by the gateway). Applies at the next backend-session build (idle recycle or restart). |
+| `share remove <user> <collectionHref>` | Remove a grant — the folder disappears at the next session build. |
+| `share list [user]` | List shared-calendar grants. |
 | `purge user <user>` | Delete ALL of a user's state (asks for confirmation, or `--yes`). |
 | `purge device <user> <deviceId>` | Delete one device registration (it re-syncs from scratch). |
 

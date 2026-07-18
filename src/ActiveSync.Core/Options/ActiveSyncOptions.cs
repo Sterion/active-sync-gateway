@@ -85,6 +85,15 @@ public sealed class DavServerOptions
 	///   the DAV server.
 	/// </summary>
 	public string CalendarAttachments { get; set; } = "Auto";
+
+	/// <summary>
+	///   CalDav only (CardDav ignores it for now) — extra collection hrefs synced as
+	///   additional calendar folders on every device: absolute paths ("/dav/cal/team/") or
+	///   same-host URLs, each optionally suffixed "|ro" for gateway-enforced read-only.
+	///   Collections the DAV server refuses (403/404) are skipped with a warning, never
+	///   breaking folder sync. Runtime per-user grants via `eas share` add to this list.
+	/// </summary>
+	public List<string>? SharedCollections { get; set; }
 }
 
 /// <summary>

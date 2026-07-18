@@ -334,6 +334,34 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.ToTable("ServerCertificates");
                 });
 
+            modelBuilder.Entity("ActiveSync.Core.State.SharedCalendarGrant", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CollectionHref")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("ReadOnly")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserName", "CollectionHref")
+                        .IsUnique();
+
+                    b.ToTable("SharedCalendarGrants");
+                });
+
             modelBuilder.Entity("ActiveSync.Core.State.UserFolder", b =>
                 {
                     b.Property<int>("Id")

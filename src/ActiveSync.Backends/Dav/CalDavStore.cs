@@ -13,11 +13,31 @@ public sealed class CalDavStore(
 	DavServerOptions options,
 	BackendCredentials credentials,
 	string partStatIdentity,
-	ILogger logger)
+	ILogger logger,
+	IReadOnlyList<SharedCollection>? sharedCollections = null)
 	: DavStoreBase(dav, options, credentials, logger),
 		ICalendarOperations, ICalendarAttachmentSource, IFreeBusySource
 {
 	public const string KeyPrefix = "caldav:";
+
+	private readonly IReadOnlyList<SharedCollection> _sharedCollections = sharedCollections ?? [];
+
+	/// <summary>Whether a folder maps to a shared collection granted read-only.</summary>
+	public bool IsReadOnlyCollection(string folderBackendKey)
+	{
+		string href = FromBackendKey(folderBackendKey);
+		return _sharedCollections.Any(c => c.ReadOnly && SharedHrefEquals(c.Href, href));
+	}
+
+	/// <summary>
+	///   Grant-vs-server href comparison: servers canonicalize hrefs (percent-encoding,
+	///   case), while grants hold whatever the operator typed — compare leniently.
+	/// </summary>
+	private static bool SharedHrefEquals(string a, string b)
+	{
+		return Uri.UnescapeDataString(a).TrimEnd('/')
+			.Equals(Uri.UnescapeDataString(b).TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+	}
 
 	protected override string Prefix => KeyPrefix;
 	public override string EasClass => Protocol.EasClass.Calendar;
@@ -184,6 +204,58 @@ public sealed class CalDavStore(
 				first ? EasFolderType.Calendar : EasFolderType.UserCalendar,
 				Protocol.EasClass.Calendar));
 			first = false;
+		}
+
+		// Shared collections (config + `eas share` grants): each is probed individually and
+		// SKIPPED on any failure — an unreachable/revoked share must never break folder sync.
+		foreach (SharedCollection shared in _sharedCollections)
+		{
+			if (folders.Any(f => SharedHrefEquals(FromBackendKey(f.BackendKey), shared.Href)))
+				continue; // already in the user's own home set
+			try
+			{
+				List<DavResource> probe = await Dav.PropfindAsync(shared.Href, 0, body, ct)
+					.ConfigureAwait(false);
+				DavResource? resource = probe.FirstOrDefault();
+				XElement? type = resource?.Propstat.Descendants(DavNs.D + "resourcetype").FirstOrDefault();
+				if (type?.Element(DavNs.CalDav + "calendar") is null)
+				{
+					Logger.LogWarning("Shared collection {Href} is not a calendar collection; skipped",
+						shared.Href);
+					continue;
+				}
+
+				List<string?> components = resource!.Propstat
+					.Descendants(DavNs.CalDav + "supported-calendar-component-set")
+					.Descendants(DavNs.CalDav + "comp")
+					.Select(c => c.Attribute("name")?.Value)
+					.Where(n => n is not null)
+					.ToList();
+				if (components.Count > 0 && !components.Contains("VEVENT"))
+				{
+					Logger.LogWarning("Shared collection {Href} does not carry events; skipped", shared.Href);
+					continue;
+				}
+
+				// Dedupe AGAIN on the server's canonical href: the configured entry and the
+				// home-set listing may spell the same collection differently (encoding, case).
+				if (folders.Any(f => SharedHrefEquals(FromBackendKey(f.BackendKey), resource.Href)))
+					continue;
+				string? name = resource.Propstat.Descendants(DavNs.D + "displayname").FirstOrDefault()?.Value;
+				if (string.IsNullOrWhiteSpace(name))
+					name = shared.Href.TrimEnd('/').Split('/').LastOrDefault() ?? "Shared";
+				folders.Add(new BackendFolder(
+					ToBackendKey(resource.Href),
+					name,
+					null,
+					EasFolderType.UserCalendar,
+					Protocol.EasClass.Calendar));
+			}
+			catch (BackendException ex)
+			{
+				Logger.LogWarning("Shared collection {Href} is not accessible ({Reason}); skipped",
+					shared.Href, ex.Message);
+			}
 		}
 
 		return folders;

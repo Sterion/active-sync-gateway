@@ -166,6 +166,20 @@ public class LoginBlock
 }
 
 /// <summary>
+///   A CLI-managed grant exposing one extra CalDAV collection to one user as an additional
+///   calendar folder (`eas share`). ReadOnly grants are enforced gateway-side (silent
+///   revert, like ReadOnly mode) on top of whatever the DAV server itself allows.
+/// </summary>
+public class SharedCalendarGrant
+{
+	public int Id { get; set; }
+	public required string UserName { get; set; }
+	public required string CollectionHref { get; set; }
+	public bool ReadOnly { get; set; }
+	public DateTime CreatedUtc { get; set; }
+}
+
+/// <summary>
 ///   A database-declared user account entry: <see cref="Json" /> holds the serialized
 ///   ActiveSync.Core.Options.AccountOptions shape, secrets stored exactly as config would
 ///   hold them (pbkdf2$/plaintext/enc:v1:). A row REPLACES the whole config entry for the

@@ -105,6 +105,12 @@ public interface IBackendSession : IAsyncDisposable
 
 	IContentStore? GetStoreForClass(string easClass);
 	IContentStore? GetStoreForBackendKey(string backendKey);
+
+	/// <summary>
+	///   Whether the folder is granted read-only (shared calendars): client writes are then
+	///   silently reverted, the same convergence semantics as global ReadOnly mode.
+	/// </summary>
+	bool IsReadOnlyFolder(string folderBackendKey);
 }
 
 public interface IBackendSessionFactory

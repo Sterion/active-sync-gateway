@@ -61,6 +61,16 @@ internal static class CliApp
 			device.AddCommand<DeviceWipeCommand>("wipe")
 				.WithDescription("Arm (or --cancel) a 16.1 account-only wipe: removes the account from the device, never the device itself.");
 		});
+		config.AddBranch("share", share =>
+		{
+			share.SetDescription("Grant extra CalDAV collections to users as shared calendar folders.");
+			share.AddCommand<ShareAddCommand>("add")
+				.WithDescription("Grant a collection to a user (--read-only for gateway-enforced read-only).");
+			share.AddCommand<ShareRemoveCommand>("remove")
+				.WithDescription("Remove a grant (the folder disappears at the next session build).");
+			share.AddCommand<ShareListCommand>("list")
+				.WithDescription("List shared-calendar grants, optionally for one user.");
+		});
 		config.AddBranch("purge", purge =>
 		{
 			purge.SetDescription("Permanently delete gateway state (asks for confirmation).");

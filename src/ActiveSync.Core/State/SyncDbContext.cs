@@ -22,6 +22,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	public DbSet<AccountsStamp> AccountsStamps => Set<AccountsStamp>();
 	public DbSet<ServerCertificate> ServerCertificates => Set<ServerCertificate>();
 	public DbSet<OofSetting> OofSettings => Set<OofSetting>();
+	public DbSet<SharedCalendarGrant> SharedCalendarGrants => Set<SharedCalendarGrant>();
 
 	protected override void OnModelCreating(ModelBuilder modelBuilder)
 	{
@@ -77,6 +78,9 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 
 		modelBuilder.Entity<OofSetting>(e =>
 			e.HasIndex(o => o.UserName).IsUnique());
+
+		modelBuilder.Entity<SharedCalendarGrant>(e =>
+			e.HasIndex(g => new { g.UserName, g.CollectionHref }).IsUnique());
 	}
 
 	// Re-stamp the concurrency token on every insert/update so a lost update (two writers

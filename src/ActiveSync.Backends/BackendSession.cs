@@ -24,6 +24,8 @@ public sealed class BackendSession : IBackendSession
 	private readonly ImapSession _imapSession;
 	private readonly List<IContentStore> _stores = [];
 
+	private readonly CalDavStore? _calDavStore;
+
 	public BackendSession(
 		ResolvedAccount account,
 		BackendCredentials gatewayCredentials,
@@ -32,7 +34,8 @@ public sealed class BackendSession : IBackendSession
 		LocalContentProtector protector,
 		Func<string, ImapIdleWatcher?> idleWatcherProvider,
 		ILogger logger,
-		ILoggerFactory loggerFactory)
+		ILoggerFactory loggerFactory,
+		IReadOnlyList<SharedCollection>? sharedCalendars = null)
 	{
 		// The gateway credentials are the IDENTITY (DB scoping, encryption AAD, cache keys);
 		// each backend authenticates with the account's resolved per-backend credentials.
@@ -60,8 +63,9 @@ public sealed class BackendSession : IBackendSession
 			_calDavClient = new WebDavClient(new Uri(calDavOptions.BaseUrl), account.CalDav.Credentials,
 				calDavOptions.AllowInvalidCertificates, calDavOptions.CaCertificatePath, davWireLogger);
 			CalDavStore calStore = new(_calDavClient, calDavOptions, account.CalDav.Credentials,
-				partStatIdentity, logger);
+				partStatIdentity, logger, sharedCalendars);
 			Calendar = calStore;
+			_calDavStore = calStore;
 			_stores.Add(calStore);
 		}
 		else
@@ -131,6 +135,13 @@ public sealed class BackendSession : IBackendSession
 		if (backendKey.StartsWith(LocalStoreBase.KeyPrefix, StringComparison.Ordinal))
 			return _stores.FirstOrDefault(s => s is LocalStoreBase local && local.FolderBackendKey == backendKey);
 		return null;
+	}
+
+	public bool IsReadOnlyFolder(string folderBackendKey)
+	{
+		return _calDavStore is not null &&
+		       folderBackendKey.StartsWith(CalDavStore.KeyPrefix, StringComparison.Ordinal) &&
+		       _calDavStore.IsReadOnlyCollection(folderBackendKey);
 	}
 
 	public async ValueTask DisposeAsync()

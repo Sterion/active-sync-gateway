@@ -127,6 +127,33 @@ public class AccountResolverTests
 	}
 
 	[Fact]
+	public void SharedCollections_InheritOrReplace_LikeEveryOtherOverride()
+	{
+		ActiveSyncOptions options = BaseOptions();
+		options.CalDav = new DavServerOptions
+		{
+			BaseUrl = "https://dav.global",
+			SharedCollections = ["/cal/global/", "/cal/other/|ro"]
+		};
+		options.Users = new Dictionary<string, AccountOptions>
+		{
+			["inherits"] = new(),
+			["replaces"] = new()
+			{
+				CalDav = new DavAccountOptions { SharedCollections = ["/cal/own/"] }
+			}
+		};
+		AccountResolver resolver = Resolver(options);
+		BackendCredentials presented = new("x", "P");
+
+		ResolvedAccount inherits = resolver.Resolve(presented with { UserName = "inherits" });
+		Assert.Equal(["/cal/global/", "/cal/other/|ro"], inherits.CalDav!.Options.SharedCollections);
+
+		ResolvedAccount replaces = resolver.Resolve(presented with { UserName = "replaces" });
+		Assert.Equal(["/cal/own/"], replaces.CalDav!.Options.SharedCollections);
+	}
+
+	[Fact]
 	public void DavInheritance_DisableSwitch_AndPerUserOnlyDav()
 	{
 		ActiveSyncOptions options = BaseOptions();

@@ -453,12 +453,16 @@ public sealed class AccountResolver
 			TaskFolder = user?.TaskFolder ?? global?.TaskFolder ?? "Tasks",
 			AllowInvalidCertificates = user?.AllowInvalidCertificates ?? global?.AllowInvalidCertificates ?? false,
 			CaCertificatePath = user?.CaCertificatePath ?? global?.CaCertificatePath,
-			CalendarAttachments = user?.CalendarAttachments ?? global?.CalendarAttachments ?? "Auto"
+			CalendarAttachments = user?.CalendarAttachments ?? global?.CalendarAttachments ?? "Auto",
+			SharedCollections = user?.SharedCollections ?? global?.SharedCollections
 		};
 		if (merged.CalendarAttachments.ToLowerInvariant() is not ("auto" or "on" or "off"))
 			failures.Add(
 				$"ActiveSync:Users:{login}: effective {section}:CalendarAttachments " +
 				$"'{merged.CalendarAttachments}' is unknown (use Auto, On or Off).");
+		foreach (string entry in merged.SharedCollections ?? [])
+			if (Backend.SharedCollection.Validate(entry, merged.BaseUrl) is { } sharedFailure)
+				failures.Add($"ActiveSync:Users:{login}: effective {section}:SharedCollections: {sharedFailure}");
 		if (!Uri.TryCreate(merged.BaseUrl, UriKind.Absolute, out Uri? uri) ||
 		    (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
 			failures.Add(

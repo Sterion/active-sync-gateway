@@ -364,7 +364,9 @@ public sealed partial class SyncHandler(
 		EasContext context, UserFolder folder, IContentStore store, XElement command,
 		Dictionary<string, string> snapshot, BodyPreference bodyPreference, bool deletesAsMoves, CancellationToken ct)
 	{
-		bool readOnly = options.Value.ReadOnly;
+		// Global ReadOnly mode and per-folder read-only shared-calendar grants share the
+		// same enforcement: reject Adds, silently revert Changes/Deletes.
+		bool readOnly = options.Value.ReadOnly || context.Session.IsReadOnlyFolder(folder.BackendKey);
 		XElement? appData = command.Element(AS + "ApplicationData");
 		switch (command.Name.LocalName)
 		{

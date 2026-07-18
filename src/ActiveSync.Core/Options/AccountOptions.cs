@@ -60,6 +60,12 @@ public sealed class DavAccountOptions
 
 	/// <inheritdoc cref="DavServerOptions.CalendarAttachments" />
 	public string? CalendarAttachments { get; set; }
+
+	/// <summary>
+	///   <inheritdoc cref="DavServerOptions.SharedCollections" /> null = inherit the global
+	///   list; a non-null list REPLACES it (consistent with every other override).
+	/// </summary>
+	public List<string>? SharedCollections { get; set; }
 }
 
 /// <summary>Per-user ManageSieve override; unset fields inherit the global section.</summary>

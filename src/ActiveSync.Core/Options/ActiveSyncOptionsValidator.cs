@@ -191,5 +191,8 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 			failures.Add(
 				$"ActiveSync:{sectionName}:CalendarAttachments '{dav.CalendarAttachments}' is unknown " +
 				"(use Auto, On or Off).");
+		foreach (string entry in dav.SharedCollections ?? [])
+			if (Backend.SharedCollection.Validate(entry, dav.BaseUrl) is { } failure)
+				failures.Add($"ActiveSync:{sectionName}:SharedCollections: {failure}");
 	}
 }

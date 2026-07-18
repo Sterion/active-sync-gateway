@@ -10,6 +10,7 @@ using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
 using MailKit.Net.Imap;
 using MailKit.Security;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -159,6 +160,12 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			return GetOrCreateWatcher(account, folderFullName);
 		}
 
+		// Shared-calendar grants are read here (async) because the session constructor is
+		// synchronous; a session therefore carries the grants from its build time — `eas
+		// share` changes apply when the session is next rebuilt (idle eviction, restart).
+		IReadOnlyList<SharedCollection> sharedCalendars =
+			await LoadSharedCalendarsAsync(account, credentials.UserName, ct).ConfigureAwait(false);
+
 		// Cache keys and rotation compares stay on the GATEWAY login/password — per-backend
 		// user names never become identity, and in Accounts mode the backend credentials are
 		// config-static (restart to apply changes).
@@ -168,7 +175,8 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		{
 			created = true;
 			return new BackendSession(
-				account, credentials, _dbFactory, _notifier, _protector, WatcherProvider, _logger, _loggerFactory);
+				account, credentials, _dbFactory, _notifier, _protector, WatcherProvider, _logger, _loggerFactory,
+				sharedCalendars);
 		}));
 		BackendSession session = lazy.Value;
 		if (created)
@@ -184,12 +192,37 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 				_ => new Lazy<BackendSession>(() =>
 					new BackendSession(
 						account, credentials, _dbFactory, _notifier, _protector, WatcherProvider, _logger,
-						_loggerFactory)));
+						_loggerFactory, sharedCalendars)));
 			session = lazy.Value;
 		}
 
 		session.LastUsedUtc = DateTime.UtcNow;
 		return session;
+	}
+
+	/// <summary>
+	///   Config SharedCollections ∪ database `eas share` grants for this user; a grant for
+	///   the same collection overrides the config entry's mode. Empty without a CalDAV side.
+	/// </summary>
+	private async Task<IReadOnlyList<SharedCollection>> LoadSharedCalendarsAsync(
+		ResolvedAccount account, string userName, CancellationToken ct)
+	{
+		if (account.CalDav is null)
+			return [];
+		List<SharedCollection> merged = (account.CalDav.Options.SharedCollections ?? [])
+			.Select(SharedCollection.Parse)
+			.ToList();
+		await using SyncDbContext db = _dbFactory.CreateDbContext();
+		List<SharedCalendarGrant> grants = await db.SharedCalendarGrants.AsNoTracking()
+			.Where(g => g.UserName == userName)
+			.ToListAsync(ct).ConfigureAwait(false);
+		foreach (SharedCalendarGrant grant in grants)
+		{
+			merged.RemoveAll(c => c.Href.TrimEnd('/') == grant.CollectionHref.TrimEnd('/'));
+			merged.Add(new SharedCollection(grant.CollectionHref, grant.ReadOnly));
+		}
+
+		return merged;
 	}
 
 	/// <summary>

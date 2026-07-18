@@ -243,8 +243,11 @@ public static partial class StartupSummary
 		if (dav is null)
 			return "local storage (gateway database)";
 		string? homeSet = string.IsNullOrEmpty(dav.HomeSetPath) ? "RFC 6764 discovery" : dav.HomeSetPath;
+		string shared = dav.SharedCollections is { Count: > 0 } list
+			? $", shared: {list.Count} configured"
+			: "";
 		return
-			$"{dav.BaseUrl}  (home set: {homeSet}, certs={CertMode(dav.AllowInvalidCertificates, dav.CaCertificatePath)})";
+			$"{dav.BaseUrl}  (home set: {homeSet}, certs={CertMode(dav.AllowInvalidCertificates, dav.CaCertificatePath)}{shared})";
 	}
 
 	/// <summary>Certificate-validation mode marker; ACCEPT-ANY shouts on purpose.</summary>
