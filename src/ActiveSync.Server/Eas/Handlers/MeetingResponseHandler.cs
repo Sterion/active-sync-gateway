@@ -1,5 +1,6 @@
 using System.Text;
 using System.Xml.Linq;
+using ActiveSync.Backends.Converters;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
@@ -174,15 +175,8 @@ public sealed class MeetingResponseHandler(
 			.AppendLine("END:VCALENDAR")
 			.ToString();
 
-		MimeMessage reply = new();
-		reply.From.Add(new MailboxAddress(user, user));
-		reply.To.Add(new MailboxAddress(organizerEmail, organizerEmail));
-		reply.Subject = $"{verb}: {invite.Subject}";
-		reply.Body = new TextPart("calendar")
-		{
-			Text = replyIcs,
-			ContentType = { Parameters = { { "method", "REPLY" } } }
-		};
+		MimeMessage reply = ImipMailBuilder.Compose(
+			user, [(organizerEmail, null)], $"{verb}: {invite.Subject}", "REPLY", replyIcs);
 		using MemoryStream output = new();
 		await reply.WriteToAsync(output, ct);
 		await context.Session.Mail.SendAsync(output.ToArray(), ct);

@@ -76,6 +76,64 @@ public sealed class CalDavStore(
 		return href;
 	}
 
+	public async Task<string?> GetRawEventAsync(string folderBackendKey, string itemKey, CancellationToken ct)
+	{
+		return (await Dav.GetAsync(itemKey, ct).ConfigureAwait(false))?.Content;
+	}
+
+	private bool? _serverSchedules;
+
+	public async Task<bool> ShouldSendInvitationsAsync(CancellationToken ct)
+	{
+		switch (options.SendInvitations.ToLowerInvariant())
+		{
+			case "off":
+				return false;
+			case "on":
+				return true;
+		}
+
+		// Auto: probe once per store whether the server schedules on its own — a
+		// scheduling server sends its own invitations, and double invites are worse than
+		// none. Probe failures mean "server does not schedule" (the gateway mails).
+		if (_serverSchedules is { } cached)
+			return !cached;
+		bool schedules = await ProbeServerSchedulingAsync(ct).ConfigureAwait(false);
+		_serverSchedules = schedules;
+		Logger.LogInformation(
+			"CalDAV schedule-outbox probe: {Result} — gateway iMIP invitations {State} (SendInvitations=Auto)",
+			schedules ? "present" : "absent", schedules ? "disabled" : "enabled");
+		return !schedules;
+	}
+
+	private async Task<bool> ProbeServerSchedulingAsync(CancellationToken ct)
+	{
+		try
+		{
+			// Primary signal: the "calendar-auto-schedule" compliance class (RFC 6638 §8.1)
+			// on the user's home set — servers doing implicit scheduling mail invitations on
+			// every PUT (verified live: Stalwart and Axigen both do, and Stalwart exposes NO
+			// schedule-outbox-URL, which is why the outbox probe is only the fallback).
+			string capabilities = await Dav
+				.GetDavCapabilitiesAsync(await GetHomeSetAsync(ct).ConfigureAwait(false), ct)
+				.ConfigureAwait(false);
+			if (capabilities.Contains("calendar-auto-schedule", StringComparison.Ordinal))
+				return true;
+
+			string? principal = await Dav.GetPropertyAsync("/", DavNs.D + "current-user-principal", ct)
+				.ConfigureAwait(false);
+			if (string.IsNullOrWhiteSpace(principal))
+				return false;
+			string? outbox = await Dav.GetPropertyAsync(principal, DavNs.CalDav + "schedule-outbox-URL", ct)
+				.ConfigureAwait(false);
+			return !string.IsNullOrWhiteSpace(outbox);
+		}
+		catch (BackendException)
+		{
+			return false;
+		}
+	}
+
 	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
 	{
 		return CalendarConverter.ToApplicationData(content, bodyPreference);
@@ -84,7 +142,7 @@ public sealed class CalDavStore(
 	protected override string FromApplicationData(XElement applicationData, string uid, string? existingContent)
 	{
 		return CalendarConverter.FromApplicationData(applicationData, uid, existingContent,
-			CalendarAttachmentPolicy.CapBytes(options.CalendarAttachments));
+			CalendarAttachmentPolicy.CapBytes(options.CalendarAttachments), partStatIdentity);
 	}
 
 	/// <summary>ItemOperations fetch of an inline event attachment (calatt:: FileReference).</summary>

@@ -76,6 +76,19 @@ public interface ICalendarOperations
 	/// </summary>
 	Task<string?> RespondToMeetingAsync(
 		string calendarFolderBackendKey, string eventUid, int userResponse, CancellationToken ct);
+
+	/// <summary>
+	///   The stored (merged) iCalendar of one event — the invitation service reads it so
+	///   16.x ghosted attendees survive; null when the item vanished.
+	/// </summary>
+	Task<string?> GetRawEventAsync(string folderBackendKey, string itemKey, CancellationToken ct);
+
+	/// <summary>
+	///   Whether the GATEWAY should mail iMIP invitations for organizer changes: the
+	///   SendInvitations knob, with Auto probing the server for an RFC 6638 schedule
+	///   outbox (server schedules itself → gateway stays silent to avoid double invites).
+	/// </summary>
+	Task<bool> ShouldSendInvitationsAsync(CancellationToken ct);
 }
 
 /// <summary>

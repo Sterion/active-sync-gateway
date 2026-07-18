@@ -146,6 +146,21 @@ public sealed class WebDavClient : IDisposable
 	}
 
 	/// <summary>
+	///   The resource's compliance classes (the OPTIONS "DAV:" header, comma-joined,
+	///   lowercase) — e.g. "1, calendar-access, calendar-auto-schedule". Empty on failure.
+	/// </summary>
+	public async Task<string> GetDavCapabilitiesAsync(string href, CancellationToken ct)
+	{
+		using HttpResponseMessage response = await SendAsync(
+			() => new HttpRequestMessage(HttpMethod.Options, Resolve(href)), ct).ConfigureAwait(false);
+		if (!response.IsSuccessStatusCode)
+			return "";
+		return response.Headers.TryGetValues("DAV", out IEnumerable<string>? values)
+			? string.Join(", ", values).ToLowerInvariant()
+			: "";
+	}
+
+	/// <summary>
 	///   Sends a request, following same-host redirects manually with the method, body and
 	///   Authorization header intact (auto-redirect would strip auth and downgrade methods).
 	///   The factory is invoked once per hop because HttpRequestMessage is single-use.

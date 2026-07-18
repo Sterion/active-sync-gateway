@@ -454,8 +454,13 @@ public sealed class AccountResolver
 			AllowInvalidCertificates = user?.AllowInvalidCertificates ?? global?.AllowInvalidCertificates ?? false,
 			CaCertificatePath = user?.CaCertificatePath ?? global?.CaCertificatePath,
 			CalendarAttachments = user?.CalendarAttachments ?? global?.CalendarAttachments ?? "Auto",
-			SharedCollections = user?.SharedCollections ?? global?.SharedCollections
+			SharedCollections = user?.SharedCollections ?? global?.SharedCollections,
+			SendInvitations = user?.SendInvitations ?? global?.SendInvitations ?? "Auto"
 		};
+		if (merged.SendInvitations.ToLowerInvariant() is not ("auto" or "on" or "off"))
+			failures.Add(
+				$"ActiveSync:Users:{login}: effective {section}:SendInvitations " +
+				$"'{merged.SendInvitations}' is unknown (use Auto, On or Off).");
 		if (merged.CalendarAttachments.ToLowerInvariant() is not ("auto" or "on" or "off"))
 			failures.Add(
 				$"ActiveSync:Users:{login}: effective {section}:CalendarAttachments " +

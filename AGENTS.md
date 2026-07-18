@@ -213,6 +213,22 @@ live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
   Status 3; EmptyFolderContents/MeetingResponse Status 2. Settings/Provision stay writable
   (they only touch our own state DB). If you add a new write path, wire it into this
   scheme.
+- **Outbound iMIP** (`MeetingInvitationService`, hooks in `SyncHandler.ApplyClientCommandAsync`
+  for the Calendar class): REQUEST on create / significant change / attendee add, CANCEL
+  on delete, occurrence delete (RECURRENCE-ID) and attendee removal. Three duplicate-mail
+  guards, all load-bearing: (1) `CalDavStore.ShouldSendInvitationsAsync` — Auto probes the
+  home set's DAV header for **calendar-auto-schedule** (Stalwart and Axigen both schedule
+  implicitly; Stalwart exposes NO schedule-outbox-URL, so the outbox is only the fallback
+  signal); (2) `CalendarConverter.SchedulingSignificantlyDiffers` — only time/recurrence/
+  location/summary changes re-invite (reminder edits, PARTSTAT echoes and ghosted Changes
+  stay silent), EXDATE excluded because occurrence cancels send their own targeted CANCEL;
+  (3) hooks run strictly AFTER successful writes and never throw (mail failure = warning).
+  Groundwork lives in the converter: client Attendees parse with per-attendee PARTSTAT
+  preservation, ORGANIZER injection (clients never send one), SEQUENCE bump on significant
+  merges. The stored (merged) ICS is read via `ICalendarOperations.GetRawEventAsync` so
+  16.x ghosting can't hide attendees. Caveat: a client RETRYING a Sync Add re-executes it
+  (snapshot rollback design) and duplicates the event AND its invitation — pre-existing
+  behavior, tracked separately.
 - **Shared calendars** ride the same silent-revert path per folder:
   `IBackendSession.IsReadOnlyFolder` (CalDavStore matches the folder href against
   read-only grants) ORs into SyncHandler's `readOnly` flag. Grants = config

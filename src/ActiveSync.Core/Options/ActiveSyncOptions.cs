@@ -94,6 +94,14 @@ public sealed class DavServerOptions
 	///   breaking folder sync. Runtime per-user grants via `eas share` add to this list.
 	/// </summary>
 	public List<string>? SharedCollections { get; set; }
+
+	/// <summary>
+	///   CalDav only — iMIP invitation mails (METHOD:REQUEST/CANCEL) when the user creates,
+	///   updates or cancels a meeting as its organizer: "Auto" (send unless the server
+	///   advertises an RFC 6638 schedule outbox — a scheduling server invites on its own,
+	///   and double invites are worse than none), "On" (always send) or "Off" (never).
+	/// </summary>
+	public string SendInvitations { get; set; } = "Auto";
 }
 
 /// <summary>

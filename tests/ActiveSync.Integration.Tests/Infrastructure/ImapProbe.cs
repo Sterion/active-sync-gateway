@@ -77,6 +77,16 @@ internal static class ImapProbe
 		await imap.DisconnectAsync(true);
 	}
 
+	public static async Task<int> CountMessagesAsync(string user, string folder, string subject)
+	{
+		using ImapClient imap = await ConnectAsync(user);
+		IMailFolder mailFolder = await imap.GetFolderAsync(folder);
+		await mailFolder.OpenAsync(FolderAccess.ReadOnly);
+		IList<UniqueId> uids = await mailFolder.SearchAsync(SearchQuery.SubjectContains(subject));
+		await imap.DisconnectAsync(true);
+		return uids.Count;
+	}
+
 	public static async Task SetSeenAsync(string user, string subject, bool seen)
 	{
 		using ImapClient imap = await ConnectAsync(user);

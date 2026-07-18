@@ -184,10 +184,14 @@ public static class CalendarConverter
 
 	/// <summary>
 	///   Builds an iCalendar document from client ApplicationData. When <paramref name="existingIcs" />
-	///   is provided, unmanaged properties (attendees, organizer, custom props) are preserved.
+	///   is provided, unmanaged properties (custom props, existing PARTSTATs) are preserved.
+	///   <paramref name="defaultOrganizer" /> (the acting user's mail address) becomes the
+	///   ORGANIZER when the event carries attendees but no organizer yet — clients never send
+	///   one, and scheduling (iMIP) needs it.
 	/// </summary>
 	public static string FromApplicationData(
-		XElement applicationData, string uid, string? existingIcs, long? attachmentCapBytes = null)
+		XElement applicationData, string uid, string? existingIcs, long? attachmentCapBytes = null,
+		string? defaultOrganizer = null)
 	{
 		string? V(string localName)
 		{
@@ -207,6 +211,10 @@ public static class CalendarConverter
 			calendar = new Calendar { ProductId = "-//ActiveSync Gateway//EN" };
 			evt = AddNewEvent(calendar);
 		}
+
+		// Snapshot before the merge: SEQUENCE must bump when a scheduling-significant
+		// field of a meeting changes (attendees judge "same invite or update" by it).
+		string schedulingBefore = SchedulingFingerprint(evt);
 
 		evt.Uid = uid;
 		if (V("Subject") is { } subject)
@@ -296,6 +304,41 @@ public static class CalendarConverter
 			}
 		}
 
+		// Attendees: a present element replaces the list (clients send the full set),
+		// preserving each existing attendee's PARTSTAT; an omitted element leaves attendees
+		// untouched (partial/ghosted Changes). New attendees start NEEDS-ACTION with RSVP.
+		XElement? attendeesElement = applicationData.Element(Cal + "Attendees");
+		if (attendeesElement is not null)
+		{
+			List<Attendee> previous = evt.Attendees?.ToList() ?? [];
+			List<Attendee> updated = new();
+			foreach (XElement attendeeElement in attendeesElement.Elements(Cal + "Attendee"))
+			{
+				string? email = attendeeElement.Element(Cal + "Email")?.Value?.Trim();
+				if (string.IsNullOrEmpty(email))
+					continue;
+				Attendee? kept = previous.FirstOrDefault(a =>
+					a.Value is not null && MailboxEquals(a.Value.ToString(), email));
+				Attendee attendee = kept ?? new Attendee($"mailto:{email}")
+				{
+					Rsvp = true,
+					ParticipationStatus = "NEEDS-ACTION"
+				};
+				if (kept is null && attendeeElement.Element(Cal + "Name")?.Value is { Length: > 0 } name)
+					attendee.CommonName = name;
+				attendee.Role = attendeeElement.Element(Cal + "AttendeeType")?.Value == "2"
+					? "OPT-PARTICIPANT"
+					: kept?.Role ?? "REQ-PARTICIPANT";
+				updated.Add(attendee);
+			}
+
+			evt.Attendees = updated;
+		}
+
+		// A meeting needs an ORGANIZER for scheduling; EAS clients never send one.
+		if (defaultOrganizer is not null && evt.Attendees is { Count: > 0 } && evt.Organizer is null)
+			evt.Organizer = new Organizer($"mailto:{defaultOrganizer}");
+
 		// Only the DISPLAY alarm is EAS-managed: a present Reminder replaces it, an omitted
 		// one leaves alarms untouched, and custom alarms (EMAIL action etc.) always survive.
 		if (V("Reminder") is { } reminder && int.TryParse(reminder, out int minutes) && minutes >= 0)
@@ -313,8 +356,86 @@ public static class CalendarConverter
 
 		ApplyAttachmentChanges(evt, applicationData, attachmentCapBytes);
 
+		// SEQUENCE bump on scheduling-significant meeting changes — attendees/servers use
+		// it to tell an update apart from a duplicate of the original invitation.
+		if (existingIcs is not null && evt.Attendees is { Count: > 0 } &&
+		    !SchedulingFingerprint(evt).Equals(schedulingBefore, StringComparison.Ordinal))
+			evt.Sequence += 1;
+
 		evt.DtStamp = new CalDateTime(DateTime.UtcNow, "UTC");
 		return IcalHelpers.Serialize(calendar);
+	}
+
+	/// <summary>
+	///   The fields whose change makes a meeting update scheduling-significant (attendees
+	///   must be re-invited): time, recurrence, location, summary. Deliberately NOT
+	///   exceptions/EXDATE — single-occurrence cancels send their own targeted CANCEL.
+	/// </summary>
+	private static string SchedulingFingerprint(CalendarEvent evt)
+	{
+		string rrule = evt.RecurrenceRules?.FirstOrDefault()?.ToString() ?? "";
+		return $"{ToUtc(evt.Start as CalDateTime):O}|{ToUtc(evt.End as CalDateTime):O}|{rrule}|" +
+		       $"{evt.Location}|{evt.Summary}";
+	}
+
+	/// <summary>Scheduling-relevant view of a stored event, for the invitation service.</summary>
+	public sealed record SchedulingInfo(
+		string? Organizer,
+		IReadOnlyList<(string Email, string? Name)> Attendees,
+		int Sequence,
+		string Summary,
+		string Uid);
+
+	public static SchedulingInfo? ReadSchedulingInfo(string ics)
+	{
+		Calendar? calendar = Calendar.Load(ics);
+		CalendarEvent? evt = calendar?.Events.FirstOrDefault(e => e.RecurrenceId is null)
+		                     ?? calendar?.Events.FirstOrDefault();
+		if (evt is null)
+			return null;
+		List<(string Email, string? Name)> attendees = new();
+		foreach (Attendee attendee in evt.Attendees ?? [])
+		{
+			string? email = StripMailto(attendee.Value?.ToString());
+			if (!string.IsNullOrEmpty(email))
+				attendees.Add((email, attendee.CommonName));
+		}
+
+		return new SchedulingInfo(
+			StripMailto(evt.Organizer?.Value?.ToString()),
+			attendees,
+			evt.Sequence,
+			evt.Summary ?? "",
+			evt.Uid ?? "");
+	}
+
+	/// <summary>Whether a stored-event change re-invites attendees (see SchedulingFingerprint).</summary>
+	public static bool SchedulingSignificantlyDiffers(string? oldIcs, string newIcs)
+	{
+		CalendarEvent? Load(string? ics)
+		{
+			Calendar? calendar = ics is null ? null : Calendar.Load(ics);
+			return calendar?.Events.FirstOrDefault(e => e.RecurrenceId is null)
+			       ?? calendar?.Events.FirstOrDefault();
+		}
+
+		CalendarEvent? oldEvent = Load(oldIcs);
+		CalendarEvent? newEvent = Load(newIcs);
+		if (newEvent is null)
+			return false;
+		if (oldEvent is null)
+			return true;
+		return !SchedulingFingerprint(newEvent).Equals(SchedulingFingerprint(oldEvent), StringComparison.Ordinal);
+	}
+
+	private static string? StripMailto(string? value)
+	{
+		if (value is null)
+			return null;
+		string trimmed = value.Trim();
+		return trimmed.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)
+			? trimmed["mailto:".Length..]
+			: trimmed;
 	}
 
 	// ---------- event attachments (EAS 16.x, stored inline as base64 ATTACH) ----------

@@ -101,6 +101,20 @@ public sealed class LocalCalendarStore(
 		return row.Id.ToString();
 	}
 
+	public async Task<string?> GetRawEventAsync(string folderBackendKey, string itemKey, CancellationToken ct)
+	{
+		await using SyncDbContext db = DbFactory.CreateDbContext();
+		LocalItem? row = await FindAsync(db, itemKey, ct).ConfigureAwait(false);
+		return row is null ? null : Protector.Unprotect(row.Content, Credentials.UserName, "calendar");
+	}
+
+	public Task<bool> ShouldSendInvitationsAsync(CancellationToken ct)
+	{
+		// Local storage has no server-side scheduling — the gateway is the only party that
+		// can invite anyone, so it always does (there is no knob for the local store).
+		return Task.FromResult(true);
+	}
+
 	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
 	{
 		return CalendarConverter.ToApplicationData(content, bodyPreference);
@@ -110,7 +124,7 @@ public sealed class LocalCalendarStore(
 	{
 		// The local store has no DAV server to protect — Auto semantics (1 MiB cap).
 		return CalendarConverter.FromApplicationData(applicationData, uid, existingContent,
-			CalendarAttachmentPolicy.CapBytes(null));
+			CalendarAttachmentPolicy.CapBytes(null), partStatIdentity);
 	}
 
 	/// <summary>ItemOperations fetch of an inline event attachment (calatt:: FileReference).</summary>

@@ -15,6 +15,7 @@ public sealed partial class SyncHandler(
 	FolderService folders,
 	IOptions<ActiveSyncOptions> options,
 	IHostApplicationLifetime lifetime,
+	MeetingInvitationService invitations,
 	ILogger<SyncHandler> logger) : IEasCommandHandler
 {
 	/// <summary>
@@ -395,6 +396,8 @@ public sealed partial class SyncHandler(
 
 				(string itemKey, string revision) = await store.CreateItemAsync(folder.BackendKey, appData, ct);
 				snapshot[itemKey] = revision;
+				if (IsCalendarClass(store))
+					await invitations.AfterCreateAsync(context, store, folder.BackendKey, itemKey, ct);
 				string serverId = await folders.ComposeServerIdAsync(folder, store, itemKey, ct);
 				return new XElement(AS + "Add",
 					new XElement(AS + "ClientId", clientId),
@@ -430,8 +433,16 @@ public sealed partial class SyncHandler(
 					return null;
 				}
 
+				// Meetings: the pre-change ICS feeds the invitation diff (what changed, who
+				// was removed) — captured only for the calendar class.
+				string? previousIcs = IsCalendarClass(store)
+					? await MeetingInvitationService.CaptureIcsAsync(store, folder.BackendKey, itemKey, ct)
+					: null;
 				string revision = await store.UpdateItemAsync(folder.BackendKey, itemKey, appData, ct);
 				snapshot[itemKey] = revision;
+				if (IsCalendarClass(store))
+					await invitations.AfterChangeAsync(
+						context, store, folder.BackendKey, itemKey, previousIcs, ct);
 				return null; // implicit success
 			}
 			case "Delete":
@@ -465,6 +476,8 @@ public sealed partial class SyncHandler(
 					string occurrenceRevision =
 						await store.UpdateItemAsync(folder.BackendKey, itemKey, occurrenceDelete, ct);
 					snapshot[itemKey] = occurrenceRevision;
+					await invitations.AfterOccurrenceCancelAsync(
+						context, store, folder.BackendKey, itemKey, occurrence, ct);
 					return null;
 				}
 
@@ -480,8 +493,14 @@ public sealed partial class SyncHandler(
 						return null;
 					}
 
+					// Meetings: the ICS must be read BEFORE the delete for the CANCEL mail.
+					string? deletedIcs = IsCalendarClass(store)
+						? await MeetingInvitationService.CaptureIcsAsync(store, folder.BackendKey, itemKey, ct)
+						: null;
 					await store.DeleteItemAsync(folder.BackendKey, itemKey, ct, permanent: !deletesAsMoves);
 					snapshot.Remove(itemKey);
+					if (deletedIcs is not null)
+						await invitations.AfterDeleteAsync(context, store, deletedIcs, ct);
 				}
 
 				return null; // deletes are only reported on failure
@@ -502,6 +521,11 @@ public sealed partial class SyncHandler(
 			default:
 				return ClientCommandStatus(command, "4");
 		}
+	}
+
+	private static bool IsCalendarClass(IContentStore store)
+	{
+		return store.EasClass.Equals(EasClass.Calendar, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static bool HasSendElement(XElement command, XElement appData)

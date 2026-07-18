@@ -96,6 +96,7 @@ public static class ServiceCollectionExtensions
 	/// <summary>Registers one scoped <see cref="IEasCommandHandler" /> per supported EAS command.</summary>
 	public static IServiceCollection AddEasHandlers(this IServiceCollection services)
 	{
+		services.AddSingleton<MeetingInvitationService>();
 		services.AddScoped<IEasCommandHandler, FolderSyncHandler>();
 		services.AddScoped<IEasCommandHandler, FolderCreateHandler>();
 		services.AddScoped<IEasCommandHandler, FolderDeleteHandler>();

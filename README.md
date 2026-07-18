@@ -44,6 +44,11 @@ MS-ASCNTC, MS-ASTZ) in modern async C#.
 - **Shared calendars**: extra CalDAV collections sync as additional calendar folders —
   statically via `CalDav:SharedCollections` or per user at runtime via `eas share`
   grants, each read-write or **gateway-enforced read-only**.
+- **Meeting invitations (iMIP)**: create/update/cancel a meeting on the phone and the
+  gateway mails the attendees (`METHOD:REQUEST`/`CANCEL`) — unless the CalDAV server
+  schedules on its own (`calendar-auto-schedule`/schedule outbox, probed automatically),
+  in which case the gateway stays silent to avoid double invites. Reminder-only edits
+  never mail; attendee replies flow back via the existing MeetingResponse iTIP handling.
 - **EAS 16.x features**: server-synced **Drafts** (compose on one device, finish on
   another; `Send` submits a draft), calendar **event attachments** (stored inline in the
   event, works on any CalDAV server and the local store), 16.x calendar semantics
@@ -275,6 +280,7 @@ Omit a section entirely and that content class is served from the gateway databa
 | `TaskFolder` | `"Tasks"` | *(CalDav only)* Name of the VTODO (tasks) collection in the calendar home set; when a collection with this display name or path segment exists, it becomes the ActiveSync Tasks folder (Axigen ships one named "Tasks"). Empty → tasks are stored in the gateway database instead. Recurring tasks sync (regenerating "n days after completion" tasks have no iCalendar equivalent and keep their fixed schedule). |
 | `CalendarAttachments` | `"Auto"` | *(CalDav only)* Event attachments for EAS 16.x clients: `Auto` (enabled, 1 MiB per attachment), `On` (enabled, 16 MiB) or `Off`. Attachments are stored **inline** in the event (base64 `ATTACH` property), so they work against any CalDAV server — the cap protects the DAV server from bloated items. Per-user overridable. |
 | `SharedCollections` | unset | *(CalDav only)* Extra collection hrefs synced as additional calendar folders for every user: absolute paths (`"/dav/cal/team/"`) or same-host URLs, suffix `\|ro` for gateway-enforced read-only (client edits are silently reverted). Collections the server refuses (403/404) are skipped with a warning. Per-user overridable (a user's list **replaces** the global one); per-user runtime grants via `eas share`. |
+| `SendInvitations` | `"Auto"` | *(CalDav only)* iMIP invitation mails when the user organizes a meeting: `Auto` (send unless the server advertises `calendar-auto-schedule` or a schedule outbox — a scheduling server invites on its own, and double invites are worse than none), `On` (always) or `Off` (never). The local calendar store always sends (nothing else can). Per-user overridable. |
 | `AllowInvalidCertificates` | `false` | As above. |
 | `CaCertificatePath` | `null` | As above. |
 

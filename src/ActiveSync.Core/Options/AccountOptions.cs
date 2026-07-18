@@ -66,6 +66,9 @@ public sealed class DavAccountOptions
 	///   list; a non-null list REPLACES it (consistent with every other override).
 	/// </summary>
 	public List<string>? SharedCollections { get; set; }
+
+	/// <inheritdoc cref="DavServerOptions.SendInvitations" />
+	public string? SendInvitations { get; set; }
 }
 
 /// <summary>Per-user ManageSieve override; unset fields inherit the global section.</summary>
