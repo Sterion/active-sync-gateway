@@ -111,7 +111,7 @@ public class ImipTests
 
 		Assert.Equal("Invitation: Planning", request.Subject);
 		Assert.Equal("bob@example.com", request.To.Mailboxes.Single().Address);
-		string body = ((TextPart)request.Body).Text;
+		string body = Assert.IsType<TextPart>(request.Body).Text!;
 		Assert.Contains("METHOD:REQUEST", body);
 		Assert.Contains($"UID:{uid}", body);
 		Assert.Contains("mailto:bob@example.com", body);
@@ -124,7 +124,7 @@ public class ImipTests
 	{
 		MimeMessage whole = ImipMailBuilder.BuildCancel(
 			"uid-1", 3, "alice@example.com", [("bob@example.com", null)], null, "Cancelled: X");
-		string wholeBody = ((TextPart)whole.Body).Text;
+		string wholeBody = Assert.IsType<TextPart>(whole.Body).Text!;
 		Assert.Contains("METHOD:CANCEL", wholeBody);
 		Assert.Contains("SEQUENCE:3", wholeBody);
 		Assert.Contains("STATUS:CANCELLED", wholeBody);
@@ -133,6 +133,6 @@ public class ImipTests
 		MimeMessage occurrence = ImipMailBuilder.BuildCancel(
 			"uid-1", 4, "alice@example.com", [("bob@example.com", null)],
 			new DateTime(2026, 8, 5, 9, 0, 0, DateTimeKind.Utc), "Cancelled occurrence: X");
-		Assert.Contains("RECURRENCE-ID:20260805T090000Z", ((TextPart)occurrence.Body).Text);
+		Assert.Contains("RECURRENCE-ID:20260805T090000Z", Assert.IsType<TextPart>(occurrence.Body).Text);
 	}
 }
