@@ -77,6 +77,12 @@ public static class MailConverter
 
 		data.Add(flag);
 
+		// User categories = the message's custom IMAP keywords, minus the system ones.
+		IReadOnlyList<string> categories = CategoryKeywords(flags.Keywords);
+		if (categories.Count > 0)
+			data.Add(new XElement(Email + "Categories",
+				categories.Select(c => new XElement(Email + "Category", c))));
+
 		data.Add(new XElement(AirSyncBase + "NativeBodyType", nativeBodyType.ToString()));
 
 		// Conversation grouping (protocol 14.x): derive stable ids from threading headers.
@@ -335,5 +341,30 @@ public static class MailConverter
 		return element;
 	}
 
-	public sealed record MessageFlags(bool Read, bool Flagged, bool Answered, bool Forwarded);
+	// Managed/system keywords that must never surface as user categories (nor be removed
+	// by a client clearing its category list). Everything backslash-prefixed is an IMAP
+	// system flag by definition.
+	private static readonly HashSet<string> SystemKeywords = new(StringComparer.OrdinalIgnoreCase)
+	{
+		"$Forwarded", "$MDNSent", "$SubmitPending", "$Submitted",
+		"$Junk", "$NotJunk", "Junk", "NonJunk", "$Phishing"
+	};
+
+	/// <summary>
+	///   The category-relevant subset of a message's IMAP keywords: system keywords
+	///   filtered out, sorted for stable revision strings.
+	/// </summary>
+	public static IReadOnlyList<string> CategoryKeywords(IEnumerable<string>? keywords)
+	{
+		if (keywords is null)
+			return [];
+		return keywords
+			.Where(k => k.Length > 0 && k[0] != '\\' && !SystemKeywords.Contains(k))
+			.OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+	}
+
+	public sealed record MessageFlags(
+		bool Read, bool Flagged, bool Answered, bool Forwarded,
+		IReadOnlyCollection<string>? Keywords = null);
 }

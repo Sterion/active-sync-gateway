@@ -112,6 +112,67 @@ public class MailFlowTests(GatewayFixture gateway)
 	}
 
 	[BackendFact]
+	public async Task Categories_RoundTripAsImapKeywords_AndGhostedChangeLeavesThem()
+	{
+		EasTestClient clientB = gateway.CreateEasClient(TestBackend.User2);
+		await clientB.HandshakeAsync();
+		string inboxB = clientB.FolderOfType(EasFolderType.Inbox).ServerId;
+		await clientB.InitialSyncAsync(inboxB);
+		await clientB.PullAllAsync(inboxB);
+
+		EasTestClient clientA = gateway.CreateEasClient(TestBackend.User1);
+		await clientA.HandshakeAsync();
+		string subject = $"cat-{Guid.NewGuid():N}";
+		await clientA.SendMailAsync(EasTestClient.BuildMime(
+			TestBackend.User1, TestBackend.User2, subject, "category test"));
+		SyncItem item = await WaitUntil.ResultAsync(async () =>
+				(await clientB.PullAllAsync(inboxB)).Adds.FirstOrDefault(a =>
+					a.ApplicationData.Element(Email + "Subject")?.Value == subject),
+			$"delivery of '{subject}'");
+
+		// EAS Categories → IMAP keywords ("spaced name" sanitizes to an atom).
+		SyncResult change = await clientB.ChangeItemAsync(inboxB, item.ServerId,
+			new XElement(Email + "Categories",
+				new XElement(Email + "Category", "Project-X"),
+				new XElement(Email + "Category", "spaced name")));
+		Assert.Equal("1", change.Status);
+		await WaitUntil.TrueAsync(async () =>
+			{
+				IReadOnlyList<string> keywords =
+					await ImapProbe.MessageKeywordsAsync(TestBackend.User2, "INBOX", subject);
+				return keywords.Contains("Project-X") && keywords.Contains("spaced_name");
+			}, "category keywords on the IMAP message");
+
+		// A ghosted Change (no Categories element) must leave the keywords alone.
+		Assert.Equal("1", (await clientB.ChangeItemAsync(inboxB, item.ServerId,
+			new XElement(Email + "Read", "1"))).Status);
+		IReadOnlyList<string> afterGhost =
+			await ImapProbe.MessageKeywordsAsync(TestBackend.User2, "INBOX", subject);
+		Assert.Contains("Project-X", afterGhost);
+
+		// A keyword added server-side surfaces as a Change carrying the new category.
+		await ImapProbe.AddKeywordAsync(TestBackend.User2, subject, "ServerSide");
+		await WaitUntil.TrueAsync(async () =>
+				(await clientB.PullAllAsync(inboxB)).Changes.Any(c =>
+					c.ApplicationData.Element(Email + "Subject")?.Value == subject &&
+					c.ApplicationData.Element(Email + "Categories")?.Elements(Email + "Category")
+						.Any(cat => cat.Value == "ServerSide") == true),
+			"server-side keyword arriving as a category change");
+
+		// Clearing categories removes user keywords but never system ones.
+		await ImapProbe.AddKeywordAsync(TestBackend.User2, subject, "NonJunk");
+		Assert.Equal("1", (await clientB.ChangeItemAsync(inboxB, item.ServerId,
+			new XElement(Email + "Categories"))).Status);
+		await WaitUntil.TrueAsync(async () =>
+			{
+				IReadOnlyList<string> keywords =
+					await ImapProbe.MessageKeywordsAsync(TestBackend.User2, "INBOX", subject);
+				return !keywords.Contains("Project-X") && !keywords.Contains("ServerSide") &&
+				       keywords.Contains("NonJunk");
+			}, "cleared user categories with the system keyword surviving");
+	}
+
+	[BackendFact]
 	public async Task Delete_WithDeletesAsMovesZero_ExpungesInsteadOfMovingToTrash()
 	{
 		EasTestClient recipient = gateway.CreateEasClient(TestBackend.User2);

@@ -28,7 +28,8 @@ MS-ASCNTC, MS-ASTZ) in modern async C#.
 **Protocol**
 
 - The full command set through **EAS 16.1**: FolderSync and folder create/rename/delete,
-  two-way Sync for mail/contacts/calendar/tasks/notes, Ping (long-poll push),
+  two-way Sync for mail/contacts/calendar/tasks/notes (including recurring tasks and
+  mail **categories** ↔ IMAP keywords), Ping (long-poll push),
   GetItemEstimate, ItemOperations (item + attachment fetch, EmptyFolderContents),
   GetAttachment, SendMail, SmartReply, SmartForward, MoveItems, Search and the 16.1
   **Find** command (mailbox + GAL via CardDAV, **contact photos** included on request),

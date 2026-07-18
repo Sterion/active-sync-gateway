@@ -52,6 +52,31 @@ internal static class ImapProbe
 		return uids.Count > 0;
 	}
 
+	public static async Task<IReadOnlyList<string>> MessageKeywordsAsync(
+		string user, string folder, string subject)
+	{
+		using ImapClient imap = await ConnectAsync(user);
+		IMailFolder mailFolder = await imap.GetFolderAsync(folder);
+		await mailFolder.OpenAsync(FolderAccess.ReadOnly);
+		IList<UniqueId> uids = await mailFolder.SearchAsync(SearchQuery.SubjectContains(subject));
+		if (uids.Count == 0)
+			return [];
+		IList<IMessageSummary> summaries = await mailFolder.FetchAsync(uids, MessageSummaryItems.Flags);
+		await imap.DisconnectAsync(true);
+		return summaries.SelectMany(s => s.Keywords ?? (IReadOnlySet<string>)new HashSet<string>())
+			.Distinct().ToList();
+	}
+
+	public static async Task AddKeywordAsync(string user, string subject, string keyword)
+	{
+		using ImapClient imap = await ConnectAsync(user);
+		await imap.Inbox.OpenAsync(FolderAccess.ReadWrite);
+		IList<UniqueId> uids = await imap.Inbox.SearchAsync(SearchQuery.SubjectContains(subject));
+		Assert.NotEmpty(uids);
+		await imap.Inbox.AddFlagsAsync(uids, MessageFlags.None, new HashSet<string> { keyword }, true);
+		await imap.DisconnectAsync(true);
+	}
+
 	public static async Task SetSeenAsync(string user, string subject, bool seen)
 	{
 		using ImapClient imap = await ConnectAsync(user);

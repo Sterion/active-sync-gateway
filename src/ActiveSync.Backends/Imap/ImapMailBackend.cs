@@ -109,7 +109,8 @@ public sealed partial class ImapMailBackend(
 				.ConfigureAwait(false);
 			Dictionary<string, string> map = new(summaries.Count, StringComparer.Ordinal);
 			foreach (IMessageSummary summary in summaries)
-				map[summary.UniqueId.Id.ToString()] = RevisionOf(summary.Flags ?? MessageFlags.None);
+				map[summary.UniqueId.Id.ToString()] =
+					RevisionOf(summary.Flags ?? MessageFlags.None, summary.Keywords);
 			return map;
 		}, ct);
 	}
@@ -142,7 +143,8 @@ public sealed partial class ImapMailBackend(
 				(flags & MessageFlags.Seen) != 0,
 				(flags & MessageFlags.Flagged) != 0,
 				(flags & MessageFlags.Answered) != 0,
-				summaries[0].Keywords?.Contains("$Forwarded") == true);
+				summaries[0].Keywords?.Contains("$Forwarded") == true,
+				summaries[0].Keywords);
 			List<XElement> data = MailConverter.ToApplicationData(
 				message, converterFlags, bodyPreference,
 				idx => MakeFileReference(folderBackendKey, itemKey, idx));
@@ -221,10 +223,48 @@ public sealed partial class ImapMailBackend(
 					await folder.RemoveFlagsAsync(uid, MessageFlags.Flagged, true, ct).ConfigureAwait(false);
 			}
 
+			// Presence-guarded like Read/Flag: only an explicit Categories element touches
+			// the message's custom keywords — and only the category-relevant subset, so a
+			// client clearing its categories can never strip $Forwarded or other system
+			// keywords. Servers without custom-keyword support are skipped (same tolerant
+			// stance as the $Forwarded write in SetAnsweredAsync).
+			XElement? categoriesElement = applicationData.Element(Email + "Categories");
+			if (categoriesElement is not null)
+			{
+				if ((folder.PermanentFlags & MessageFlags.UserDefined) != 0)
+				{
+					HashSet<string> wanted = categoriesElement.Elements(Email + "Category")
+						.Select(c => SanitizeKeyword(c.Value))
+						.Where(k => k.Length > 0)
+						.ToHashSet(StringComparer.OrdinalIgnoreCase);
+					IList<IMessageSummary> current = await folder
+						.FetchAsync([uid], MessageSummaryItems.UniqueId | MessageSummaryItems.Flags, ct)
+						.ConfigureAwait(false);
+					IReadOnlyList<string> existing =
+						MailConverter.CategoryKeywords(current.FirstOrDefault()?.Keywords);
+					HashSet<string> toAdd = wanted
+						.Where(k => !existing.Contains(k, StringComparer.OrdinalIgnoreCase))
+						.ToHashSet();
+					HashSet<string> toRemove = existing
+						.Where(k => !wanted.Contains(k))
+						.ToHashSet();
+					if (toAdd.Count > 0)
+						await folder.AddFlagsAsync(uid, MessageFlags.None, toAdd, true, ct).ConfigureAwait(false);
+					if (toRemove.Count > 0)
+						await folder.RemoveFlagsAsync(uid, MessageFlags.None, toRemove, true, ct).ConfigureAwait(false);
+				}
+				else
+				{
+					logger.LogDebug("Server does not accept custom keywords; Categories change skipped");
+				}
+			}
+
 			IList<IMessageSummary> summaries = await folder
 				.FetchAsync([uid], MessageSummaryItems.UniqueId | MessageSummaryItems.Flags, ct)
 				.ConfigureAwait(false);
-			return summaries.Count > 0 ? RevisionOf(summaries[0].Flags ?? MessageFlags.None) : "000";
+			return summaries.Count > 0
+				? RevisionOf(summaries[0].Flags ?? MessageFlags.None, summaries[0].Keywords)
+				: "000";
 		}, ct);
 	}
 
@@ -511,13 +551,36 @@ public sealed partial class ImapMailBackend(
 	}
 
 	// A mail item's "revision" is a 3-digit string encoding the sync-relevant flags in a
-	// fixed order: seen, flagged, answered (e.g. "101" = seen, not flagged, answered). The
-	// diff engine treats any change to this string as an item change, so the digit order
-	// must stay stable — a Ping/Sync watcher compares these against the stored snapshot.
-	private static string RevisionOf(MessageFlags flags)
+	// fixed order: seen, flagged, answered (e.g. "101" = seen, not flagged, answered),
+	// followed by "|kw1,kw2" ONLY when the message carries category-relevant keywords —
+	// keyword-less messages keep the historical 3-digit form byte-for-byte, so upgrading
+	// only churns messages that already have keywords. The diff engine treats any change
+	// to this string as an item change, so the digit order (and the sorted keyword order
+	// from CategoryKeywords) must stay stable — a Ping/Sync watcher compares these
+	// against the stored snapshot.
+	private static string RevisionOf(MessageFlags flags, IEnumerable<string>? keywords = null)
 	{
-		return
+		string digits =
 			$"{((flags & MessageFlags.Seen) != 0 ? 1 : 0)}{((flags & MessageFlags.Flagged) != 0 ? 1 : 0)}{((flags & MessageFlags.Answered) != 0 ? 1 : 0)}";
+		IReadOnlyList<string> categories = MailConverter.CategoryKeywords(keywords);
+		return categories.Count == 0 ? digits : $"{digits}|{string.Join(',', categories)}";
+	}
+
+	/// <summary>
+	///   EAS categories are free text while IMAP keywords are atoms: replace anything an
+	///   atom cannot carry (spaces, controls, specials) with '_'. Server→client needs no
+	///   inverse — every atom is already a valid category string.
+	/// </summary>
+	private static string SanitizeKeyword(string category)
+	{
+		char[] sanitized = new char[category.Length];
+		for (int i = 0; i < category.Length; i++)
+		{
+			char c = category[i];
+			sanitized[i] = c > ' ' && c < (char)127 && !@"(){%*""\[]".Contains(c) ? c : '_';
+		}
+
+		return new string(sanitized);
 	}
 
 	public static string MakeFileReference(string folderBackendKey, string itemKey, int attachmentIndex)

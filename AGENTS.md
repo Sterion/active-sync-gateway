@@ -175,7 +175,9 @@ live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
 - **Differential sync, Z-Push style.** No CONDSTORE/QRESYNC/sync-collection dependency.
   Each collection stores a snapshot `itemKey → revision`; each Sync round fetches the
   backend's current revision map and diffs (`CollectionDiff.Compute`):
-  - Mail: itemKey = IMAP UID, revision = flags string (`seen|flagged|answered` as "101").
+  - Mail: itemKey = IMAP UID, revision = flags string (`seen|flagged|answered` as "101"),
+    plus `|kw1,kw2` (sorted category keywords) ONLY when the message carries any — the
+    non-empty-only rule keeps unkeyworded messages byte-identical across the upgrade.
   - DAV: itemKey = href, revision = ETag.
 - **Windowing:** items beyond WindowSize are left OUT of the persisted snapshot so they
   surface on the next round; `MoreAvailable` is emitted. Deletes are never windowed.
