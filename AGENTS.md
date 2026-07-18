@@ -357,8 +357,20 @@ derive an address from `UserName` with `Contains('@')`.
 
 ## Backend layer notes
 
-- One `BackendSession` per (user, deviceId), cached in `BackendSessionFactory` with idle
-  eviction; auth is an IMAP LOGIN probe cached ~5 minutes. DAV stores are optional —
+- **Provider engine**: every backend is an `IBackendProvider` ("imap", "smtp", "caldav",
+  "carddav", "sieve", "local") registered in DI and indexed by `BackendProviderRegistry`.
+  `CompositeBackendSession` groups an account's `ResolvedRole`s by provider, opens ONE
+  `IBackendConnection` per provider (a provider serves all its assigned roles over one
+  connection — the JMAP shape), and aggregates stores/side-ops. `RoleMapper` is a
+  TRANSITIONAL shim translating the typed `ResolvedAccount` slots into role assignments
+  via the historical presence rules; it dissolves when config grows role sections with
+  provider discriminators. `ResolvedRole.Settings` is the provider's own options object
+  (typed handoff, same transition). Optional provider capabilities: `ICredentialVerifier`
+  (auth probe — the MailStore role's provider verifies pass-through logins; a provider
+  without it means declared-users-only), `IPerUserResourceOwner` (per-user cache trim on
+  the eviction sweep).
+- One `CompositeBackendSession` per (user, deviceId), cached in `BackendSessionFactory`
+  with idle eviction; auth verdicts are cached ~5 minutes. DAV stores are optional —
   when a `CalDav`/`CardDav` section is omitted, that class is served by a **local store**
   instead (below), so `Session.Contacts` / `Session.Calendar` are now always non-null.
 - **Local stores** (`Backends/Local/`): `IContentStore` over the `LocalItems` table when
@@ -375,7 +387,7 @@ derive an address from `UserName` with `Contains('@')`.
   to ActiveSync clients; the state DB therefore holds real user data.
 - Push/Ping: the priority folder (INBOX when pinged, else the first watched mail folder)
   is watched by a **persistent per-(user, folder) IDLE watcher** (`ImapIdleWatcher`,
-  shared by all the user's devices, owned by `BackendSessionFactory` and resolved lazily
+  shared by all the user's devices, owned by `ImapBackendProvider` and resolved lazily
   per folder via a provider closure): lazy-started on first wait, dedicated connection
   (never the shared session client — IDLE occupies the whole connection; 9-min slices per
   MailKit guidance), reconnect with capped backoff, evicted when the user's last session

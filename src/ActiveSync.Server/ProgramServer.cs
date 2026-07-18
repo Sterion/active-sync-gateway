@@ -1,6 +1,10 @@
 using System.Security.Cryptography.X509Certificates;
 using ActiveSync.Backends;
+using ActiveSync.Backends.Dav;
+using ActiveSync.Backends.Imap;
 using ActiveSync.Backends.Local;
+using ActiveSync.Backends.Sieve;
+using ActiveSync.Backends.Smtp;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
@@ -114,6 +118,15 @@ public partial class Program
 		builder.Services.AddSingleton<AccountResolver>();
 		builder.Services.AddSingleton<AuthThrottle>();
 		builder.Services.AddSingleton<LocalChangeNotifier>();
+		// Backend providers: named implementations the session factory composes per account.
+		// Explicit registrations for the in-repo providers; the registry indexes them by name.
+		builder.Services.AddSingleton<IBackendProvider, ImapBackendProvider>();
+		builder.Services.AddSingleton<IBackendProvider, SmtpBackendProvider>();
+		builder.Services.AddSingleton<IBackendProvider, CalDavBackendProvider>();
+		builder.Services.AddSingleton<IBackendProvider, CardDavBackendProvider>();
+		builder.Services.AddSingleton<IBackendProvider, SieveBackendProvider>();
+		builder.Services.AddSingleton<IBackendProvider, LocalBackendProvider>();
+		builder.Services.AddSingleton<BackendProviderRegistry>();
 		builder.Services.AddSingleton<BackendSessionFactory>();
 		builder.Services.AddSingleton<IBackendSessionFactory>(sp => sp.GetRequiredService<BackendSessionFactory>());
 		builder.Services.AddEasHandlers();

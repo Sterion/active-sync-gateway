@@ -2,16 +2,11 @@ using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Security.Cryptography;
 using System.Text;
-using ActiveSync.Backends.Imap;
-using ActiveSync.Backends.Local;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Observability;
 using ActiveSync.Core.Options;
-using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
-using MailKit.Net.Imap;
-using MailKit.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -19,9 +14,11 @@ using Microsoft.Extensions.Options;
 namespace ActiveSync.Backends;
 
 /// <summary>
-///   Caches one <see cref="BackendSession" /> per (user, device) so consecutive EAS requests reuse
-///   live IMAP connections. Idle sessions are evicted in the background. Successful authentications
-///   are cached briefly so every HTTP request does not trigger an IMAP login round-trip.
+///   Caches one <see cref="CompositeBackendSession" /> per (user, device) so consecutive EAS
+///   requests reuse live backend connections. Idle sessions are evicted in the background —
+///   providers holding per-user caches (IDLE watchers) trim them on the same sweep via
+///   <see cref="IPerUserResourceOwner" />. Successful authentications are cached briefly so
+///   every HTTP request does not trigger a backend login round-trip.
 /// </summary>
 public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDisposable
 {
@@ -30,33 +27,23 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	private readonly ISyncDbContextFactory _dbFactory;
 	private readonly Timer _evictionTimer;
 	private readonly ILogger<BackendSessionFactory> _logger;
-	private readonly LocalChangeNotifier _notifier;
 	private readonly ActiveSyncOptions _options;
-	private readonly LocalContentProtector _protector;
+	private readonly BackendProviderRegistry _registry;
 	private readonly AccountResolver _resolver;
-	private readonly ConcurrentDictionary<string, Lazy<BackendSession>> _sessions = new();
-	private readonly ConcurrentDictionary<string, Lazy<ImapIdleWatcher>> _watchers = new();
-	private readonly ILoggerFactory _loggerFactory;
-	// Verbose wire logging gets a per-backend category so one backend can be traced alone.
-	private readonly ILogger _imapWireLogger;
+	private readonly ConcurrentDictionary<string, Lazy<CompositeBackendSession>> _sessions = new();
 
 	public BackendSessionFactory(
 		IOptions<ActiveSyncOptions> options,
 		AccountResolver resolver,
 		ISyncDbContextFactory dbFactory,
-		LocalChangeNotifier notifier,
-		LocalContentProtector protector,
-		ILogger<BackendSessionFactory> logger,
-		ILoggerFactory loggerFactory)
+		BackendProviderRegistry registry,
+		ILogger<BackendSessionFactory> logger)
 	{
 		_options = options.Value;
 		_resolver = resolver;
 		_dbFactory = dbFactory;
-		_notifier = notifier;
-		_protector = protector;
+		_registry = registry;
 		_logger = logger;
-		_loggerFactory = loggerFactory;
-		_imapWireLogger = loggerFactory.CreateLogger("ActiveSync.Backends.Imap");
 		_evictionTimer = new Timer(_ => EvictIdleSessions(), null,
 			TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
 		// Account edits (eas user ...) must apply on the next request, not after the auth
@@ -66,14 +53,9 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			_authCache.Clear();
 			_authNegativeCache.Clear();
 		};
-		// Per-user live-count gauges. Keys are "user\ndevice" / "user\nfolder"; only
-		// materialized Lazy values count (an unrealized slot is not a live connection).
+		// Per-user live-count gauge. Keys are "user\ndevice"; only materialized Lazy
+		// values count (an unrealized slot is not a live connection).
 		GatewayMetrics.SetSessionsObserver(() => _sessions
-			.Where(pair => pair.Value.IsValueCreated)
-			.GroupBy(pair => pair.Key.Split('\n')[0], StringComparer.OrdinalIgnoreCase)
-			.Select(g => new Measurement<long>(g.Count(),
-				new KeyValuePair<string, object?>("user", GatewayMetrics.PerUserLabels ? g.Key : "-"))));
-		GatewayMetrics.SetIdleWatchersObserver(() => _watchers
 			.Where(pair => pair.Value.IsValueCreated)
 			.GroupBy(pair => pair.Key.Split('\n')[0], StringComparer.OrdinalIgnoreCase)
 			.Select(g => new Measurement<long>(g.Count(),
@@ -83,14 +65,10 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	public async ValueTask DisposeAsync()
 	{
 		await _evictionTimer.DisposeAsync().ConfigureAwait(false);
-		foreach ((string _, Lazy<BackendSession> lazy) in _sessions)
+		foreach ((string _, Lazy<CompositeBackendSession> lazy) in _sessions)
 			if (lazy.IsValueCreated)
 				await DisposeSessionAsync(lazy.Value).ConfigureAwait(false);
 		_sessions.Clear();
-		foreach ((string _, Lazy<ImapIdleWatcher> lazy) in _watchers)
-			if (lazy.IsValueCreated)
-				await DisposeWatcherAsync(lazy.Value).ConfigureAwait(false);
-		_watchers.Clear();
 	}
 
 	public async Task<bool> AuthenticateAsync(BackendCredentials credentials, CancellationToken ct)
@@ -102,7 +80,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		    _authCache.TryGetValue(cacheKey, out (string PasswordHash, DateTime ExpiresUtc) cached) &&
 		    cached.PasswordHash == passwordHash && cached.ExpiresUtc > DateTime.UtcNow)
 			return true;
-		// Repeats of a known-bad password are refused without an IMAP round-trip, so the
+		// Repeats of a known-bad password are refused without a backend round-trip, so the
 		// gateway cannot be used to hammer the mail backend with login attempts.
 		if (_options.Auth.NegativeCacheSeconds > 0 &&
 		    _authNegativeCache.TryGetValue(cacheKey, out (string PasswordHash, DateTime ExpiresUtc) negative) &&
@@ -115,50 +93,27 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// a false verdict feeds the per-IP throttle via the normal 401 path.
 		if (_resolver.VerifyLocally(credentials.UserName, credentials.Password) is { } verified)
 		{
-			if (verified)
-			{
-				if (_options.Auth.SuccessCacheMinutes > 0)
-					_authCache[cacheKey] = (passwordHash, DateTime.UtcNow.AddMinutes(_options.Auth.SuccessCacheMinutes));
-				_authNegativeCache.TryRemove(cacheKey, out _);
-			}
-			else
-			{
-				_authCache.TryRemove(cacheKey, out _);
-				if (_options.Auth.NegativeCacheSeconds > 0)
-					_authNegativeCache[cacheKey] =
-						(passwordHash, DateTime.UtcNow.AddSeconds(_options.Auth.NegativeCacheSeconds));
-			}
-
+			CacheVerdict(cacheKey, passwordHash, verified);
 			return verified;
 		}
 
-		// No local rule: the presented password is the IMAP password — probe the user's
-		// EFFECTIVE IMAP endpoint/username, so per-user Host/UserName overrides apply.
+		// No local rule: the presented password is the mail password — the MailStore role's
+		// provider probes the user's EFFECTIVE endpoint/username, so per-user overrides
+		// apply. A provider without verification support cannot admit pass-through logins.
 		ResolvedAccount probeAccount = _resolver.Resolve(credentials);
-		try
+		ResolvedRole mailRole = RoleMapper.Map(probeAccount, credentials)
+			.First(r => r.Role == BackendRole.MailStore);
+		if (_registry.GetFor(mailRole.ProviderName, BackendRole.MailStore) is not ICredentialVerifier verifier)
 		{
-			using ImapClient client = await ImapConnectionFactory
-				.ConnectAsync(probeAccount.Imap.Options, probeAccount.Imap.Credentials, ct, _imapWireLogger)
-				.ConfigureAwait(false);
-			await client.DisconnectAsync(true, ct).ConfigureAwait(false);
-			if (_options.Auth.SuccessCacheMinutes > 0)
-				_authCache[cacheKey] = (passwordHash, DateTime.UtcNow.AddMinutes(_options.Auth.SuccessCacheMinutes));
-			_authNegativeCache.TryRemove(cacheKey, out _);
-			return true;
-		}
-		catch (AuthenticationException)
-		{
-			_authCache.TryRemove(cacheKey, out _);
-			if (_options.Auth.NegativeCacheSeconds > 0)
-				_authNegativeCache[cacheKey] =
-					(passwordHash, DateTime.UtcNow.AddSeconds(_options.Auth.NegativeCacheSeconds));
+			_logger.LogWarning(
+				"Provider {Provider} cannot verify credentials and no local rule decides {User}; refusing login",
+				mailRole.ProviderName, credentials.UserName);
 			return false;
 		}
-		catch (Exception ex) when (ex is not OperationCanceledException)
-		{
-			_logger.LogError(ex, "IMAP authentication probe failed for {User}", credentials.UserName);
-			throw new BackendException("Mail backend unreachable.", ex);
-		}
+
+		bool ok = await verifier.VerifyCredentialsAsync(mailRole, ct).ConfigureAwait(false);
+		CacheVerdict(cacheKey, passwordHash, ok);
+		return ok;
 	}
 
 	public async Task<IBackendSession> GetSessionAsync(
@@ -166,13 +121,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	{
 		await _resolver.EnsureFreshAsync(false, ct).ConfigureAwait(false);
 		ResolvedAccount account = _resolver.Resolve(credentials);
-
-		// Watchers are resolved lazily per folder at wait time (a Ping decides then which
-		// folder deserves the IDLE connection), so the session gets a provider closure.
-		ImapIdleWatcher? WatcherProvider(string folderFullName)
-		{
-			return GetOrCreateWatcher(account, folderFullName);
-		}
+		IReadOnlyList<ResolvedRole> roles = RoleMapper.Map(account, credentials);
 
 		// Shared-calendar grants are read here (async) because the session constructor is
 		// synchronous; a session therefore carries the grants from its build time — `eas
@@ -185,14 +134,13 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// config-static (restart to apply changes).
 		string key = $"{credentials.UserName}\n{deviceId}";
 		bool created = false;
-		Lazy<BackendSession> lazy = _sessions.GetOrAdd(key, _ => new Lazy<BackendSession>(() =>
+		Lazy<CompositeBackendSession> lazy = _sessions.GetOrAdd(key, _ => new Lazy<CompositeBackendSession>(() =>
 		{
 			created = true;
-			return new BackendSession(
-				account, credentials, _dbFactory, _notifier, _protector, WatcherProvider, _logger, _loggerFactory,
-				sharedCalendars);
+			return new CompositeBackendSession(
+				_registry, credentials, account.MailAddress, roles, sharedCalendars);
 		}));
-		BackendSession session = lazy.Value;
+		CompositeBackendSession session = lazy.Value;
 		if (created)
 			_logger.LogInformation("Opened backend session for {User} (device {DeviceId})",
 				credentials.UserName, deviceId);
@@ -200,13 +148,12 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// Credentials changed (e.g. password rotation): rebuild the session.
 		if (session.Credentials.Password != credentials.Password)
 		{
-			if (_sessions.TryRemove(key, out Lazy<BackendSession>? stale) && stale.IsValueCreated)
+			if (_sessions.TryRemove(key, out Lazy<CompositeBackendSession>? stale) && stale.IsValueCreated)
 				_ = DisposeSessionAsync(stale.Value);
 			lazy = _sessions.GetOrAdd(key,
-				_ => new Lazy<BackendSession>(() =>
-					new BackendSession(
-						account, credentials, _dbFactory, _notifier, _protector, WatcherProvider, _logger,
-						_loggerFactory, sharedCalendars)));
+				_ => new Lazy<CompositeBackendSession>(() =>
+					new CompositeBackendSession(
+						_registry, credentials, account.MailAddress, roles, sharedCalendars)));
 			session = lazy.Value;
 		}
 
@@ -239,40 +186,29 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		return merged;
 	}
 
-	/// <summary>
-	///   One shared IDLE watcher per (gateway user, folder) — all of the user's devices reuse
-	///   it. Rebuilt on password rotation; null when IDLE is disabled by configuration.
-	/// </summary>
-	private ImapIdleWatcher? GetOrCreateWatcher(ResolvedAccount account, string folderFullName)
+	private void CacheVerdict(string cacheKey, string passwordHash, bool verified)
 	{
-		if (!_options.Eas.UseImapIdle)
-			return null;
-		string key = $"{account.GatewayLogin}\n{folderFullName}";
-		Lazy<ImapIdleWatcher> lazy = _watchers.GetOrAdd(key,
-			_ => new Lazy<ImapIdleWatcher>(() =>
-				new ImapIdleWatcher(
-					account.Imap.Options, account.Imap.Credentials, folderFullName, _logger, _imapWireLogger)));
-		ImapIdleWatcher watcher = lazy.Value;
-		if (watcher.Credentials.Password != account.Imap.Credentials.Password)
+		if (verified)
 		{
-			if (_watchers.TryRemove(key, out Lazy<ImapIdleWatcher>? stale) && stale.IsValueCreated)
-				_ = DisposeWatcherAsync(stale.Value);
-			watcher = _watchers.GetOrAdd(key,
-					_ => new Lazy<ImapIdleWatcher>(() =>
-						new ImapIdleWatcher(
-							account.Imap.Options, account.Imap.Credentials, folderFullName, _logger, _imapWireLogger)))
-				.Value;
+			if (_options.Auth.SuccessCacheMinutes > 0)
+				_authCache[cacheKey] = (passwordHash, DateTime.UtcNow.AddMinutes(_options.Auth.SuccessCacheMinutes));
+			_authNegativeCache.TryRemove(cacheKey, out _);
 		}
-
-		return watcher;
+		else
+		{
+			_authCache.TryRemove(cacheKey, out _);
+			if (_options.Auth.NegativeCacheSeconds > 0)
+				_authNegativeCache[cacheKey] =
+					(passwordHash, DateTime.UtcNow.AddSeconds(_options.Auth.NegativeCacheSeconds));
+		}
 	}
 
 	private void EvictIdleSessions()
 	{
 		DateTime cutoff = DateTime.UtcNow.AddMinutes(-_options.Eas.SessionIdleMinutes);
-		foreach ((string key, Lazy<BackendSession> lazy) in _sessions)
+		foreach ((string key, Lazy<CompositeBackendSession> lazy) in _sessions)
 			if (lazy.IsValueCreated && lazy.Value.LastUsedUtc < cutoff &&
-			    _sessions.TryRemove(key, out Lazy<BackendSession>? removed))
+			    _sessions.TryRemove(key, out Lazy<CompositeBackendSession>? removed))
 			{
 				_logger.LogDebug("Evicting idle backend session {Key}", key.Replace('\n', '/'));
 				if (removed.IsValueCreated)
@@ -289,35 +225,16 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			if (pair.Value.ExpiresUtc <= nowUtc)
 				_authNegativeCache.TryRemove(pair);
 
-		// A user's shared IDLE watchers live exactly as long as any of their sessions.
+		// Providers with per-user caches (IDLE watchers) trim users without live sessions.
 		HashSet<string> activeUsers = _sessions.Keys
 			.Select(k => k[..k.IndexOf('\n')])
 			.ToHashSet(StringComparer.Ordinal);
-		foreach ((string key, Lazy<ImapIdleWatcher> lazy) in _watchers)
-		{
-			string user = key[..key.IndexOf('\n')];
-			if (!activeUsers.Contains(user) && _watchers.TryRemove(key, out Lazy<ImapIdleWatcher>? removed))
-			{
-				_logger.LogDebug("Evicting IMAP IDLE watcher {Key}", key.Replace('\n', '/'));
-				if (removed.IsValueCreated)
-					_ = DisposeWatcherAsync(removed.Value);
-			}
-		}
+		foreach (IBackendProvider provider in _registry.All)
+			if (provider is IPerUserResourceOwner owner)
+				owner.TrimUserResources(activeUsers);
 	}
 
-	private async Task DisposeWatcherAsync(ImapIdleWatcher watcher)
-	{
-		try
-		{
-			await watcher.DisposeAsync().ConfigureAwait(false);
-		}
-		catch (Exception ex)
-		{
-			_logger.LogDebug(ex, "Error disposing IMAP IDLE watcher");
-		}
-	}
-
-	private async Task DisposeSessionAsync(BackendSession session)
+	private async Task DisposeSessionAsync(CompositeBackendSession session)
 	{
 		try
 		{
