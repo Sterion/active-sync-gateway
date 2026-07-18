@@ -1,7 +1,6 @@
 using System.Xml.Linq;
 using ActiveSync.Backends.Converters;
 using ActiveSync.Core.Backend;
-using ActiveSync.Core.Options;
 using ActiveSync.Protocol;
 using Microsoft.Extensions.Logging;
 

@@ -2,7 +2,6 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
 using ActiveSync.Core.Backend;
-using ActiveSync.Core.Options;
 using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Backends.Sieve;

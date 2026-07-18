@@ -1,6 +1,5 @@
 using System.Xml.Linq;
 using ActiveSync.Core.Backend;
-using ActiveSync.Core.Options;
 using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Backends.Dav;

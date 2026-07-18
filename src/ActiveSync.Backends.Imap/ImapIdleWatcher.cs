@@ -1,5 +1,4 @@
 using ActiveSync.Core.Backend;
-using ActiveSync.Core.Options;
 using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Security;

@@ -117,8 +117,15 @@ src/ActiveSync.Core/        Backend interfaces + provider engine (BackendProvide
                             store, diff engine, options. Depends on Protocol only
                             (+ EF Core / config-binder packages). Provider-agnostic.
 src/ActiveSync.Backends.Common/  Shared building blocks: MIME/iCal/vCard ⇄ EAS converters
-                            + TLS/wire-logging helpers. Depends on Core (+ MailKit, Ical.Net,
+                            + TLS/wire-logging helpers + the shared backend-options bases
+                            (NetworkBackendOptions = the TLS knobs; MailConnectionOptions =
+                            Host/Port/UseSsl/Security). Depends on Core (+ MailKit, Ical.Net,
                             FolkerKinzel.VCards) so those deps stay OUT of Core.
+                            OPTIONS CONVENTION: a provider's own options class lives in ITS
+                            assembly (e.g. ImapOptions, JmapOptions), deriving from the Common
+                            bases and adding only its specifics; bound via ProviderSettings.
+                            Bind<T>(). Core holds only host/protocol options (Eas/Auth/Database/
+                            Encryption/Log/Policy/…), never backend-specific ones.
 src/ActiveSync.Backends.Imap/    "imap" provider (MailKit). Depends on Core + Common.
 src/ActiveSync.Backends.Jmap/    "jmap" provider (Stalwart JMAP over HttpClient +
                             System.Text.Json). Serves MailStore + MailSubmit + Oof

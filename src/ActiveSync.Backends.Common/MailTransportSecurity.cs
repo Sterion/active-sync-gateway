@@ -1,5 +1,4 @@
 using System.Net.Security;
-using ActiveSync.Core.Options;
 using MailKit;
 using MailKit.Security;
 
@@ -8,7 +7,7 @@ namespace ActiveSync.Backends.Common;
 /// <summary>Central mapping of transport-security options for all MailKit connections.</summary>
 public static class MailTransportSecurity
 {
-	public static SecureSocketOptions ForImap(ImapOptions options)
+	public static SecureSocketOptions ForImap(MailConnectionOptions options)
 	{
 		return Parse(options.Security) ?? (options.UseSsl
 			? SecureSocketOptions.SslOnConnect
@@ -17,7 +16,7 @@ public static class MailTransportSecurity
 				: SecureSocketOptions.Auto);
 	}
 
-	public static SecureSocketOptions ForSmtp(SmtpOptions options)
+	public static SecureSocketOptions ForSmtp(MailConnectionOptions options)
 	{
 		return Parse(options.Security) ?? (options.UseSsl
 			? SecureSocketOptions.SslOnConnect
