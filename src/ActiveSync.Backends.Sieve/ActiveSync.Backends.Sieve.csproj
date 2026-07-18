@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- The "sieve" backend provider: out-of-office via a minimal ManageSieve (RFC 5804) client. -->
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
+		<ProjectReference Include="..\ActiveSync.Backends.Common\ActiveSync.Backends.Common.csproj" />
+	</ItemGroup>
+
+</Project>

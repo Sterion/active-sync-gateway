@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- The always-shipped "local" fallback provider: content stores over the gateway database
+	     (Notes always; Contacts/Calendar/Tasks when no external backend is configured). -->
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
+		<ProjectReference Include="..\ActiveSync.Backends.Common\ActiveSync.Backends.Common.csproj" />
+	</ItemGroup>
+
+</Project>

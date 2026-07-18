@@ -1,4 +1,4 @@
-using ActiveSync.Backends.Imap;
+using ActiveSync.Backends.Common;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using Microsoft.Extensions.Logging;
@@ -33,7 +33,7 @@ public sealed class SmtpBackendProvider(ILoggerFactory loggerFactory) : IBackend
 		return $"smtp {options.Host}:{options.Port} " +
 		       $"(ssl={(options.UseSsl ? "on" : "off")}, security={options.Security ?? "auto"}, " +
 		       $"forceFrom={(options.ForceFrom ? "on" : "off")}, " +
-		       $"cert={ImapBackendProvider.DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
+		       $"cert={BackendDescription.DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
 	}
 
 	public IBackendConnection CreateConnection(BackendConnectionContext context)

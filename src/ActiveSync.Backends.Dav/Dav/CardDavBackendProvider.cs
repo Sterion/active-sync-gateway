@@ -1,4 +1,4 @@
-using ActiveSync.Backends.Imap;
+using ActiveSync.Backends.Common;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using Microsoft.Extensions.Logging;
@@ -28,7 +28,7 @@ public sealed class CardDavBackendProvider(ILoggerFactory loggerFactory) : IBack
 	{
 		DavServerOptions options = settings.Bind<DavServerOptions>();
 		return $"carddav {options.BaseUrl} " +
-		       $"(cert={ImapBackendProvider.DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
+		       $"(cert={BackendDescription.DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
 	}
 
 	public Task<bool> ProbeReadinessAsync(ProviderSettings settings, CancellationToken ct)

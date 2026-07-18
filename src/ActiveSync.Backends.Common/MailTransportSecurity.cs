@@ -3,7 +3,7 @@ using ActiveSync.Core.Options;
 using MailKit;
 using MailKit.Security;
 
-namespace ActiveSync.Backends.Imap;
+namespace ActiveSync.Backends.Common;
 
 /// <summary>Central mapping of transport-security options for all MailKit connections.</summary>
 public static class MailTransportSecurity

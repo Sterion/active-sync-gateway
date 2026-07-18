@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- The "imap" backend provider: email content store + IMAP IDLE watcher over MailKit. -->
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
+		<ProjectReference Include="..\ActiveSync.Backends.Common\ActiveSync.Backends.Common.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="MailKit" />
+	</ItemGroup>
+
+</Project>

@@ -112,17 +112,29 @@ docker compose -f docker/docker-compose.ci.yml run --rm tests        # full suit
 ```
 src/ActiveSync.Protocol/    WBXML codec, code pages, MS-ASHTTP query parser, EAS constants.
                             Depends on NOTHING project-wise. No ASP.NET, no MailKit.
-src/ActiveSync.Core/        Backend interfaces, EF Core state store, diff engine, options.
-                            Depends on Protocol only (+ EF Core packages).
-src/ActiveSync.Backends/    IMAP/SMTP (MailKit), CalDAV/CardDAV (in-house WebDAV client),
-                            MIME/iCal/vCard ⇄ EAS converters. Depends on Core.
+src/ActiveSync.Core/        Backend interfaces + provider engine (BackendProviderRegistry,
+                            CompositeBackendSession, BackendSessionFactory), EF Core state
+                            store, diff engine, options. Depends on Protocol only
+                            (+ EF Core / config-binder packages). Provider-agnostic.
+src/ActiveSync.Backends.Common/  Shared building blocks: MIME/iCal/vCard ⇄ EAS converters
+                            + TLS/wire-logging helpers. Depends on Core (+ MailKit, Ical.Net,
+                            FolkerKinzel.VCards) so those deps stay OUT of Core.
+src/ActiveSync.Backends.Imap/    "imap" provider (MailKit). Depends on Core + Common.
+src/ActiveSync.Backends.Smtp/    "smtp" provider (MailKit). Depends on Core + Common.
+src/ActiveSync.Backends.Dav/     "caldav" + "carddav" providers (one assembly — shared
+                            WebDavClient/DavStoreBase/DavDiscovery). Depends on Core + Common.
+src/ActiveSync.Backends.Sieve/   "sieve" provider (ManageSieve). Depends on Core + Common.
+src/ActiveSync.Backends.Local/   always-shipped "local" fallback stores (gateway DB) +
+                            LocalChangeNotifier. Depends on Core + Common.
 src/ActiveSync.Server/      Kestrel host, /Microsoft-Server-ActiveSync endpoint, Basic auth,
-                            one IEasCommandHandler per EAS command. Depends on Backends.
+                            one IEasCommandHandler per EAS command, provider DI registration
+                            (AddBackendProviders). References Core + all six backend assemblies.
 tests/ActiveSync.Protocol.Tests/   WBXML round-trip + query parser tests
 tests/ActiveSync.Core.Tests/       diff engine, sync-key state machine, options validator,
-                                   AND the Backends unit tests (converters, cert validator,
-                                   WebDAV redirect safety) — there is no Backends.Tests project,
-                                   so Core.Tests references Backends and hosts them.
+                                   provider engine + resolver, AND the backend unit tests
+                                   (converters, cert validator, WebDAV redirect safety) —
+                                   there is no per-provider test project, so Core.Tests
+                                   references the provider assemblies and hosts them.
 tests/ActiveSync.Server.Tests/     handler-level tests (has InternalsVisibleTo into Server)
 tests/ActiveSync.Integration.Tests/  real-backend E2E tests (see "Integration tests" below)
 ```

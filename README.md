@@ -924,15 +924,17 @@ hand gets a minimal auto-created release with the same assets.
 src/
   ActiveSync.Protocol/   WBXML codec (all MS-ASWBXML code pages), MS-ASHTTP base64 query
                          parser, EAS constants. No ASP.NET dependencies.
-  ActiveSync.Core/       Backend abstractions (IContentStore, IBackendSession), EF Core
-                         state store (devices, folder registry, sync keys + snapshots,
-                         DAV href map), differential sync engine (CollectionDiff).
-  ActiveSync.Backends/   Named backend providers composed per role — imap/smtp (MailKit),
-                         caldav/carddav over a thin WebDAV client, sieve, and the local
-                         (gateway-DB) fallback — plus MIME/iCalendar/vCard ↔ EAS converters,
-                         MS-ASTZ timezone blob, per-(user,device) session cache.
+  ActiveSync.Core/       Backend abstractions (IContentStore, IBackendSession) + the
+                         provider engine (registry, composite session, session factory),
+                         EF Core state store (devices, folder registry, sync keys +
+                         snapshots, DAV href map), differential sync engine (CollectionDiff).
+  ActiveSync.Backends.Common/   MIME/iCalendar/vCard ↔ EAS converters, MS-ASTZ timezone
+                         blob, TLS/wire-logging helpers — shared by the providers.
+  ActiveSync.Backends.{Imap,Smtp,Dav,Sieve,Local}/   one assembly per provider (Dav serves
+                         both caldav + carddav); Local is the gateway-DB fallback. New
+                         backends (e.g. jmap) drop in as another such assembly.
   ActiveSync.Server/     Kestrel host, /Microsoft-Server-ActiveSync endpoint, Basic auth,
-                         one handler class per EAS command, the `eas` CLI.
+                         one handler class per EAS command, provider DI wiring, the `eas` CLI.
 ```
 
 Design notes:

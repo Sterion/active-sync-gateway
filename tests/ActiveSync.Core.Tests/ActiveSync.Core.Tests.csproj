@@ -17,7 +17,11 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\..\src\ActiveSync.Core\ActiveSync.Core.csproj" />
-		<ProjectReference Include="..\..\src\ActiveSync.Backends\ActiveSync.Backends.csproj" />
+		<ProjectReference Include="..\..\src\ActiveSync.Backends.Imap\ActiveSync.Backends.Imap.csproj" />
+		<ProjectReference Include="..\..\src\ActiveSync.Backends.Smtp\ActiveSync.Backends.Smtp.csproj" />
+		<ProjectReference Include="..\..\src\ActiveSync.Backends.Dav\ActiveSync.Backends.Dav.csproj" />
+		<ProjectReference Include="..\..\src\ActiveSync.Backends.Sieve\ActiveSync.Backends.Sieve.csproj" />
+		<ProjectReference Include="..\..\src\ActiveSync.Backends.Local\ActiveSync.Backends.Local.csproj" />
 	</ItemGroup>
 
 </Project>

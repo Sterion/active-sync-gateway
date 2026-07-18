@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- The "caldav" and "carddav" backend providers over a thin WebDAV client (one assembly:
+	     calendar, tasks and contacts share DavStoreBase / WebDavClient / DavDiscovery). -->
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
+		<ProjectReference Include="..\ActiveSync.Backends.Common\ActiveSync.Backends.Common.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="FolkerKinzel.VCards" />
+		<PackageReference Include="Ical.Net" />
+	</ItemGroup>
+
+</Project>

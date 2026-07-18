@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using ActiveSync.Backends.Common;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Observability;
 using ActiveSync.Core.Options;
@@ -61,12 +62,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		ImapOptions options = settings.Bind<ImapOptions>();
 		return $"imap {options.Host}:{options.Port} " +
 		       $"(ssl={(options.UseSsl ? "on" : "off")}, security={options.Security ?? "auto"}, " +
-		       $"cert={DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
-	}
-
-	internal static string DescribeCert(bool allowInvalid, string? caPath)
-	{
-		return allowInvalid ? "any (insecure)" : caPath is null ? "system" : "system+custom CA";
+		       $"cert={BackendDescription.DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
 	}
 
 	public IBackendConnection CreateConnection(BackendConnectionContext context)

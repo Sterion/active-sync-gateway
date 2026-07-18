@@ -1,4 +1,4 @@
-using ActiveSync.Backends.Imap;
+using ActiveSync.Backends.Common;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using MailKit.Net.Smtp;

@@ -1,10 +1,5 @@
 using System.Security.Cryptography.X509Certificates;
-using ActiveSync.Backends;
-using ActiveSync.Backends.Dav;
-using ActiveSync.Backends.Imap;
 using ActiveSync.Backends.Local;
-using ActiveSync.Backends.Sieve;
-using ActiveSync.Backends.Smtp;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;

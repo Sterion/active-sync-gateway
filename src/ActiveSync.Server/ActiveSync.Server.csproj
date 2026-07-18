@@ -1,10 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
 	<ItemGroup>
-		<ProjectReference Include="..\ActiveSync.Backends\ActiveSync.Backends.csproj" />
-	</ItemGroup>
-
-	<ItemGroup>
 		<PackageReference Include="OpenTelemetry.Extensions.Hosting" />
 		<PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" />
 		<PackageReference Include="Serilog.AspNetCore" />
@@ -18,6 +14,15 @@
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Backends.Common\ActiveSync.Backends.Common.csproj" />
+		<ProjectReference Include="..\ActiveSync.Backends.Imap\ActiveSync.Backends.Imap.csproj" />
+		<ProjectReference Include="..\ActiveSync.Backends.Smtp\ActiveSync.Backends.Smtp.csproj" />
+		<ProjectReference Include="..\ActiveSync.Backends.Dav\ActiveSync.Backends.Dav.csproj" />
+		<ProjectReference Include="..\ActiveSync.Backends.Sieve\ActiveSync.Backends.Sieve.csproj" />
+		<ProjectReference Include="..\ActiveSync.Backends.Local\ActiveSync.Backends.Local.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

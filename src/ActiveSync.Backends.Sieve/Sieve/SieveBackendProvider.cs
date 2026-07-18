@@ -1,4 +1,4 @@
-using ActiveSync.Backends.Imap;
+using ActiveSync.Backends.Common;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using Microsoft.Extensions.Logging;
@@ -28,7 +28,7 @@ public sealed class SieveBackendProvider(ILoggerFactory loggerFactory) : IBacken
 	{
 		SieveOptions options = settings.Bind<SieveOptions>();
 		return $"sieve {options.Host}:{options.Port} (tls={(options.UseTls ? "on" : "off")}, " +
-		       $"cert={ImapBackendProvider.DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
+		       $"cert={BackendDescription.DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
 	}
 
 	public IBackendConnection CreateConnection(BackendConnectionContext context)

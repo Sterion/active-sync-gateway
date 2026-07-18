@@ -3,7 +3,6 @@ using System.Diagnostics.Metrics;
 using System.Security.Cryptography;
 using System.Text;
 using ActiveSync.Core.Accounts;
-using ActiveSync.Core.Backend;
 using ActiveSync.Core.Observability;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
@@ -11,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace ActiveSync.Backends;
+namespace ActiveSync.Core.Backend;
 
 /// <summary>
 ///   Caches one <see cref="CompositeBackendSession" /> per (user, device) so consecutive EAS

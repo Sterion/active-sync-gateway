@@ -1,5 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+	<!-- Shared backend building blocks: the MIME/iCalendar/vCard <-> EAS converters plus the
+	     TLS/wire-logging helpers every network provider reuses. Carries the heavy converter
+	     package dependencies so Core stays free of them. -->
 	<ItemGroup>
 		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
 	</ItemGroup>

@@ -3,7 +3,7 @@ using ActiveSync.Core.Logging;
 using MailKit;
 using Microsoft.Extensions.Logging;
 
-namespace ActiveSync.Backends.Imap;
+namespace ActiveSync.Backends.Common;
 
 /// <summary>
 ///   MailKit <see cref="IProtocolLogger" /> that forwards the raw IMAP/SMTP exchange to an

@@ -1,7 +1,6 @@
-using ActiveSync.Core.Backend;
 using ActiveSync.Protocol;
 
-namespace ActiveSync.Backends;
+namespace ActiveSync.Core.Backend;
 
 /// <summary>
 ///   Composite backend session: groups the account's resolved roles by provider, opens one
