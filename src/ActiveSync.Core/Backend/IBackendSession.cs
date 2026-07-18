@@ -57,23 +57,31 @@ public interface IContactOperations
 }
 
 /// <summary>
-///   Out-of-office backend (ManageSieve). The state database is the source of truth for the
-///   Oof SETTINGS; this interface only manages the vacation script on the mail server.
+///   The out-of-office auto-reply, one body for every audience; null Start/End means
+///   "until disabled". Backends that cannot render HTML may send the body as-is.
+/// </summary>
+public sealed record OofReply(string BodyText, bool BodyIsHtml, DateTime? StartUtc, DateTime? EndUtc);
+
+/// <summary>
+///   Out-of-office backend (ManageSieve today). The state database is the source of truth
+///   for the Oof SETTINGS; the backend renders and arms its own server-side rule from the
+///   semantic reply — callers never see scripts or rules.
 /// </summary>
 public interface IOofBackend
 {
 	/// <summary>
-	///   Uploads the gateway-owned vacation script and makes it the active script. Returns
-	///   the name of the PREVIOUSLY active script ("" when none was active) so it can be
-	///   restored on disable — callers must ignore the return when it names our own script.
+	///   Arms the auto-reply. Returns the restore token the caller must persist for
+	///   <see cref="DisableAsync" /> (Sieve: the previously active script name, "" when
+	///   nothing was active) — or null when the gateway's own rule was already armed, in
+	///   which case the caller's stored token remains the one to restore.
 	/// </summary>
-	Task<string> ActivateAsync(string sieveScript, CancellationToken ct);
+	Task<string?> EnableAsync(OofReply reply, CancellationToken ct);
 
 	/// <summary>
-	///   Removes the gateway-owned script and restores the given previously active script
-	///   (empty = leave no script active). Missing scripts are tolerated.
+	///   Disarms the auto-reply and restores the given token ("" = leave nothing active).
+	///   Missing or stale tokens are tolerated.
 	/// </summary>
-	Task DeactivateAsync(string previousActiveScript, CancellationToken ct);
+	Task DisableAsync(string restoreToken, CancellationToken ct);
 }
 
 /// <summary>Calendar-specific operations.</summary>

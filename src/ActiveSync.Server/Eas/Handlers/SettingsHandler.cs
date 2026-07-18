@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Xml.Linq;
-using ActiveSync.Backends.Sieve;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
@@ -120,8 +119,8 @@ public sealed class SettingsHandler(
 	}
 
 	/// <summary>
-	///   Oof Set: sieve first, then the database — a failed script upload must not leave the
-	///   phone believing the auto-reply is armed. Without a Sieve backend the historical stub
+	///   Oof Set: backend first, then the database — a failed arm/disarm must not leave the
+	///   phone believing the auto-reply is armed. Without an Oof backend the historical stub
 	///   behavior remains (accept and ignore) so clients probing Oof see no change.
 	/// </summary>
 	private async Task<XElement> ApplyOofSetAsync(EasContext context, XElement set, CancellationToken ct)
@@ -151,19 +150,19 @@ public sealed class SettingsHandler(
 			string? previousActive = row?.PreviousActiveScript;
 			if (state == 0)
 			{
-				// Only touch the sieve server when the gateway actually armed something.
+				// Only touch the backend when the gateway actually armed something.
 				if (row is { State: not 0 })
-					await oof.DeactivateAsync(previousActive ?? "", ct);
+					await oof.DisableAsync(previousActive ?? "", ct);
 				previousActive = null;
 			}
 			else
 			{
-				string script = SieveVacationScript.Build(
-					message, state == 2 ? start : null, state == 2 ? end : null);
-				string wasActive = await oof.ActivateAsync(script, ct);
-				// Remember what to restore — unless it is our own script (re-arm case).
-				if (wasActive != SieveVacationScript.ScriptName)
-					previousActive = wasActive;
+				string? token = await oof.EnableAsync(new OofReply(
+					message, bodyType.Equals("HTML", StringComparison.OrdinalIgnoreCase),
+					state == 2 ? start : null, state == 2 ? end : null), ct);
+				// null = our own rule was already armed; the stored restore target stays.
+				if (token is not null)
+					previousActive = token;
 			}
 
 			await context.State.SaveOofAsync(
@@ -173,7 +172,7 @@ public sealed class SettingsHandler(
 		catch (BackendException ex)
 		{
 			// MS-ASCMD Settings status 4: server unavailable — the phone shows a retry hint.
-			logger.LogWarning(ex, "Oof Set failed against the sieve server for {User}",
+			logger.LogWarning(ex, "Oof Set failed against the Oof backend for {User}",
 				LogText.Clean(context.Device.UserName, 128));
 			return new XElement(ST + "Oof", new XElement(ST + "Status", "4"));
 		}
