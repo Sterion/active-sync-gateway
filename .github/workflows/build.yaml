@@ -7,26 +7,24 @@ on:
       - '**'
   workflow_dispatch:
 
-# GitHub twin of .gitea/workflows/build.yaml — same single-compile pipeline: the
-# Dockerfile `test` stage builds the solution and runs the unit tests; the integration
-# tests then run FROM that same image (`--no-build`) against throwaway Stalwart/Postgres
-# containers, and only when the full suite is green is the runtime image assembled and
-# pushed to ghcr.io. Differences from the Gitea file: GITHUB_TOKEN replaces BUILD_TOKEN
-# (ghcr.io login and release API), actions/upload-artifact replaces the Gitea artifact
-# action, and the release-attach step speaks `gh` instead of raw curl — creating the
-# release with generated notes when the tag arrived via the Gitea->GitHub mirror (the
-# normal flow; releases authored on Gitea stay untouched there).
+# Single pipeline, single compile: the Dockerfile `test` stage builds the solution and
+# runs the unit tests; the integration tests then run FROM that same image (`--no-build`)
+# against throwaway Stalwart/Postgres containers, and only when the full suite is green
+# is the runtime image assembled and pushed to ghcr.io — all with the built-in
+# GITHUB_TOKEN, no repository secrets needed.
 #
-# The container-streaming pattern (docker cp / stdin instead of bind mounts) is kept
-# even though GitHub-hosted runners could bind-mount: it keeps the two files diffable.
+# Everything streams through the docker daemon API (`docker cp` for the backend config,
+# stdin for provision.sh) instead of bind mounts — a pattern inherited from a
+# docker-out-of-docker runner and kept for robustness. For local runs use
+# docker/docker-compose.ci.yml.
 permissions:
   contents: write
   packages: write
 
 jobs:
   Build:
-    # Guard against ever being picked up by a Gitea runner (Gitea also reads
-    # .github/workflows when .gitea/workflows is absent).
+    # Guard against ever being picked up by a non-GitHub Actions-compatible runner
+    # (e.g. a Gitea mirror of this repo — Gitea reads .github/workflows too).
     if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     env:
@@ -92,8 +90,8 @@ jobs:
 
       # The engine-embedded BuildKit (docker driver), not an isolated builder container:
       # `load:` becomes a no-op (the test image builds straight into the engine store
-      # instead of a ~1.5 GB tarball round-trip). GitHub-hosted runners are ephemeral, so
-      # unlike the Gitea runner there is no cross-run layer cache either way.
+      # instead of a ~1.5 GB tarball round-trip). GitHub-hosted runners are ephemeral,
+      # so there is no cross-run layer cache either way.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
         with:
@@ -274,9 +272,9 @@ jobs:
 
       # Version tags only, and strictly after the image push: attach the download zips to
       # the GitHub release for this tag. An existing release (authored by release.yaml or
-      # by hand) is reused untouched; otherwise one is created with notes generated from
-      # the commit subjects since the previous release — which is what happens when the
-      # tag arrives via the Gitea->GitHub push mirror. Re-runs are idempotent (--clobber).
+      # by hand) is reused untouched; otherwise a manually pushed tag gets one created
+      # here, with notes generated from the commit subjects since the previous release.
+      # Re-runs are idempotent (--clobber).
       - name: Create release and attach zips
         if: steps.version.outputs.version != ''
         env:

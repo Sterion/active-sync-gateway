@@ -1,4 +1,4 @@
-# CI entry point (Gitea workflow): runs the FULL test suite — unit + integration — against
+# CI entry point: runs the FULL test suite — unit + integration — against
 # a throwaway stalwart backend on a private compose network.
 #
 #   docker compose -f docker/docker-compose.ci.yml run --rm tests

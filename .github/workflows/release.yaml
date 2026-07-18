@@ -1,12 +1,12 @@
-# GitHub twin of .gitea/workflows/release.yaml — one-click release from the Actions tab.
-# NORMAL flow is still: release from Gitea, and the tag reaches GitHub via the push
-# mirror (build.yaml then creates the GitHub release + assets automatically). This
-# workflow exists for parity / emergencies; note a tag created HERE never flows back to
-# Gitea (the mirror is one-way).
-#
-# GitHub-specific ordering twist: a tag pushed with the built-in GITHUB_TOKEN does NOT
-# fire other workflows (loop prevention), so instead of relying on the tag push event
-# this workflow dispatches build.yaml explicitly against the tag ref.
+# One-click release: Actions -> Create Release -> enter the version. The ORDER is the
+# point — the release (with generated notes) must exist before the tag build finishes:
+#   1. the tag is pushed (a tag pushed with the built-in GITHUB_TOKEN does NOT fire
+#      other workflows — loop prevention — which is why step 3 exists);
+#   2. the release object is created for the now-existing tag with notes generated from
+#      the commit subjects since the previous release;
+#   3. build.yaml is dispatched explicitly against the tag ref — it tests, pushes the
+#      image and ATTACHES the download zips to this release.
+# Manual tagging keeps working: build.yaml creates a release itself when none exists.
 name: Create Release
 run-name: ${{ github.actor }} releases ${{ github.event.inputs.version }}
 

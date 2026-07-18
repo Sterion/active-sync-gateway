@@ -92,8 +92,8 @@ docker compose -f docker/docker-compose.ci.yml run --rm tests        # full suit
 
 - The solution file is **`ActiveSync.slnx`** (new SDK format). `dotnet build` without an
   argument works from the repo root; `ActiveSync.sln` does not exist.
-- **`nuget.config` pins nuget.org as the only source.** The developer machine has private
-  feeds (the internal Gitea instance, DevExpress) that 401 on public packages — do not remove this file.
+- **`nuget.config` pins nuget.org as the only source.** Developer machines may have
+  private feeds configured globally that 401 on public packages — do not remove this file.
 - **NuGet package versions are centralized in `Directory.Packages.props`**
   (`ManagePackageVersionsCentrally`). Every csproj's `<PackageReference Include="...">` must
   have **no** `Version` attribute — add/bump versions only in `Directory.Packages.props`.
@@ -438,29 +438,28 @@ banner. Rules:
   inside the container before building — never build directly on the bind mount, it would
   poison host bin/obj with Linux paths). Image builds run unit tests only via the
   Dockerfile `test` stage (forced by a marker-file COPY into `runtime`).
-- Gitea workflows (`.gitea/workflows/build.yaml`, single pipeline): the runner is
-  **docker-out-of-docker** — job steps run in a container but the docker daemon is the
-  host's, so any bind-mount path resolves on the runner host and mounts an empty
-  directory. Everything therefore streams through the daemon API (`docker cp` for the
-  Stalwart config — as a *directory* copy, because the image entrypoint hardwires
+- GitHub workflow (`.github/workflows/build.yaml`, single pipeline): steps deliberately
+  stream everything through the docker daemon API (`docker cp` for the Stalwart config —
+  as a *directory* copy, because the image entrypoint hardwires
   `--config /opt/stalwart/etc/config.toml` and ignores command args; stdin for
-  provision.sh). Never add a bind mount to a workflow step. A warm-up canary mail runs
-  before the suite (a cold Stalwart intermittently delays its first delivery, which would
-  flake one test).
+  provision.sh) instead of bind mounts, a pattern inherited from a docker-out-of-docker
+  runner and kept for robustness — don't add bind mounts to workflow steps. A warm-up
+  canary mail runs before the suite (a cold Stalwart intermittently delays its first
+  delivery, which would flake one test). The runtime image pushes to ghcr.io with the
+  built-in GITHUB_TOKEN; no repository secrets are needed.
 - Release flow (`release.yaml`, workflow_dispatch): validate version → generate notes
-  from commit subjects since the previous tag → push the tag as a REAL git push with the
-  BUILD_TOKEN PAT (the workflow's own token could be loop-prevented and API-created tags
-  have fired push events unreliably) → gitea-release-action creates the release object.
-  The tag run of build.yaml then pushes the image and attaches the zips to that release.
-  Order matters: release-with-notes first, files arrive when the build is green.
+  from commit subjects since the previous RELEASE (not tag) → push the tag → create the
+  release object → **explicitly dispatch build.yaml against the tag ref** (a tag pushed
+  with GITHUB_TOKEN never fires other workflows — loop prevention — so the dispatch is
+  load-bearing, don't remove it). The tag run of build.yaml then pushes the image and
+  attaches the zips to that release. Order matters: release-with-notes first, files
+  arrive when the build is green.
 - Download zips: after the integration tests, a container from the test image publishes
   framework-dependent linux-x64/win-x64 outputs (WITH apphost, unlike the image) plus a
   README.txt, zips them as `eas-gateway-<platform>-x64-<tag|branch>.zip` and `docker cp`s
-  them out; the publish DIRECTORIES are uploaded via `gitea-upload-artifact@v4` (Gitea
-  zips artifacts under the artifact name itself), and on version tags the .zip files are
-  attached to the tag's release through the Gitea API using the auto-provided
-  GITHUB_TOKEN (existing releases are reused, same-named assets replaced — re-runs are
-  idempotent).
+  them out; the publish DIRECTORIES are uploaded via `actions/upload-artifact@v4`, and on
+  version tags the .zip files are attached to the tag's release via `gh release upload
+  --clobber` (existing releases are reused, assets replaced — re-runs are idempotent).
 
 ## Testing expectations
 

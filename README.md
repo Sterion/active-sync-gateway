@@ -780,14 +780,13 @@ AS_TEST_STACK=mailserver dotnet test --filter Category=Integration
   localhost defaults just work. Breakpoints hit gateway code (it runs in-process).
 - **VS Code devcontainer**: "Reopen in Container" — the `.devcontainer` compose brings the
   Stalwart stack up alongside the workspace with env preset.
-- **Gitea CI**: one workflow, `.gitea/workflows/build.yaml` (push + dispatch), compiles the
-  solution exactly once: the Dockerfile `test` stage builds everything and runs the unit
-  tests, the integration tests then run **from that same image** (`dotnet test --no-build`,
-  joined to a network with throwaway Stalwart + Postgres containers), and only when the
-  full suite is green is the runtime image assembled from the warm build cache and pushed
-  to the project's container registry. The workflow deliberately avoids bind
-  mounts (the runner is docker-out-of-docker: mount paths would resolve on the runner
-  host) and streams the backend config and provision script through the docker API
+- **GitHub Actions**: one workflow, `.github/workflows/build.yaml` (push + dispatch),
+  compiles the solution exactly once: the Dockerfile `test` stage builds everything and
+  runs the unit tests, the integration tests then run **from that same image**
+  (`dotnet test --no-build`, joined to a network with throwaway Stalwart + Postgres
+  containers), and only when the full suite is green is the runtime image assembled from
+  the warm build cache and pushed to ghcr.io. The workflow deliberately avoids bind
+  mounts and streams the backend config and provision script through the docker API
   instead.
 
   Local reproduction of the CI suite:
@@ -804,8 +803,8 @@ AS_TEST_STACK=mailserver dotnet test --filter Category=Integration
 
 Actions → **Create Release** → enter the version (`1.0.7` or `v1.0.7`) and an optional
 headline. The workflow validates the version, generates release notes from the commit
-subjects since the previous tag, pushes the tag (which starts the build pipeline) and
-creates the release. The tag build then pushes the versioned docker image and attaches
+subjects since the previous release, pushes the tag, creates the release and dispatches
+the tag build. The tag build then pushes the versioned docker image and attaches
 the download zips to the release once the full test suite is green — so the release page
 is complete a few minutes after dispatch. Manual tagging still works: a tag pushed by
 hand gets a minimal auto-created release with the same assets.
