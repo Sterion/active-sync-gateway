@@ -268,7 +268,7 @@ Omit a section entirely and that content class is served from the gateway databa
 |--------|---------|-------------|
 | `BaseUrl` | — | Absolute http(s) URL of the DAV server. Required when the section is present. |
 | `HomeSetPath` | `null` | Home-set path template; `{user}` and `{localpart}` are substituted (Radicale/Baikal style: `"/{user}/"`). Unset → RFC 6764 discovery via `.well-known` + `current-user-principal`. |
-| `TaskFolder` | `"Tasks"` | *(CalDav only)* Name of the VTODO (tasks) collection in the calendar home set; when a collection with this display name or path segment exists, it becomes the ActiveSync Tasks folder (Axigen ships one named "Tasks"). Empty → tasks are stored in the gateway database instead. Recurring tasks are not mapped yet. |
+| `TaskFolder` | `"Tasks"` | *(CalDav only)* Name of the VTODO (tasks) collection in the calendar home set; when a collection with this display name or path segment exists, it becomes the ActiveSync Tasks folder (Axigen ships one named "Tasks"). Empty → tasks are stored in the gateway database instead. Recurring tasks sync (regenerating "n days after completion" tasks have no iCalendar equivalent and keep their fixed schedule). |
 | `CalendarAttachments` | `"Auto"` | *(CalDav only)* Event attachments for EAS 16.x clients: `Auto` (enabled, 1 MiB per attachment), `On` (enabled, 16 MiB) or `Off`. Attachments are stored **inline** in the event (base64 `ATTACH` property), so they work against any CalDAV server — the cap protects the DAV server from bloated items. Per-user overridable. |
 | `AllowInvalidCertificates` | `false` | As above. |
 | `CaCertificatePath` | `null` | As above. |

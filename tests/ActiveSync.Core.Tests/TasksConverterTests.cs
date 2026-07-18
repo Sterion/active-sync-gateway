@@ -210,4 +210,130 @@ public class TasksConverterTests
 		Assert.Contains("STATUS:IN-PROCESS", updated);
 		Assert.Contains("SUMMARY:Test Task renamed", updated);
 	}
+
+	// ---------- recurrence ----------
+
+	[Theory]
+	[InlineData(0, null, null, null, null, "FREQ=DAILY")] // daily
+	[InlineData(1, 20, null, null, null, "FREQ=WEEKLY")] // weekly Tue+Thu (mask 4|16)
+	[InlineData(2, null, 15, null, null, "FREQ=MONTHLY")] // monthly on the 15th
+	[InlineData(3, 8, null, 2, null, "FREQ=MONTHLY")] // 2nd Wednesday
+	[InlineData(5, null, 24, null, 12, "FREQ=YEARLY")] // every Dec 24th
+	[InlineData(6, 1, null, 5, 10, "FREQ=YEARLY")] // last Sunday of October
+	public void Recurrence_RoundTrips_PerType(
+		int type, int? dayOfWeek, int? dayOfMonth, int? weekOfMonth, int? monthOfYear, string rruleFragment)
+	{
+		XElement recurrence = new(Tasks + "Recurrence",
+			new XElement(Tasks + "Type", type.ToString()),
+			new XElement(Tasks + "Start", "2026-08-03T00:00:00.000Z"));
+		if (dayOfWeek is { } dow)
+			recurrence.Add(new XElement(Tasks + "DayOfWeek", dow.ToString()));
+		if (dayOfMonth is { } dom)
+			recurrence.Add(new XElement(Tasks + "DayOfMonth", dom.ToString()));
+		if (weekOfMonth is { } wom)
+			recurrence.Add(new XElement(Tasks + "WeekOfMonth", wom.ToString()));
+		if (monthOfYear is { } moy)
+			recurrence.Add(new XElement(Tasks + "MonthOfYear", moy.ToString()));
+
+		string uid = Guid.NewGuid().ToString();
+		string ics = TasksConverter.FromApplicationData(AppData(
+			new XElement(Tasks + "Subject", "recurring"),
+			new XElement(Tasks + "StartDate", "2026-08-03T00:00:00.000Z"),
+			recurrence), uid, null);
+		Assert.Contains(rruleFragment, ics);
+
+		List<XElement> data = TasksConverter.ToApplicationData(ics, new BodyPreference(1, null, false))!;
+		XElement emitted = data.Single(e => e.Name == Tasks + "Recurrence");
+		Assert.Equal(type.ToString(), emitted.Element(Tasks + "Type")?.Value);
+		Assert.NotNull(emitted.Element(Tasks + "Start")); // required by MS-ASTASK
+		if (dayOfWeek is { } expectedDow)
+			Assert.Equal(expectedDow.ToString(), emitted.Element(Tasks + "DayOfWeek")?.Value);
+		if (dayOfMonth is { } expectedDom)
+			Assert.Equal(expectedDom.ToString(), emitted.Element(Tasks + "DayOfMonth")?.Value);
+		if (weekOfMonth is { } expectedWom)
+			Assert.Equal(expectedWom.ToString(), emitted.Element(Tasks + "WeekOfMonth")?.Value);
+		if (monthOfYear is { } expectedMoy)
+			Assert.Equal(expectedMoy.ToString(), emitted.Element(Tasks + "MonthOfYear")?.Value);
+	}
+
+	[Fact]
+	public void Recurrence_IntervalOccurrencesAndUntil_RoundTrip()
+	{
+		string uid = Guid.NewGuid().ToString();
+		string counted = TasksConverter.FromApplicationData(AppData(
+			new XElement(Tasks + "Subject", "counted"),
+			new XElement(Tasks + "StartDate", "2026-08-03T00:00:00.000Z"),
+			new XElement(Tasks + "Recurrence",
+				new XElement(Tasks + "Type", "0"),
+				new XElement(Tasks + "Start", "2026-08-03T00:00:00.000Z"),
+				new XElement(Tasks + "Interval", "2"),
+				new XElement(Tasks + "Occurrences", "5"))), uid, null);
+		Assert.Contains("INTERVAL=2", counted);
+		Assert.Contains("COUNT=5", counted);
+		List<XElement> countedData = TasksConverter.ToApplicationData(counted, new BodyPreference(1, null, false))!;
+		XElement countedRecurrence = countedData.Single(e => e.Name == Tasks + "Recurrence");
+		Assert.Equal("2", countedRecurrence.Element(Tasks + "Interval")?.Value);
+		Assert.Equal("5", countedRecurrence.Element(Tasks + "Occurrences")?.Value);
+
+		string bounded = TasksConverter.FromApplicationData(AppData(
+			new XElement(Tasks + "Subject", "bounded"),
+			new XElement(Tasks + "StartDate", "2026-08-03T00:00:00.000Z"),
+			new XElement(Tasks + "Recurrence",
+				new XElement(Tasks + "Type", "0"),
+				new XElement(Tasks + "Start", "2026-08-03T00:00:00.000Z"),
+				new XElement(Tasks + "Until", "2026-12-31T00:00:00.000Z"))), uid, null);
+		Assert.Contains("UNTIL=20261231", bounded);
+		List<XElement> boundedData = TasksConverter.ToApplicationData(bounded, new BodyPreference(1, null, false))!;
+		// Tasks dates use the long form, like every other date field in this class.
+		Assert.Equal("2026-12-31T00:00:00.000Z",
+			boundedData.Single(e => e.Name == Tasks + "Recurrence").Element(Tasks + "Until")?.Value);
+	}
+
+	[Fact]
+	public void Recurrence_Regenerate_IsSkippedEntirely()
+	{
+		// "N days after completion" has no RRULE equivalent — a fixed RRULE would fire
+		// wrong occurrences, so the element must be ignored, not approximated.
+		string ics = TasksConverter.FromApplicationData(AppData(
+			new XElement(Tasks + "Subject", "regenerating"),
+			new XElement(Tasks + "Recurrence",
+				new XElement(Tasks + "Type", "0"),
+				new XElement(Tasks + "Start", "2026-08-03T00:00:00.000Z"),
+				new XElement(Tasks + "Regenerate", "1"),
+				new XElement(Tasks + "Interval", "3"))), Guid.NewGuid().ToString(), null);
+
+		Assert.DoesNotContain("RRULE", ics);
+	}
+
+	[Fact]
+	public void Update_OmittedRecurrence_PreservesTheStoredRule()
+	{
+		string uid = Guid.NewGuid().ToString();
+		string recurring = TasksConverter.FromApplicationData(AppData(
+			new XElement(Tasks + "Subject", "weekly"),
+			new XElement(Tasks + "StartDate", "2026-08-03T00:00:00.000Z"),
+			new XElement(Tasks + "Recurrence",
+				new XElement(Tasks + "Type", "1"),
+				new XElement(Tasks + "Start", "2026-08-03T00:00:00.000Z"),
+				new XElement(Tasks + "DayOfWeek", "2"))), uid, null);
+		Assert.Contains("FREQ=WEEKLY", recurring);
+
+		// A partial/ghosted Change without the Recurrence element must not strip the rule.
+		string renamed = TasksConverter.FromApplicationData(AppData(
+			new XElement(Tasks + "Subject", "weekly renamed")), uid, recurring);
+		Assert.Contains("FREQ=WEEKLY", renamed);
+	}
+
+	[Fact]
+	public void Recurrence_OnDatelessTask_AnchorsDtStartFromRecurrenceStart()
+	{
+		string ics = TasksConverter.FromApplicationData(AppData(
+			new XElement(Tasks + "Subject", "dateless"),
+			new XElement(Tasks + "Recurrence",
+				new XElement(Tasks + "Type", "0"),
+				new XElement(Tasks + "Start", "2026-08-03T00:00:00.000Z"))), Guid.NewGuid().ToString(), null);
+
+		Assert.Contains("RRULE", ics);
+		Assert.Contains("DTSTART;VALUE=DATE:20260803", ics); // RRULE without an anchor is ill-defined
+	}
 }

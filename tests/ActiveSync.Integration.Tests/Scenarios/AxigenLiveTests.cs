@@ -563,6 +563,50 @@ public sealed class AxigenLiveTests(AxigenGatewayFixture axigen)
 		}
 	}
 
+	[AxigenFact]
+	public async Task RecurringTask_RoundTrips_OnAxigenVtodoCollection()
+	{
+		EasTestClient writer = axigen.CreateEasClient("14.1");
+		await writer.HandshakeAsync();
+		EasFolder? tasksFolder = writer.Folders.FirstOrDefault(f => f.Type == EasFolderType.Tasks);
+		Assert.NotNull(tasksFolder); // Axigen ships /Calendar/Tasks/ out of the box
+
+		string marker = $"AXRT{Guid.NewGuid():N}"[..12];
+		await writer.InitialSyncAsync(tasksFolder.ServerId);
+		await writer.PullAllAsync(tasksFolder.ServerId);
+		string startDate = EasDateTime.ToLong(DateTime.UtcNow.Date.AddDays(1));
+		SyncResult add = await writer.AddItemAsync(tasksFolder.ServerId, "axrt1",
+			new XElement(EasNamespaces.Tasks + "Subject", marker),
+			new XElement(EasNamespaces.Tasks + "Complete", "0"),
+			new XElement(EasNamespaces.Tasks + "StartDate", startDate),
+			new XElement(EasNamespaces.Tasks + "Recurrence",
+				new XElement(EasNamespaces.Tasks + "Type", "1"),
+				new XElement(EasNamespaces.Tasks + "Start", startDate),
+				new XElement(EasNamespaces.Tasks + "DayOfWeek", "62")));
+		Assert.Equal("1", add.Status);
+		string serverId = AddedServerId(add);
+		try
+		{
+			// The RRULE must survive Axigen's VTODO storage: a second device re-reads it.
+			EasTestClient observer = axigen.CreateEasClient("14.1");
+			await observer.HandshakeAsync();
+			string tasks2 = observer.FolderOfType(EasFolderType.Tasks).ServerId;
+			await observer.InitialSyncAsync(tasks2);
+			SyncItem received = await WaitUntil.ResultAsync(async () =>
+					(await observer.PullAllAsync(tasks2)).Adds.FirstOrDefault(a =>
+						a.ApplicationData.Element(EasNamespaces.Tasks + "Subject")?.Value == marker),
+				"recurring task on the second device", TimeSpan.FromSeconds(120));
+			XElement? recurrence = received.ApplicationData.Element(EasNamespaces.Tasks + "Recurrence");
+			Assert.NotNull(recurrence);
+			Assert.Equal("1", recurrence.Element(EasNamespaces.Tasks + "Type")?.Value);
+			Assert.Equal("62", recurrence.Element(EasNamespaces.Tasks + "DayOfWeek")?.Value);
+		}
+		finally
+		{
+			await writer.DeleteItemAsync(tasksFolder.ServerId, serverId, false);
+		}
+	}
+
 	private static string AddedServerId(SyncResult result)
 	{
 		XElement? add = result.Responses.FirstOrDefault(r => r.Name.LocalName == "Add");

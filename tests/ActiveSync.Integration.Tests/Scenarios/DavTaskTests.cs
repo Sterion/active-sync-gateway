@@ -70,6 +70,52 @@ public class DavTaskTests(GatewayFixture gateway)
 			"task completion on device 2");
 	}
 
+	[BackendFact]
+	public async Task RecurringTask_RoundTrips_WithRecurrenceElement()
+	{
+		if (!await EnsureTasksCollectionAsync(TestBackend.User2))
+			return; // server without MKCALENDAR/tasks support — nothing to test
+
+		EasTestClient writer = gateway.CreateEasClient(TestBackend.User2);
+		await writer.HandshakeAsync();
+		EasFolder? tasksFolder = writer.Folders.FirstOrDefault(f => f.Type == EasFolderType.Tasks);
+		if (tasksFolder is null)
+			return;
+
+		string marker = $"Recur {Guid.NewGuid():N}"[..18];
+		await writer.InitialSyncAsync(tasksFolder.ServerId);
+		await writer.PullAllAsync(tasksFolder.ServerId);
+		string startDate = EasDateTime.ToLong(DateTime.UtcNow.Date.AddDays(1));
+		SyncResult add = await writer.AddItemAsync(tasksFolder.ServerId, "tr1",
+			new XElement(T + "Subject", marker),
+			new XElement(T + "Complete", "0"),
+			new XElement(T + "StartDate", startDate),
+			new XElement(T + "Recurrence",
+				new XElement(T + "Type", "1"),
+				new XElement(T + "Start", startDate),
+				new XElement(T + "DayOfWeek", "62"), // weekdays
+				new XElement(T + "Interval", "1")));
+		XElement? addResponse = add.Responses.FirstOrDefault(r => r.Name.LocalName == "Add");
+		Assert.NotNull(addResponse);
+		Assert.Equal("1", addResponse.Element(AS + "Status")?.Value);
+
+		// A second device re-reads the stored VTODO — the RRULE must come back as the
+		// same Recurrence shape.
+		EasTestClient observer = gateway.CreateEasClient(TestBackend.User2);
+		await observer.HandshakeAsync();
+		string tasks2 = observer.FolderOfType(EasFolderType.Tasks).ServerId;
+		await observer.InitialSyncAsync(tasks2);
+		SyncItem received = await WaitUntil.ResultAsync(async () =>
+				(await observer.PullAllAsync(tasks2)).Adds.FirstOrDefault(a =>
+					a.ApplicationData.Element(T + "Subject")?.Value == marker),
+			$"recurring task '{marker}' on the second device");
+		XElement? recurrence = received.ApplicationData.Element(T + "Recurrence");
+		Assert.NotNull(recurrence);
+		Assert.Equal("1", recurrence.Element(T + "Type")?.Value);
+		Assert.Equal("62", recurrence.Element(T + "DayOfWeek")?.Value);
+		Assert.NotNull(recurrence.Element(T + "Start"));
+	}
+
 	/// <summary>Ensures a "Tasks" calendar collection exists in the user's home set.</summary>
 	private static async Task<bool> EnsureTasksCollectionAsync(string user)
 	{

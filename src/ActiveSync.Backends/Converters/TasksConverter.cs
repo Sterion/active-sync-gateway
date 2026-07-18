@@ -6,11 +6,20 @@ using Ical.Net;
 using Ical.Net.CalendarComponents;
 using Ical.Net.DataTypes;
 
+// EAS expresses at most one recurrence rule per task, so the obsolete single-value
+// RecurrenceRules surface of Ical.Net matches what the protocol can carry (same rationale
+// as CalendarConverter).
+#pragma warning disable CS0618
+
 namespace ActiveSync.Backends.Converters;
 
 /// <summary>
-///   iCalendar VTODO ↔ EAS Tasks-class ApplicationData (MS-ASTASK). Recurring tasks are not
-///   mapped yet — the Recurrence element is neither emitted nor honored.
+///   iCalendar VTODO ↔ EAS Tasks-class ApplicationData (MS-ASTASK). Recurrence maps both
+///   directions via <see cref="RecurrenceMapper" /> with two deliberate holes:
+///   Regenerate/DeadOccur ("n days after completion") have no RRULE equivalent and are
+///   skipped entirely, and an omitted Recurrence element leaves the stored RRULE untouched
+///   (data preservation over MS-ASTASK's nominal full-replace — same stance as every other
+///   presence-guarded field in this file).
 /// </summary>
 public static class TasksConverter
 {
@@ -84,6 +93,21 @@ public static class TasksConverter
 		if (todo.Categories is { Count: > 0 } categories)
 			data.Add(new XElement(Tasks + "Categories",
 				categories.Select(c => new XElement(Tasks + "Category", c))));
+
+		if (todo.RecurrenceRules?.FirstOrDefault() is { } rule)
+		{
+			CalDateTime? anchor = todo.DtStart ?? todo.Due;
+			DateTime anchorUtc = anchor?.AsUtc ?? DateTime.UtcNow.Date;
+			XElement? recurrence = RecurrenceMapper.Build(Tasks, rule, anchorUtc, true);
+			if (recurrence is not null)
+			{
+				// MS-ASTASK requires a Start child inside Recurrence — nominal wall-clock,
+				// consistent with StartDate/DueDate above.
+				recurrence.Element(Tasks + "Type")!.AddAfterSelf(new XElement(Tasks + "Start",
+					EasDateTime.ToLong(anchor is not null ? Nominal(anchor) : anchorUtc)));
+				data.Add(recurrence);
+			}
+		}
 
 		return data;
 	}
@@ -165,6 +189,28 @@ public static class TasksConverter
 
 		if (applicationData.Element(Tasks + "Categories") is { } categories)
 			todo.Categories = categories.Elements(Tasks + "Category").Select(c => c.Value).ToList();
+
+		// Presence-guarded like Complete/dates: only an explicit Recurrence element touches
+		// the stored RRULE (so partial Changes never strip a recurring task; consequently
+		// "remove the recurrence" is not expressible — data preservation wins).
+		if (applicationData.Element(Tasks + "Recurrence") is { } recurrenceElement)
+		{
+			// Regenerate tasks ("n days/weeks after completion") have no RRULE equivalent —
+			// a fixed RRULE would fire wrong occurrences, so the element is ignored whole.
+			bool regenerate = recurrenceElement.Element(Tasks + "Regenerate")?.Value == "1";
+			RecurrencePattern? rule = regenerate ? null : RecurrenceMapper.Parse(Tasks, recurrenceElement);
+			if (rule is not null)
+			{
+				todo.RecurrenceRules?.Clear();
+				todo.RecurrenceRules ??= [];
+				todo.RecurrenceRules.Add(rule);
+				// An RRULE needs an anchor: derive DTSTART from Recurrence/Start when the
+				// task has no dates at all (date-only, like the nominal handling above).
+				if (todo.DtStart is null && todo.Due is null &&
+				    recurrenceElement.Element(Tasks + "Start")?.Value is { } recurrenceStart)
+					todo.DtStart = new CalDateTime(DateOnly.FromDateTime(EasDateTime.Parse(recurrenceStart)));
+			}
+		}
 
 		// Only the DISPLAY alarm is EAS-managed. ReminderSet=1 replaces it, ReminderSet=0
 		// explicitly removes it, an omitted ReminderSet leaves alarms untouched — and

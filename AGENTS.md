@@ -347,8 +347,10 @@ derive an address from `UserName` with `Contains('@')`.
 - **Tasks over CalDAV** (`CalDavTaskStore`): VTODOs in the home-set collection named by
   `CalDav.TaskFolder` (default "Tasks", Axigen's layout); matched by displayname or
   trailing path segment among VTODO-capable collections. `CalDavStore` conversely skips
-  collections whose `supported-calendar-component-set` lacks VEVENT. Recurring tasks are
-  not mapped (no `Recurrence` element).
+  collections whose `supported-calendar-component-set` lacks VEVENT. Task recurrence maps
+  via `RecurrenceMapper` (shared with the calendar converter) with two deliberate holes:
+  Regenerate/DeadOccur are skipped (no RRULE equivalent) and an omitted Recurrence element
+  preserves the stored RRULE (presence-guard over MS-ASTASK's nominal full-replace).
 - **Axigen DAV quirks** (verified live 2026-07-17 against Axigen X6): its `calendar-query`
   **omits events carrying an RRULE when the VEVENT comp-filter has no `time-range`** —
   which is why `CalDavStore.BuildEventFilter` always sends a time-range (epoch start when
