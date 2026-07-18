@@ -157,8 +157,10 @@ dotnet run --project src/ActiveSync.Server          # serve; listens on :5080 by
 # or
 docker build -f docker/Dockerfile -t activesync-gateway .
 docker run -p 443:5443 -p 5080:5080 -v activesync-data:/data \
-  -e ActiveSync__Imap__Host=imap.example.com \
-  -e ActiveSync__Smtp__Host=smtp.example.com \
+  -e ActiveSync__Backends__MailStore__Provider=imap \
+  -e ActiveSync__Backends__MailStore__Host=imap.example.com \
+  -e ActiveSync__Backends__MailSubmit__Provider=smtp \
+  -e ActiveSync__Backends__MailSubmit__Host=smtp.example.com \
   -e ActiveSync__Encryption__Key='any passphrase - or a key from: openssl rand -base64 32' \
   activesync-gateway
 ```
@@ -190,31 +192,45 @@ curl -i -X OPTIONS http://localhost:5080/Microsoft-Server-ActiveSync
 ## Configuration
 
 One backend set serves all users; each user authenticates with their own credentials
-(HTTP Basic, validated by an IMAP login probe and passed through to all backends).
-Edit `src/ActiveSync.Server/appsettings.json`:
+(HTTP Basic, validated by the MailStore provider's login probe and passed through to all
+backends). Backends are configured per **role** under `ActiveSync:Backends`, each naming
+the **provider** that serves it. Edit `src/ActiveSync.Server/appsettings.json`:
 
 ```jsonc
 "ActiveSync": {
-  "Imap":  { "Host": "imap.example.com", "Port": 993, "UseSsl": true },
-  "Smtp":  { "Host": "smtp.example.com", "Port": 465, "UseSsl": true },
-  "CalDav":  { "BaseUrl": "https://dav.example.com", "HomeSetPath": "" },   // "" → RFC 6764 discovery
-  "CardDav": { "BaseUrl": "https://dav.example.com", "HomeSetPath": "" },   // or e.g. "/{user}/"
+  "Backends": {
+    "MailStore":  { "Provider": "imap",   "Host": "imap.example.com", "Port": 993, "UseSsl": true },
+    "MailSubmit": { "Provider": "smtp",   "Host": "smtp.example.com", "Port": 465, "UseSsl": true },
+    "Calendar":   { "Provider": "caldav", "BaseUrl": "https://dav.example.com", "HomeSetPath": "" },  // "" → RFC 6764 discovery
+    "Tasks":      { "Provider": "caldav" },                                    // VTODOs in the calendar home set
+    "Contacts":   { "Provider": "carddav", "BaseUrl": "https://dav.example.com", "HomeSetPath": "" }, // or e.g. "/{user}/"
+    "Oof":        { "Provider": "sieve",  "Host": "mail.example.com", "Port": 4190 }  // optional; out-of-office
+  },
   "Database": { "Provider": "Sqlite", "ConnectionString": "Data Source=activesync.db" },
   "Encryption": { "Key": "<any passphrase — or a raw key from: openssl rand -base64 32>" },
   "Eas": { "MaxHeartbeatSeconds": 1770, "DavPollSeconds": 60, "WatchdogSeconds": 60 }
 }
 ```
 
-- **IMAP and SMTP are mandatory** — startup fails with a clear validation error when
-  either host is missing (a mail gateway without mail access makes no sense).
-- **CalDAV/CardDAV are optional**: omit the `CalDav`/`CardDav` sections and that content
-  class is served from the **gateway's own database** instead — contacts and calendar
-  still sync, stored as vCard/iCalendar rows, visible to all of the user's ActiveSync
+- **Roles**: `MailStore`, `MailSubmit`, `Calendar`, `Tasks`, `Contacts`, `Notes`, `Oof`.
+  Each role section has one host-reserved key — `Provider` (the backend implementation:
+  `imap`, `smtp`, `caldav`, `carddav`, `sieve`, `local`, and in future third-party
+  providers like `jmap`) — plus provider-owned settings the host never interprets. One
+  provider can fill several roles: `caldav` serves both Calendar and Tasks over one
+  connection.
+- **MailStore and MailSubmit are mandatory** — startup fails with a clear validation error
+  when either role is missing (a mail gateway without mail access makes no sense).
+- **Calendar / Tasks / Contacts / Notes are optional**: omit the role (or don't assign a
+  provider) and it falls back to the **`local` provider** — served from the **gateway's
+  own database**, stored as vCard/iCalendar rows visible to all of the user's ActiveSync
   devices and nowhere else (no webmail/DAV client will see them). Changes push to other
-  devices near-instantly via an in-process notifier. **Notes are always stored locally**
-  (no DAV backend carries them). With local stores in play the state database holds real
-  user data, not just sync state — back it up accordingly. A `CalDav`/`CardDav` section
-  that is present but has an invalid `BaseUrl` fails startup validation.
+  devices near-instantly via an in-process notifier. **Notes are always local** (no DAV
+  backend carries them). With local stores in play the state database holds real user
+  data, not just sync state — back it up accordingly.
+- **Tasks over CalDAV requires the explicit `Tasks` role** — `"Tasks": { "Provider":
+  "caldav" }`. It inherits the `Calendar` section's settings as its base (share the
+  server), so it usually only needs `Provider` and optionally `TaskFolder`. Without the
+  role, tasks are stored locally.
 - `HomeSetPath` supports `{user}` and `{localpart}` placeholders (Radicale/Baikal style is
   `/{user}/`). Leave empty for `.well-known` + `current-user-principal` discovery.
 - `Database.Provider` may be `Sqlite` or `Postgres`
@@ -224,19 +240,43 @@ Edit `src/ActiveSync.Server/appsettings.json`:
 - **An `Encryption` key is mandatory** — locally-stored content is encrypted at rest (see
   the `Encryption` option table below). Startup fails without a key unless
   `Encryption.AllowPlaintext=true` is set explicitly (dev/test only).
-- **Backend TLS**: every backend section (`Imap`, `Smtp`, `CalDav`, `CardDav`) supports
-  two certificate knobs. `"CaCertificatePath": "/path/to/ca.pem"` trusts the CAs in that
-  PEM file *in addition to* the system store — the right choice for a private PKI /
-  self-signed setup. `"AllowInvalidCertificates": true` disables certificate validation
-  entirely (lab use only; it wins over `CaCertificatePath` and is called out as
-  `certs=ACCEPT-ANY` in the startup banner). A configured CA file that is missing or not
-  valid PEM fails startup validation.
+- **Backend TLS**: every network provider (`imap`, `smtp`, `caldav`, `carddav`, `sieve`)
+  supports two certificate knobs in its role section. `"CaCertificatePath": "/path/to/ca.pem"`
+  trusts the CAs in that PEM file *in addition to* the system store — the right choice for a
+  private PKI / self-signed setup. `"AllowInvalidCertificates": true` disables certificate
+  validation entirely (lab use only; it wins over `CaCertificatePath` and is called out as
+  `certs=ACCEPT-ANY`-style in the startup banner). A configured CA file that is missing or
+  not valid PEM fails startup validation.
+
+#### Migrating from the pre-1.x flat sections
+
+The old fixed `ActiveSync:Imap` / `Smtp` / `CalDav` / `CardDav` / `Sieve` sections are
+gone. Move each into its role section and add the matching `Provider`:
+
+| Old key | New key |
+|---------|---------|
+| `ActiveSync:Imap:*` | `ActiveSync:Backends:MailStore:*` + `"Provider": "imap"` |
+| `ActiveSync:Smtp:*` | `ActiveSync:Backends:MailSubmit:*` + `"Provider": "smtp"` |
+| `ActiveSync:CalDav:*` | `ActiveSync:Backends:Calendar:*` + `"Provider": "caldav"` — and, to keep CalDAV tasks, also add `"Tasks": { "Provider": "caldav" }` |
+| `ActiveSync:CardDav:*` | `ActiveSync:Backends:Contacts:*` + `"Provider": "carddav"` |
+| `ActiveSync:Sieve:*` (with `Enabled: true`) | `ActiveSync:Backends:Oof:*` + `"Provider": "sieve"` — **`Host` is now required** (see below) |
+| `Users:<login>:Imap:UserName` | `Users:<login>:Backends:MailStore:UserName` |
+| `Users:<login>:Imap:Host` | `Users:<login>:Backends:MailStore:Settings:Host` |
+| `Users:<login>:CalDav:Enabled=false` | `Users:<login>:Backends:Calendar:Enabled=false` |
+
+Two behavior changes to note: the old `TaskFolder`-drives-tasks rule is replaced by the
+explicit `Tasks` role assignment above, and the Oof/sieve **`Host` no longer defaults to
+the IMAP host** — providers can't see each other's sections, so name it explicitly.
+Database-declared users (`eas user ...`) written before the change are **upgraded
+automatically at startup**; any row that cannot be converted is logged as an error and
+skipped (never silently degraded), so watch the startup log on first boot after upgrading.
 
 ### Full option reference
 
 Everything lives under the `ActiveSync` configuration section. Any option can also be set
 via environment variables using `__` as the separator, e.g.
-`ActiveSync__Imap__Host=imap.example.com` (that is what the Docker examples use).
+`ActiveSync__Backends__MailStore__Host=imap.example.com` (that is what the Docker examples
+use).
 
 **Root**
 
@@ -248,10 +288,11 @@ via environment variables using `__` as the separator, e.g.
 | `RequireDeclaredUsers` | `false` | Allowlist switch: only logins with a `Users` entry (config or database) may authenticate — anyone else gets 401 without a backend probe. An empty entry (`{}`) is a valid grant. |
 | `UsersFile` | `null` | Path to a JSON file merged into configuration at startup (full shape: `{ "ActiveSync": { "Users": { ... } } }`) — the natural fit for a mounted Kubernetes Secret/ConfigMap. Changes require a restart. |
 
-**`Imap` (required)**
+**`Backends:MailStore` (required, provider `imap`)**
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `Provider` | — | `imap`. **Required.** |
 | `Host` | — | IMAP server host. **Required** — startup fails without it. |
 | `Port` | `993` | IMAP port. |
 | `UseSsl` | `true` | Implicit TLS on connect (used when `Security` is unset). |
@@ -260,51 +301,56 @@ via environment variables using `__` as the separator, e.g.
 | `CaCertificatePath` | `null` | PEM file with CA certificates trusted in addition to the system store (private PKI). Validated at startup. |
 | `PathSeparator` | `null` | IMAP folder path separator override; autodetected when unset. |
 
-**`Smtp` (required)**
+**`Backends:MailSubmit` (required, provider `smtp`)**
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `Provider` | — | `smtp`. **Required.** |
 | `Host` | — | SMTP server host. **Required.** |
 | `Port` | `465` | SMTP port. |
 | `UseSsl` | `true` | Implicit TLS on connect (used when `Security` is unset). |
-| `Security` | `null` | Same values/semantics as `Imap.Security`. |
+| `Security` | `null` | Same values/semantics as MailStore's `Security`. |
 | `AllowInvalidCertificates` | `false` | As above. |
 | `CaCertificatePath` | `null` | As above. |
 | `ForceFrom` | `false` | Rewrite the `From` header of outgoing mail to the authenticated user before submission (display name is kept). Off by default because most SMTP servers already enforce sender alignment for authenticated submissions — enable it when yours does not. |
 
-**`CalDav` / `CardDav` (optional sections)**
+**`Backends:Calendar` / `Backends:Tasks` / `Backends:Contacts` (provider `caldav`/`carddav`)**
 
-Omit a section entirely and that content class is served from the gateway database
-(local storage) instead.
+Omit a role (or leave it on the `local` provider) and that content class is served from the
+gateway database (local storage) instead. `Calendar`/`Tasks` use `caldav`, `Contacts` uses
+`carddav`. When `Tasks` shares the `caldav` provider with `Calendar` it inherits the
+Calendar section as its base, so it usually sets only `Provider` (and maybe `TaskFolder`).
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `BaseUrl` | — | Absolute http(s) URL of the DAV server. Required when the section is present. |
+| `Provider` | — | `caldav` (Calendar/Tasks) or `carddav` (Contacts). |
+| `BaseUrl` | — | Absolute http(s) URL of the DAV server. Required (Tasks may inherit it from Calendar). |
 | `HomeSetPath` | `null` | Home-set path template; `{user}` and `{localpart}` are substituted (Radicale/Baikal style: `"/{user}/"`). Unset → RFC 6764 discovery via `.well-known` + `current-user-principal`. |
-| `TaskFolder` | `"Tasks"` | *(CalDav only)* Name of the VTODO (tasks) collection in the calendar home set; when a collection with this display name or path segment exists, it becomes the ActiveSync Tasks folder (Axigen ships one named "Tasks"). Empty → tasks are stored in the gateway database instead. Recurring tasks sync (regenerating "n days after completion" tasks have no iCalendar equivalent and keep their fixed schedule). |
-| `CalendarAttachments` | `"Auto"` | *(CalDav only)* Event attachments for EAS 16.x clients: `Auto` (enabled, 1 MiB per attachment), `On` (enabled, 16 MiB) or `Off`. Attachments are stored **inline** in the event (base64 `ATTACH` property), so they work against any CalDAV server — the cap protects the DAV server from bloated items. Per-user overridable. |
-| `SharedCollections` | unset | *(CalDav only)* Extra collection hrefs synced as additional calendar folders for every user: absolute paths (`"/dav/cal/team/"`) or same-host URLs, suffix `\|ro` for gateway-enforced read-only (client edits are silently reverted). Collections the server refuses (403/404) are skipped with a warning. Per-user overridable (a user's list **replaces** the global one); per-user runtime grants via `eas share`. |
-| `SendInvitations` | `"Auto"` | *(CalDav only)* iMIP invitation mails when the user organizes a meeting: `Auto` (send unless the server advertises `calendar-auto-schedule` or a schedule outbox — a scheduling server invites on its own, and double invites are worse than none), `On` (always) or `Off` (never). The local calendar store always sends (nothing else can). Per-user overridable. |
+| `TaskFolder` | `"Tasks"` | *(caldav only)* Name of the VTODO (tasks) collection in the calendar home set; the collection with this display name or path segment becomes the ActiveSync Tasks folder (Axigen ships one named "Tasks"). Recurring tasks sync (regenerating "n days after completion" tasks have no iCalendar equivalent and keep their fixed schedule). |
+| `CalendarAttachments` | `"Auto"` | *(caldav only)* Event attachments for EAS 16.x clients: `Auto` (enabled, 1 MiB per attachment), `On` (enabled, 16 MiB) or `Off`. Attachments are stored **inline** in the event (base64 `ATTACH` property), so they work against any CalDAV server — the cap protects the DAV server from bloated items. Per-user overridable. |
+| `SharedCollections` | unset | *(caldav only)* Extra collection hrefs synced as additional calendar folders for every user: absolute paths (`"/dav/cal/team/"`) or same-host URLs, suffix `\|ro` for gateway-enforced read-only (client edits are silently reverted). Collections the server refuses (403/404) are skipped with a warning. Per-user overridable (a user's list **replaces** the global one); per-user runtime grants via `eas share`. |
+| `SendInvitations` | `"Auto"` | *(caldav only)* iMIP invitation mails when the user organizes a meeting: `Auto` (send unless the server advertises `calendar-auto-schedule` or a schedule outbox — a scheduling server invites on its own, and double invites are worse than none), `On` (always) or `Off` (never). The local calendar store always sends (nothing else can). Per-user overridable. |
 | `AllowInvalidCertificates` | `false` | As above. |
 | `CaCertificatePath` | `null` | As above. |
 
-**`Sieve`** (out-of-office via ManageSieve)
+**`Backends:Oof` (optional, provider `sieve`)** (out-of-office via ManageSieve)
 
-When enabled, the phone's out-of-office settings page works: Settings→Oof Set uploads a
-gateway-owned sieve script named `eas-gateway` (RFC 5230 `vacation`, wrapped in a
-`currentdate` window for scheduled Oof) and makes it the active script; disabling
-restores the previously active script. The state database is the source of truth for
-what the phone sees — the script is derived output, never parsed back. One reply body is
-used for all three EAS audiences (internal/external-known/external-unknown), and the
-auto-reply is sent as plain text. Note that sieve has a single active script: while Oof
-is enabled, the user's own filter script (if any) is inactive until Oof is disabled
-again. Credentials default to the user's effective IMAP login, and a per-user
-`Users:<login>:Sieve` override section exists with the same fields.
+Assign the `Oof` role to the `sieve` provider and the phone's out-of-office settings page
+works: Settings→Oof Set uploads a gateway-owned sieve script named `eas-gateway` (RFC 5230
+`vacation`, wrapped in a `currentdate` window for scheduled Oof) and makes it the active
+script; disabling restores the previously active script. The state database is the source
+of truth for what the phone sees — the script is derived output, never parsed back. One
+reply body is used for all three EAS audiences (internal/external-known/external-unknown),
+and the auto-reply is sent as plain text. Note that sieve has a single active script: while
+Oof is enabled, the user's own filter script (if any) is inactive until Oof is disabled
+again. Omit the role and Settings→Oof behaves as the historical stub (accepted, ignored).
+Credentials default to the user's effective MailStore login; a per-user
+`Users:<login>:Backends:Oof` override exists with the same fields.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `Enabled` | `false` | Master switch. Off: Settings→Oof behaves as the historical stub (accepted, ignored). |
-| `Host` | IMAP host | ManageSieve server; defaults to the (effective) IMAP host. |
+| `Provider` | — | `sieve`. Presence of the role is the on switch (no separate `Enabled` flag). |
+| `Host` | — | ManageSieve server. **Required** — unlike the old `Sieve` section, there is no "defaults to the IMAP host" fallback (providers cannot see each other's sections). |
 | `Port` | `4190` | The standard ManageSieve port. |
 | `UseTls` | `true` | Require STARTTLS before authenticating (ManageSieve has no implicit-TLS port). `false` = plaintext, test stacks only. |
 | `AllowInvalidCertificates` | `false` | As above. |
@@ -398,29 +444,43 @@ document (the device default applies).
 
 Pass-through is always the baseline: the EAS credentials are forwarded to every backend. A
 `Users` entry is a pure **overlay** — declare only the users who need something different
-(another SMTP login, a personal DAV supplier, a different IMAP host or user name) and
+(another SMTP login, a personal DAV supplier, a different mail host or user name) and
 override only the fields that differ. Everyone without an entry keeps working untouched.
-Unset passwords inherit the presented EAS password, per user *and* per backend.
+Unset passwords inherit the presented EAS password, per user *and* per role.
+
+Each entry is `{ Password?, MailAddress?, Backends: { "<Role>": {...} } }`, and each role
+override has host-reserved `Enabled` / `Provider` / `UserName` / `Password` plus a free-form
+`Settings` map that overlays the global role section. Setting `Provider` **switches** the
+provider for that user (its `Settings` then start fresh, since a different provider's keys
+mean something else); leaving `Provider` unset overlays `Settings` onto the global section
+(a user list like `Settings:SharedCollections:0` **replaces** the whole global list).
+`Enabled: false` sends a content role to the `local` provider (and turns Oof off); it is
+invalid on the two mail roles.
 
 ```jsonc
 "ActiveSync": {
-  "Imap": { "Host": "imap.example.com" },          // global defaults, per-user overridable
-  "Smtp": { "Host": "smtp.example.com" },
+  "Backends": {
+    "MailStore":  { "Provider": "imap", "Host": "imap.example.com" },  // global defaults, per-user overridable
+    "MailSubmit": { "Provider": "smtp", "Host": "smtp.example.com" }
+  },
   "Users": {
     "anna@example.com": {
-      // No passwords: anna's phone password stays her IMAP password (probe validates it);
-      // only her CalDAV lives elsewhere, with its own credentials.
-      "CalDav": { "BaseUrl": "https://cloud.example.com", "UserName": "anna", "Password": "enc:v1:..." }
+      // No passwords: anna's phone password stays her mail password (probe validates it);
+      // only her contacts live elsewhere, with their own credentials.
+      "Backends": {
+        "Contacts": { "Provider": "carddav", "UserName": "anna", "Password": "enc:v1:...",
+                      "Settings": { "BaseUrl": "https://cloud.example.com" } }
+      }
     },
     "ben@example.com": {
       // Only the SMTP login differs; everything else is plain pass-through.
-      "Smtp": { "UserName": "relay-ben", "Password": "relay-pw" }
+      "Backends": { "MailSubmit": { "UserName": "relay-ben", "Password": "relay-pw" } }
     },
     "phone-carla": {
       // Fully decoupled: own phone password, mapped to a real mailbox.
       "Password": "pbkdf2$200000$...$...",         // hash-password verb
       "MailAddress": "carla@example.com",
-      "Imap": { "UserName": "carla@example.com", "Password": "enc:v1:..." }
+      "Backends": { "MailStore": { "UserName": "carla@example.com", "Password": "enc:v1:..." } }
     }
   }
 }
@@ -430,10 +490,10 @@ Unset passwords inherit the presented EAS password, per user *and* per backend.
 
 | # | Entry has | The phone's password is |
 |---|-----------|-------------------------|
-| 1 | `Password` (pbkdf2$ or plaintext) | verified against it locally — fully decoupled from IMAP |
-| 2 | `Imap:Password` (no `Password`) | pinned: it must equal the configured IMAP password (timing-safe compare, no probe) |
-| 3 | neither | the IMAP password — validated by a login probe against the user's *effective* IMAP host/user name (overrides apply) |
-| 4 | *(no entry)* | same as 3 with the global IMAP section — classic pass-through |
+| 1 | `Password` (pbkdf2$ or plaintext) | verified against it locally — fully decoupled from the mail backend |
+| 2 | `Backends:MailStore:Password` (no `Password`) | pinned: it must equal the configured MailStore password (timing-safe compare, no probe) |
+| 3 | neither | the mail password — validated by the MailStore provider's login probe against the user's *effective* host/user name (overrides apply) |
+| 4 | *(no entry)* | same as 3 with the global MailStore section — classic pass-through |
 
 #### Database-declared users (`eas user ...`)
 
@@ -457,16 +517,18 @@ only as `***(pbkdf2)` / `***(sealed)` / `***(PLAINTEXT)` markers.
 kubectl exec <pod> -- eas user add phone-dana                         # allowlist grant
 echo -n 'phone-pw' | kubectl exec -i <pod> -- eas user password phone-dana
 kubectl exec <pod> -- eas user set phone-dana MailAddress dana@example.com
-kubectl exec <pod> -- eas user set phone-dana Imap:UserName dana@example.com
-echo -n 'imap-pw' | kubectl exec -i <pod> -- eas user secret phone-dana Imap:Password
+kubectl exec <pod> -- eas user set phone-dana Backends:MailStore:UserName dana@example.com
+echo -n 'imap-pw' | kubectl exec -i <pod> -- eas user secret phone-dana Backends:MailStore:Password
 kubectl exec <pod> -- eas user show phone-dana
 ```
 
-`user set` addresses every field by its config path (`Imap:Host`, `CalDav:Enabled`, ...)
-and accepts password keys too: plaintext values are hashed (`Password` → pbkdf2$) or
-sealed (`*:Password` → `enc:v1:`) on the spot, already-prepared values are stored verbatim
-— but plaintext on the command line lands in shell history, so the stdin forms above are
-preferred (the CLI warns).
+`user set` addresses every field by its path — `MailAddress`, `Password`, and per-role keys
+`Backends:<Role>:Provider|Enabled|UserName|Password` plus free-form provider settings under
+`Backends:<Role>:Settings:<Key>` (e.g. `Backends:MailStore:Settings:Host`). It accepts
+password keys too: plaintext values are hashed (`Password` → pbkdf2$) or sealed
+(`Backends:<Role>:Password` → `enc:v1:`) on the spot, already-prepared values are stored
+verbatim — but plaintext on the command line lands in shell history, so the stdin forms
+above are preferred (the CLI warns).
 
 Rules worth knowing:
 
@@ -580,8 +642,10 @@ docker run -p 443:5443 -v /path/to/certs:/certs:ro \
   -e Kestrel__Endpoints__Https__Url=https://0.0.0.0:5443 \
   -e Kestrel__Endpoints__Https__Certificate__Path=/certs/fullchain.pem \
   -e Kestrel__Endpoints__Https__Certificate__KeyPath=/certs/privkey.pem \
-  -e ActiveSync__Imap__Host=imap.example.com \
-  -e ActiveSync__Smtp__Host=smtp.example.com \
+  -e ActiveSync__Backends__MailStore__Provider=imap \
+  -e ActiveSync__Backends__MailStore__Host=imap.example.com \
+  -e ActiveSync__Backends__MailSubmit__Provider=smtp \
+  -e ActiveSync__Backends__MailSubmit__Host=smtp.example.com \
   -e ActiveSync__Encryption__Key='...' \
   -v activesync-data:/data activesync-gateway
 ```
@@ -615,11 +679,12 @@ kind, live session/IDLE-watcher/long-poll gauges); set `Metrics:PerUser=false` o
 multi-tenant fleets where that label cardinality would hurt. Backend errors count by
 protocol, throttle rejections globally.
 
-`/readyz` is a real readiness probe: cached (~10 s) checks of the state database, the
-IMAP listener (TCP, no credentials) and the DAV base URLs (any HTTP answer counts,
-including 401) — 503 with per-component JSON when something is down. `/healthz` stays a
-trivial liveness 200 on purpose: a dead mail server should drain traffic, not restart
-gateway pods.
+`/readyz` is a real readiness probe: cached (~10 s) checks of the state database plus each
+configured backend role whose provider can probe itself — `mailstore` (TCP, no
+credentials) and `calendar`/`contacts` (any HTTP answer counts, including 401). Component
+names in the JSON are the role names; the probe returns 503 with per-component detail when
+something is down. `/healthz` stays a trivial liveness 200 on purpose: a dead mail server
+should drain traffic, not restart gateway pods.
 
 ### Device security policies
 
@@ -692,9 +757,9 @@ dotnet ef migrations add <Name> --context NpgsqlSyncDbContext \
   https too — the gateway forwards the user's credentials there on every request (it
   refuses redirects that would downgrade an https DAV base URL to http, or leave the host).
 - **Brute force**: see the `Auth` options above; defaults throttle per client address and
-  shield the IMAP server from repeated bad-password attempts. Users with a local password
-  rule (gateway `Password` or pinned `Imap:Password`) are verified without a backend
-  round-trip, so the throttle is the primary brute-force defense for them.
+  shield the mail server from repeated bad-password attempts. Users with a local password
+  rule (gateway `Password` or pinned `Backends:MailStore:Password`) are verified without a
+  backend round-trip, so the throttle is the primary brute-force defense for them.
 - **Data at rest**: locally-stored item content (Notes always; Contacts/Calendar/Tasks
   without a DAV backend) is encrypted with AES-256-GCM under the `Encryption` key, bound
   to the owning user + collection so rows cannot be swapped between users. What stays
@@ -743,10 +808,10 @@ appsettings.json in the working directory.
 | `user show <login>` | The effective entry for one login, secrets masked. |
 | `user add <login>` | Declare a user in the database (an empty entry is an allowlist grant; copies a same-login config entry as the starting point). |
 | `user remove <login>` | Delete the database entry — a same-login config entry becomes active again. |
-| `user set <login> <key> <value>` | Set one field by config path (`Imap:Host`, `CalDav:Enabled`, ...); password keys are hashed/sealed automatically. |
+| `user set <login> <key> <value>` | Set one field by path (`MailAddress`, `Backends:Calendar:Enabled`, `Backends:MailStore:Settings:Host`, ...); password keys are hashed/sealed automatically. |
 | `user unset <login> <key>` | Clear one field (an emptied entry remains an allowlist grant). |
 | `user password <login>` | Set the gateway password from stdin (stored as a pbkdf2$ hash). |
-| `user secret <login> <key>` | Set a backend password (`Imap:Password`, ...) from stdin (stored sealed, enc:v1:). |
+| `user secret <login> <key>` | Set a backend password (`Backends:MailStore:Password`, ...) from stdin (stored sealed, enc:v1:). |
 
 **Access control & cleanup**
 
@@ -862,9 +927,10 @@ src/
   ActiveSync.Core/       Backend abstractions (IContentStore, IBackendSession), EF Core
                          state store (devices, folder registry, sync keys + snapshots,
                          DAV href map), differential sync engine (CollectionDiff).
-  ActiveSync.Backends/   ImapMailBackend (MailKit), CalDavStore/CardDavStore over a thin
-                         WebDAV client, MIME/iCalendar/vCard ↔ EAS converters, MS-ASTZ
-                         timezone blob, per-(user,device) session cache.
+  ActiveSync.Backends/   Named backend providers composed per role — imap/smtp (MailKit),
+                         caldav/carddav over a thin WebDAV client, sieve, and the local
+                         (gateway-DB) fallback — plus MIME/iCalendar/vCard ↔ EAS converters,
+                         MS-ASTZ timezone blob, per-(user,device) session cache.
   ActiveSync.Server/     Kestrel host, /Microsoft-Server-ActiveSync endpoint, Basic auth,
                          one handler class per EAS command, the `eas` CLI.
 ```

@@ -48,8 +48,8 @@ Settings→DevicePassword escrows the recovery password (sealed via `LocalConten
 AAD `user + "recovery:" + deviceId`) only when `PasswordRecoveryEnabled`; read it back
 with `eas device password`.
 
-**Out-of-office** (Settings→Oof) is backed by **ManageSieve** when `ActiveSync:Sieve` is
-enabled (off = the historical accept-and-ignore stub). The handler is backend-agnostic:
+**Out-of-office** (Settings→Oof) is backed by **ManageSieve** when the `Oof` role is
+assigned to the `sieve` provider (no Oof role = the historical accept-and-ignore stub). The handler is backend-agnostic:
 `IOofBackend.EnableAsync(OofReply)` returns an opaque restore token (null = re-arm, keep
 the stored token) and the backend renders its own rule — `SieveVacationScript` (script
 name "eas-gateway") lives entirely inside `SieveOofBackend`. Invariants: the
@@ -246,10 +246,12 @@ live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
   (snapshot rollback design) and duplicates the event AND its invitation — pre-existing
   behavior, tracked separately.
 - **Shared calendars** ride the same silent-revert path per folder:
-  `IBackendSession.IsReadOnlyFolder` (CalDavStore matches the folder href against
-  read-only grants) ORs into SyncHandler's `readOnly` flag. Grants = config
-  `CalDav:SharedCollections` ("href|ro" entries) ∪ DB `SharedCalendarGrants` (`eas
-  share`, DB wins per href), loaded once per session build in BackendSessionFactory —
+  `IBackendSession.IsReadOnlyFolder` (the owning store opts in via
+  `IReadOnlyCollectionSource`; CalDavStore matches the folder href against read-only
+  grants) ORs into SyncHandler's `readOnly` flag. Grants = config Calendar-role
+  `SharedCollections` ("href|ro" entries) ∪ DB `SharedCalendarGrants` (`eas share`, DB
+  wins per href); the factory loads the DB grants once per session build and the caldav
+  provider unions them with its own configured list —
   changes apply on session recycle, not immediately. Href comparison against grants is
   deliberately lenient (`SharedHrefEquals`: unescape + case-insensitive) because servers
   canonicalize hrefs; `ListFoldersAsync` dedupes shared entries against the home set
@@ -287,25 +289,29 @@ entities — do not repurpose `SaveDeviceInfoAsync` as a generic save.
 Design-time factories (`SqliteSyncDbContextFactory` / `NpgsqlSyncDbContextFactory`) exist
 only so `dotnet ef` can instantiate the contexts; their connection strings are placeholders.
 
-Options are validated at startup (`ActiveSyncOptionsValidator` + `ValidateOnStart`):
-IMAP/SMTP hosts are **mandatory** in PassThrough mode; `CalDav`/`CardDav` sections are
-optional but must have a valid absolute http(s) `BaseUrl` when present; an `Encryption`
-key (`Key` or `KeyFile`, ANY string — base64 of exactly 32 bytes is used as the raw key,
-anything else is PBKDF2-stretched by `EncryptionKeyLoader`) is **mandatory** unless
+Host options are validated at startup by `ActiveSyncOptionsValidator` + `ValidateOnStart`
+(database, EAS, auth, encryption, policy, ...); an `Encryption` key (`Key` or `KeyFile`,
+ANY string — base64 of exactly 32 bytes is used as the raw key, anything else is
+PBKDF2-stretched by `EncryptionKeyLoader`) is **mandatory** unless
 `Encryption:AllowPlaintext=true` is set explicitly (test fixtures use
-`GatewayFixture.TestEncryptionKey`). Options classes deliberately avoid the `required`
-modifier so the validator (not the config binder) produces the error messages.
+`GatewayFixture.TestEncryptionKey`). The BACKEND role sections + declared users are
+validated separately by `BackendConfigurationValidator`, which runs AFTER the service
+provider is built (it needs the registry): every named provider must exist and support
+its role, and each provider validates its own settings (`ValidateConfiguration`).
+MailStore + MailSubmit are mandatory; content roles fall back to `local`. Options classes
+deliberately avoid the `required` modifier so the validators produce the error messages.
 
 **Auth model**: pass-through is the baseline (EAS Basic credentials forwarded to every
-backend, validated by an IMAP login probe). `ActiveSync:Users` (or a mounted `UsersFile`)
-is an optional per-user OVERLAY resolved by `Core/Accounts/AccountResolver` — override
-only what differs per backend (user name / password / endpoint fields); unset passwords
-inherit the presented EAS password, SMTP/DAV credentials default to the effective IMAP
-pair, and the merge/unseal rules live ONCE (shared with the validator via
-`ValidateUsers`). Auth precedence per login: explicit gateway `Password`
-(`GatewayPasswordHasher`, pbkdf2$/plaintext, local verify) → configured `Imap:Password`
-(presented must equal it, timing-safe) → IMAP probe against the user's EFFECTIVE
-endpoint+username → undeclared = global probe. `RequireDeclaredUsers=true` turns `Users`
+backend, validated by the MailStore provider's login probe via `ICredentialVerifier`).
+`ActiveSync:Users` (or a mounted `UsersFile`) is an optional per-user OVERLAY resolved by
+`Core/Accounts/AccountResolver` — role-keyed overrides (Provider / Enabled / UserName /
+Password / free-form Settings per role); unset passwords inherit the presented EAS
+password, every non-MailStore role's credentials default to the effective MailStore pair,
+and the merge/unseal rules live ONCE (shared with the validator via `ValidateUsers`). Auth
+precedence per login: explicit gateway `Password` (`GatewayPasswordHasher`,
+pbkdf2$/plaintext, local verify) → configured MailStore `Password` (presented must equal
+it, timing-safe) → MailStore provider probe against the user's EFFECTIVE endpoint+username
+→ undeclared = global probe. `RequireDeclaredUsers=true` turns `Users`
 into an allowlist (undeclared logins get a local 401; an empty entry is a grant). Backend
 passwords may be `enc:v1:` values sealed by `SecretValue` under the Encryption master key
 — CLI commands `protect` / `hash-password` (Spectre.Console.Cli app in
@@ -335,7 +341,7 @@ no artificial namespace — `ActiveSync.Server.Eas.*` dumps decoded request/resp
 `EasContext.ReadRequestAsync`/`WriteResponseAsync` (+ Autodiscover bodies; binary/raw
 side-channels log sizes only); `ActiveSync.Backends.Imap`/`.Smtp` attach
 `MailKitWireLogger` (an `IProtocolLogger`→`ILogger` adapter; SMTP has its own category
-string so it can be traced alone) in `ImapConnectionFactory` and the inline `SmtpClient`;
+string so it can be traced alone) in `ImapConnectionFactory` and `SmtpSubmitBackend`;
 `ActiveSync.Backends.Dav` logs method/URI/bodies in `WebDavClient.SendAsync`. Invariants:
 mail-wire credentials are masked via MailKit's `AuthenticationSecretDetector` contract,
 DAV wire logging must NEVER log headers (Authorization), payloads go through
@@ -361,18 +367,23 @@ derive an address from `UserName` with `Contains('@')`.
   "carddav", "sieve", "local") registered in DI and indexed by `BackendProviderRegistry`.
   `CompositeBackendSession` groups an account's `ResolvedRole`s by provider, opens ONE
   `IBackendConnection` per provider (a provider serves all its assigned roles over one
-  connection — the JMAP shape), and aggregates stores/side-ops. `RoleMapper` is a
-  TRANSITIONAL shim translating the typed `ResolvedAccount` slots into role assignments
-  via the historical presence rules; it dissolves when config grows role sections with
-  provider discriminators. `ResolvedRole.Settings` is the provider's own options object
-  (typed handoff, same transition). Optional provider capabilities: `ICredentialVerifier`
-  (auth probe — the MailStore role's provider verifies pass-through logins; a provider
-  without it means declared-users-only), `IPerUserResourceOwner` (per-user cache trim on
-  the eviction sweep).
+  connection — the JMAP shape), and aggregates stores/side-ops. Config assigns roles
+  directly: `ActiveSync:Backends:<Role>` sections carry a `Provider` discriminator, parsed
+  by `BackendRolesConfig`; `AccountResolver` produces role→provider resolutions
+  (`ResolvedRole`), per-user overrides are role-keyed with subtree-replace list merges, and
+  each provider binds its OWN options from its raw `ProviderSettings` (the host never knows
+  a plugin provider's option shape — that is the whole point). Providers validate their
+  sections via `ValidateConfiguration` and describe themselves for the banner via
+  `DescribeRole`. Pre-role-model DB account rows are upgraded at startup by
+  `AccountStore.UpgradeLegacyRowsAsync` (`LegacyAccountJson`) — unconvertible rows are
+  logged as errors, never silently dropped. Optional provider capabilities:
+  `ICredentialVerifier` (auth probe — the MailStore role's provider verifies pass-through
+  logins; a provider without it means declared-users-only), `IPerUserResourceOwner`
+  (per-user cache trim on the eviction sweep), `IReadinessSource` (/readyz probe).
 - One `CompositeBackendSession` per (user, deviceId), cached in `BackendSessionFactory`
-  with idle eviction; auth verdicts are cached ~5 minutes. DAV stores are optional —
-  when a `CalDav`/`CardDav` section is omitted, that class is served by a **local store**
-  instead (below), so `Session.Contacts` / `Session.Calendar` are now always non-null.
+  with idle eviction; auth verdicts are cached ~5 minutes. Content roles are optional —
+  when a role has no configured provider it falls back to the **local store** (below), so
+  `Session.Contacts` / `Session.Calendar` are always non-null.
 - **Local stores** (`Backends/Local/`): `IContentStore` over the `LocalItems` table when
   no DAV backend is configured, plus `LocalNotesStore` which is **always** present (no
   DAV backend carries notes) and `LocalTaskStore` when no CalDAV tasks collection is
@@ -408,8 +419,10 @@ derive an address from `UserName` with `Contains('@')`.
   keeps `caldav:` from matching `caldav-tasks:` keys; local stores match their single
   folder key exactly). Read-only folders route the same way: the owning store opts in
   via `IReadOnlyCollectionSource`.
-- **Tasks over CalDAV** (`CalDavTaskStore`): VTODOs in the home-set collection named by
-  `CalDav.TaskFolder` (default "Tasks", Axigen's layout); matched by displayname or
+- **Tasks over CalDAV** (`CalDavTaskStore`, the `Tasks` role on the `caldav` provider):
+  VTODOs in the home-set collection named by the Tasks role's `TaskFolder` setting
+  (default "Tasks", Axigen's layout; the Tasks section inherits the Calendar section's
+  server settings as its base); matched by displayname or
   trailing path segment among VTODO-capable collections. `CalDavStore` conversely skips
   collections whose `supported-calendar-component-set` lacks VEVENT. Task recurrence maps
   via `RecurrenceMapper` (shared with the calendar converter) with two deliberate holes:
@@ -491,10 +504,10 @@ banner. Rules:
 - Read-only revert semantics: the reverting Add/Change usually arrives **in the same Sync
   response** as the suppressed command (the diff runs after client commands) — check the
   command's own response before polling.
-- Test backends speak **plaintext**; the gateway fixture sets
-  `Imap/Smtp Security="None"` because Stalwart advertises STARTTLS with a self-signed
-  cert and MailKit would otherwise fail the upgrade. `MailTransportSecurity` in Backends
-  is the single mapping point for these options.
+- Test backends speak **plaintext**; the gateway fixture sets the MailStore/MailSubmit
+  role `Security="None"` because Stalwart advertises STARTTLS with a self-signed cert and
+  MailKit would otherwise fail the upgrade. `MailTransportSecurity` in Backends is the
+  single mapping point for these options.
 - TLS certificate validation callbacks come **only** from
   `ServerCertificateValidator` (Backends root) — MailKit and SocketsHttpHandler share the
   delegate type. Never inline a validation callback. Knobs per backend section:
