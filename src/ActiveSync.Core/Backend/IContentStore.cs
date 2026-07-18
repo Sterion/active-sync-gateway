@@ -12,6 +12,13 @@ public interface IContentStore
 	/// <summary>EAS content class served by this store (Email/Calendar/Contacts/Tasks).</summary>
 	string EasClass { get; }
 
+	/// <summary>
+	///   Whether this store owns the given folder/item backend key (each store namespaces its
+	///   keys, e.g. by a "imap:"/"caldav:" prefix). Key spaces must be disjoint across the
+	///   stores of one session — the session dispatches on the first store that claims a key.
+	/// </summary>
+	bool OwnsBackendKey(string backendKey);
+
 	Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct);
 
 	/// <summary>
@@ -80,4 +87,15 @@ public interface IFreeBusySource
 {
 	Task<IReadOnlyList<BusyPeriod>?> GetBusyPeriodsAsync(
 		string targetAddress, DateTime startUtc, DateTime endUtc, CancellationToken ct);
+}
+
+/// <summary>
+///   Implemented by stores whose folders can be granted read-only (shared calendars):
+///   client writes into such a folder are silently reverted by the sync engine, the same
+///   convergence semantics as global ReadOnly mode.
+/// </summary>
+public interface IReadOnlyCollectionSource
+{
+	/// <summary>Whether the folder maps to a collection granted read-only.</summary>
+	bool IsReadOnlyCollection(string folderBackendKey);
 }

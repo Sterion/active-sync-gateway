@@ -54,6 +54,9 @@ public sealed class FolderServiceTests : IDisposable
 	{
 		public string EasClass => Protocol.EasClass.Email;
 
+		public bool OwnsBackendKey(string backendKey) =>
+			backendKey.StartsWith("imap:", StringComparison.Ordinal);
+
 		public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct) =>
 			throw new NotSupportedException();
 

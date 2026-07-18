@@ -49,12 +49,15 @@ AAD `user + "recovery:" + deviceId`) only when `PasswordRecoveryEnabled`; read i
 with `eas device password`.
 
 **Out-of-office** (Settings→Oof) is backed by **ManageSieve** when `ActiveSync:Sieve` is
-enabled (off = the historical accept-and-ignore stub). Invariants: the `OofSettings` DB
-row is the source of truth for Get — the sieve script (`SieveVacationScript.ScriptName`,
-"eas-gateway") is derived output and never parsed back; Set writes sieve FIRST, then the
-DB (a failed upload must not leave the phone believing Oof is armed; BackendException →
-Oof Status 4); the previously active script name is stored on the row and restored on
-disable; one reply body for all three audiences. `ManageSieveClient` is minimal RFC 5804
+enabled (off = the historical accept-and-ignore stub). The handler is backend-agnostic:
+`IOofBackend.EnableAsync(OofReply)` returns an opaque restore token (null = re-arm, keep
+the stored token) and the backend renders its own rule — `SieveVacationScript` (script
+name "eas-gateway") lives entirely inside `SieveOofBackend`. Invariants: the
+`OofSettings` DB row is the source of truth for Get — the script is derived output and
+never parsed back; Set hits the backend FIRST, then the DB (a failed arm must not leave
+the phone believing Oof is armed; BackendException → Oof Status 4); the restore token
+(previously active script name) is stored on the row and restored on disable; one reply
+body for all three audiences. `ManageSieveClient` is minimal RFC 5804
 (STARTTLS + AUTH PLAIN, no pooling — one connection per operation), wire-logged at Trace
 as `ActiveSync.Backends.Sieve` with the AUTHENTICATE line always masked.
 
@@ -388,8 +391,11 @@ derive an address from `UserName` with `Contains('@')`.
   where index is the position in `MimeMessage.Attachments`. Search `LongId` format:
   `UrlEncode("{folderBackendKey}|{itemKey}")`. Both round-trip through ItemOperations.
 - Folder backend keys are prefixed: `imap:`, `caldav:`, `caldav-tasks:`, `carddav:`,
-  `local:` — `BackendSession.GetStoreForBackendKey` routes on the prefix (check
-  `caldav-tasks:` before `caldav:` is unnecessary — the colon keeps them distinct).
+  `local:` — each store claims its keys via `IContentStore.OwnsBackendKey` and the
+  session dispatches on the first claimant, so key spaces must stay disjoint (the colon
+  keeps `caldav:` from matching `caldav-tasks:` keys; local stores match their single
+  folder key exactly). Read-only folders route the same way: the owning store opts in
+  via `IReadOnlyCollectionSource`.
 - **Tasks over CalDAV** (`CalDavTaskStore`): VTODOs in the home-set collection named by
   `CalDav.TaskFolder` (default "Tasks", Axigen's layout); matched by displayname or
   trailing path segment among VTODO-capable collections. `CalDavStore` conversely skips

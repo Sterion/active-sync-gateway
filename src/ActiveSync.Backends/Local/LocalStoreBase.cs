@@ -42,6 +42,12 @@ public abstract class LocalStoreBase(
 	public string FolderBackendKey => KeyPrefix + Collection;
 	public abstract string EasClass { get; }
 
+	// Local stores share the "local:" prefix, so the single-folder key is matched exactly.
+	public bool OwnsBackendKey(string backendKey)
+	{
+		return backendKey == FolderBackendKey;
+	}
+
 	public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 	{
 		return Task.FromResult<IReadOnlyList<BackendFolder>>(

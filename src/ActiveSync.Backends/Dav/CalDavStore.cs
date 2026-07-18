@@ -16,7 +16,7 @@ public sealed class CalDavStore(
 	ILogger logger,
 	IReadOnlyList<SharedCollection>? sharedCollections = null)
 	: DavStoreBase(dav, options, credentials, logger),
-		ICalendarOperations, ICalendarAttachmentSource, IFreeBusySource
+		ICalendarOperations, ICalendarAttachmentSource, IFreeBusySource, IReadOnlyCollectionSource
 {
 	public const string KeyPrefix = "caldav:";
 

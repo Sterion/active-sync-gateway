@@ -35,6 +35,11 @@ public sealed partial class ImapMailBackend(
 
 	// ---------- IContentStore ----------
 
+	public bool OwnsBackendKey(string backendKey)
+	{
+		return backendKey.StartsWith(ImapSession.KeyPrefix, StringComparison.Ordinal);
+	}
+
 	public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 	{
 		return session.RunAsync<IReadOnlyList<BackendFolder>>(async client =>

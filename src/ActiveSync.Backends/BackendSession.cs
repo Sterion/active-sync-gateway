@@ -25,8 +25,6 @@ public sealed class BackendSession : IBackendSession
 	private readonly ImapSession _imapSession;
 	private readonly List<IContentStore> _stores = [];
 
-	private readonly CalDavStore? _calDavStore;
-
 	public BackendSession(
 		ResolvedAccount account,
 		BackendCredentials gatewayCredentials,
@@ -66,7 +64,6 @@ public sealed class BackendSession : IBackendSession
 			CalDavStore calStore = new(_calDavClient, calDavOptions, account.CalDav.Credentials,
 				partStatIdentity, logger, sharedCalendars);
 			Calendar = calStore;
-			_calDavStore = calStore;
 			_stores.Add(calStore);
 		}
 		else
@@ -126,24 +123,13 @@ public sealed class BackendSession : IBackendSession
 
 	public IContentStore? GetStoreForBackendKey(string backendKey)
 	{
-		if (backendKey.StartsWith(ImapSession.KeyPrefix, StringComparison.Ordinal))
-			return GetStoreForClass(EasClass.Email);
-		if (backendKey.StartsWith(CalDavTaskStore.KeyPrefix, StringComparison.Ordinal))
-			return GetStoreForClass(EasClass.Tasks);
-		if (backendKey.StartsWith(CalDavStore.KeyPrefix, StringComparison.Ordinal))
-			return GetStoreForClass(EasClass.Calendar);
-		if (backendKey.StartsWith(CardDavStore.KeyPrefix, StringComparison.Ordinal))
-			return GetStoreForClass(EasClass.Contacts);
-		if (backendKey.StartsWith(LocalStoreBase.KeyPrefix, StringComparison.Ordinal))
-			return _stores.FirstOrDefault(s => s is LocalStoreBase local && local.FolderBackendKey == backendKey);
-		return null;
+		return _stores.FirstOrDefault(s => s.OwnsBackendKey(backendKey));
 	}
 
 	public bool IsReadOnlyFolder(string folderBackendKey)
 	{
-		return _calDavStore is not null &&
-		       folderBackendKey.StartsWith(CalDavStore.KeyPrefix, StringComparison.Ordinal) &&
-		       _calDavStore.IsReadOnlyCollection(folderBackendKey);
+		return GetStoreForBackendKey(folderBackendKey) is IReadOnlyCollectionSource source &&
+		       source.IsReadOnlyCollection(folderBackendKey);
 	}
 
 	public async ValueTask DisposeAsync()

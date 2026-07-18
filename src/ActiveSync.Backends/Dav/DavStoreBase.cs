@@ -68,6 +68,11 @@ public abstract class DavStoreBase(
 
 	public abstract string EasClass { get; }
 
+	public bool OwnsBackendKey(string backendKey)
+	{
+		return backendKey.StartsWith(Prefix, StringComparison.Ordinal);
+	}
+
 	public abstract Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct);
 
 	public abstract Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
