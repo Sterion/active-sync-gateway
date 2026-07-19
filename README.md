@@ -133,8 +133,8 @@ MS-ASCNTC, MS-ASTZ) in modern async C#.
 
 - ~330 automated tests, including an integration suite that hosts the gateway in-process
   and drives it with a real WBXML-speaking mini-EAS client against **live backends**
-  (Stalwart; docker-mailserver + Radicale; Cyrus IMAP; Baikal + docker-mailserver; and Axigen
-  in trial mode on a nightly, reduced-trigger leg).
+  (Stalwart; docker-mailserver + Radicale; Cyrus IMAP; Baikal + docker-mailserver; Apache James;
+  and Axigen in trial mode on a nightly, reduced-trigger leg).
 - CI compiles the solution exactly once and only pushes an image after both the unit and
   integration suites pass.
 - Async end-to-end: all I/O uses async/await with `CancellationToken` propagation;
@@ -1095,6 +1095,12 @@ docker compose -f docker/backends/baikal/docker-compose.yml up -d --build --wait
 # boot. Trial mode is EVALUATION ONLY, so in CI this leg is reduced-trigger (nightly / dispatch).
 # Home-sets live under /Calendar/ and /Contacts/.
 docker compose -f docker/backends/axigen/docker-compose.yml up -d --build --wait
+
+# Apache James (memory) — a second, independent Java IMAP + SMTP submission implementation
+# (no CalDAV/CardDAV/JMAP/Sieve). Run this leg with AS_TEST_DAV_URL=none so calendar/contacts
+# fall back to the gateway's local stores and the DAV tests skip.
+docker compose -f docker/backends/james/docker-compose.yml up -d --build --wait
+# AS_TEST_STACK=james AS_TEST_DAV_URL=none dotnet test --filter Category=Integration
 ```
 
 Or run the suite against **every** stack in turn with one command (brings each up, tests,
@@ -1116,11 +1122,12 @@ scripts/test-backends.sh               # Linux / devcontainer
   - **`test`** — the Dockerfile `test` stage builds everything and runs the unit tests,
     exporting every layer to a `type=gha` build cache.
   - **`integration`** — a matrix leg per backend (`stalwart`, `mailserver`, `cyrus`, `baikal`,
-    `axigen`) runs in parallel. Each loads the cached test image, brings its backend + a
+    `james`, `axigen`) runs in parallel. Each loads the cached test image, brings its backend + a
     throwaway Postgres up, and runs the integration suite **from that image**
     (`dotnet test --no-build`). Tests for capabilities a backend lacks (JMAP/Sieve on
     docker-mailserver, CalDAV free-busy on Radicale, SMTP submission / password-enforcement on
-    the Cyrus test image, JMAP/Sieve on the Baikal DAV stack) skip cleanly. Legs push nothing.
+    the Cyrus test image, JMAP/Sieve on the Baikal DAV stack, all of CalDAV/CardDAV + JMAP + Sieve
+    on the mail-only James stack) skip cleanly. Legs push nothing.
     The **`axigen`** leg runs Axigen's evaluation-only trial mode, so it is reduced-trigger —
     real work happens only on `workflow_dispatch`/`schedule` (nightly); on push its steps skip
     and it never gates `publish`.

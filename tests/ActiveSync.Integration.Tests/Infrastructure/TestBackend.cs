@@ -19,7 +19,14 @@ public static class TestBackend
 	public static int ImapPort { get; } = int.Parse(Env("AS_TEST_IMAP_PORT", "143"));
 	public static string SmtpHost { get; } = Env("AS_TEST_SMTP_HOST", ImapHost);
 	public static int SmtpPort { get; } = int.Parse(Env("AS_TEST_SMTP_PORT", "587"));
-	public static string? DavUrl { get; } = EnvOrNull("AS_TEST_DAV_URL") ?? $"http://{ImapHost}:5232";
+	// The sentinel "none" (case-insensitive) means the backend has NO CalDAV/CardDAV at all
+	// (e.g. Apache James): DavUrl is null, so GatewayFixture leaves calendar/contacts/notes on
+	// the local stores and the DAV-only tests skip via [DavBackendFact]. Any other value is used
+	// verbatim; unset keeps the http://{ImapHost}:5232 default.
+	public static string? DavUrl { get; } =
+		string.Equals(EnvOrNull("AS_TEST_DAV_URL"), "none", StringComparison.OrdinalIgnoreCase)
+			? null
+			: EnvOrNull("AS_TEST_DAV_URL") ?? $"http://{ImapHost}:5232";
 
 	/// <summary>
 	///   JMAP session base URL (Stalwart serves JMAP on the same HTTP listener as DAV). Defaults
@@ -218,6 +225,23 @@ public sealed class BackendFactAttribute : FactAttribute
 	{
 		if (!TestBackend.IsAvailable)
 			Skip = TestBackend.SkipReason;
+	}
+}
+
+/// <summary>
+///   A [Fact] for scenarios that genuinely need a CalDAV/CardDAV backend. Skips when the mail
+///   backend is unavailable OR when the stack has no DAV at all (AS_TEST_DAV_URL=none, e.g.
+///   Apache James) -- there the gateway serves calendar/contacts from its local stores, so a
+///   DAV round-trip test would exercise nothing real.
+/// </summary>
+public sealed class DavBackendFactAttribute : FactAttribute
+{
+	public DavBackendFactAttribute()
+	{
+		if (!TestBackend.IsAvailable)
+			Skip = TestBackend.SkipReason;
+		else if (TestBackend.DavUrl is null)
+			Skip = "No CalDAV/CardDAV backend (AS_TEST_DAV_URL=none).";
 	}
 }
 

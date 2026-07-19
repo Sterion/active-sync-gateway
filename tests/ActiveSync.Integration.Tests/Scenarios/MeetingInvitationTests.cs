@@ -148,7 +148,7 @@ public sealed class MeetingInvitationTests(GatewayFixture gateway)
 			TestBackend.User2, "INBOX", $"Cancelled occurrence: {marker}"));
 	}
 
-	[SkipOnStackFact("cyrus,baikal", "The backend does not email an iMIP invitation into the attendee's IMAP mailbox: Cyrus auto-schedules via the CalDAV schedule-inbox, and Baikal's DAV server + mail companion are separate systems. The gateway correctly leaves scheduling to the server (auto-probe), so no invitation arrives here.")]
+	[SkipOnStackFact("cyrus,baikal,james", "The backend does not email an iMIP invitation into the attendee's IMAP mailbox: Cyrus auto-schedules via the CalDAV schedule-inbox, Baikal's DAV server + mail companion are separate systems, and James has no DAV calendar at all (local store). The gateway correctly leaves scheduling to the server (auto-probe), so no invitation arrives here.")]
 	public async Task CalDav_AutoProbe_LeavesSchedulingToTheServer()
 	{
 		EasTestClient organizer = gateway.CreateEasClient(TestBackend.User1);

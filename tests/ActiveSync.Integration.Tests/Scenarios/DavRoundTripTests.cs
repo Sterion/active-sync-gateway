@@ -16,7 +16,7 @@ public class DavRoundTripTests(GatewayFixture gateway)
 	private static readonly XNamespace C = EasNamespaces.Contacts;
 	private static readonly XNamespace Cal = EasNamespaces.Calendar;
 
-	[BackendFact]
+	[DavBackendFact]
 	public async Task Contact_CreatedOnDevice1_SyncsToDevice2_AndDeletePropagates()
 	{
 		EasTestClient device1 = gateway.CreateEasClient(TestBackend.User1);
@@ -66,7 +66,7 @@ public class DavRoundTripTests(GatewayFixture gateway)
 			}, $"contact '{marker}' deletion on device 2");
 	}
 
-	[BackendFact]
+	[DavBackendFact]
 	public async Task RecurringEvent_CreatedOnDevice1_SyncsToDevice2()
 	{
 		EasTestClient device1 = gateway.CreateEasClient(TestBackend.User1);

@@ -545,8 +545,9 @@ banner. Rules:
   `postgresql://` URI: when set, each gateway factory creates its own fresh Postgres
   database instead of a SQLite temp file — never dropped, the CI container is discarded —
   so Npgsql migrations, URI conversion and provider inference all run in CI.
-- Five stacks, one suite: four gate every push (`stalwart`, `mailserver`, `cyrus`, `baikal`)
-  and `axigen` is reduced-trigger (dispatch/schedule — see the Axigen note below). `stalwart`
+- Six stacks, one suite: five gate every push (`stalwart`, `mailserver`, `cyrus`, `baikal`,
+  `james`) and `axigen` is reduced-trigger (dispatch/schedule — see the Axigen note below).
+  `stalwart`
   (default; **v0.16.13**, self-provisioning), `mailserver` (docker-mailserver + Radicale; set
   `AS_TEST_STACK=mailserver` so the DAV `HomeSetPath` preset switches to `/{user}/`), `cyrus`
   (`cyrus-docker-test-server`: an independent C implementation of IMAP + CalDAV/CardDAV + JMAP +
@@ -616,6 +617,27 @@ banner. Rules:
   backend; a nightly `schedule:` runs it for real. Axigen enforces auth and emails iMIP
   invitations from the same system, so the auth-rejection and CalDav-auto-schedule tests run
   (not skipped); JMAP/ManageSieve tests self-skip by probe.
+- **Apache James** (`docker/backends/james`, `AS_TEST_STACK=james`) — a second, independent
+  (Java) implementation of **IMAP + SMTP submission**, run with **no CalDAV/CardDAV**
+  (`AS_TEST_DAV_URL=none`). The `none` sentinel makes `TestBackend.DavUrl` null, so
+  `GatewayFixture` leaves calendar/contacts/notes on the **local stores** and the DAV-only tests
+  skip via the new **`[DavBackendFact]`** gate (skips when `DavUrl is null`); the retagged DAV
+  tests are `DavRoundTripTests` (both) — `DavTaskTests`/`SharedCalendarTests` already self-guard,
+  and the CalDav-auto-schedule test adds `james` to its `SkipOnStackFact` list. Stock JMAP serves
+  no usable routes for our client (JMAP probe skips), and **ManageSieve is left disabled** — James
+  advertises STARTTLS in its ManageSieve greeting even with startTLS off, but the actual STARTTLS
+  negotiation hangs the gateway's Sieve client, so with no 4190 listener the Oof/Sieve tests skip
+  cleanly (as on Cyrus). It is a **self-provisioning custom image** (`Dockerfile` + `entrypoint.sh`):
+  the Dockerfile flips config knobs (`imapserver.xml` `plainAuthDisallowed` → false for the
+  fixture's plaintext LOGIN; `smtpserver.xml` announce=always + requireSSL=false so the 587
+  submission listener advertises AUTH over plaintext to any source — stock James only announces it
+  to unauthorized addresses after STARTTLS, so CI's 127.0.0.1 client would never see it), and —
+  because the memory server keeps users in RAM — the entrypoint starts James in the background,
+  waits for WebAdmin (port 8000, no auth), `PUT`s domain example.com + users user1/user2 **plus
+  their Trash/Sent/Drafts/Outbox mailboxes** (James creates only INBOX; MoveItems-to-Trash needs
+  them), drops a `.provisioned` marker, and hands the foreground back. The healthcheck gates on
+  that marker + IMAP 143, so `up --wait` blocks until provisioning is done (no separate one-shot,
+  which a single-service backend cannot depend on without a cycle).
 - Tests use **GUID subjects/markers** and poll with `WaitUntil` — never assume an empty
   mailbox and never assert on absolute counts. `MailboxJanitor` exists for best-effort
   purges when needed.
@@ -640,7 +662,7 @@ banner. Rules:
     it to a `type=gha` build cache. Uses the default docker-container buildx driver (the old
     single-daemon containerd-store step is gone; the job split replaces daemon layer reuse
     with the shared cache).
-  - `integration` — `strategy.matrix.backend: [stalwart, mailserver, cyrus, baikal, axigen]`
+  - `integration` — `strategy.matrix.backend: [stalwart, mailserver, cyrus, baikal, james, axigen]`
     (axigen is reduced-trigger via `RUN_LEG` — dispatch/schedule only), `fail-fast: false`,
     `needs: test`. Each leg loads the cached test image (`cache-from: type=gha`, no
     recompile), `docker compose ... up --wait`s its backend + a Postgres sidecar, warms mail,

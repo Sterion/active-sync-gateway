@@ -105,6 +105,10 @@ for backend in "${LIST[@]}"; do
 				'AS_TEST_DAV_HOMESET=/Calendar/'
 				'AS_TEST_DAV_CONTACTS_HOMESET=/Contacts/'
 			) ;;
+		james)
+			extra_env=(
+				'AS_TEST_DAV_URL=none'
+			) ;;
 	esac
 	env AS_TEST_STACK="$backend" "${extra_env[@]}" dotnet test ActiveSync.slnx --nologo --filter "$FILTER"
 	code=$?

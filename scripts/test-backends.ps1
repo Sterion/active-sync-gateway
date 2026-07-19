@@ -81,6 +81,9 @@ $BackendEnv = @{
 		AS_TEST_DAV_HOMESET          = '/Calendar/'
 		AS_TEST_DAV_CONTACTS_HOMESET = '/Contacts/'
 	}
+	james = @{
+		AS_TEST_DAV_URL = 'none'
+	}
 }
 
 try {

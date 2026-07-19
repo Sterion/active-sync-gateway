@@ -96,6 +96,9 @@ jobs:
           - backend: baikal
             dav_homeset: "/dav.php/calendars/{user}/"
             dav_contacts_homeset: "/dav.php/addressbooks/{user}/"
+          # Apache James: mail-only (IMAP/SMTP + ManageSieve), no CalDAV/CardDAV -> dav_url none.
+          - backend: james
+            dav_url: none
           # Axigen runs its trial/demo mode (evaluation-only licensing), so this leg is
           # reduced-trigger: it only does real work on workflow_dispatch / schedule (RUN_LEG
           # below). On push its steps skip, the leg still reports success, and `publish`
@@ -188,7 +191,7 @@ jobs:
             -e AS_TEST_STACK=${{ matrix.backend }} \
             -e AS_TEST_IMAP_HOST=localhost -e AS_TEST_IMAP_PORT=143 \
             -e AS_TEST_SMTP_HOST=localhost -e AS_TEST_SMTP_PORT=587 \
-            -e AS_TEST_DAV_URL=http://localhost:5232 \
+            -e "AS_TEST_DAV_URL=${{ matrix.dav_url || 'http://localhost:5232' }}" \
             -e "AS_TEST_DAV_HOMESET=${{ matrix.dav_homeset }}" \
             -e "AS_TEST_DAV_CONTACTS_HOMESET=${{ matrix.dav_contacts_homeset }}" \
             -e "AS_TEST_MAILSUBMIT=${{ matrix.mailsubmit }}" \

@@ -1,0 +1,31 @@
+# Backend leg (CI + local): Apache James (memory) -- a second, independent Java implementation
+# of IMAP + SMTP submission. No CalDAV/CardDAV (the leg runs with AS_TEST_DAV_URL=none, so the
+# gateway serves calendar/contacts/notes from its local stores and the DAV tests skip via
+# [DavBackendFact]); stock JMAP serves no usable routes and ManageSieve stays disabled (its
+# STARTTLS greeting hangs the gateway's Sieve client), so JMAP + Oof tests self-skip. Same
+# published mail ports and users (user1/user2, password "pass") as every other stack, so the
+# only switch is AS_TEST_STACK (+ AS_TEST_DAV_URL=none in the CI matrix / scripts/test-backends).
+#
+#   docker compose -f docker/backends/james/docker-compose.yml up -d --build --wait
+#   $env:AS_TEST_STACK = "james"; $env:AS_TEST_DAV_URL = "none"
+#   dotnet test --filter Category=Integration
+#
+# Self-provisioning custom image (Dockerfile + entrypoint.sh): plaintext IMAP auth + STARTTLS
+# ManageSieve are enabled at build time, and the domain + users are created via WebAdmin on
+# first boot (memory server = ephemeral). Plaintext everywhere -- test use exclusively.
+services:
+  james:
+    build:
+      context: .
+    ports:
+      - "143:143"                # IMAP
+      - "587:587"                # SMTP submission
+      # No 4190/ManageSieve: James's ManageSieve STARTTLS does not interoperate with the
+      # gateway's Sieve client (hangs), so it stays disabled and the Oof/Sieve tests skip.
+    healthcheck:
+      # Ready once provisioning wrote its marker AND IMAP is accepting connections.
+      test: ["CMD-SHELL", "test -f /root/.provisioned && bash -c 'exec 3<>/dev/tcp/127.0.0.1/143'"]
+      interval: 5s
+      timeout: 4s
+      retries: 60
+      start_period: 30s
