@@ -399,8 +399,11 @@ derive an address from `UserName` with `Contains('@')`.
   `CompositeBackendSession` groups an account's `ResolvedRole`s by provider, opens ONE
   `IBackendConnection` per provider (a provider serves all its assigned roles over one
   connection — the JMAP shape), and aggregates stores/side-ops. Config assigns roles
-  directly: `ActiveSync:Backends:<Role>` sections carry a `Provider` discriminator, parsed
-  by `BackendRolesConfig`; `AccountResolver` produces role→provider resolutions
+  directly: `ActiveSync:Backends:<Role>` sections carry a `Provider` discriminator, parsed by
+  `BackendRolesConfig` and held live by `BackendRolesProvider` (rebuilt when a settings change
+  moves the `Backends` subtree — the session cache recycles, no restart; absent mail roles =
+  UNCONFIGURED, so EAS/Autodiscover answer 503 and `/readyz` is not-ready until set);
+  `AccountResolver` produces role→provider resolutions
   (`ResolvedRole`), per-user overrides are role-keyed with subtree-replace list merges, and
   each provider binds its OWN options from its raw `ProviderSettings` (the host never knows
   a plugin provider's option shape — that is the whole point). Providers validate their
@@ -411,6 +414,16 @@ derive an address from `UserName` with `Contains('@')`.
   `ICredentialVerifier` (auth probe — the MailStore role's provider verifies pass-through
   logins; a provider without it means declared-users-only), `IPerUserResourceOwner`
   (per-user cache trim on the eviction sweep), `IReadinessSource` (/readyz probe).
+- **DB-backed global settings**: every setting is CLI-settable (`eas config set`) and stored in
+  the state DB (`GlobalSetting` rows + a single-row `SettingsStamp`, mirroring the accounts store).
+  A `DbSettingsConfigurationProvider` is layered LAST in configuration so the DB wins over
+  appsettings/env, which win over code (POCO) defaults; `SettingsRefresher` polls the stamp
+  (`Auth:UsersRefreshSeconds`, ~1s) and swaps the provider snapshot, firing the config reload token
+  so `IOptionsMonitor`/`IOptionsSnapshot` recompute. Consumers therefore read options live (NOT
+  `IOptions<>` captured once). Bootstrap `Database`/`Encryption` are env/file-only (they open and
+  decrypt that DB). `SettingKeys` (`Cli/`) is the settable-key catalogue (type/range/tier). Options
+  are validated once at startup (fail-fast) — NOT via a registered `IValidateOptions`, so a bad live
+  value never throws on read. Multi-pod: each replica polls its own stamp; no cross-process bus.
 - **Out-of-repo plugins**: `Core/Plugins/PluginLoader` loads assemblies from
   `ActiveSync:Plugins:Directory` (default `/app/plugins`, one subdir per plugin, entry dll
   = dir name) in a per-plugin non-collectible `AssemblyLoadContext` that resolves the

@@ -334,6 +334,19 @@ whatever was active); `jmap` gives real HTML and precise start/end times.
 
 ## Configuration
 
+> **Settings live in layers — the database wins, and it's all CLI-settable.** Every global setting
+> can be set with `eas config set <key> <value>` and is stored in the state **database**, which
+> overrides `appsettings.json` / environment variables, which override the built-in **code
+> defaults**. A database change is applied by every running replica within ~1s (no restart), except
+> a few listener settings — HTTP/HTTPS ports, self-signed-TLS and metrics enable/port — that apply
+> on the next restart. The gateway also starts with **no mail configuration at all**: with only the
+> bootstrap Encryption key set it runs **unconfigured** (EAS/Autodiscover answer 503, `/readyz` is
+> not-ready) until you point it at a backend with `eas config set`. So the shipped `appsettings.json`
+> carries only the two **bootstrap** sections — `Database` and `Encryption`, which are needed to
+> open and decrypt the database itself and are the only settings that cannot live in it. Everything
+> shown below is a **code default or example**; set the real values with the
+> [`eas config`](#operator-cli-eas) commands (or `appsettings.json`/env as defaults).
+
 One backend set serves all users; each user authenticates with their own credentials
 (HTTP Basic, validated by the MailStore provider's login probe and passed through to all
 backends). Backends are configured per **role** under `ActiveSync:Backends`, each naming
