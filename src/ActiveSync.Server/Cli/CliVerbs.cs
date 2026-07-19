@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
+using ActiveSync.Core.Settings;
 using ActiveSync.Server.Setup;
 using Microsoft.Extensions.Options;
 using Serilog;
@@ -48,7 +49,17 @@ internal static class CliVerbs
 	/// </summary>
 	internal static async Task<int> ShowBannerAsync()
 	{
-		IConfigurationRoot config = BuildConfiguration([]);
+		// Overlay database-stored settings on top of file/env so the banner reflects what serve
+		// would actually run (the database wins). Tolerant of an unreachable/unmigrated database.
+		IConfigurationRoot fileConfig = BuildConfiguration([]);
+		DatabaseOptions bootstrapDatabase =
+			fileConfig.GetSection("ActiveSync:Database").Get<DatabaseOptions>() ?? new DatabaseOptions();
+		DbSettingsConfigurationSource settingsSource = new();
+		settingsSource.Provider.SetData(DbSettingsLoader.TryLoad(bootstrapDatabase, null));
+		IConfigurationRoot config = new ConfigurationBuilder()
+			.AddConfiguration(fileConfig)
+			.Add(settingsSource)
+			.Build();
 		ActiveSyncOptions? options = config.GetSection("ActiveSync").Get<ActiveSyncOptions>();
 		if (options is null)
 		{

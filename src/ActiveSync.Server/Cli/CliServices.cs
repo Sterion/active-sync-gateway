@@ -1,4 +1,5 @@
 using ActiveSync.Core.Options;
+using ActiveSync.Core.Settings;
 using ActiveSync.Core.State;
 using ActiveSync.Server.Setup;
 using Microsoft.EntityFrameworkCore;
@@ -71,6 +72,51 @@ internal static class CliServices
 
 		// CLI commands never migrate; refuse to query a missing or outdated schema instead of
 		// failing with a provider error mid-command.
+		try
+		{
+			await using AsyncServiceScope scope = provider.CreateAsyncScope();
+			SyncDbContext db = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
+			List<string> pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
+			if (pending.Count > 0)
+			{
+				await Console.Error.WriteLineAsync(
+					$"The state database is missing {pending.Count} migration(s) — " +
+					"start the gateway once ('eas serve') to create/upgrade the schema.");
+				await provider.DisposeAsync();
+				return null;
+			}
+		}
+		catch (Exception ex)
+		{
+			await Console.Error.WriteLineAsync($"Cannot open the state database: {ex.Message}");
+			await provider.DisposeAsync();
+			return null;
+		}
+
+		return provider;
+	}
+
+	/// <summary>
+	///   Lean provider for the settings/logs commands: configuration + the provider-matched
+	///   DbContext and the <see cref="GlobalSettingStore" /> only — NO backend providers, plugins
+	///   or configuration validation. Skipping validation is deliberate: `eas config set` must work
+	///   to REPAIR a broken or unconfigured gateway, and reading logs must never depend on valid
+	///   backend config. Still refuses a missing/outdated schema (start 'eas serve' once).
+	/// </summary>
+	internal static async Task<ServiceProvider?> TryCreateLeanAsync()
+	{
+		IConfigurationRoot config = CliVerbs.BuildConfiguration([]);
+		DatabaseOptions database =
+			config.GetSection("ActiveSync:Database").Get<DatabaseOptions>() ?? new DatabaseOptions();
+
+		ServiceCollection services = new();
+		services.AddLogging();
+		services.AddSingleton<IConfiguration>(config);
+		services.AddOptions<ActiveSyncOptions>().Bind(config.GetSection("ActiveSync"));
+		services.AddSyncDatabase(PostgresConnectionUri.EffectiveProvider(database));
+		services.AddSingleton<GlobalSettingStore>();
+		ServiceProvider provider = services.BuildServiceProvider();
+
 		try
 		{
 			await using AsyncServiceScope scope = provider.CreateAsyncScope();

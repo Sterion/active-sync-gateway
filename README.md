@@ -1004,6 +1004,18 @@ appsettings.json in the working directory.
 | `user password <login>` | Set the gateway password from stdin (stored as a pbkdf2$ hash). |
 | `user secret <login> <key>` | Set a backend password (`Backends:MailStore:Password`, ...) from stdin (stored sealed, enc:v1:). |
 
+**Global settings** — stored in the database; the database wins over appsettings/env, which win
+over the built-in defaults. Applies live within ~1s (a background change-stamp poll), except a few
+listener settings that apply on restart. The two bootstrap sections (`Database`, `Encryption`) are
+env/file only — they are needed to open and decrypt the database that stores everything else.
+
+| Command | What it does |
+| --- | --- |
+| `config list` | Every setting with its effective value and source (default / config / db). |
+| `config get <key>` | One setting's effective value and source (e.g. `config get ActiveSync:ReadOnly`). |
+| `config set <key> <value>` | Store a setting (e.g. `config set ActiveSync:Eas:MaxHeartbeatSeconds 1800`); validated by type/range; live in ~1s (listener settings say "restart"). |
+| `config unset <key>` | Clear a database setting — falls back to the config file, then the code default. |
+
 **Access control & cleanup**
 
 | Command | What it does |

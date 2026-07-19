@@ -79,6 +79,18 @@ internal static class CliApp
 			purge.AddCommand<PurgeDeviceCommand>("device")
 				.WithDescription("Delete one device registration (the device re-syncs from scratch).");
 		});
+		config.AddBranch("config", cfg =>
+		{
+			cfg.SetDescription("View and change global settings (stored in the database; the database wins over config files).");
+			cfg.AddCommand<ConfigListCommand>("list")
+				.WithDescription("List every setting with its effective value and source (default/config/db).");
+			cfg.AddCommand<ConfigGetCommand>("get")
+				.WithDescription("Show one setting's effective value and source.");
+			cfg.AddCommand<ConfigSetCommand>("set")
+				.WithDescription("Store a setting in the database (applies live within ~1s, or on restart for listener settings).");
+			cfg.AddCommand<ConfigUnsetCommand>("unset")
+				.WithDescription("Clear a database setting (falls back to the config file, then the code default).");
+		});
 	}
 }
 
