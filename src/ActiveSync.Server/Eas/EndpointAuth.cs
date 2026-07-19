@@ -1,4 +1,5 @@
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Security;
 
 namespace ActiveSync.Server.Eas;
 

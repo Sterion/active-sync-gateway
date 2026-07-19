@@ -2,16 +2,17 @@ using System.Collections.Concurrent;
 using ActiveSync.Core.Options;
 using Microsoft.Extensions.Options;
 
-namespace ActiveSync.Server.Eas;
+namespace ActiveSync.Core.Security;
 
 /// <summary>
-///   Brute-force throttle for the authenticated endpoints. Counts failed Basic-auth attempts
-///   in a fixed window and answers 429 once a key reaches its limit — without touching the
-///   IMAP backend. Callers key the granular counter by (address, username) so a valid login
-///   for one account cannot clear another account's counter, and keep a looser per-address
-///   ceiling (<see cref="IpWideLimit" />) so username-rotation from one address is still
-///   bounded. Sized for the gateway's audience (a handful of mailbox owners), not as a
-///   general-purpose WAF.
+///   Brute-force throttle for the authenticated endpoints (EAS Basic auth and the web UI
+///   login form — callers namespace their keys). Counts failed attempts in a fixed window and
+///   answers 429 once a key reaches its limit — without touching the mail backend. Callers
+///   key the granular counter by (address, username) so a valid login for one account cannot
+///   clear another account's counter, and keep a looser per-address ceiling
+///   (<see cref="IpWideLimit" />) so username-rotation from one address is still bounded.
+///   Sized for the gateway's audience (a handful of mailbox owners), not as a general-purpose
+///   WAF.
 /// </summary>
 public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options)
 {

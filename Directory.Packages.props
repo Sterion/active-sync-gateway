@@ -42,6 +42,10 @@
 		<PackageVersion Include="Serilog.Formatting.Compact" Version="3.0.0" />
 		<PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
 
+		<!-- Web UI (ActiveSync.WebUi): OIDC login + embedded no-build SPA assets. -->
+		<PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.10" />
+		<PackageVersion Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.10" />
+
 		<!-- CLI -->
 		<PackageVersion Include="Spectre.Console" Version="0.57.2" />
 		<PackageVersion Include="Spectre.Console.Cli" Version="0.55.0" />

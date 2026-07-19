@@ -1,5 +1,5 @@
 using ActiveSync.Core.Options;
-using ActiveSync.Server.Eas;
+using ActiveSync.Core.Security;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Server.Tests;

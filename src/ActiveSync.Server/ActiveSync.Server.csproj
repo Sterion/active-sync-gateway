@@ -24,6 +24,7 @@
 		<ProjectReference Include="..\ActiveSync.Backends.Dav\ActiveSync.Backends.Dav.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Sieve\ActiveSync.Backends.Sieve.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Local\ActiveSync.Backends.Local.csproj" />
+		<ProjectReference Include="..\ActiveSync.WebUi\ActiveSync.WebUi.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

@@ -5,6 +5,7 @@ using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Logging;
 using ActiveSync.Core.Options;
+using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
 using Microsoft.Extensions.Options;
 

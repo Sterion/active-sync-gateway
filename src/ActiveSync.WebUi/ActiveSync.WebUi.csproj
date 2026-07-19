@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- The web admin interface (/admin) + user self-service portal (/user), served by the
+	     gateway host. A class library, not Sdk.Web — the Server owns the host; this assembly
+	     contributes services, endpoints and the embedded no-build SPA (plain HTML/CSS/ES
+	     modules under wwwroot, no bundler). -->
+	<PropertyGroup>
+		<GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<EmbeddedResource Include="wwwroot\**" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
+		<PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="ActiveSync.WebUi.Tests" />
+	</ItemGroup>
+
+</Project>

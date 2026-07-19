@@ -9,6 +9,7 @@ using ActiveSync.Core.State;
 using ActiveSync.Server;
 using ActiveSync.Server.Eas;
 using ActiveSync.Server.Setup;
+using ActiveSync.WebUi.Setup;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
@@ -145,6 +146,7 @@ public partial class Program
 		builder.Services.AddSingleton<BackendSessionFactory>();
 		builder.Services.AddSingleton<IBackendSessionFactory>(sp => sp.GetRequiredService<BackendSessionFactory>());
 		builder.Services.AddEasHandlers();
+		builder.AddWebUi();
 
 		WebApplication app = builder.Build();
 
@@ -257,6 +259,7 @@ public partial class Program
 
 		EasEndpoint.Map(app);
 		AutodiscoverEndpoint.Map(app);
+		app.MapWebUi();
 
 		await app.RunAsync();
 		return 0;

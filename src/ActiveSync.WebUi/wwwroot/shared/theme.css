@@ -1,0 +1,80 @@
+/* ActiveSync gateway web UI — theme tokens.
+   Everything visual flows from these custom properties; app.css consumes only variables, so
+   restyling the whole UI means editing THIS file. Dark is the default; the light block
+   applies via prefers-color-scheme unless the user pinned a theme ([data-theme] wins). */
+
+:root {
+	/* Surfaces */
+	--bg: #0d1117;
+	--bg-raised: #161b22;
+	--bg-inset: #010409;
+	--bg-hover: #1f2630;
+
+	/* Text */
+	--fg: #e6edf3;
+	--fg-muted: #8b949e;
+	--fg-faint: #6e7681;
+
+	/* Lines + focus */
+	--border: #30363d;
+	--border-strong: #3d444d;
+	--focus: #388bfd;
+
+	/* Brand + status */
+	--accent: #4f8cff;
+	--accent-fg: #ffffff;
+	--ok: #3fb950;
+	--warn: #d29922;
+	--danger: #f85149;
+
+	/* Shape + type */
+	--radius: 8px;
+	--radius-small: 5px;
+	--font: system-ui, "Segoe UI", sans-serif;
+	--font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+	--shadow: 0 8px 24px rgba(1, 4, 9, 0.55);
+
+	color-scheme: dark;
+}
+
+/* Light palette — used when the OS prefers light and no explicit choice was made… */
+@media (prefers-color-scheme: light) {
+	:root:not([data-theme="dark"]) {
+		--bg: #f6f8fa;
+		--bg-raised: #ffffff;
+		--bg-inset: #eaeef2;
+		--bg-hover: #eef1f4;
+		--fg: #1f2328;
+		--fg-muted: #59636e;
+		--fg-faint: #818b98;
+		--border: #d1d9e0;
+		--border-strong: #b7c0c9;
+		--accent: #0969da;
+		--accent-fg: #ffffff;
+		--ok: #1a7f37;
+		--warn: #9a6700;
+		--danger: #d1242f;
+		--shadow: 0 8px 24px rgba(31, 35, 40, 0.12);
+		color-scheme: light;
+	}
+}
+
+/* …or when the user pinned light via the theme switch. */
+:root[data-theme="light"] {
+	--bg: #f6f8fa;
+	--bg-raised: #ffffff;
+	--bg-inset: #eaeef2;
+	--bg-hover: #eef1f4;
+	--fg: #1f2328;
+	--fg-muted: #59636e;
+	--fg-faint: #818b98;
+	--border: #d1d9e0;
+	--border-strong: #b7c0c9;
+	--accent: #0969da;
+	--accent-fg: #ffffff;
+	--ok: #1a7f37;
+	--warn: #9a6700;
+	--danger: #d1242f;
+	--shadow: 0 8px 24px rgba(31, 35, 40, 0.12);
+	color-scheme: light;
+}

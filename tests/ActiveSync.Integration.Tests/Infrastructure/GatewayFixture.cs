@@ -187,9 +187,10 @@ public sealed class GatewayFixture : IAsyncLifetime
 	///   live (so it can be set up via `eas config set`) but answers 503 on EAS/Autodiscover and
 	///   is not-ready. The caller owns and disposes it.
 	/// </summary>
-	public WebApplicationFactory<Program> CreateUnconfiguredFactory()
+	public WebApplicationFactory<Program> CreateUnconfiguredFactory(
+		Dictionary<string, string?>? overrides = null)
 	{
-		return CreateFactory(false, noMail: true);
+		return CreateFactory(false, noMail: true, overrides: overrides);
 	}
 
 	private WebApplicationFactory<Program> CreateFactory(

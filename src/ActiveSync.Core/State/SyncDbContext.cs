@@ -24,6 +24,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	public DbSet<SettingsStamp> SettingsStamps => Set<SettingsStamp>();
 	public DbSet<LogEntry> LogEntries => Set<LogEntry>();
 	public DbSet<ServerCertificate> ServerCertificates => Set<ServerCertificate>();
+	public DbSet<DataProtectionKeyEntry> DataProtectionKeys => Set<DataProtectionKeyEntry>();
 	public DbSet<OofSetting> OofSettings => Set<OofSetting>();
 	public DbSet<SharedCalendarGrant> SharedCalendarGrants => Set<SharedCalendarGrant>();
 

@@ -276,6 +276,20 @@ public class ServerCertificate
 }
 
 /// <summary>
+///   One ASP.NET DataProtection key-ring entry — the signing/encryption keys behind the web
+///   UI's auth cookies, stored in the state database so sessions survive restarts and
+///   validate on every replica. <see cref="Xml" /> is the key XML, sealed with the Encryption
+///   master key when one is configured (a database dump alone cannot forge web sessions).
+///   Written by the web UI's key repository, never by hand.
+/// </summary>
+public class DataProtectionKeyEntry
+{
+	public int Id { get; set; }
+	public string? FriendlyName { get; set; }
+	public string? Xml { get; set; }
+}
+
+/// <summary>
 ///   Per-user out-of-office state — the source of truth for Settings→Oof Get (the sieve
 ///   script on the mail server is derived output, never parsed back). The message is stored
 ///   in plaintext deliberately: the same text sits as a plaintext sieve script on the mail

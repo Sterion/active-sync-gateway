@@ -114,6 +114,25 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.ToTable("CollectionStates");
                 });
 
+            modelBuilder.Entity("ActiveSync.Core.State.DataProtectionKeyEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("FriendlyName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Xml")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("DataProtectionKeys");
+                });
+
             modelBuilder.Entity("ActiveSync.Core.State.DavItem", b =>
                 {
                     b.Property<int>("Id")

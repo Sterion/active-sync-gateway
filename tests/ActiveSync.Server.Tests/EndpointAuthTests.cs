@@ -1,5 +1,6 @@
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
+using ActiveSync.Core.Security;
 using ActiveSync.Server.Eas;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;

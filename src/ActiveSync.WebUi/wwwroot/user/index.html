@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>ActiveSync — My account</title>
+	<link rel="stylesheet" href="/shared/theme.css">
+	<link rel="stylesheet" href="/shared/app.css">
+	<script type="module" src="/user/app.js"></script>
+</head>
+<body>
+	<!-- Login view -->
+	<div id="login" class="login-wrap hidden">
+		<form id="login-form" class="login-card">
+			<div class="brand"><span class="logo">AS</span> My account</div>
+			<div id="login-error" class="notice error hidden"></div>
+			<div id="login-local">
+				<label for="login-user">Login</label>
+				<input id="login-user" name="username" autocomplete="username" spellcheck="false" autofocus>
+				<label for="login-pass">Password</label>
+				<input id="login-pass" name="password" type="password" autocomplete="current-password">
+				<button class="primary" type="submit">Sign in</button>
+			</div>
+			<div id="login-oidc" class="hidden">
+				<button class="primary" type="button" id="login-sso">Sign in with SSO</button>
+			</div>
+		</form>
+	</div>
+
+	<!-- App shell -->
+	<div id="shell" class="shell hidden">
+		<nav class="sidebar">
+			<div class="brand"><span class="logo">AS</span> My account</div>
+			<a class="nav-item active" href="#/account" data-view="account">Account</a>
+			<div class="spacer"></div>
+			<a class="nav-item hidden" id="nav-admin" href="/admin">Admin</a>
+		</nav>
+		<header class="topbar">
+			<span class="who" id="who"></span>
+			<button id="theme-toggle" title="Toggle theme">◐</button>
+			<button id="logout">Sign out</button>
+		</header>
+		<main class="content" id="view"></main>
+	</div>
+</body>
+</html>

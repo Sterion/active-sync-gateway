@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>ActiveSync — Admin</title>
+	<link rel="stylesheet" href="/shared/theme.css">
+	<link rel="stylesheet" href="/shared/app.css">
+	<script type="module" src="/admin/app.js"></script>
+</head>
+<body>
+	<!-- Login view -->
+	<div id="login" class="login-wrap hidden">
+		<form id="login-form" class="login-card">
+			<div class="brand"><span class="logo">AS</span> ActiveSync Admin</div>
+			<div id="login-error" class="notice error hidden"></div>
+			<div id="login-local">
+				<label for="login-user">Login</label>
+				<input id="login-user" name="username" autocomplete="username" spellcheck="false" autofocus>
+				<label for="login-pass">Password</label>
+				<input id="login-pass" name="password" type="password" autocomplete="current-password">
+				<button class="primary" type="submit">Sign in</button>
+			</div>
+			<div id="login-oidc" class="hidden">
+				<button class="primary" type="button" id="login-sso">Sign in with SSO</button>
+			</div>
+		</form>
+	</div>
+
+	<!-- App shell -->
+	<div id="shell" class="shell hidden">
+		<nav class="sidebar">
+			<div class="brand"><span class="logo">AS</span> ActiveSync</div>
+			<a class="nav-item" href="#/dashboard" data-view="dashboard">Dashboard</a>
+			<a class="nav-item" href="#/settings" data-view="settings">Settings</a>
+			<a class="nav-item" href="#/users" data-view="users">Users</a>
+			<a class="nav-item" href="#/devices" data-view="devices">Devices</a>
+			<a class="nav-item" href="#/shares" data-view="shares">Shared calendars</a>
+			<a class="nav-item" href="#/logs" data-view="logs">Logs</a>
+			<a class="nav-item" href="#/state" data-view="state">State</a>
+			<div class="spacer"></div>
+			<a class="nav-item" id="nav-portal" href="/user">User portal</a>
+		</nav>
+		<header class="topbar">
+			<span class="who" id="who"></span>
+			<button id="theme-toggle" title="Toggle theme">◐</button>
+			<button id="logout">Sign out</button>
+		</header>
+		<main class="content" id="view"></main>
+	</div>
+</body>
+</html>
