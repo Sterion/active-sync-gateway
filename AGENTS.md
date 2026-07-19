@@ -6,7 +6,7 @@ from the file tree.
 
 ## What this project is
 
-A **.NET 10** service that speaks **Microsoft Exchange ActiveSync (EAS) 14.1** to mail
+A **.NET 10** service that speaks **Microsoft Exchange ActiveSync (EAS) 16.1** to mail
 clients (iOS Mail, Android, Outlook) and translates every operation to standard backends
 hosted elsewhere: **IMAP** (mail), **SMTP** (send), **CalDAV** (calendar), **CardDAV**
 (contacts). Functionally equivalent to Z-Push (PHP), implemented from Microsoft's open
@@ -27,7 +27,7 @@ Delete + airsyncbase:InstanceId becomes a synthesized deleted exception through 
 normal partial-merge path. Drafts: Sync Add/Change of Email is allowed ONLY in the
 Drafts folder (`DraftMessageBuilder` merges fields; a rewrite changes the IMAP UID and
 the snapshot diff re-identifies as Delete+Add); email2:Send submits instead of storing.
-Event attachments live INLINE in the iCal (base64 ATTACH; `Dav:CalendarAttachments`
+Event attachments live INLINE in the iCal (base64 ATTACH; `Backends:Calendar:CalendarAttachments`
 Auto/On/Off caps them) with FileReferences "calatt::<serverId>::<index>" — the converter
 emits the index and SyncHandler stamps the ServerId; ItemOperations resolves them via
 `ICalendarAttachmentSource`. Account-only wipe: `Device.PendingAccountWipe` → 449 herds
@@ -105,7 +105,7 @@ docker compose -f docker/docker-compose.ci.yml run --rm tests        # full suit
   per-project `PackageReference` — don't re-add it to individual csproj files.
 - Quick smoke test after server changes:
   `curl -i -X OPTIONS http://localhost:5080/Microsoft-Server-ActiveSync`
-  must return `MS-ASProtocolVersions: 2.5,12.0,12.1,14.0,14.1`.
+  must return `MS-ASProtocolVersions: 12.1,14.0,14.1,16.0,16.1`.
 
 ## Solution layout and dependency rule
 

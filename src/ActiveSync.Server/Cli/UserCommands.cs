@@ -222,7 +222,7 @@ internal sealed class UserSetCommand(IAnsiConsole terminal) : UserCommandBase<Us
 		public required string Login { get; init; }
 
 		[CommandArgument(1, "<key>")]
-		[Description("Field path, e.g. MailAddress, Backends:MailStore:Settings:Host, Backends:Calendar:Enabled.")]
+		[Description("Field path, e.g. MailAddress, Backends:MailStore:Settings:Host, Backends:Contacts:Enabled.")]
 		public required string Key { get; init; }
 
 		[CommandArgument(2, "<value>")]
