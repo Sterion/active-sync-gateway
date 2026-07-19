@@ -7,7 +7,7 @@ on:
       - '**'
   workflow_dispatch:
   schedule:
-    # Nightly, so the reduced-trigger backend legs (Axigen trial/demo) run without gating pushes.
+    # Nightly full run (regression safety net; all enabled backend legs + publish).
     - cron: '0 3 * * *'
 
 # Three-stage pipeline, one compile:
@@ -102,19 +102,18 @@ jobs:
           # Apache James: mail-only (IMAP/SMTP + ManageSieve), no CalDAV/CardDAV -> dav_url none.
           - backend: james
             dav_url: none
-          # Axigen runs its trial/demo mode (evaluation-only licensing), so this leg is
-          # reduced-trigger: it only does real work on workflow_dispatch / schedule (RUN_LEG
-          # below). On push its steps skip, the leg still reports success, and `publish`
-          # (needs: integration) stays green without ever depending on the trial backend.
+          # Axigen runs its trial/demo mode (evaluation-only licensing — an accepted trade-off).
+          # It runs on every trigger like the other legs and gates `publish` (needs: integration).
           - backend: axigen
             dav_homeset: "/Calendar/"
             dav_contacts_homeset: "/Contacts/"
     env:
       POSTGRES: as-ci-postgres-${{ github.run_id }}-${{ matrix.backend }}
-      # Which legs actually do work: cyrus is temporarily disabled (never runs); axigen runs only
-      # on dispatch/schedule (evaluation-only trial); every other leg runs on every trigger. A
-      # gated-off leg's steps skip, so the job still reports success and `publish` stays green.
-      RUN_LEG: ${{ matrix.backend != 'cyrus' && (matrix.backend != 'axigen' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
+      # Which legs actually do work: every leg runs on every trigger EXCEPT cyrus, which is
+      # temporarily disabled (never runs — failing, under investigation). A gated-off leg's steps
+      # skip, so its job still reports success and `publish` stays green. (Axigen runs on every
+      # push despite its evaluation-only trial licensing — an accepted trade-off.)
+      RUN_LEG: ${{ matrix.backend != 'cyrus' }}
     steps:
       - name: Check out code
         uses: actions/checkout@v7

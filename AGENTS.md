@@ -545,10 +545,9 @@ banner. Rules:
   `postgresql://` URI: when set, each gateway factory creates its own fresh Postgres
   database instead of a SQLite temp file — never dropped, the CI container is discarded —
   so Npgsql migrations, URI conversion and provider inference all run in CI.
-- Six stacks, one suite: four gate every push (`stalwart`, `mailserver`, `baikal`, `james`);
-  `cyrus` is **temporarily disabled** (failing in CI, under investigation — the `RUN_LEG` gate
-  never runs it, though its compose/config stay in place) and `axigen` is reduced-trigger
-  (dispatch/schedule — see the Axigen note below). `stalwart`
+- Six stacks, one suite: five gate every push (`stalwart`, `mailserver`, `baikal`, `james`,
+  `axigen`); `cyrus` is **temporarily disabled** (failing in CI, under investigation — the
+  `RUN_LEG` gate never runs it, though its compose/config stay in place). `stalwart`
   (default; **v0.16.13**, self-provisioning), `mailserver` (docker-mailserver + Radicale; set
   `AS_TEST_STACK=mailserver` so the DAV `HomeSetPath` preset switches to `/{user}/`), `cyrus`
   (`cyrus-docker-test-server`: an independent C implementation of IMAP + CalDAV/CardDAV + JMAP +
@@ -611,13 +610,11 @@ banner. Rules:
   HTTP/DAV 80), `SAVE CONFIG`, then **edits the top-level `services` list** in the saved
   `axigen.cfg` to enable `imap smtpIncoming smtpOutgoing webmail` (there is no CLI verb for that
   list) and execs the final server. A `.provisioned` marker makes it idempotent; `down -v`
-  gives each run a fresh trial. **Licensing:** trial mode is evaluation-only, so this leg is
-  **reduced-trigger** — the `build.yaml` matrix gates its work steps behind
-  `RUN_LEG` (`matrix.backend != 'axigen' || event is workflow_dispatch/schedule`), so on push
-  the leg's steps skip (the leg still reports success) and `publish` never depends on the trial
-  backend; a nightly `schedule:` runs it for real. Axigen enforces auth and emails iMIP
-  invitations from the same system, so the auth-rejection and CalDav-auto-schedule tests run
-  (not skipped); JMAP/ManageSieve tests self-skip by probe.
+  gives each run a fresh trial. **Licensing:** trial mode is evaluation-only; running it on every
+  push is an accepted trade-off, so the leg runs on every trigger like the others and gates
+  `publish` (the `RUN_LEG` gate only excludes the disabled `cyrus`). Axigen enforces auth and
+  emails iMIP invitations from the same system, so the auth-rejection and CalDav-auto-schedule
+  tests run (not skipped); JMAP/ManageSieve tests self-skip by probe.
 - **Apache James** (`docker/backends/james`, `AS_TEST_STACK=james`) — a second, independent
   (Java) implementation of **IMAP + SMTP submission**, run with **no CalDAV/CardDAV**
   (`AS_TEST_DAV_URL=none`). The `none` sentinel makes `TestBackend.DavUrl` null, so
@@ -664,8 +661,8 @@ banner. Rules:
     single-daemon containerd-store step is gone; the job split replaces daemon layer reuse
     with the shared cache).
   - `integration` — `strategy.matrix.backend: [stalwart, mailserver, cyrus, baikal, james, axigen]`
-    (via `RUN_LEG`: cyrus is temporarily disabled — never runs; axigen is reduced-trigger —
-    dispatch/schedule only), `fail-fast: false`,
+    (via `RUN_LEG`: cyrus is temporarily disabled — never runs; every other leg, incl. axigen,
+    runs on every trigger), `fail-fast: false`,
     `needs: test`. Each leg loads the cached test image (`cache-from: type=gha`, no
     recompile), `docker compose ... up --wait`s its backend + a Postgres sidecar, warms mail,
     and runs the suite `--no-build` with `--network host` (so `localhost` reaches the

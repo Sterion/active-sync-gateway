@@ -1,10 +1,10 @@
-# Backend leg (reduced-trigger CI + local): Axigen full groupware -- IMAP/SMTP + CalDAV/CardDAV
-# from a single container, via Axigen's built-in 3-day TRIAL/DEMO mode (no license key).
+# Backend leg (CI + local): Axigen full groupware -- IMAP/SMTP + CalDAV/CardDAV from a single
+# container, via Axigen's built-in 3-day TRIAL/DEMO mode (no license key).
 #
-# LICENSING: trial mode is licensed for EVALUATION ONLY. This leg runs only on
-# workflow_dispatch / schedule (never on push) and never gates the publish pipeline. The trial
-# clock resets on every fresh container, so `down -v` between runs keeps it evaluation-scoped.
-# EAS is an Axigen paid add-on, but the gateway speaks IMAP/SMTP/CalDAV/CardDAV to it, not EAS.
+# LICENSING: trial mode is licensed for EVALUATION ONLY; running it in CI on every push is an
+# accepted trade-off. The trial clock resets on every fresh container, so `down -v` between runs
+# keeps it evaluation-scoped. EAS is an Axigen paid add-on, but the gateway speaks
+# IMAP/SMTP/CalDAV/CardDAV to it, not EAS.
 #
 #   docker compose -f docker/backends/axigen/docker-compose.yml up -d --build --wait
 #   $env:AS_TEST_STACK = "axigen"

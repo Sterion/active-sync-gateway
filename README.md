@@ -134,7 +134,7 @@ MS-ASCNTC, MS-ASTZ) in modern async C#.
 - ~330 automated tests, including an integration suite that hosts the gateway in-process
   and drives it with a real WBXML-speaking mini-EAS client against **live backends**
   (Stalwart; docker-mailserver + Radicale; Cyrus IMAP; Baikal + docker-mailserver; Apache James;
-  and Axigen in trial mode on a nightly, reduced-trigger leg).
+  and Axigen in trial mode).
 - CI compiles the solution exactly once and only pushes an image after both the unit and
   integration suites pass.
 - Async end-to-end: all I/O uses async/await with `CancellationToken` propagation;
@@ -1092,7 +1092,7 @@ docker compose -f docker/backends/baikal/docker-compose.yml up -d --build --wait
 
 # Axigen full groupware (IMAP/SMTP + CalDAV/CardDAV) via its built-in 3-day trial/demo mode.
 # A self-provisioning custom image creates the domain/users and opens the listeners on first
-# boot. Trial mode is EVALUATION ONLY, so in CI this leg is reduced-trigger (nightly / dispatch).
+# boot. Trial mode is EVALUATION ONLY (running it in CI is an accepted trade-off).
 # Home-sets live under /Calendar/ and /Contacts/.
 docker compose -f docker/backends/axigen/docker-compose.yml up -d --build --wait
 
@@ -1129,9 +1129,8 @@ scripts/test-backends.sh               # Linux / devcontainer
     the Cyrus test image, JMAP/Sieve on the Baikal DAV stack, all of CalDAV/CardDAV + JMAP + Sieve
     on the mail-only James stack) skip cleanly. Legs push nothing. (The `cyrus` leg is currently
     disabled — under investigation — so it never runs; its compose/config remain in the tree.)
-    The **`axigen`** leg runs Axigen's evaluation-only trial mode, so it is reduced-trigger —
-    real work happens only on `workflow_dispatch`/`schedule` (nightly); on push its steps skip
-    and it never gates `publish`.
+    The **`axigen`** leg runs Axigen's evaluation-only trial mode on every trigger (an accepted
+    trade-off) and gates `publish` like the other legs.
   - **`publish`** — only when **every** backend leg is green: the multi-arch runtime image,
     the NuGet packages and the release zips are built from the warm cache and pushed.
 
