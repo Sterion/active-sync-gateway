@@ -545,9 +545,10 @@ banner. Rules:
   `postgresql://` URI: when set, each gateway factory creates its own fresh Postgres
   database instead of a SQLite temp file — never dropped, the CI container is discarded —
   so Npgsql migrations, URI conversion and provider inference all run in CI.
-- Six stacks, one suite: five gate every push (`stalwart`, `mailserver`, `cyrus`, `baikal`,
-  `james`) and `axigen` is reduced-trigger (dispatch/schedule — see the Axigen note below).
-  `stalwart`
+- Six stacks, one suite: four gate every push (`stalwart`, `mailserver`, `baikal`, `james`);
+  `cyrus` is **temporarily disabled** (failing in CI, under investigation — the `RUN_LEG` gate
+  never runs it, though its compose/config stay in place) and `axigen` is reduced-trigger
+  (dispatch/schedule — see the Axigen note below). `stalwart`
   (default; **v0.16.13**, self-provisioning), `mailserver` (docker-mailserver + Radicale; set
   `AS_TEST_STACK=mailserver` so the DAV `HomeSetPath` preset switches to `/{user}/`), `cyrus`
   (`cyrus-docker-test-server`: an independent C implementation of IMAP + CalDAV/CardDAV + JMAP +
@@ -663,7 +664,8 @@ banner. Rules:
     single-daemon containerd-store step is gone; the job split replaces daemon layer reuse
     with the shared cache).
   - `integration` — `strategy.matrix.backend: [stalwart, mailserver, cyrus, baikal, james, axigen]`
-    (axigen is reduced-trigger via `RUN_LEG` — dispatch/schedule only), `fail-fast: false`,
+    (via `RUN_LEG`: cyrus is temporarily disabled — never runs; axigen is reduced-trigger —
+    dispatch/schedule only), `fail-fast: false`,
     `needs: test`. Each leg loads the cached test image (`cache-from: type=gha`, no
     recompile), `docker compose ... up --wait`s its backend + a Postgres sidecar, warms mail,
     and runs the suite `--no-build` with `--network host` (so `localhost` reaches the

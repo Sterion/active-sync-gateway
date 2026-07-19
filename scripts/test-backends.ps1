@@ -67,6 +67,8 @@ function Stop-Postgres {
 # under non-default roots, whose mail submits over JMAP, or whose ManageSieve is plaintext set
 # these; others inherit TestBackend's defaults.
 $BackendEnv = @{
+	# cyrus is TEMPORARILY DISABLED (failing under investigation); it is not in the default
+	# -Backends list, so it only runs if explicitly named. Config kept for easy re-enable.
 	cyrus = @{
 		AS_TEST_DAV_HOMESET          = '/dav/calendars/user/{user}/'
 		AS_TEST_DAV_CONTACTS_HOMESET = '/dav/addressbooks/user/{user}/'

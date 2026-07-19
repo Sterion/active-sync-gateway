@@ -1127,7 +1127,8 @@ scripts/test-backends.sh               # Linux / devcontainer
     (`dotnet test --no-build`). Tests for capabilities a backend lacks (JMAP/Sieve on
     docker-mailserver, CalDAV free-busy on Radicale, SMTP submission / password-enforcement on
     the Cyrus test image, JMAP/Sieve on the Baikal DAV stack, all of CalDAV/CardDAV + JMAP + Sieve
-    on the mail-only James stack) skip cleanly. Legs push nothing.
+    on the mail-only James stack) skip cleanly. Legs push nothing. (The `cyrus` leg is currently
+    disabled — under investigation — so it never runs; its compose/config remain in the tree.)
     The **`axigen`** leg runs Axigen's evaluation-only trial mode, so it is reduced-trigger —
     real work happens only on `workflow_dispatch`/`schedule` (nightly); on push its steps skip
     and it never gates `publish`.

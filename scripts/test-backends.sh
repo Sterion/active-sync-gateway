@@ -88,6 +88,8 @@ for backend in "${LIST[@]}"; do
 	# Per-backend AS_TEST_* beyond AS_TEST_STACK (mirrors the CI matrix).
 	extra_env=()
 	case "$backend" in
+		# cyrus is TEMPORARILY DISABLED (failing under investigation); it is not in the default
+		# backend list, so it only runs if explicitly named. Config kept for easy re-enable.
 		cyrus)
 			extra_env=(
 				'AS_TEST_DAV_HOMESET=/dav/calendars/user/{user}/'
