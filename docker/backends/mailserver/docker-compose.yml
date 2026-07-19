@@ -1,12 +1,15 @@
-# Alternative test backend (manual runs): docker-mailserver (Postfix + Dovecot) for mail
-# and Radicale for CalDAV/CardDAV. Same published ports and users as the stalwart stack.
+# Second test backend (CI + local): docker-mailserver (Postfix + Dovecot) for mail and
+# Radicale for CalDAV/CardDAV. Same published ports and users as the stalwart stack, so the
+# only switch between stacks is AS_TEST_STACK. Runs in the build.yaml integration matrix and
+# via scripts/test-backends.ps1 (or .sh).
 #
 #   docker compose -f docker/backends/mailserver/docker-compose.yml up -d --wait
 #   $env:AS_TEST_STACK = "mailserver"      (sets DAV HomeSetPath to "/{user}/")
 #   dotnet test --filter Category=Integration
 #
-# Users are declared in config/postfix-accounts.cf (password "pass").
-# Plaintext everywhere — test use exclusively.
+# Users are declared in config/postfix-accounts.cf (password "pass"); the radicale-provision
+# one-shot creates each user's default calendar + address book (Radicale ships none, so DAV
+# discovery would otherwise find nothing). Plaintext everywhere — test use exclusively.
 services:
   mailserver:
     image: mailserver/docker-mailserver:15.1.0
@@ -46,6 +49,19 @@ services:
       - radicale-data:/data
       - ./radicale/config:/config/config:ro
       - ./radicale/users:/config/users:ro
+
+  # One-shot: create user1/user2 default calendar + address book so DAV discovery has
+  # something to find (Radicale auto-creates no collections). Idempotent; `up --wait` blocks
+  # until it exits 0.
+  radicale-provision:
+    image: curlimages/curl:8.11.1
+    depends_on:
+      radicale:
+        condition: service_healthy
+    restart: "no"
+    volumes:
+      - ./radicale/provision.sh:/provision.sh:ro
+    entrypoint: ["sh", "/provision.sh"]
 
 volumes:
   mailserver-data:

@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Xml.Linq;
 
 namespace ActiveSync.Integration.Tests.Infrastructure;
 
@@ -135,6 +136,121 @@ public sealed class JmapGroupwareFactAttribute : FactAttribute
 	});
 
 	public JmapGroupwareFactAttribute()
+	{
+		if (Reason.Value is not null)
+			Skip = Reason.Value;
+	}
+}
+
+/// <summary>
+///   A [Fact] that runs only when a JMAP <em>mail</em> server is reachable — mail store,
+///   submission and vacation response on one session (Stalwart). Mail-only stacks such as
+///   docker-mailserver have no JMAP listener, so the JMAP mail/Oof scenarios skip cleanly
+///   instead of pointing the JMAP provider at a DAV-only endpoint and failing.
+/// </summary>
+public sealed class JmapMailFactAttribute : FactAttribute
+{
+	private static readonly Lazy<string?> Reason = new(() =>
+	{
+		if (TestBackend.JmapUrl is not { } url)
+			return "No JMAP endpoint configured (AS_TEST_JMAP_URL / AS_TEST_DAV_URL).";
+		try
+		{
+			// Synchronous HttpClient.Send + ReadAsStream: this runs in the xunit discovery path
+			// (attribute ctor), where blocking on async would trip the threading analyzer.
+			using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(5) };
+			string token = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+				$"{TestBackend.User1}:{TestBackend.Password}"));
+			// The session resource directly (not /.well-known/jmap): HttpClient strips the
+			// Authorization header across the well-known redirect, which would 401 the probe.
+			HttpRequestMessage request = new(HttpMethod.Get, new Uri(new Uri(url), "/jmap/session"));
+			request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", token);
+			using HttpResponseMessage response = http.Send(request);
+			using StreamReader reader = new(response.Content.ReadAsStream());
+			string body = reader.ReadToEnd();
+			return body.Contains("urn:ietf:params:jmap:mail")
+			       && body.Contains("urn:ietf:params:jmap:submission")
+			       && body.Contains("urn:ietf:params:jmap:vacationresponse")
+				? null
+				: $"JMAP server at {url} lacks mail/submission/vacation capabilities.";
+		}
+		catch (Exception ex)
+		{
+			return $"No JMAP mail server at {url} " +
+			       "(start docker/backends/stalwart) — " + ex.GetBaseException().Message;
+		}
+	});
+
+	public JmapMailFactAttribute()
+	{
+		if (Reason.Value is not null)
+			Skip = Reason.Value;
+	}
+}
+
+/// <summary>
+///   A [Fact] that runs only when the CalDAV backend advertises the CALDAV:free-busy-query
+///   report in a calendar's supported-report-set. Radicale answers the report but neither
+///   advertises it nor computes it exactly, so the CalDAV free/busy scenario skips there and
+///   runs on servers that implement it properly (Stalwart). Only stacks configured with an
+///   explicit DAV home-set template are probed; RFC 6764 discovery backends implement it.
+/// </summary>
+public sealed class CalDavFreeBusyFactAttribute : FactAttribute
+{
+	private static readonly XNamespace Dav = "DAV:";
+	private static readonly XNamespace CalDav = "urn:ietf:params:xml:ns:caldav";
+
+	private static readonly Lazy<string?> Reason = new(() =>
+	{
+		if (TestBackend.DavUrl is not { } davUrl)
+			return "No CalDAV backend configured.";
+		// Empty home-set path => the backend supports RFC 6764 discovery (Stalwart), which
+		// implements free-busy-query. Only the explicit-template stacks (Radicale) get probed.
+		if (string.IsNullOrEmpty(TestBackend.DavHomeSetPath))
+			return null;
+		try
+		{
+			using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(5) };
+			string token = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+				$"{TestBackend.User1}:{TestBackend.Password}"));
+			http.DefaultRequestHeaders.Authorization =
+				new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", token);
+			string home = TestBackend.DavHomeSetPath.Replace("{user}", TestBackend.User1);
+			XDocument body = new(new XElement(Dav + "propfind",
+				new XElement(Dav + "prop",
+					new XElement(Dav + "resourcetype"),
+					new XElement(Dav + "supported-report-set"))));
+			// Synchronous Send: this runs in the xunit discovery path (attribute ctor).
+			using HttpRequestMessage request = new(new HttpMethod("PROPFIND"), new Uri(new Uri(davUrl), home))
+			{
+				Content = new StringContent(body.ToString(), System.Text.Encoding.UTF8, "application/xml")
+			};
+			request.Headers.Add("Depth", "1");
+			using HttpResponseMessage response = http.Send(request);
+			if ((int)response.StatusCode != 207)
+				return null; // inconclusive — never skip a possibly-capable backend
+			using StreamReader reader = new(response.Content.ReadAsStream());
+			XDocument doc = XDocument.Parse(reader.ReadToEnd());
+			bool sawCalendar = false;
+			foreach (XElement resp in doc.Descendants(Dav + "response"))
+			{
+				if (!resp.Descendants(Dav + "resourcetype").Elements(CalDav + "calendar").Any())
+					continue;
+				sawCalendar = true;
+				if (resp.Descendants(CalDav + "free-busy-query").Any())
+					return null; // advertised — run
+			}
+			return sawCalendar
+				? $"CalDAV server at {davUrl} does not advertise the free-busy-query report."
+				: null;
+		}
+		catch
+		{
+			return null; // probe glitch — run rather than hide a real failure
+		}
+	});
+
+	public CalDavFreeBusyFactAttribute()
 	{
 		if (Reason.Value is not null)
 			Skip = Reason.Value;

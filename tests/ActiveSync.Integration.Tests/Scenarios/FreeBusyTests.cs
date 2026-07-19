@@ -50,7 +50,7 @@ public sealed class FreeBusyTests(GatewayFixture gateway)
 		Assert.Equal("163", crossAvailability?.Element(RR + "Status")?.Value);
 	}
 
-	[BackendFact]
+	[CalDavFreeBusyFact]
 	public async Task OwnAvailability_CalDav_UsesFreeBusyQuery()
 	{
 		// The shared factory syncs calendars against the real CalDAV backend, so this

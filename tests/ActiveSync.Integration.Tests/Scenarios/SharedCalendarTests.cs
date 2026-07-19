@@ -132,7 +132,16 @@ public sealed class SharedCalendarTests(GatewayFixture gateway)
 		using HttpClient http = new() { BaseAddress = new Uri(davUrl) };
 		http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic",
 			Convert.ToBase64String(Encoding.UTF8.GetBytes($"{user}:{TestBackend.Password}")));
-		using HttpRequestMessage mkcalendar = new(new HttpMethod("MKCALENDAR"), target);
+		// Set the display name in the request: servers that invent none from the URL segment
+		// (Radicale) would otherwise surface the shared folder as "<user>/<name>", not "<name>".
+		XNamespace d = "DAV:";
+		XNamespace c = "urn:ietf:params:xml:ns:caldav";
+		XDocument mkbody = new(new XElement(c + "mkcalendar",
+			new XElement(d + "set", new XElement(d + "prop", new XElement(d + "displayname", name)))));
+		using HttpRequestMessage mkcalendar = new(new HttpMethod("MKCALENDAR"), target)
+		{
+			Content = new StringContent(mkbody.ToString(), Encoding.UTF8, "application/xml")
+		};
 		try
 		{
 			using HttpResponseMessage response = await http.SendAsync(mkcalendar);

@@ -1,0 +1,9 @@
+# Test-backend Dovecot tuning (docker-mailserver includes this file verbatim).
+#
+# The integration suite drives auth hard from a single IP: many gateway factories, a
+# persistent per-user IMAP IDLE watcher each, plus deliberate wrong-password checks. Under
+# Dovecot's defaults that saturates auth and the per-IP connection cap, so legitimate logins
+# start timing out and the gateway surfaces them as 503s. Relax the throttles — this stack is
+# plaintext, lab-only, mirroring the Stalwart test image's relaxed auth/ban policy.
+mail_max_userip_connections = 0
+auth_failure_delay = 0

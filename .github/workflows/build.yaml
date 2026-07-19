@@ -7,77 +7,47 @@ on:
       - '**'
   workflow_dispatch:
 
-# Single pipeline, single compile: the Dockerfile `test` stage builds the solution and
-# runs the unit tests; the integration tests then run FROM that same image (`--no-build`)
-# against throwaway Stalwart/Postgres containers, and only when the full suite is green
-# is the runtime image assembled and pushed to ghcr.io — all with the built-in
-# GITHUB_TOKEN, no repository secrets needed.
-#
-# Everything streams through the docker daemon API (`docker cp` for the backend config,
-# stdin for provision.sh) instead of bind mounts — a pattern inherited from a
-# docker-out-of-docker runner and kept for robustness. For local runs use
-# docker/docker-compose.ci.yml.
+# Three-stage pipeline, one compile:
+#   test         -> the Dockerfile `test` stage builds the solution and runs the UNIT tests
+#                   once, exporting every layer to a type=gha build cache.
+#   integration  -> a matrix leg per backend (Stalwart, docker-mailserver + Radicale) loads
+#                   that cached image and runs the EAS integration suite against a throwaway
+#                   backend + Postgres. Legs push nothing.
+#   publish      -> only when EVERY backend leg is green: assemble + push the multi-arch
+#                   image, the NuGet packages and the release zips.
+# All with the built-in GITHUB_TOKEN, no repository secrets. The job split trades the old
+# single-daemon containerd layer reuse for the shared type=gha cache; that buys real
+# per-backend parallelism and a separate status check per backend.
 permissions:
   contents: write
   packages: write
 
+env:
+  # Ephemeral test-image tag, shared across jobs; keyed to the run so parallel runs and the
+  # two matrix legs never collide.
+  TEST_IMAGE: as-ci-build:${{ github.run_id }}
+
 jobs:
-  Build:
-    # Guard against ever being picked up by a non-GitHub Actions-compatible runner
-    # (e.g. a Gitea mirror of this repo — Gitea reads .github/workflows too).
+  # ---- compile + unit tests, exactly once ------------------------------------------------
+  test:
+    # Guard against a non-GitHub runner (e.g. a Gitea mirror, which also reads .github).
     if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
-    env:
-      NET: as-ci-${{ github.run_id }}
-      BACKEND: as-ci-stalwart-${{ github.run_id }}
-      POSTGRES: as-ci-postgres-${{ github.run_id }}
-      TEST_IMAGE: as-ci-build:${{ github.run_id }}
-      PKG: as-ci-pkg-${{ github.run_id }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      # Full history + tags: the release-notes step diffs against the previous release.
+      # Full history + tags: the release-notes step in `publish` diffs against the last release.
       - name: Check out code
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      # The containerd image store lets the engine's own builder do BOTH jobs — build the
-      # amd64 test image straight into the daemon (no tarball export/import) AND produce
-      # the multi-arch manifest for the push step, with one shared layer cache in between.
-      # The docker-container builder + GHA-cache alternative measured ~3 minutes of pure
-      # overhead per run (load: tarball round-trip + mode=max upload of SDK-stage layers).
-      # First step on purpose: the daemon restart would kill the backend containers.
-      - name: Enable containerd image store
-        run: |
-          [ -f /etc/docker/daemon.json ] || echo '{}' | sudo tee /etc/docker/daemon.json
-          sudo jq '.features["containerd-snapshotter"] = true' /etc/docker/daemon.json > /tmp/daemon.json
-          sudo mv /tmp/daemon.json /etc/docker/daemon.json
-          sudo systemctl restart docker
-          docker info -f '{{ .DriverStatus }}' | grep -q containerd
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
-      # Backends start first (detached) so they boot while the solution compiles.
-      # The Stalwart test backend is a small custom image (pinned 0.16 server + stalwart-cli,
-      # see docker/backends/stalwart/Dockerfile). Its baked-in entrypoint self-provisions on
-      # first boot via the CLI — users, plaintext listeners and relaxed test policy — driving
-      # the server's own schema-driven management API. No mounted config, no separate provisioner.
-      - name: Start Stalwart backend
-        run: |
-          docker network create "$NET"
-          docker build -t activesync-stalwart-test:ci docker/backends/stalwart
-          docker run -d --name "$BACKEND" --network "$NET" --network-alias stalwart \
-            -e STALWART_RECOVERY_ADMIN=admin:secret \
-            activesync-stalwart-test:ci
-
-      # The gateway state DB for the suite: with AS_TEST_PG set, every gateway factory
-      # creates its own database here, so the Npgsql provider + migrations run in CI
-      # (locally the suite defaults to SQLite temp files). Throwaway, like Stalwart.
-      - name: Start Postgres state DB
-        run: |
-          docker run -d --name "$POSTGRES" --network "$NET" --network-alias postgres \
-            -e POSTGRES_USER=activesync -e POSTGRES_PASSWORD=ci-pw -e POSTGRES_DB=activesync \
-            postgres:17-alpine
-
-      # Tagged releases (X.Y.Z or vX.Y.Z) bake the tag into the assemblies so the
-      # startup banner reports the deployed version instead of the 1.0.0 default.
+      # Tagged releases (X.Y.Z or vX.Y.Z) bake the tag into the assemblies so the startup
+      # banner reports the deployed version. The same value must reach every downstream build
+      # (the VERSION build-arg is part of the cache key).
       - name: Derive version from tag
         id: version
         run: |
@@ -87,6 +57,134 @@ jobs:
             version="${ref#v}"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # Build the Dockerfile `test` stage: restore, publish and RUN the unit suite
+      # (--filter Category!=Integration, baked into the stage). Exported to the GHA cache so
+      # the integration and publish jobs reuse every layer instead of recompiling.
+      - name: Build and run unit tests
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: test
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+
+  # ---- integration suite, one leg per backend --------------------------------------------
+  integration:
+    if: github.server_url == 'https://github.com'
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: stalwart
+          - backend: mailserver
+    env:
+      POSTGRES: as-ci-postgres-${{ github.run_id }}-${{ matrix.backend }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Materialise the cached test image into the local daemon (cache hit from `test`: no
+      # recompile, the unit-test layer is reused) so the suite runs FROM it with --no-build.
+      - name: Load test image from cache
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: test
+          platforms: linux/amd64
+          load: true
+          push: false
+          cache-from: type=gha
+          tags: ${{ env.TEST_IMAGE }}
+          build-args: |
+            VERSION=${{ needs.test.outputs.version }}
+
+      # Each backend stack is defined by its own compose file and publishes the same host
+      # ports (143/587/5232, +4190 on Stalwart). --wait blocks until healthy AND, for
+      # mailserver, until the radicale-provision one-shot has created the DAV collections.
+      - name: Start backend (${{ matrix.backend }})
+        run: |
+          docker compose -f "docker/backends/${{ matrix.backend }}/docker-compose.yml" \
+            up -d --build --wait --wait-timeout 300
+
+      # The gateway state DB for the suite: with AS_TEST_PG set, every gateway factory creates
+      # its own database here, so the Npgsql provider + migrations run in CI.
+      - name: Start Postgres state DB
+        run: |
+          docker run -d --name "$POSTGRES" -p 5432:5432 \
+            -e POSTGRES_USER=activesync -e POSTGRES_PASSWORD=ci-pw -e POSTGRES_DB=activesync \
+            postgres:17-alpine
+          ok=0
+          for i in $(seq 1 30); do
+            if docker exec "$POSTGRES" pg_isready -U activesync -d activesync -q; then ok=1; break; fi
+            sleep 2
+          done
+          if [ "$ok" != "1" ]; then echo "Postgres did not come up" >&2; docker logs "$POSTGRES" >&2; exit 1; fi
+
+      # A freshly booted stack stalls the FIRST delivery into each mailbox; warm both
+      # directions before the suite (the fixture also warms as a second line of defence).
+      - name: Warm up mail delivery
+        run: |
+          docker run --rm --network host --entrypoint /bin/sh curlimages/curl:8.11.1 -c '
+            send() {
+              printf "From: %s\r\nTo: %s\r\nSubject: ci-warmup\r\n\r\nwarmup\r\n" "$1" "$2" |
+                curl -sS smtp://localhost:587 --mail-from "$1" --mail-rcpt "$2" -T - --user "$1:pass"
+            }
+            send user1@example.com user2@example.com || true
+            send user2@example.com user1@example.com || true
+            for user in user1@example.com user2@example.com; do
+              for i in $(seq 1 45); do
+                if curl -sS "imap://localhost:143/" -X "STATUS INBOX (MESSAGES)" \
+                     --user "$user:pass" | grep -Eq "MESSAGES [1-9]"; then break; fi
+                sleep 2
+              done
+            done
+            echo "delivery warm"
+          '
+
+      # Runs FROM the test image (--no-build); host networking reaches the published backend
+      # and Postgres ports on localhost. AS_TEST_STACK is the only per-backend switch the
+      # suite needs (it flips the CalDAV home-set style); Sieve/JMAP tests self-skip when the
+      # backend has no such listener.
+      - name: Run integration tests (${{ matrix.backend }})
+        run: |
+          docker run --rm --network host \
+            -e AS_TEST_STACK=${{ matrix.backend }} \
+            -e AS_TEST_IMAP_HOST=localhost -e AS_TEST_IMAP_PORT=143 \
+            -e AS_TEST_SMTP_HOST=localhost -e AS_TEST_SMTP_PORT=587 \
+            -e AS_TEST_DAV_URL=http://localhost:5232 \
+            -e AS_TEST_PG=postgresql://activesync:ci-pw@localhost:5432/activesync \
+            -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+            "$TEST_IMAGE" \
+            dotnet test ActiveSync.slnx -c Release --nologo --no-build --filter "Category=Integration"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose -f "docker/backends/${{ matrix.backend }}/docker-compose.yml" down -v 2>/dev/null || true
+          docker rm -f "$POSTGRES" 2>/dev/null || true
+
+  # ---- publish, only when every backend leg is green -------------------------------------
+  publish:
+    if: github.server_url == 'https://github.com'
+    needs: [test, integration]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Docker Tags and Labels
         id: meta
@@ -107,19 +205,12 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
-      # Explicitly the engine's builder (multi-arch capable thanks to the containerd
-      # store above): the push build reuses the test build's amd64 layers directly from
-      # the daemon — no cache export, no image transfer.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-        with:
-          driver: docker
 
-      # The amd64 compile: restore, publish, and the unit test suite (Dockerfile test
-      # stage). Loaded into the daemon so the integration step can `docker run` it.
-      # VERSION must match the push build below, or the cache would be busted and the
-      # solution compiled twice on tagged builds.
-      - name: Build and run unit tests
+      # The test image (cache hit from `test`) carries the built solution for the NuGet and
+      # zip steps below — no recompile.
+      - name: Load test image from cache
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -128,114 +219,30 @@ jobs:
           platforms: linux/amd64
           load: true
           push: false
+          cache-from: type=gha
           tags: ${{ env.TEST_IMAGE }}
           build-args: |
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=${{ needs.test.outputs.version }}
 
-      # Fail hard when a backend never comes up: the test suite auto-skips integration
-      # tests against an unreachable backend, which would otherwise turn a dead backend
-      # into a green (but meaningless) run. The `.provisioned` marker appears only after
-      # the entrypoint has finished setup (bootstrap -> restart -> settings -> restart ->
-      # users), so it is the correct readiness signal (the mail listeners bind mid-way).
-      - name: Wait for Stalwart provisioning
-        run: |
-          ok=0
-          for i in $(seq 1 90); do
-            if docker exec "$BACKEND" test -f /etc/stalwart/.provisioned 2>/dev/null; then
-              ok=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "$ok" != "1" ]; then
-            echo "Stalwart did not finish provisioning:" >&2
-            docker logs "$BACKEND" >&2 || true
-            exit 1
-          fi
-
-      - name: Wait for Postgres
-        run: |
-          ok=0
-          for i in $(seq 1 30); do
-            if docker exec "$POSTGRES" pg_isready -U activesync -d activesync -q; then
-              ok=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "$ok" != "1" ]; then
-            echo "Postgres did not come up:" >&2
-            docker logs "$POSTGRES" >&2 || true
-            exit 1
-          fi
-
-      # A freshly provisioned Stalwart stalls the FIRST delivery into each mailbox,
-      # which would flake one test per direction. Warm BOTH inboxes before the suite
-      # (the test fixture also warms as a second line of defense).
-      - name: Warm up mail delivery
-        run: |
-          docker run --rm --network "$NET" --entrypoint /bin/sh curlimages/curl:8.11.1 -c '
-            send() {
-              printf "From: %s\r\nTo: %s\r\nSubject: ci-warmup\r\n\r\nwarmup\r\n" "$1" "$2" |
-                curl -sS smtp://stalwart:587 --mail-from "$1" --mail-rcpt "$2" -T - --user "$1:pass"
-            }
-            send user1@example.com user2@example.com
-            send user2@example.com user1@example.com
-            for user in user1@example.com user2@example.com; do
-              ok=0
-              for i in $(seq 1 45); do
-                if curl -sS "imap://stalwart:143/" -X "STATUS INBOX (MESSAGES)" \
-                     --user "$user:pass" | grep -Eq "MESSAGES [1-9]"; then
-                  ok=1
-                  break
-                fi
-                sleep 2
-              done
-              if [ "$ok" != "1" ]; then
-                echo "warmup mail for $user never arrived" >&2
-                exit 1
-              fi
-            done
-            echo "delivery warm (both directions)"
-          '
-
-      # Unit tests already ran inside the build (hence the positive filter); the
-      # test-stage image carries the built solution, so nothing recompiles here.
-      - name: Run integration tests
-        run: |
-          docker run --rm --network "$NET" \
-            -e AS_TEST_STACK=stalwart \
-            -e AS_TEST_IMAP_HOST=stalwart -e AS_TEST_IMAP_PORT=143 \
-            -e AS_TEST_SMTP_HOST=stalwart -e AS_TEST_SMTP_PORT=587 \
-            -e AS_TEST_DAV_URL=http://stalwart:8080 \
-            -e AS_TEST_PG=postgresql://activesync:ci-pw@postgres:5432/activesync \
-            -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-            "$TEST_IMAGE" \
-            dotnet test ActiveSync.slnx -c Release --nologo --no-build --filter "Category=Integration"
-
-      # Contract packages for out-of-repo plugin authors, pushed to GitHub Packages with
-      # the built-in token (nuget.org too when a NUGET_API_KEY secret exists). Tagged
-      # releases only, strictly after the tests. Packing the whole solution inside the
-      # test image (solution + NuGet cache already warm) publishes exactly the projects
-      # that set <IsPackable>true> — currently Protocol, Core and Backends.Common — so a
-      # new contract package ships by flipping that one csproj flag, no workflow edit.
-      # -p:Version (not PackageVersion) stamps the assembly too: the plugin loader gates
-      # on the packed ActiveSync.Core assembly's major version, so it must match the tag.
+      # Contract packages for out-of-repo plugin authors, pushed to GitHub Packages with the
+      # built-in token (nuget.org too when a NUGET_API_KEY secret exists). Tagged releases
+      # only. Packs inside the test image (solution + NuGet cache already warm) — exactly the
+      # projects that set <IsPackable>true>. -p:Version stamps the assembly too.
       - name: Pack and publish NuGet packages
-        if: steps.version.outputs.version != ''
+        if: needs.test.outputs.version != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
-          docker run --name "$PKG"-nuget \
-            -e VERSION='${{ steps.version.outputs.version }}' \
+          docker run --name as-ci-nuget \
+            -e VERSION='${{ needs.test.outputs.version }}' \
             -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
             "$TEST_IMAGE" sh -ec '
               dotnet pack ActiveSync.slnx -c Release -o /out/nupkg -p:Version="$VERSION" --nologo
             '
           mkdir -p dist/nupkg
-          docker cp "$PKG"-nuget:/out/nupkg/. dist/nupkg/
-          docker rm "$PKG"-nuget
+          docker cp as-ci-nuget:/out/nupkg/. dist/nupkg/
+          docker rm as-ci-nuget
           ls -l dist/nupkg
           dotnet nuget push 'dist/nupkg/*.nupkg' --skip-duplicate \
             --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
@@ -246,18 +253,15 @@ jobs:
           fi
 
       # Download bundles for people who prefer a zip over a container: framework-dependent
-      # publishes (need the ASP.NET Core Runtime) WITH the native launcher binaries, one
-      # per platform, named after the tag (v1.0.7) or branch (main). Published inside a
-      # container from the test image — the solution and NuGet cache are already there
-      # (linux-x64 recompiles nothing; win-x64 restores its runtime pack and recompiles).
-      # Zipping happens in the container too (Debian SDK image).
+      # publishes WITH the native launcher binaries, one per platform, named after the tag or
+      # branch. Published + zipped inside a container from the test image.
       - name: Package download zips
         id: package
         run: |
           label=$(echo "${{ github.ref_name }}" | tr '/' '-')
           echo "label=$label" >> "$GITHUB_OUTPUT"
-          docker run --name "$PKG" \
-            -e VERSION='${{ steps.version.outputs.version }}' -e LABEL="$label" \
+          docker run --name as-ci-pkg \
+            -e VERSION='${{ needs.test.outputs.version }}' -e LABEL="$label" \
             -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
             "$TEST_IMAGE" sh -ec '
               apt-get update -qq && apt-get install -y -qq zip >/dev/null
@@ -285,13 +289,10 @@ jobs:
               (cd /out/win-x64 && zip -qr "/out/eas-gateway-windows-x64-$LABEL.zip" .)
             '
           mkdir -p dist
-          docker cp "$PKG":/out/. dist/
-          docker rm "$PKG"
+          docker cp as-ci-pkg:/out/. dist/
+          docker rm as-ci-pkg
           ls -l dist/*.zip
 
-      # The artifact NAME carries the platform and label while the path is the publish
-      # DIRECTORY — run artifacts download as eas-gateway-linux-x64-main.zip without
-      # double-zipping. (The .zip files in dist/ are for the release step below.)
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
@@ -310,10 +311,9 @@ jobs:
           name: eas-gateway-windows-x64-${{ steps.package.outputs.label }}
           path: dist/win-x64
 
-      # The only pushing step, strictly after BOTH test steps — a unit or integration
-      # failure aborts the job before anything is published. amd64 layers up to the test
-      # stage sit warm in the daemon from the unit-test build; arm64 adds one native
-      # cross-compile + QEMU-executed runtime RUNs. Multi-arch manifests cannot `load:`,
+      # The only pushing step, and it runs only after every integration leg is green (job
+      # needs). amd64 layers up to the test stage come warm from the GHA cache; arm64 adds one
+      # native cross-compile + QEMU-executed runtime RUNs. Multi-arch manifests cannot load:,
       # hence push-only.
       - name: Docker Build and push
         uses: docker/build-push-action@v7
@@ -324,16 +324,15 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
           build-args: |
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=${{ needs.test.outputs.version }}
 
-      # Version tags only, and strictly after the image push: attach the download zips to
-      # the GitHub release for this tag. An existing release (authored by release.yaml or
-      # by hand) is reused untouched; otherwise a manually pushed tag gets one created
-      # here, with notes generated from the commit subjects since the previous release.
-      # Re-runs are idempotent (--clobber).
+      # Version tags only, strictly after the image push: attach the download zips to the
+      # GitHub release. An existing release (from release.yaml or by hand) is reused;
+      # otherwise a manually pushed tag gets one created here. Re-runs are idempotent.
       - name: Create release and attach zips
-        if: steps.version.outputs.version != ''
+        if: needs.test.outputs.version != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -354,12 +353,3 @@ jobs:
             gh release create "$tag" --title "$tag" --notes-file release-notes.md
           fi
           gh release upload "$tag" dist/eas-gateway-*.zip --clobber
-
-      - name: Cleanup
-        if: always()
-        run: |
-          docker rm -f "$BACKEND" 2>/dev/null || true
-          docker rm -f "$POSTGRES" 2>/dev/null || true
-          docker rm -f "$PKG" 2>/dev/null || true
-          docker network rm "$NET" 2>/dev/null || true
-          docker rmi "$TEST_IMAGE" 2>/dev/null || true

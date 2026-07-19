@@ -1074,9 +1074,19 @@ vacation) on the DAV port:
 # server's own management API. No mounted config, no separate provisioner — just build + up.
 docker compose -f docker/backends/stalwart/docker-compose.yml up -d --build --wait
 
-# Alternative (manual runs): docker-mailserver (Postfix+Dovecot) + Radicale
-docker compose -f docker/backends/mailserver/docker-compose.yml up -d
+# Second backend (also runs in CI): docker-mailserver (Postfix+Dovecot) + Radicale. A
+# one-shot in the compose provisions each user's default calendar + address book (Radicale
+# ships none). --wait blocks until healthy AND provisioned.
+docker compose -f docker/backends/mailserver/docker-compose.yml up -d --wait
 AS_TEST_STACK=mailserver dotnet test --filter Category=Integration
+```
+
+Or run the suite against **every** stack in turn with one command (brings each up, tests,
+tears down, prints a per-backend summary):
+
+```powershell
+./scripts/test-backends.ps1            # Windows
+scripts/test-backends.sh               # Linux / devcontainer
 ```
 
 ### Where tests run
@@ -1085,20 +1095,24 @@ AS_TEST_STACK=mailserver dotnet test --filter Category=Integration
   localhost defaults just work. Breakpoints hit gateway code (it runs in-process).
 - **VS Code devcontainer**: "Reopen in Container" — the `.devcontainer` compose brings the
   Stalwart stack up alongside the workspace with env preset.
-- **GitHub Actions**: one workflow, `.github/workflows/build.yaml` (push + dispatch),
-  compiles the solution exactly once: the Dockerfile `test` stage builds everything and
-  runs the unit tests, the integration tests then run **from that same image**
-  (`dotnet test --no-build`, joined to a network with throwaway Stalwart + Postgres
-  containers), and only when the full suite is green is the runtime image assembled from
-  the warm build cache and pushed to ghcr.io. The Stalwart test backend is a small custom
-  image (pinned server + stalwart-cli) that self-provisions on first boot; the workflow
-  builds it and waits for its `.provisioned` marker before running the suite.
+- **GitHub Actions**: `.github/workflows/build.yaml` (push + dispatch) is a three-stage
+  pipeline that compiles the solution exactly once:
+  - **`test`** — the Dockerfile `test` stage builds everything and runs the unit tests,
+    exporting every layer to a `type=gha` build cache.
+  - **`integration`** — a matrix leg per backend (`stalwart`, `mailserver`) runs in
+    parallel. Each loads the cached test image, brings its backend + a throwaway Postgres
+    up, and runs the integration suite **from that image** (`dotnet test --no-build`).
+    Tests for capabilities a backend lacks (JMAP/Sieve on docker-mailserver, CalDAV
+    free-busy on Radicale) skip cleanly. Legs push nothing.
+  - **`publish`** — only when **every** backend leg is green: the multi-arch runtime image,
+    the NuGet packages and the release zips are built from the warm cache and pushed.
 
-  Local reproduction of the CI suite:
+  Adding a backend = one more matrix entry + its `docker/backends/<name>/docker-compose.yml`.
 
-  ```bash
-  docker compose -f docker/docker-compose.ci.yml run --rm tests
-  docker compose -f docker/docker-compose.ci.yml down -v
+  Local reproduction — run the whole matrix sequentially:
+
+  ```powershell
+  ./scripts/test-backends.ps1        # or scripts/test-backends.sh
   ```
 
 - **Image builds**: the Dockerfile has a `test` stage, so every `docker build` runs the

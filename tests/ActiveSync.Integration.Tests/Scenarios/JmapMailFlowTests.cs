@@ -17,7 +17,7 @@ public class JmapMailFlowTests(GatewayFixture gateway)
 {
 	private static readonly XNamespace Email = EasNamespaces.Email;
 
-	[BackendFact]
+	[JmapMailFact]
 	public async Task Jmap_FolderSync_MapsSpecialFolders()
 	{
 		EasTestClient client = gateway.CreateJmapEasClient(TestBackend.User1);
@@ -30,7 +30,7 @@ public class JmapMailFlowTests(GatewayFixture gateway)
 		Assert.NotNull(client.FolderOfType(EasFolderType.Drafts));
 	}
 
-	[BackendFact]
+	[JmapMailFact]
 	public async Task Jmap_User1SendsMail_User2ReceivesIt_RepliesBack()
 	{
 		EasTestClient clientA = gateway.CreateJmapEasClient(TestBackend.User1);
@@ -81,7 +81,7 @@ public class JmapMailFlowTests(GatewayFixture gateway)
 		Assert.Contains("Reply from B", replyBody);
 	}
 
-	[BackendFact]
+	[JmapMailFact]
 	public async Task Jmap_ReadFlag_LandsOnBackend_AndDeleteMovesToTrash()
 	{
 		EasTestClient clientB = gateway.CreateJmapEasClient(TestBackend.User2);

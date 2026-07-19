@@ -18,7 +18,7 @@ public sealed class JmapOofTests(GatewayFixture gateway)
 {
 	private static readonly XNamespace ST = EasNamespaces.Settings;
 
-	[BackendFact]
+	[JmapMailFact]
 	public async Task Oof_EnableGetDisable_RoundTrips_AndArmsTheVacationResponse()
 	{
 		EasTestClient client = gateway.CreateJmapEasClient(TestBackend.User2);

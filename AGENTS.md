@@ -523,9 +523,15 @@ codec and `EasRequestParameters.ToBase64()`. The factory invokes the entry point
 `AS_TEST_FORCE_SERVE=1` to route empty invocations to the web host instead of the CLI
 banner. Rules:
 
-- Every test class: `[Collection("gateway")]`, `[Trait("Category","Integration")]`, and
-  `[BackendFact]` on each test. `BackendFact` skips when no IMAP backend answers —
-  **never** make integration tests hard-fail on a docker-less machine.
+- Every test class: `[Collection("gateway")]`, `[Trait("Category","Integration")]`, and a
+  capability-gated fact attribute on each test. `[BackendFact]` skips when no IMAP backend
+  answers — **never** make integration tests hard-fail on a docker-less machine. The
+  narrower gates skip a test cleanly on a backend that lacks the feature (so the *same*
+  suite runs against every stack): `[SieveBackendFact]` (ManageSieve 4190), `[JmapMailFact]`
+  / `[JmapGroupwareFact]` (probe `/jmap/session` for the mail resp. calendars+contacts
+  capabilities), and `[CalDavFreeBusyFact]` (probe the calendar's `supported-report-set` for
+  `free-busy-query`; Radicale omits it). Add a gate rather than a hard `[BackendFact]` when a
+  test needs a capability not every backend has.
 - Backends resolve via `TestBackend` env vars (`AS_TEST_IMAP_HOST`, `AS_TEST_SMTP_HOST`,
   `AS_TEST_DAV_URL`, `AS_TEST_STACK`, …) with localhost defaults matching both compose
   stacks under `docker/backends/` (same ports 143/587/5232, same users user1/user2 @
@@ -534,9 +540,13 @@ banner. Rules:
   `postgresql://` URI: when set, each gateway factory creates its own fresh Postgres
   database instead of a SQLite temp file — never dropped, the CI container is discarded —
   so Npgsql migrations, URI conversion and provider inference all run in CI.
-- Two stacks, one suite: `stalwart` (default; **v0.16.13**, self-provisioning) and
-  `mailserver` (docker-mailserver + Radicale; set `AS_TEST_STACK=mailserver` so the DAV
-  `HomeSetPath` preset switches to `/{user}/`). 0.16 dropped the mounted-TOML + REST
+- Two stacks, one suite, both in CI: `stalwart` (default; **v0.16.13**, self-provisioning)
+  and `mailserver` (docker-mailserver + Radicale; set `AS_TEST_STACK=mailserver` so the DAV
+  `HomeSetPath` preset switches to `/{user}/`). The mailserver compose runs a one-shot
+  `radicale-provision` (`docker/backends/mailserver/radicale/provision.sh`) that MKCALENDARs
+  each user's default calendar + address book — Radicale auto-creates none, so without it DAV
+  discovery finds nothing and every DAV test silently no-ops. Radicale lacks JMAP, ManageSieve
+  and (advertised) CalDAV free-busy, so those tests skip via the capability gates above. 0.16 dropped the mounted-TOML + REST
   provisioning the old 0.13 stack used — config now lives in the data store and is written
   through Stalwart's own management API (schema-driven, `urn:stalwart:jmap`), only in a
   bootstrap mode that needs a restart to take effect. The `stalwart` backend is therefore a
@@ -572,19 +582,27 @@ banner. Rules:
   delegate type. Never inline a validation callback. Knobs per backend section:
   `AllowInvalidCertificates` (accept everything, lab use) and `CaCertificatePath`
   (PEM CAs trusted on top of the system store via CustomRootTrust).
-- CI: `docker compose -f docker/docker-compose.ci.yml run --rm tests` (copies the repo
-  inside the container before building — never build directly on the bind mount, it would
-  poison host bin/obj with Linux paths). Image builds run unit tests only via the
-  Dockerfile `test` stage (forced by a marker-file COPY into `runtime`).
-- GitHub workflow (`.github/workflows/build.yaml`, single pipeline): steps deliberately
-  stream everything through the docker daemon API (`docker cp` the Stalwart entrypoint into
-  the container, then override the command to run it) instead of bind mounts, a pattern
-  inherited from a docker-out-of-docker runner and kept for robustness — don't add bind
-  mounts to workflow steps. The container self-provisions; the workflow waits for its
-  `.provisioned` marker before running the suite. A warm-up canary mail runs before the
-  suite (a cold Stalwart intermittently delays its first delivery, which would flake one
-  test). The runtime image pushes to ghcr.io with the built-in GITHUB_TOKEN; no repository
-  secrets are needed.
+- Local all-stacks run: `scripts/test-backends.ps1` (or `.sh`) brings each backend compose
+  up `--wait`, runs `Category=Integration` with the right `AS_TEST_STACK`, tears it down, and
+  prints a per-backend summary. Sequential (the stacks share host ports 143/587/5232). `-p`
+  adds a throwaway Postgres for CI parity; default is SQLite temp DBs.
+- GitHub workflow (`.github/workflows/build.yaml`): a **three-job** pipeline, one compile.
+  - `test` — builds the Dockerfile `test` stage (compiles + runs unit tests once) and exports
+    it to a `type=gha` build cache. Uses the default docker-container buildx driver (the old
+    single-daemon containerd-store step is gone; the job split replaces daemon layer reuse
+    with the shared cache).
+  - `integration` — `strategy.matrix.backend: [stalwart, mailserver]`, `fail-fast: false`,
+    `needs: test`. Each leg loads the cached test image (`cache-from: type=gha`, no
+    recompile), `docker compose ... up --wait`s its backend + a Postgres sidecar, warms mail,
+    and runs the suite `--no-build` with `--network host` (so `localhost` reaches the
+    published backend/Postgres ports). Legs push nothing. Adding a backend = one matrix entry
+    + a `docker/backends/<name>/docker-compose.yml`.
+  - `publish` — `needs: [test, integration]`, so it runs only when **every** backend leg is
+    green. Loads the cached test image for the NuGet-pack and zip steps, then builds+pushes
+    the multi-arch runtime image (`cache-from: type=gha`), publishes NuGet, uploads the zips
+    and creates/attaches the release. This is the only pushing job; nothing is published until
+    both backends pass. Pushes to ghcr.io with the built-in GITHUB_TOKEN; no repository
+    secrets are needed.
 - Release flow (`release.yaml`, workflow_dispatch): validate version → generate notes
   from commit subjects since the previous RELEASE (not tag) → push the tag → create the
   release object → **explicitly dispatch build.yaml against the tag ref** (a tag pushed
