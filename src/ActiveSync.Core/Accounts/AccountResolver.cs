@@ -25,7 +25,7 @@ public sealed record MergedAccount(AccountOptions Options, bool FromDatabase, bo
 /// </summary>
 public sealed class AccountResolver
 {
-	private readonly ActiveSyncOptions _options;
+	private readonly IOptionsMonitor<ActiveSyncOptions> _options;
 	private readonly BackendRolesConfig _roles;
 	private readonly BackendProviderRegistry _registry;
 	private readonly AccountStore? _store;
@@ -40,20 +40,20 @@ public sealed class AccountResolver
 	public event Action? SnapshotChanged;
 
 	public AccountResolver(
-		IOptions<ActiveSyncOptions> options,
+		IOptionsMonitor<ActiveSyncOptions> options,
 		BackendRolesConfig roles,
 		BackendProviderRegistry registry,
 		AccountStore? store = null,
 		ILogger<AccountResolver>? logger = null)
 	{
-		_options = options.Value;
+		_options = options;
 		_roles = roles;
 		_registry = registry;
 		_store = store;
 		_logger = logger;
 		// Config-only snapshot first; database entries arrive with the first EnsureFreshAsync
 		// (the server forces one right after migrations, before any request).
-		_snapshot = BuildSnapshot(_options, _roles, _registry, null, logger);
+		_snapshot = BuildSnapshot(_options.CurrentValue, _roles, _registry, null, logger);
 	}
 
 	/// <summary>The global role assignments (for banners, readiness probes and the CLI).</summary>
@@ -71,7 +71,7 @@ public sealed class AccountResolver
 	{
 		if (_store is null)
 			return;
-		double refreshSeconds = _options.Auth.UsersRefreshSeconds;
+		double refreshSeconds = _options.CurrentValue.Auth.UsersRefreshSeconds;
 		if (!force)
 		{
 			if (refreshSeconds < 0)
@@ -91,7 +91,7 @@ public sealed class AccountResolver
 				Dictionary<string, AccountOptions>? dbUsers = stamp is null
 					? null
 					: await _store.LoadAllAsync(_logger, ct).ConfigureAwait(false);
-				_snapshot = BuildSnapshot(_options, _roles, _registry, dbUsers, _logger);
+				_snapshot = BuildSnapshot(_options.CurrentValue, _roles, _registry, dbUsers, _logger);
 				_lastStamp = stamp;
 				_logger?.LogInformation(
 					"Accounts snapshot rebuilt: {Count} declared user(s) ({Db} from database)",
@@ -127,7 +127,7 @@ public sealed class AccountResolver
 	{
 		AccountTemplate? template = _snapshot.Templates?.GetValueOrDefault(login);
 		if (template is null)
-			return _options.RequireDeclaredUsers ? false : null;
+			return _options.CurrentValue.RequireDeclaredUsers ? false : null;
 		if (template.GatewayPassword is not null)
 			return GatewayPasswordHasher.Verify(template.GatewayPassword, presented);
 		if (template.Roles.GetValueOrDefault(BackendRole.MailStore)?.Password is { } mailPassword)

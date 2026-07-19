@@ -11,7 +11,7 @@ public class EndpointAuthTests
 {
 	private static AuthThrottle Throttle()
 	{
-		return new AuthThrottle(Options.Create(new ActiveSyncOptions()));
+		return new AuthThrottle(TestOptionsMonitor.Of(new ActiveSyncOptions()));
 	}
 
 	[Fact]

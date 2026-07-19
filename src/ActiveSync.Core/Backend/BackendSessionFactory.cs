@@ -26,19 +26,19 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	private readonly ISyncDbContextFactory _dbFactory;
 	private readonly Timer _evictionTimer;
 	private readonly ILogger<BackendSessionFactory> _logger;
-	private readonly ActiveSyncOptions _options;
+	private readonly IOptionsMonitor<ActiveSyncOptions> _options;
 	private readonly BackendProviderRegistry _registry;
 	private readonly AccountResolver _resolver;
 	private readonly ConcurrentDictionary<string, Lazy<CompositeBackendSession>> _sessions = new();
 
 	public BackendSessionFactory(
-		IOptions<ActiveSyncOptions> options,
+		IOptionsMonitor<ActiveSyncOptions> options,
 		AccountResolver resolver,
 		ISyncDbContextFactory dbFactory,
 		BackendProviderRegistry registry,
 		ILogger<BackendSessionFactory> logger)
 	{
-		_options = options.Value;
+		_options = options;
 		_resolver = resolver;
 		_dbFactory = dbFactory;
 		_registry = registry;
@@ -75,13 +75,13 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		await _resolver.EnsureFreshAsync(false, ct).ConfigureAwait(false);
 		string cacheKey = credentials.UserName;
 		string passwordHash = Hash(credentials.Password);
-		if (_options.Auth.SuccessCacheMinutes > 0 &&
+		if (_options.CurrentValue.Auth.SuccessCacheMinutes > 0 &&
 		    _authCache.TryGetValue(cacheKey, out (string PasswordHash, DateTime ExpiresUtc) cached) &&
 		    cached.PasswordHash == passwordHash && cached.ExpiresUtc > DateTime.UtcNow)
 			return true;
 		// Repeats of a known-bad password are refused without a backend round-trip, so the
 		// gateway cannot be used to hammer the mail backend with login attempts.
-		if (_options.Auth.NegativeCacheSeconds > 0 &&
+		if (_options.CurrentValue.Auth.NegativeCacheSeconds > 0 &&
 		    _authNegativeCache.TryGetValue(cacheKey, out (string PasswordHash, DateTime ExpiresUtc) negative) &&
 		    negative.PasswordHash == passwordHash && negative.ExpiresUtc > DateTime.UtcNow)
 			return false;
@@ -181,22 +181,22 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	{
 		if (verified)
 		{
-			if (_options.Auth.SuccessCacheMinutes > 0)
-				_authCache[cacheKey] = (passwordHash, DateTime.UtcNow.AddMinutes(_options.Auth.SuccessCacheMinutes));
+			if (_options.CurrentValue.Auth.SuccessCacheMinutes > 0)
+				_authCache[cacheKey] = (passwordHash, DateTime.UtcNow.AddMinutes(_options.CurrentValue.Auth.SuccessCacheMinutes));
 			_authNegativeCache.TryRemove(cacheKey, out _);
 		}
 		else
 		{
 			_authCache.TryRemove(cacheKey, out _);
-			if (_options.Auth.NegativeCacheSeconds > 0)
+			if (_options.CurrentValue.Auth.NegativeCacheSeconds > 0)
 				_authNegativeCache[cacheKey] =
-					(passwordHash, DateTime.UtcNow.AddSeconds(_options.Auth.NegativeCacheSeconds));
+					(passwordHash, DateTime.UtcNow.AddSeconds(_options.CurrentValue.Auth.NegativeCacheSeconds));
 		}
 	}
 
 	private void EvictIdleSessions()
 	{
-		DateTime cutoff = DateTime.UtcNow.AddMinutes(-_options.Eas.SessionIdleMinutes);
+		DateTime cutoff = DateTime.UtcNow.AddMinutes(-_options.CurrentValue.Eas.SessionIdleMinutes);
 		foreach ((string key, Lazy<CompositeBackendSession> lazy) in _sessions)
 			if (lazy.IsValueCreated && lazy.Value.LastUsedUtc < cutoff &&
 			    _sessions.TryRemove(key, out Lazy<CompositeBackendSession>? removed))

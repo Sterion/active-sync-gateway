@@ -40,7 +40,7 @@ public class AccountResolverTests
 		return new BackendProviderRegistry(
 		[
 			new ImapBackendProvider(
-				Microsoft.Extensions.Options.Options.Create(new ActiveSyncOptions()), NullLoggerFactory.Instance),
+				TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
 			new SmtpBackendProvider(NullLoggerFactory.Instance),
 			new CalDavBackendProvider(NullLoggerFactory.Instance),
 			new CardDavBackendProvider(NullLoggerFactory.Instance),
@@ -62,7 +62,7 @@ public class AccountResolverTests
 	private static AccountResolver Resolver(ActiveSyncOptions options, Dictionary<string, string?> config)
 	{
 		return new AccountResolver(
-			Microsoft.Extensions.Options.Options.Create(options), Roles(config), Registry());
+			TestOptionsMonitor.Of(options), Roles(config), Registry());
 	}
 
 	// ---------- pass-through baseline ----------

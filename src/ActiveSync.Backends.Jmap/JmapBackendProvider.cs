@@ -24,7 +24,7 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 		BackendRole.Contacts, BackendRole.Calendar
 	};
 
-	private readonly ActiveSyncOptions _options;
+	private readonly IOptionsMonitor<ActiveSyncOptions> _options;
 	private readonly ILogger _logger;
 	private readonly ILogger _wireLogger;
 
@@ -32,9 +32,9 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 	// the session factory's eviction sweep trims watchers for users with no live session.
 	private readonly ConcurrentDictionary<string, Lazy<JmapEventSourceWatcher>> _watchers = new();
 
-	public JmapBackendProvider(IOptions<ActiveSyncOptions> options, ILoggerFactory loggerFactory)
+	public JmapBackendProvider(IOptionsMonitor<ActiveSyncOptions> options, ILoggerFactory loggerFactory)
 	{
-		_options = options.Value;
+		_options = options;
 		_logger = loggerFactory.CreateLogger<JmapBackendProvider>();
 		_wireLogger = loggerFactory.CreateLogger("ActiveSync.Backends.Jmap");
 	}
@@ -83,7 +83,7 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 			switch (role.Role)
 			{
 				case BackendRole.MailStore:
-					stores.Add(new JmapMailStore(client, context.MailAddress, _options.Eas.DavPollSeconds, waitForPush));
+					stores.Add(new JmapMailStore(client, context.MailAddress, _options.CurrentValue.Eas.DavPollSeconds, waitForPush));
 					break;
 				case BackendRole.MailSubmit:
 					submit = new JmapMailSubmit(client, context.MailAddress, _logger);
@@ -92,10 +92,10 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 					oof = new JmapOofBackend(client);
 					break;
 				case BackendRole.Contacts:
-					stores.Add(new JmapContactStore(client, _options.Eas.DavPollSeconds));
+					stores.Add(new JmapContactStore(client, _options.CurrentValue.Eas.DavPollSeconds));
 					break;
 				case BackendRole.Calendar:
-					stores.Add(new JmapCalendarStore(client, context.MailAddress, _options.Eas.DavPollSeconds));
+					stores.Add(new JmapCalendarStore(client, context.MailAddress, _options.CurrentValue.Eas.DavPollSeconds));
 					break;
 			}
 

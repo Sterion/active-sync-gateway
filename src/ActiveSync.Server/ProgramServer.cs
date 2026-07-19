@@ -70,9 +70,7 @@ public partial class Program
 		});
 
 		builder.Services.AddOptions<ActiveSyncOptions>()
-			.Bind(builder.Configuration.GetSection("ActiveSync"))
-			.ValidateOnStart();
-		builder.Services.AddSingleton<IValidateOptions<ActiveSyncOptions>, ActiveSyncOptionsValidator>();
+			.Bind(builder.Configuration.GetSection("ActiveSync"));
 
 		ActiveSyncOptions options = builder.Configuration.GetSection("ActiveSync").Get<ActiveSyncOptions>()
 			?? throw new InvalidOperationException("Missing 'ActiveSync' configuration section.");
@@ -143,6 +141,17 @@ public partial class Program
 		WebApplication app = builder.Build();
 
 		ILogger startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ActiveSync.Startup");
+
+		// Validate the effective (post-build, database-overlaid) configuration once and fail fast —
+		// deliberately NOT via a registered IValidateOptions / ValidateOnStart: options are now
+		// live-reloadable from the database, and a bad live value must never make IOptionsMonitor /
+		// IOptionsSnapshot throw on read and take a running gateway down (`eas config set` validates
+		// before storing). Runs after Build so it sees the final configuration.
+		ValidateOptionsResult startupValidation = new ActiveSyncOptionsValidator()
+			.Validate(null, app.Services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value);
+		if (startupValidation.Failed)
+			throw new InvalidOperationException("Invalid ActiveSync configuration:" + Environment.NewLine +
+				string.Join(Environment.NewLine, startupValidation.Failures ?? []));
 
 		// Backend role sections + declared users are validated here (not via ValidateOnStart)
 		// because every named provider must exist in the registry and validate its own

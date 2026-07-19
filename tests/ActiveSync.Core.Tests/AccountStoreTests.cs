@@ -60,11 +60,11 @@ public sealed class AccountStoreTests : IDisposable
 		BackendProviderRegistry registry = new(
 		[
 			new ActiveSync.Backends.Imap.ImapBackendProvider(
-				Microsoft.Extensions.Options.Options.Create(new ActiveSyncOptions()), NullLoggerFactory.Instance),
+				TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
 			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
 			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!)
 		], NullLogger<BackendProviderRegistry>.Instance);
-		return new AccountResolver(Microsoft.Extensions.Options.Options.Create(options), roles, registry, _store);
+		return new AccountResolver(TestOptionsMonitor.Of(options), roles, registry, _store);
 	}
 
 	[Fact]

@@ -11,7 +11,7 @@ namespace ActiveSync.Server.Eas.Handlers;
 /// <summary>Ping (MS-ASCMD 2.2.1.13): long-poll push notification.</summary>
 public sealed class PingHandler(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	IHostApplicationLifetime lifetime,
 	ILogger<PingHandler> logger) : IEasCommandHandler
 {

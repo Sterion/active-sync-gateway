@@ -74,7 +74,7 @@ public sealed class FolderSyncHandler(FolderService folders) : IEasCommandHandle
 /// <summary>FolderCreate / FolderDelete / FolderUpdate — mail folders only.</summary>
 public abstract class FolderModifyHandlerBase(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	ILogger logger) : IEasCommandHandler
 {
 	protected static readonly XNamespace FH = EasNamespaces.FolderHierarchy;
@@ -146,7 +146,7 @@ public abstract class FolderModifyHandlerBase(
 
 public sealed class FolderCreateHandler(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	ILogger<FolderCreateHandler> logger)
 	: FolderModifyHandlerBase(folders, options, logger)
 {
@@ -176,7 +176,7 @@ public sealed class FolderCreateHandler(
 
 public sealed class FolderDeleteHandler(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	ILogger<FolderDeleteHandler> logger)
 	: FolderModifyHandlerBase(folders, options, logger)
 {
@@ -196,7 +196,7 @@ public sealed class FolderDeleteHandler(
 
 public sealed class FolderUpdateHandler(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	ILogger<FolderUpdateHandler> logger)
 	: FolderModifyHandlerBase(folders, options, logger)
 {

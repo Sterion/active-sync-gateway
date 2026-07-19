@@ -13,7 +13,7 @@ public class JmapBackendProviderTests
 	private static JmapBackendProvider Provider()
 	{
 		return new JmapBackendProvider(
-			Microsoft.Extensions.Options.Options.Create(new ActiveSyncOptions()), NullLoggerFactory.Instance);
+			TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance);
 	}
 
 	private static ProviderSettings Settings(params (string Key, string? Value)[] values)

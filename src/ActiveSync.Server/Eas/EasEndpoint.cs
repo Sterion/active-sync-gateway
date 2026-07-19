@@ -49,7 +49,7 @@ public static class EasEndpoint
 		SyncStateService state,
 		IEnumerable<IEasCommandHandler> handlers,
 		AuthThrottle authThrottle,
-		IOptions<ActiveSyncOptions> options,
+		IOptionsSnapshot<ActiveSyncOptions> options,
 		ILoggerFactory loggerFactory)
 	{
 		ILogger logger = loggerFactory.CreateLogger("ActiveSync.Endpoint");

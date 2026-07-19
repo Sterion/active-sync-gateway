@@ -11,7 +11,7 @@ namespace ActiveSync.Server.Eas.Handlers;
 /// <summary>MoveItems (MS-ASCMD 2.2.1.12).</summary>
 public sealed class MoveItemsHandler(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	ILogger<MoveItemsHandler> logger) : IEasCommandHandler
 {
 	private static readonly XNamespace M = EasNamespaces.Move;

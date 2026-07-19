@@ -40,7 +40,7 @@ public static class AutodiscoverEndpoint
 		AuthThrottle authThrottle,
 		AccountResolver resolver,
 		SyncStateService state,
-		IOptions<ActiveSyncOptions> options,
+		IOptionsSnapshot<ActiveSyncOptions> options,
 		ILoggerFactory loggerFactory)
 	{
 		CancellationToken ct = http.RequestAborted;

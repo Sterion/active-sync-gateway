@@ -13,7 +13,7 @@ namespace ActiveSync.Server.Eas.Handlers;
 /// <summary>Shared plumbing for SendMail / SmartReply / SmartForward (MS-ASCMD ComposeMail).</summary>
 public abstract class ComposeMailHandlerBase(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	ILogger logger) : IEasCommandHandler
 {
 	protected static readonly XNamespace CM = EasNamespaces.ComposeMail;
@@ -207,7 +207,7 @@ public abstract class ComposeMailHandlerBase(
 
 public sealed class SendMailHandler(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	ILogger<SendMailHandler> logger)
 	: ComposeMailHandlerBase(folders, options, logger)
 {
@@ -245,7 +245,7 @@ public sealed class SendMailHandler(
 
 public sealed class SmartReplyHandler(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	ILogger<SmartReplyHandler> logger)
 	: ComposeMailHandlerBase(folders, options, logger)
 {
@@ -318,7 +318,7 @@ public sealed class SmartReplyHandler(
 
 public sealed class SmartForwardHandler(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	ILogger<SmartForwardHandler> logger)
 	: ComposeMailHandlerBase(folders, options, logger)
 {

@@ -12,7 +12,7 @@ namespace ActiveSync.Server.Eas.Handlers;
 ///   document when ActiveSync:Policy is disabled — the historical no-op behavior) via the
 ///   standard two-phase key handshake. No RemoteWipe support by design.
 /// </summary>
-public sealed class ProvisionHandler(IOptions<ActiveSyncOptions> options) : IEasCommandHandler
+public sealed class ProvisionHandler(IOptionsSnapshot<ActiveSyncOptions> options) : IEasCommandHandler
 {
 	private const string PolicyType = "MS-EAS-Provisioning-WBXML";
 	private static readonly XNamespace PV = EasNamespaces.Provision;

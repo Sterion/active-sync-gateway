@@ -13,7 +13,7 @@ namespace ActiveSync.Server.Eas.Handlers;
 /// <summary>Sync (MS-ASCMD 2.2.1.21): item-level synchronization for all content classes.</summary>
 public sealed partial class SyncHandler(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	IHostApplicationLifetime lifetime,
 	MeetingInvitationService invitations,
 	ILogger<SyncHandler> logger) : IEasCommandHandler

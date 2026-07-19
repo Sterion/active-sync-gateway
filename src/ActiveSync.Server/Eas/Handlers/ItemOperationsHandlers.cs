@@ -11,7 +11,7 @@ namespace ActiveSync.Server.Eas.Handlers;
 
 public sealed class ItemOperationsHandler(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	ILogger<ItemOperationsHandler> logger) : IEasCommandHandler
 {
 	private static readonly XNamespace IO = EasNamespaces.ItemOperations;

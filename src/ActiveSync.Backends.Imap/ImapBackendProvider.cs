@@ -23,14 +23,14 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 {
 	private static readonly IReadOnlySet<BackendRole> Roles = new HashSet<BackendRole> { BackendRole.MailStore };
 
-	private readonly ActiveSyncOptions _options;
+	private readonly IOptionsMonitor<ActiveSyncOptions> _options;
 	private readonly ILogger _logger;
 	private readonly ILogger _wireLogger;
 	private readonly ConcurrentDictionary<string, Lazy<ImapIdleWatcher>> _watchers = new();
 
-	public ImapBackendProvider(IOptions<ActiveSyncOptions> options, ILoggerFactory loggerFactory)
+	public ImapBackendProvider(IOptionsMonitor<ActiveSyncOptions> options, ILoggerFactory loggerFactory)
 	{
-		_options = options.Value;
+		_options = options;
 		_logger = loggerFactory.CreateLogger<ImapBackendProvider>();
 		// Verbose wire logging gets a per-backend category so one backend can be traced alone.
 		_wireLogger = loggerFactory.CreateLogger("ActiveSync.Backends.Imap");
@@ -143,7 +143,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 	private ImapIdleWatcher? GetOrCreateWatcher(
 		string gatewayLogin, ImapOptions options, BackendCredentials credentials, string folderFullName)
 	{
-		if (!_options.Eas.UseImapIdle)
+		if (!_options.CurrentValue.Eas.UseImapIdle)
 			return null;
 		string key = $"{gatewayLogin}\n{folderFullName}";
 		Lazy<ImapIdleWatcher> lazy = _watchers.GetOrAdd(key,

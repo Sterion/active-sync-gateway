@@ -8,7 +8,7 @@ public class AuthThrottleTests
 {
 	private static AuthThrottle Create(int maxFailures = 3, int windowSeconds = 300)
 	{
-		return new AuthThrottle(Options.Create(new ActiveSyncOptions
+		return new AuthThrottle(TestOptionsMonitor.Of(new ActiveSyncOptions
 		{
 			Auth = new AuthOptions { MaxFailures = maxFailures, FailureWindowSeconds = windowSeconds }
 		}));
@@ -45,6 +45,24 @@ public class AuthThrottleTests
 		throttle.RecordSuccess("1.2.3.4");
 		throttle.RecordFailure("1.2.3.4");
 		Assert.Null(throttle.BlockedForSeconds("1.2.3.4"));
+	}
+
+	[Fact]
+	public void MaxFailures_AppliesLive_WithoutReconstruction()
+	{
+		// The throttle must read Auth from IOptionsMonitor.CurrentValue on each call, so a live
+		// settings change takes effect without rebuilding the singleton (the Phase 3 contract).
+		TestOptionsMonitor.Mutable<ActiveSyncOptions> monitor =
+			new(new ActiveSyncOptions { Auth = new AuthOptions { MaxFailures = 0 } });
+		AuthThrottle throttle = new(monitor);
+
+		for (int i = 0; i < 10; i++)
+			throttle.RecordFailure("1.2.3.4");
+		Assert.Null(throttle.BlockedForSeconds("1.2.3.4")); // disabled
+
+		monitor.CurrentValue = new ActiveSyncOptions { Auth = new AuthOptions { MaxFailures = 1 } };
+		throttle.RecordFailure("1.2.3.4");
+		Assert.NotNull(throttle.BlockedForSeconds("1.2.3.4")); // live change applied
 	}
 
 	[Fact]

@@ -16,7 +16,7 @@ namespace ActiveSync.Server.Eas.Handlers;
 ///   (stubbed otherwise).
 /// </summary>
 public sealed class SettingsHandler(
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	LocalContentProtector protector,
 	ILogger<SettingsHandler> logger) : IEasCommandHandler
 {

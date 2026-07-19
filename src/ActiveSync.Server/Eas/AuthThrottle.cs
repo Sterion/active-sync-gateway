@@ -13,14 +13,14 @@ namespace ActiveSync.Server.Eas;
 ///   bounded. Sized for the gateway's audience (a handful of mailbox owners), not as a
 ///   general-purpose WAF.
 /// </summary>
-public sealed class AuthThrottle(IOptions<ActiveSyncOptions> options)
+public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options)
 {
 	/// <summary>The per-address ceiling is this many times the per-(address, user) limit.</summary>
 	private const int IpWideFactor = 5;
 
 	private readonly ConcurrentDictionary<string, Entry> _failures = new();
 
-	private AuthOptions Options => options.Value.Auth;
+	private AuthOptions Options => options.CurrentValue.Auth;
 
 	/// <summary>Per-address failure ceiling, or 0 when throttling is disabled.</summary>
 	public int IpWideLimit => Options.MaxFailures <= 0 ? 0 : Options.MaxFailures * IpWideFactor;

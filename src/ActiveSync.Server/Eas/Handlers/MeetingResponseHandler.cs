@@ -14,7 +14,7 @@ namespace ActiveSync.Server.Eas.Handlers;
 /// <summary>MeetingResponse (MS-ASCMD 2.2.1.11): accept/decline via CalDAV + iTIP reply mail.</summary>
 public sealed class MeetingResponseHandler(
 	FolderService folders,
-	IOptions<ActiveSyncOptions> options,
+	IOptionsSnapshot<ActiveSyncOptions> options,
 	ILogger<MeetingResponseHandler> logger) : IEasCommandHandler
 {
 	private static readonly XNamespace MR = EasNamespaces.MeetingResponse;
