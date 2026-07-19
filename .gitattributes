@@ -6,6 +6,7 @@
 # Files consumed inside Linux containers must stay LF regardless of the policy above.
 *.sh text eol=lf
 docker/backends/mailserver/config/postfix-accounts.cf text eol=lf
+docker/backends/mailserver/config/dovecot.cf text eol=lf
 docker/backends/mailserver/radicale/users text eol=lf
 docker/backends/stalwart/*.ndjson text eol=lf
 docker/backends/stalwart/bootstrap.json text eol=lf
