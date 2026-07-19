@@ -162,7 +162,11 @@ public static class TestBackend
 			client.EndConnect(result);
 			using NetworkStream stream = client.GetStream();
 			byte[] buffer = new byte[1024];
-			stream.Read(buffer, 0, buffer.Length); // untagged greeting
+			// Drain the untagged greeting (content unused; a partial read is fine — the tagged
+			// "a OK" check below can't false-match the "* OK ..." greeting). Zero bytes means the
+			// server closed without greeting us, so treat it as enforcing rather than a false pass.
+			if (stream.Read(buffer, 0, buffer.Length) == 0)
+				return true;
 			byte[] login = System.Text.Encoding.ASCII.GetBytes(
 				$"a login {User1} definitely-wrong-{Guid.NewGuid():N}\r\n");
 			stream.Write(login, 0, login.Length);
