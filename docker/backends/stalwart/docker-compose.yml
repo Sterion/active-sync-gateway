@@ -5,8 +5,11 @@
 #
 #   docker compose -f docker/backends/stalwart/docker-compose.yml up -d --build --wait
 #
-# Published host ports: IMAP 143, SMTP submission 587, ManageSieve 4190, HTTP 5232 (DAV +
-# JMAP, both on the container's 8080 listener).
+# Published host ports default to canonical: IMAP 143, SMTP submission 587, ManageSieve 4190,
+# HTTP 5232 (DAV + JMAP, both on the container's 8080 listener). They can be overridden via
+# STALWART_IMAP_PORT / STALWART_SMTP_PORT / STALWART_SIEVE_PORT / STALWART_HTTP_PORT so this stack
+# can run on dedicated ports alongside another backend (used by scripts/test-fast for parallel
+# local runs). Unset = canonical, so CI and the devcontainer are unaffected.
 # Users: user1@example.com / user2@example.com, password "pass".
 services:
   stalwart:
@@ -19,10 +22,10 @@ services:
       # Pins the recovery administrator stalwart-cli authenticates as.
       STALWART_RECOVERY_ADMIN: "admin:secret"
     ports:
-      - "143:143"
-      - "587:587"
-      - "4190:4190"
-      - "5232:8080"
+      - "${STALWART_IMAP_PORT:-143}:143"
+      - "${STALWART_SMTP_PORT:-587}:587"
+      - "${STALWART_SIEVE_PORT:-4190}:4190"
+      - "${STALWART_HTTP_PORT:-5232}:8080"
     volumes:
       - stalwart-etc:/etc/stalwart
       - stalwart-data:/var/lib/stalwart

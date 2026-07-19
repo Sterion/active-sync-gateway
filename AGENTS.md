@@ -651,6 +651,16 @@ banner. Rules:
   delegate type. Never inline a validation callback. Knobs per backend section:
   `AllowInvalidCertificates` (accept everything, lab use) and `CaCertificatePath`
   (PEM CAs trusted on top of the system store via CustomRootTrust).
+- Fast per-change check: `scripts/test-fast.ps1` (or `.sh`) runs **stalwart + axigen in parallel**
+  and **leaves both stacks running** (start only if not already healthy; reused when warm). To
+  coexist, these two use **dedicated host ports** — stalwart `10143/10587/10190/10232`, axigen
+  `20143/20587/20232` — passed through the compose `${STALWART_*}`/`${AXIGEN_*}` port vars (which
+  default to canonical, so CI/devcontainer are unaffected). That frees the canonical set
+  (`143/587/5232/4190`) so an on-demand `test-backends` leg (e.g. baikal) can run alongside them
+  without a port clash. `-f`/`-Filter` sets the filter; `-d`/`-Down` tears both down (default:
+  leave running). Two isolated `dotnet test --no-build` processes (own env, own SQLite temp DB,
+  in-proc TestServer). Don't drive stalwart/axigen through both runners at once (dedicated vs
+  canonical ports → compose recreates the container).
 - Local all-stacks run: `scripts/test-backends.ps1` (or `.sh`) brings each backend compose
   up `--wait`, runs `Category=Integration` with the right `AS_TEST_STACK`, tears it down, and
   prints a per-backend summary. Sequential (the stacks share host ports 143/587/5232). `-p`

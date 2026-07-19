@@ -1,0 +1,104 @@
+#!/usr/bin/env pwsh
+<#
+.SYNOPSIS
+  Fast local integration check: run the suite against stalwart AND axigen in PARALLEL, with both
+  stacks left running for the next change (start only if not already healthy; reuse when warm).
+
+.DESCRIPTION
+  The two most valuable backends -- stalwart (full IMAP/SMTP/DAV/JMAP/Sieve) and axigen (fast,
+  full IMAP/SMTP/DAV) -- are the normal per-change check. They run on DEDICATED host ports
+  (stalwart 10143/10587/10190/10232, axigen 20143/20587/20232) so they coexist and leave the
+  canonical set (143/587/5232/4190) free for on-demand backends via scripts/test-backends.ps1.
+  The port overrides are passed through the compose files' ${STALWART_*}/${AXIGEN_*} vars.
+
+.PARAMETER Filter
+  dotnet test --filter expression. Default: Category=Integration.
+
+.PARAMETER Down
+  Tear both stacks down (-v) at the end. Default: leave them running.
+
+.EXAMPLE
+  ./scripts/test-fast.ps1
+.EXAMPLE
+  ./scripts/test-fast.ps1 -Filter "FullyQualifiedName~DavRoundTrip"
+#>
+[CmdletBinding()]
+param(
+	[string]$Filter = 'Category=Integration',
+	[switch]$Down
+)
+
+$ErrorActionPreference = 'Continue'
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+$Proj = Join-Path $RepoRoot 'tests/ActiveSync.Integration.Tests/ActiveSync.Integration.Tests.csproj'
+
+# Dedicated host ports so both stacks coexist and the canonical set stays free. Set for the whole
+# script so `docker compose up` publishes them (the compose files read ${STALWART_*}/${AXIGEN_*}).
+$env:STALWART_IMAP_PORT = '10143'; $env:STALWART_SMTP_PORT = '10587'
+$env:STALWART_SIEVE_PORT = '10190'; $env:STALWART_HTTP_PORT = '10232'
+$env:AXIGEN_IMAP_PORT = '20143'; $env:AXIGEN_SMTP_PORT = '20587'; $env:AXIGEN_HTTP_PORT = '20232'
+
+function Start-Stack([string]$name) {
+	Write-Host "==> up $name (reused if already healthy)" -ForegroundColor Cyan
+	docker compose -f (Join-Path $RepoRoot "docker/backends/$name/docker-compose.yml") `
+		up -d --build --wait --wait-timeout 300
+	if ($LASTEXITCODE -ne 0) { Write-Host "!! $name failed to start" -ForegroundColor Red; exit 1 }
+}
+Start-Stack 'stalwart'
+Start-Stack 'axigen'
+
+Write-Host "==> Building integration test project once" -ForegroundColor Cyan
+dotnet build $Proj -c Release --nologo -v q
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+$legs = @(
+	@{ name = 'stalwart'; env = @{
+		AS_TEST_STACK = 'stalwart'; AS_TEST_IMAP_PORT = '10143'; AS_TEST_SMTP_PORT = '10587'
+		AS_TEST_SIEVE_PORT = '10190'; AS_TEST_DAV_URL = 'http://localhost:10232' } },
+	@{ name = 'axigen'; env = @{
+		AS_TEST_STACK = 'axigen'; AS_TEST_IMAP_PORT = '20143'; AS_TEST_SMTP_PORT = '20587'
+		AS_TEST_DAV_URL = 'http://localhost:20232'
+		AS_TEST_DAV_HOMESET = '/Calendar/'; AS_TEST_DAV_CONTACTS_HOMESET = '/Contacts/' } }
+)
+
+Write-Host "==> Running stalwart + axigen suites in parallel (filter: $Filter)" -ForegroundColor Cyan
+$jobs = foreach ($leg in $legs) {
+	Start-Job -Name $leg.name -ScriptBlock {
+		param($root, $proj, $filter, $envMap)
+		foreach ($k in $envMap.Keys) { Set-Item "Env:$k" $envMap[$k] }
+		Set-Location $root
+		$out = dotnet test $proj -c Release --no-build --nologo --filter $filter 2>&1 | Out-String
+		[pscustomobject]@{ rc = $LASTEXITCODE; out = $out }
+	} -ArgumentList $RepoRoot, $Proj, $Filter, $leg.env
+}
+$jobs | Wait-Job | Out-Null
+
+$failed = $false
+Write-Host "`n==================== summary ====================" -ForegroundColor Yellow
+foreach ($job in $jobs) {
+	$r = Receive-Job $job
+	$result = ($r.out -split "`n" | Select-String -Pattern 'Passed!|Failed!' | Select-Object -Last 1).Line
+	if ($r.rc -eq 0) {
+		Write-Host ("{0,-10} PASS  {1}" -f $job.Name, ($result ?? '').Trim()) -ForegroundColor Green
+	}
+	else {
+		$failed = $true
+		Write-Host ("{0,-10} FAIL  {1}" -f $job.Name, ($result ?? '').Trim()) -ForegroundColor Red
+		$r.out -split "`n" | Select-String -Pattern '^\s*Failed ' |
+			ForEach-Object { ($_.Line -replace ' \[.*', '').Trim() } | Sort-Object -Unique |
+			Select-Object -First 20 | ForEach-Object { Write-Host "   $_" -ForegroundColor Red }
+	}
+	Remove-Job $job
+}
+
+if ($Down) {
+	Write-Host "==> Tearing down (-Down)" -ForegroundColor Cyan
+	docker compose -f (Join-Path $RepoRoot 'docker/backends/stalwart/docker-compose.yml') down -v 2>$null | Out-Null
+	docker compose -f (Join-Path $RepoRoot 'docker/backends/axigen/docker-compose.yml') down -v 2>$null | Out-Null
+}
+else {
+	Write-Host "==> Left stalwart + axigen running (re-run is fast; pass -Down to tear down)" -ForegroundColor Cyan
+}
+
+if ($failed) { exit 1 }
+exit 0

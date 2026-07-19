@@ -23,9 +23,12 @@ services:
     environment:
       ADMIN_PASSWORD: axigen-int-admin   # trial admin; the suite never uses it
     ports:
-      - "143:143"                        # IMAP
-      - "587:587"                        # SMTP submission
-      - "5232:80"                        # CalDAV/CardDAV over HTTP (canonical DAV port)
+      # Default to canonical; override via AXIGEN_IMAP_PORT / AXIGEN_SMTP_PORT / AXIGEN_HTTP_PORT
+      # to run on dedicated ports alongside another backend (scripts/test-fast). Unset = canonical,
+      # so CI is unaffected.
+      - "${AXIGEN_IMAP_PORT:-143}:143"    # IMAP
+      - "${AXIGEN_SMTP_PORT:-587}:587"    # SMTP submission
+      - "${AXIGEN_HTTP_PORT:-5232}:80"    # CalDAV/CardDAV over HTTP (canonical DAV port)
     healthcheck:
       # Ready once the IMAP service answers with its greeting (post-provisioning final boot).
       # Invoke bash explicitly: the image's /bin/sh is dash, which has no /dev/tcp.

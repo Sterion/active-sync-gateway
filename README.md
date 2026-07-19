@@ -1103,13 +1103,28 @@ docker compose -f docker/backends/james/docker-compose.yml up -d --build --wait
 # AS_TEST_STACK=james AS_TEST_DAV_URL=none dotnet test --filter Category=Integration
 ```
 
+**Fast per-change check (recommended).** `scripts/test-fast` runs the suite against **stalwart +
+axigen in parallel** and leaves both stacks running for the next change (they start only if not
+already healthy, and are reused when warm). To coexist, these two stacks use **dedicated host
+ports** (stalwart `10143/10587/10190/10232`, axigen `20143/20587/20232`) via the compose
+`${STALWART_*}` / `${AXIGEN_*}` overrides — the canonical set (`143/587/5232/4190`) stays free, so
+you can leave them up and still run an on-demand backend (e.g. baikal) without a port clash:
+
+```powershell
+./scripts/test-fast.ps1                 # Windows  (-Filter <expr>, -Down to tear down)
+scripts/test-fast.sh                    # Linux / devcontainer  (-f <expr>, -d to tear down)
+```
+
 Or run the suite against **every** stack in turn with one command (brings each up, tests,
-tears down, prints a per-backend summary):
+tears down, prints a per-backend summary — sequential, since these use the canonical ports):
 
 ```powershell
 ./scripts/test-backends.ps1            # Windows
 scripts/test-backends.sh               # Linux / devcontainer
 ```
+
+Don't drive stalwart/axigen through both runners at the same time — `test-fast` uses dedicated
+ports and `test-backends` uses canonical ones, so compose would recreate the container on switch.
 
 ### Where tests run
 
