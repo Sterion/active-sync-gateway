@@ -1,0 +1,1 @@
+{"@type":"upsert","object":"Account","matchOn":["name"],"value":{"user1":{"@type":"User","name":"user1","domainId":"__DOMAIN_ID__","credentials":{"0":{"@type":"Password","secret":"pass"}}},"user2":{"@type":"User","name":"user2","domainId":"__DOMAIN_ID__","credentials":{"0":{"@type":"Password","secret":"pass"}}}}}

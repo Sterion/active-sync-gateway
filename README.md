@@ -1068,10 +1068,11 @@ vacation) on the DAV port:
 
 ```bash
 # Default: Stalwart 0.16 all-in-one — mail with real delivery, CalDAV/CardDAV, ManageSieve,
-# and JMAP. Self-provisioning: the container creates the users, plaintext listeners and a
-# relaxed test policy on first boot (see docker/backends/stalwart/entrypoint.sh), so no
-# mounted config and no separate provisioner — just `up`.
-docker compose -f docker/backends/stalwart/docker-compose.yml up -d --wait
+# and JMAP. A small custom image (pinned server + stalwart-cli, see docker/backends/stalwart/
+# Dockerfile) self-provisions on first boot: its entrypoint uses stalwart-cli to bootstrap and
+# then declaratively `apply` the users, plaintext listeners and relaxed test policy against the
+# server's own management API. No mounted config, no separate provisioner — just build + up.
+docker compose -f docker/backends/stalwart/docker-compose.yml up -d --build --wait
 
 # Alternative (manual runs): docker-mailserver (Postfix+Dovecot) + Radicale
 docker compose -f docker/backends/mailserver/docker-compose.yml up -d
@@ -1089,9 +1090,9 @@ AS_TEST_STACK=mailserver dotnet test --filter Category=Integration
   runs the unit tests, the integration tests then run **from that same image**
   (`dotnet test --no-build`, joined to a network with throwaway Stalwart + Postgres
   containers), and only when the full suite is green is the runtime image assembled from
-  the warm build cache and pushed to ghcr.io. The workflow deliberately avoids bind
-  mounts — it `docker cp`s the self-provisioning entrypoint into the Stalwart container
-  and waits for its `.provisioned` marker before running the suite.
+  the warm build cache and pushed to ghcr.io. The Stalwart test backend is a small custom
+  image (pinned server + stalwart-cli) that self-provisions on first boot; the workflow
+  builds it and waits for its `.provisioned` marker before running the suite.
 
   Local reproduction of the CI suite:
 

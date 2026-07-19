@@ -1,0 +1,6 @@
+{"@type":"update","object":"Authentication","value":{"passwordMinStrength":"zero","passwordMinLength":1}}
+{"@type":"update","object":"Imap","value":{"allowPlainTextAuth":true,"maxAuthFailures":100000,"maxConcurrent":100000,"maxRequestRate":{"count":1000000,"period":60000}}}
+{"@type":"update","object":"Security","value":{"authBanRate":{"count":1000000,"period":86400000},"scanBanRate":{"count":1000000,"period":86400000},"abuseBanRate":{"count":1000000,"period":86400000},"loiterBanRate":{"count":1000000,"period":86400000}}}
+{"@type":"update","object":"MtaStageAuth","value":{"saslMechanisms":{"match":{"0":{"if":"local_port != 25","then":"[plain, login]"}}}}}
+{"@type":"upsert","object":"NetworkListener","matchOn":["name"],"value":{"imap-plain":{"name":"imap-plain","bind":{"[::]:143":true},"protocol":"imap","useTls":false}}}
+{"@type":"upsert","object":"NetworkListener","matchOn":["name"],"value":{"submission-plain":{"name":"submission-plain","bind":{"[::]:587":true},"protocol":"smtp","useTls":false}}}

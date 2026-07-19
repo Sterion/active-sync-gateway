@@ -5,17 +5,16 @@
 #   docker compose -f docker/docker-compose.ci.yml down -v
 #
 # NOTE: the stalwart service is intentionally mirrored from
-# docker/backends/stalwart/docker-compose.yml. Keep the two in sync — image tag,
-# entrypoint, and healthcheck must match. The container self-provisions (entrypoint.sh),
-# so there is no separate provision service.
+# docker/backends/stalwart/docker-compose.yml. Keep the two in sync — build context and
+# healthcheck must match. The custom image (pinned server + stalwart-cli) self-provisions on
+# first boot, so there is no separate provision service.
 services:
   stalwart:
-    image: stalwartlabs/stalwart:v0.16.13
-    entrypoint: ["/usr/bin/bash", "/entrypoint.sh"]
+    build:
+      context: ./backends/stalwart
+    image: activesync-stalwart-test:0.16
     environment:
       STALWART_RECOVERY_ADMIN: "admin:secret"
-    volumes:
-      - ./backends/stalwart/entrypoint.sh:/entrypoint.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "test -f /etc/stalwart/.provisioned && curl -fsS -o /dev/null http://127.0.0.1:8080/.well-known/jmap"]
       interval: 3s

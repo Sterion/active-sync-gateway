@@ -1,22 +1,22 @@
 # Stalwart all-in-one test backend (default stack): IMAP + SMTP submission with real local
 # delivery, ManageSieve, CalDAV/CardDAV, and JMAP (mail + calendars + contacts + vacation),
-# one container. Self-provisioning — see entrypoint.sh.
+# one container. Self-provisioning via stalwart-cli baked into the image — see Dockerfile +
+# entrypoint.sh.
 #
-#   docker compose -f docker/backends/stalwart/docker-compose.yml up -d --wait
+#   docker compose -f docker/backends/stalwart/docker-compose.yml up -d --build --wait
 #
 # Published host ports: IMAP 143, SMTP submission 587, ManageSieve 4190, HTTP 5232 (DAV +
 # JMAP, both on the container's 8080 listener).
 # Users: user1@example.com / user2@example.com, password "pass".
 services:
   stalwart:
-    # 0.16 line: configuration lives in the data store, written through the server's JMAP
-    # management API. entrypoint.sh drives first-run setup (bootstrap -> restart -> settings
-    # -> restart -> users) using the curl + bash already in the image, so the stack is fully
-    # self-contained with no mounted config and no external provisioner.
-    image: stalwartlabs/stalwart:v0.16.13
-    entrypoint: ["/usr/bin/bash", "/entrypoint.sh"]
+    # Custom test image: pinned Stalwart 0.16 + stalwart-cli, provisioned declaratively on
+    # first boot (bootstrap -> restart -> apply settings/listeners -> restart -> apply users).
+    build:
+      context: .
+    image: activesync-stalwart-test:0.16
     environment:
-      # Pins the recovery administrator entrypoint.sh authenticates as.
+      # Pins the recovery administrator stalwart-cli authenticates as.
       STALWART_RECOVERY_ADMIN: "admin:secret"
     ports:
       - "143:143"
@@ -24,7 +24,6 @@ services:
       - "4190:4190"
       - "5232:8080"
     volumes:
-      - ./entrypoint.sh:/entrypoint.sh:ro
       - stalwart-etc:/etc/stalwart
       - stalwart-data:/var/lib/stalwart
     healthcheck:

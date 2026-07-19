@@ -538,18 +538,25 @@ banner. Rules:
   `mailserver` (docker-mailserver + Radicale; set `AS_TEST_STACK=mailserver` so the DAV
   `HomeSetPath` preset switches to `/{user}/`). 0.16 dropped the mounted-TOML + REST
   provisioning the old 0.13 stack used — config now lives in the data store and is written
-  through Stalwart's own JMAP management API (the `urn:stalwart:jmap` `x:*` methods), only
-  in a bootstrap mode that needs a restart to take effect. `docker/backends/stalwart/
-  entrypoint.sh` runs in place of the image's default command and drives that whole dance
-  in-process (bootstrap → restart → settings → restart → users) using the curl + bash
-  already in the image: it creates the users, plaintext IMAP 143 + submission 587 listeners
-  (matching the retired 0.13 ports) and a relaxed password/auth/ban policy so the trivial
-  `pass` password keeps working, then serves mail + CalDAV/CardDAV + ManageSieve + the full
-  JMAP surface (incl. calendars/contacts/vacation) from one container. It writes a
-  `.provisioned` marker when done (the compose healthcheck gates on it); re-runs are
-  idempotent. This one stack now also backs the JMAP groupware tests (formerly a separate
-  `stalwart-jmap` 0.16 stack, now removed) — `JmapGroupware*` in `TestBackend` default to it
-  with a real user.
+  through Stalwart's own management API (schema-driven, `urn:stalwart:jmap`), only in a
+  bootstrap mode that needs a restart to take effect. The `stalwart` backend is therefore a
+  small **custom image** — `docker/backends/stalwart/Dockerfile` bakes **stalwart-cli** (from
+  `ghcr.io/stalwartlabs/cli`) onto the pinned server. Its `entrypoint.sh` drives the dance
+  in-process (bootstrap → restart → settings → restart → users) using the CLI **declaratively**:
+  `stalwart-cli update Bootstrap` then `stalwart-cli apply <plan>.ndjson` (`bootstrap.json`,
+  `provision-settings.ndjson`, `provision-users.ndjson` — idempotent `upsert matchOn` /
+  singleton `update`, schema-driven so payloads adapt on upgrade instead of being hand-rolled).
+  It creates the users, plaintext IMAP 143 + submission 587 listeners (matching the retired
+  0.13 ports) and a relaxed password/auth/ban policy so the trivial `pass` password keeps
+  working, then serves mail + CalDAV/CardDAV + ManageSieve + the full JMAP surface (incl.
+  calendars/contacts/vacation) from one container. Two gotchas baked into the entrypoint:
+  the CLI caches the downloaded schema under `$HOME`, so it runs with `HOME=/tmp` (uid 2000's
+  home is not writable); and the domain id for the users plan is resolved at runtime via
+  `stalwart-cli query Domain`. It writes a `.provisioned` marker when done (the compose
+  healthcheck gates on it); re-runs are idempotent. This one stack also backs the JMAP
+  groupware tests (formerly a separate `stalwart-jmap` 0.16 stack, now removed) —
+  `JmapGroupware*` in `TestBackend` default to it with a real user. Compose/CI/devcontainer
+  use `build:` (the custom image); the GitHub workflow `docker build`s it then runs it.
 - Tests use **GUID subjects/markers** and poll with `WaitUntil` — never assume an empty
   mailbox and never assert on absolute counts. `MailboxJanitor` exists for best-effort
   purges when needed.

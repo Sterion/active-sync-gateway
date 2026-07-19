@@ -55,19 +55,17 @@ jobs:
           docker info -f '{{ .DriverStatus }}' | grep -q containerd
 
       # Backends start first (detached) so they boot while the solution compiles.
-      # Stalwart 0.16 self-provisions through its own JMAP management API — the entrypoint
-      # wrapper is copied in and run in place of the default command (see
-      # docker/backends/stalwart/entrypoint.sh); it creates the users, plaintext listeners
-      # and relaxed test policy on first boot. No mounted config, no separate provisioner.
+      # The Stalwart test backend is a small custom image (pinned 0.16 server + stalwart-cli,
+      # see docker/backends/stalwart/Dockerfile). Its baked-in entrypoint self-provisions on
+      # first boot via the CLI — users, plaintext listeners and relaxed test policy — driving
+      # the server's own schema-driven management API. No mounted config, no separate provisioner.
       - name: Start Stalwart backend
         run: |
           docker network create "$NET"
-          docker create --name "$BACKEND" --network "$NET" --network-alias stalwart \
+          docker build -t activesync-stalwart-test:ci docker/backends/stalwart
+          docker run -d --name "$BACKEND" --network "$NET" --network-alias stalwart \
             -e STALWART_RECOVERY_ADMIN=admin:secret \
-            --entrypoint /usr/bin/bash \
-            stalwartlabs/stalwart:v0.16.13 /entrypoint.sh
-          docker cp docker/backends/stalwart/entrypoint.sh "$BACKEND":/entrypoint.sh
-          docker start "$BACKEND"
+            activesync-stalwart-test:ci
 
       # The gateway state DB for the suite: with AS_TEST_PG set, every gateway factory
       # creates its own database here, so the Npgsql provider + migrations run in CI

@@ -16,14 +16,14 @@ services:
       stalwart:
         condition: service_healthy
 
-  # 0.16 line: self-provisioning via entrypoint.sh (no mounted config, no provisioner).
+  # 0.16 line: custom test image (pinned server + stalwart-cli), self-provisioning on boot.
   stalwart:
-    image: stalwartlabs/stalwart:v0.16.13
-    entrypoint: ["/usr/bin/bash", "/entrypoint.sh"]
+    build:
+      context: ../docker/backends/stalwart
+    image: activesync-stalwart-test:0.16
     environment:
       STALWART_RECOVERY_ADMIN: "admin:secret"
     volumes:
-      - ../docker/backends/stalwart/entrypoint.sh:/entrypoint.sh:ro
       - stalwart-etc:/etc/stalwart
       - stalwart-data:/var/lib/stalwart
     healthcheck:
