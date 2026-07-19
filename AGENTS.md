@@ -576,28 +576,20 @@ banner. Rules:
   inside the container before building — never build directly on the bind mount, it would
   poison host bin/obj with Linux paths). Image builds run unit tests only via the
   Dockerfile `test` stage (forced by a marker-file COPY into `runtime`).
-- GitHub workflow (single pipeline, two files): `build-hosted.yaml` runs on the self-hosted
-  ARC scale set `sterions` under Docker-in-Docker and auto-triggers on push to `main` + tags;
-  `build.yaml` is the identical pipeline on GitHub-hosted VMs, kept as a manual
-  (`workflow_dispatch`) fallback. Keep the two in sync when editing pipeline steps. Both
-  deliberately stream everything through the docker daemon API (`docker cp`, stdin) instead of
-  bind mounts — a pattern inherited from a docker-out-of-docker runner, and mandatory under
-  DinD where host bind mounts don't cross into the sidecar daemon — so don't add bind mounts
-  to workflow steps. The container self-provisions; the workflow waits for its `.provisioned`
-  marker before running the suite. A warm-up canary mail runs before the suite (a cold
-  Stalwart intermittently delays its first delivery, which would flake one test). The runtime
-  image pushes to ghcr.io with the built-in GITHUB_TOKEN; no repository secrets are needed.
-  DinD differences in `build-hosted.yaml` only: there is no host daemon to reconfigure, so the
-  multi-arch build+push uses a buildx `docker-container` driver plus a GHA build cache that
-  bridges the amd64 test build and the multi-arch push (in place of hosted `build.yaml`'s
-  containerd-snapshotter single-daemon reuse); and because the ARC runner image has no host
-  `dotnet` or `gh`, NuGet is packed AND pushed inside the test-image container and `gh` is
-  fetched as a pinned binary on tag builds only.
+- GitHub workflow (`.github/workflows/build.yaml`, single pipeline): steps deliberately
+  stream everything through the docker daemon API (`docker cp` the Stalwart entrypoint into
+  the container, then override the command to run it) instead of bind mounts, a pattern
+  inherited from a docker-out-of-docker runner and kept for robustness — don't add bind
+  mounts to workflow steps. The container self-provisions; the workflow waits for its
+  `.provisioned` marker before running the suite. A warm-up canary mail runs before the
+  suite (a cold Stalwart intermittently delays its first delivery, which would flake one
+  test). The runtime image pushes to ghcr.io with the built-in GITHUB_TOKEN; no repository
+  secrets are needed.
 - Release flow (`release.yaml`, workflow_dispatch): validate version → generate notes
   from commit subjects since the previous RELEASE (not tag) → push the tag → create the
-  release object → **explicitly dispatch build-hosted.yaml against the tag ref** (a tag pushed
+  release object → **explicitly dispatch build.yaml against the tag ref** (a tag pushed
   with GITHUB_TOKEN never fires other workflows — loop prevention — so the dispatch is
-  load-bearing, don't remove it). The tag run of build-hosted.yaml then pushes the image and
+  load-bearing, don't remove it). The tag run of build.yaml then pushes the image and
   attaches the zips to that release. Order matters: release-with-notes first, files
   arrive when the build is green.
 - Download zips: after the integration tests, a container from the test image publishes

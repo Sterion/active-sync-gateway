@@ -4,9 +4,9 @@
 #      other workflows — loop prevention — which is why step 3 exists);
 #   2. the release object is created for the now-existing tag with notes generated from
 #      the commit subjects since the previous release;
-#   3. build-hosted.yaml is dispatched explicitly against the tag ref — it tests, pushes
-#      the image and ATTACHES the download zips to this release (on our self-hosted runners).
-# Manual tagging keeps working: build-hosted.yaml creates a release itself when none exists.
+#   3. build.yaml is dispatched explicitly against the tag ref — it tests, pushes the
+#      image and ATTACHES the download zips to this release.
+# Manual tagging keeps working: build.yaml creates a release itself when none exists.
 name: Create Release
 run-name: ${{ github.actor }} releases ${{ github.event.inputs.version }}
 
@@ -87,7 +87,7 @@ jobs:
           } > release-notes.md
 
       # checkout persists the workflow token for pushes; the push itself will NOT fire
-      # build-hosted.yaml (GITHUB_TOKEN loop prevention) — the explicit dispatch below does.
+      # build.yaml (GITHUB_TOKEN loop prevention) — the explicit dispatch below does.
       - name: Create and push tag
         run: |
           git tag '${{ steps.tag.outputs.tag }}'
@@ -106,7 +106,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh workflow run build-hosted.yaml --ref 'refs/tags/${{ steps.tag.outputs.tag }}'
+          gh workflow run build.yaml --ref 'refs/tags/${{ steps.tag.outputs.tag }}'
 
       - name: Summary
         run: |

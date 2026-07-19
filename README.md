@@ -1085,18 +1085,14 @@ AS_TEST_STACK=mailserver dotnet test --filter Category=Integration
   localhost defaults just work. Breakpoints hit gateway code (it runs in-process).
 - **VS Code devcontainer**: "Reopen in Container" — the `.devcontainer` compose brings the
   Stalwart stack up alongside the workspace with env preset.
-- **GitHub Actions**: two workflows share one single-compile pipeline.
-  `.github/workflows/build-hosted.yaml` runs it on our self-hosted runners — the Actions
-  Runner Controller scale set `sterions`, under Docker-in-Docker — on every push to `main`
-  and on tags; `.github/workflows/build.yaml` is the same pipeline on GitHub-hosted VMs,
-  kept as a manual (`workflow_dispatch`) fallback. Either compiles the solution exactly
-  once: the Dockerfile `test` stage builds everything and runs the unit tests, the
-  integration tests then run **from that same image** (`dotnet test --no-build`, joined to
-  a network with throwaway Stalwart + Postgres containers), and only when the full suite is
-  green is the runtime image assembled from the warm build cache and pushed to ghcr.io. The
-  Stalwart test backend is a small custom image (pinned server + stalwart-cli) that
-  self-provisions on first boot; the workflow builds it and waits for its `.provisioned`
-  marker before running the suite.
+- **GitHub Actions**: one workflow, `.github/workflows/build.yaml` (push + dispatch),
+  compiles the solution exactly once: the Dockerfile `test` stage builds everything and
+  runs the unit tests, the integration tests then run **from that same image**
+  (`dotnet test --no-build`, joined to a network with throwaway Stalwart + Postgres
+  containers), and only when the full suite is green is the runtime image assembled from
+  the warm build cache and pushed to ghcr.io. The Stalwart test backend is a small custom
+  image (pinned server + stalwart-cli) that self-provisions on first boot; the workflow
+  builds it and waits for its `.provisioned` marker before running the suite.
 
   Local reproduction of the CI suite:
 

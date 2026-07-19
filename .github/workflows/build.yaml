@@ -1,10 +1,10 @@
 name: ActiveSync Build
-# Auto-builds moved to the self-hosted ARC runners (build-hosted.yaml), which build on our
-# own hardware on every push to main and on tags, and are what release.yaml now dispatches.
-# This workflow is kept as a manual GitHub-hosted fallback: dispatch it by hand (Actions ->
-# ActiveSync Build -> Run workflow, optionally against a tag ref) when the self-hosted runners
-# are unavailable. Everything below is unchanged from the original hosted pipeline.
 on:
+  push:
+    branches:
+      - main
+    tags:
+      - '**'
   workflow_dispatch:
 
 # Single pipeline, single compile: the Dockerfile `test` stage builds the solution and
