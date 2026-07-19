@@ -85,7 +85,18 @@ for backend in "${LIST[@]}"; do
 	fi
 
 	echo "==> dotnet test (AS_TEST_STACK=$backend, filter=$FILTER)"
-	AS_TEST_STACK="$backend" dotnet test ActiveSync.slnx --nologo --filter "$FILTER"
+	# Per-backend AS_TEST_* beyond AS_TEST_STACK (mirrors the CI matrix).
+	extra_env=()
+	case "$backend" in
+		cyrus)
+			extra_env=(
+				'AS_TEST_DAV_HOMESET=/dav/calendars/user/{user}/'
+				'AS_TEST_DAV_CONTACTS_HOMESET=/dav/addressbooks/user/{user}/'
+				'AS_TEST_MAILSUBMIT=jmap'
+				'AS_TEST_SIEVE_TLS=false'
+			) ;;
+	esac
+	env AS_TEST_STACK="$backend" "${extra_env[@]}" dotnet test ActiveSync.slnx --nologo --filter "$FILTER"
 	code=$?
 	if [ "$code" = 0 ]; then
 		RESULTS[$backend]="PASS"

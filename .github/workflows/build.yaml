@@ -85,6 +85,11 @@ jobs:
         include:
           - backend: stalwart
           - backend: mailserver
+          - backend: cyrus
+            dav_homeset: "/dav/calendars/user/{user}/"
+            dav_contacts_homeset: "/dav/addressbooks/user/{user}/"
+            mailsubmit: jmap
+            sieve_tls: "false"
     env:
       POSTGRES: as-ci-postgres-${{ github.run_id }}-${{ matrix.backend }}
     steps:
@@ -164,6 +169,10 @@ jobs:
             -e AS_TEST_IMAP_HOST=localhost -e AS_TEST_IMAP_PORT=143 \
             -e AS_TEST_SMTP_HOST=localhost -e AS_TEST_SMTP_PORT=587 \
             -e AS_TEST_DAV_URL=http://localhost:5232 \
+            -e "AS_TEST_DAV_HOMESET=${{ matrix.dav_homeset }}" \
+            -e "AS_TEST_DAV_CONTACTS_HOMESET=${{ matrix.dav_contacts_homeset }}" \
+            -e "AS_TEST_MAILSUBMIT=${{ matrix.mailsubmit }}" \
+            -e "AS_TEST_SIEVE_TLS=${{ matrix.sieve_tls }}" \
             -e AS_TEST_PG=postgresql://activesync:ci-pw@localhost:5432/activesync \
             -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
             "$TEST_IMAGE" \

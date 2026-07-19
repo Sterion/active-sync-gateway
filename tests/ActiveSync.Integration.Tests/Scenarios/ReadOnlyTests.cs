@@ -40,7 +40,7 @@ public class ReadOnlyTests(GatewayFixture gateway)
 		Assert.Equal("3", status);
 	}
 
-	[BackendFact]
+	[SmtpSubmissionFact]
 	public async Task Delete_IsSilentlyReverted_ItemComesBack()
 	{
 		EasTestClient client = gateway.CreateEasClient(TestBackend.User1, readOnly: true);
@@ -74,7 +74,7 @@ public class ReadOnlyTests(GatewayFixture gateway)
 		Assert.Equal(item.ServerId, restored.ServerId);
 	}
 
-	[BackendFact]
+	[SmtpSubmissionFact]
 	public async Task FlagChange_IsSilentlyReverted()
 	{
 		EasTestClient client = gateway.CreateEasClient(TestBackend.User1, readOnly: true);

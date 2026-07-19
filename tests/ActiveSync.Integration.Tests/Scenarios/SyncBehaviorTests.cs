@@ -92,7 +92,7 @@ public class SyncBehaviorTests(GatewayFixture gateway)
 		}
 	}
 
-	[BackendFact]
+	[SkipOnStackFact("cyrus", "Cyrus IMAP IDLE does not push notifications on non-INBOX folders.")]
 	public async Task Ping_WakesOnNonInboxFolder()
 	{
 		// A Ping without INBOX gets a persistent IDLE watcher for its priority folder.

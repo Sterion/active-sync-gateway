@@ -99,7 +99,9 @@ public sealed class GatewayFixture : IAsyncLifetime
 
 	public async Task InitializeAsync()
 	{
-		if (!TestBackend.IsAvailable)
+		// The warm-up uses plain SMTP submission; skip it on backends with no submission MSA
+		// (Cyrus is LMTP-only and sends over JMAP instead — its tests poll for delivery).
+		if (!TestBackend.IsAvailable || !TestBackend.SmtpSubmissionAvailable)
 			return;
 		// A cold backend intermittently stalls the FIRST delivery into each mailbox for
 		// over a minute (observed on Stalwart), which flaked exactly one test per fresh
@@ -224,6 +226,7 @@ public sealed class GatewayFixture : IAsyncLifetime
 			["ActiveSync:Backends:Oof:Provider"] = "sieve",
 			["ActiveSync:Backends:Oof:Host"] = TestBackend.SieveHost,
 			["ActiveSync:Backends:Oof:Port"] = TestBackend.SievePort.ToString(),
+			["ActiveSync:Backends:Oof:UseTls"] = TestBackend.SieveUseTls ? "true" : "false",
 			["ActiveSync:Backends:Oof:AllowInvalidCertificates"] = "true"
 		};
 		if (jmap)
@@ -248,11 +251,23 @@ public sealed class GatewayFixture : IAsyncLifetime
 			settings["ActiveSync:Backends:MailStore:Port"] = TestBackend.ImapPort.ToString();
 			settings["ActiveSync:Backends:MailStore:UseSsl"] = "false";
 			settings["ActiveSync:Backends:MailStore:Security"] = "None";
-			settings["ActiveSync:Backends:MailSubmit:Provider"] = "smtp";
-			settings["ActiveSync:Backends:MailSubmit:Host"] = TestBackend.SmtpHost;
-			settings["ActiveSync:Backends:MailSubmit:Port"] = TestBackend.SmtpPort.ToString();
-			settings["ActiveSync:Backends:MailSubmit:UseSsl"] = "false";
-			settings["ActiveSync:Backends:MailSubmit:Security"] = "None";
+			if (TestBackend.MailSubmitProvider.Equals("jmap", StringComparison.OrdinalIgnoreCase)
+			    && TestBackend.JmapUrl is { } submitUrl)
+			{
+				// Cyrus has no SMTP submission MSA (LMTP-only) but advertises JMAP submission;
+				// exercise mail-flow over JMAP EmailSubmission while reading over IMAP.
+				settings["ActiveSync:Backends:MailSubmit:Provider"] = "jmap";
+				settings["ActiveSync:Backends:MailSubmit:BaseUrl"] = submitUrl;
+				settings["ActiveSync:Backends:MailSubmit:AllowInvalidCertificates"] = "true";
+			}
+			else
+			{
+				settings["ActiveSync:Backends:MailSubmit:Provider"] = "smtp";
+				settings["ActiveSync:Backends:MailSubmit:Host"] = TestBackend.SmtpHost;
+				settings["ActiveSync:Backends:MailSubmit:Port"] = TestBackend.SmtpPort.ToString();
+				settings["ActiveSync:Backends:MailSubmit:UseSsl"] = "false";
+				settings["ActiveSync:Backends:MailSubmit:Security"] = "None";
+			}
 		}
 
 		if (fastWatchdogNoIdle)
@@ -265,7 +280,7 @@ public sealed class GatewayFixture : IAsyncLifetime
 			settings["ActiveSync:Backends:Tasks:Provider"] = "caldav";
 			settings["ActiveSync:Backends:Contacts:Provider"] = "carddav";
 			settings["ActiveSync:Backends:Contacts:BaseUrl"] = davUrl;
-			settings["ActiveSync:Backends:Contacts:HomeSetPath"] = TestBackend.DavHomeSetPath;
+			settings["ActiveSync:Backends:Contacts:HomeSetPath"] = TestBackend.DavContactsHomeSetPath;
 		}
 
 		if (overrides is not null)

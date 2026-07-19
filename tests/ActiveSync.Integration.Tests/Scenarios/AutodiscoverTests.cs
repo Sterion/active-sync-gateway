@@ -60,7 +60,7 @@ public class AutodiscoverTests(GatewayFixture gateway)
 		Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 	}
 
-	[BackendFact]
+	[BackendEnforcesAuthFact]
 	public async Task Autodiscover_RejectsBadCredentials()
 	{
 		using HttpClient http = gateway.CreateHttpClient();

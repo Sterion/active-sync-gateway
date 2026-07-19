@@ -8,7 +8,7 @@ namespace ActiveSync.Integration.Tests.Scenarios;
 [Trait("Category", "Integration")]
 public class SecurityTests(GatewayFixture gateway)
 {
-	[BackendFact]
+	[BackendEnforcesAuthFact]
 	public async Task RepeatedAuthFailures_AreThrottledWith429()
 	{
 		// Private gateway with a tiny limit so the shared factories are unaffected.
@@ -34,7 +34,7 @@ public class SecurityTests(GatewayFixture gateway)
 		Assert.True(blocked.Headers.RetryAfter is not null, "429 must carry Retry-After");
 	}
 
-	[BackendFact]
+	[BackendEnforcesAuthFact]
 	public async Task ValidLogin_ClearsTheFailureCounter()
 	{
 		await using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(new Dictionary<string, string?>

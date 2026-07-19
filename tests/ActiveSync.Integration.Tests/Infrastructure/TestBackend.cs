@@ -43,9 +43,34 @@ public static class TestBackend
 
 	public static int SievePort { get; } = int.Parse(Env("AS_TEST_SIEVE_PORT", "4190"));
 
-	/// <summary>Radicale needs an explicit home set; Stalwart supports RFC 6764 discovery.</summary>
+	/// <summary>
+	///   Whether the ManageSieve backend requires STARTTLS before auth (Stalwart does). Cyrus
+	///   timsieved offers no STARTTLS, so its leg sets AS_TEST_SIEVE_TLS=false for plaintext.
+	/// </summary>
+	public static bool SieveUseTls { get; } =
+		Env("AS_TEST_SIEVE_TLS", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+	/// <summary>
+	///   Calendar/tasks home-set template. Radicale needs an explicit home set; Stalwart supports
+	///   RFC 6764 discovery (empty). Cyrus/Axigen set it via AS_TEST_DAV_HOMESET.
+	/// </summary>
 	public static string DavHomeSetPath { get; } =
 		Env("AS_TEST_DAV_HOMESET", Stack.Equals("mailserver", StringComparison.OrdinalIgnoreCase) ? "/{user}/" : "");
+
+	/// <summary>
+	///   Contacts (CardDAV) home-set template. Defaults to the calendar template so Stalwart and
+	///   the mailserver/Radicale stack are unchanged; backends that root contacts elsewhere
+	///   (Cyrus /dav/addressbooks/, Axigen /Contacts/) override via AS_TEST_DAV_CONTACTS_HOMESET.
+	/// </summary>
+	public static string DavContactsHomeSetPath { get; } =
+		Env("AS_TEST_DAV_CONTACTS_HOMESET", DavHomeSetPath);
+
+	/// <summary>
+	///   MailSubmit provider for the shared gateway factory (default "smtp"). Cyrus has no SMTP
+	///   submission MSA (LMTP-only) but does advertise JMAP submission, so its leg sets
+	///   AS_TEST_MAILSUBMIT=jmap to exercise mail-flow over JMAP EmailSubmission instead.
+	/// </summary>
+	public static string MailSubmitProvider { get; } = Env("AS_TEST_MAILSUBMIT", "smtp");
 
 	/// <summary>
 	///   postgresql:// admin URI of a THROWAWAY PostgreSQL server. When set, every gateway
@@ -92,6 +117,98 @@ public static class TestBackend
 	{
 		return Environment.GetEnvironmentVariable(name) is { Length: > 0 } value ? value : null;
 	}
+
+	/// <summary>True when an SMTP submission MSA answers at SmtpHost:SmtpPort. Cyrus injects
+	///   mail over LMTP only, so this is false there and the plain smtp warm-up/send is skipped.</summary>
+	public static bool SmtpSubmissionAvailable => SmtpSubmissionProbe.Value;
+
+	private static readonly Lazy<bool> SmtpSubmissionProbe = new(() =>
+	{
+		try
+		{
+			using TcpClient client = new();
+			IAsyncResult result = client.BeginConnect(SmtpHost, SmtpPort, null, null);
+			return result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(3)) && client.Connected;
+		}
+		catch
+		{
+			return false;
+		}
+	});
+
+	/// <summary>
+	///   True when the IMAP backend actually rejects a wrong password. The Cyrus test image
+	///   authenticates every password (its saslauthd is a test mock), so auth-rejection
+	///   scenarios cannot be exercised there and skip. Defaults to true (enforcing) when the
+	///   probe can't reach the server — never hide a real failure behind a probe glitch.
+	/// </summary>
+	public static bool BackendEnforcesAuth => EnforcesAuthProbe.Value;
+
+	private static readonly Lazy<bool> EnforcesAuthProbe = new(() =>
+	{
+		try
+		{
+			using TcpClient client = new() { SendTimeout = 3000, ReceiveTimeout = 3000 };
+			IAsyncResult result = client.BeginConnect(ImapHost, ImapPort, null, null);
+			if (!result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(3)) || !client.Connected)
+				return true;
+			client.EndConnect(result);
+			using NetworkStream stream = client.GetStream();
+			byte[] buffer = new byte[1024];
+			stream.Read(buffer, 0, buffer.Length); // untagged greeting
+			byte[] login = System.Text.Encoding.ASCII.GetBytes(
+				$"a login {User1} definitely-wrong-{Guid.NewGuid():N}\r\n");
+			stream.Write(login, 0, login.Length);
+			int read = stream.Read(buffer, 0, buffer.Length);
+			string response = System.Text.Encoding.ASCII.GetString(buffer, 0, read);
+			return !response.Contains("a OK", StringComparison.OrdinalIgnoreCase);
+		}
+		catch
+		{
+			return true;
+		}
+	});
+
+	/// <summary>
+	///   Fetches a JMAP session resource via RFC 8620 discovery: GET {baseUrl}/.well-known/jmap
+	///   and follow redirects (Stalwart → /jmap/session, Cyrus → /jmap/), re-attaching Basic auth
+	///   on every hop because HttpClient strips it across redirects. Returns the session JSON, or
+	///   null if no JMAP server answers. Synchronous — runs in the xunit discovery path.
+	/// </summary>
+	public static string? TryFetchJmapSession(string baseUrl, string user, string password)
+	{
+		try
+		{
+			string token = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{user}:{password}"));
+			using HttpClientHandler handler = new() { AllowAutoRedirect = false };
+			using HttpClient http = new(handler) { Timeout = TimeSpan.FromSeconds(5) };
+			Uri baseUri = new(baseUrl);
+			Uri target = new(baseUri, "/.well-known/jmap");
+			for (int hop = 0; hop < 4; hop++)
+			{
+				using HttpRequestMessage request = new(HttpMethod.Get, target);
+				request.Headers.Authorization =
+					new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", token);
+				using HttpResponseMessage response = http.Send(request);
+				if ((int)response.StatusCode is >= 300 and < 400 && response.Headers.Location is { } location)
+				{
+					target = new Uri(baseUri, location);
+					continue;
+				}
+
+				if (!response.IsSuccessStatusCode)
+					return null;
+				using StreamReader reader = new(response.Content.ReadAsStream());
+				return reader.ReadToEnd();
+			}
+
+			return null;
+		}
+		catch
+		{
+			return null;
+		}
+	}
 }
 
 /// <summary>A [Fact] that runs only when a real backend stack is reachable.</summary>
@@ -104,35 +221,88 @@ public sealed class BackendFactAttribute : FactAttribute
 	}
 }
 
+/// <summary>
+///   A [Fact] for auth-rejection scenarios: runs only when the IMAP backend actually rejects
+///   a bad password. Skips on the Cyrus test image, whose saslauthd accepts every password.
+/// </summary>
+public sealed class BackendEnforcesAuthFactAttribute : FactAttribute
+{
+	public BackendEnforcesAuthFactAttribute()
+	{
+		if (!TestBackend.IsAvailable)
+			Skip = TestBackend.SkipReason;
+		else if (!TestBackend.BackendEnforcesAuth)
+			Skip = "Backend authenticates any password (Cyrus test image) — auth rejection is not testable.";
+	}
+}
+
+/// <summary>
+///   A [Fact] for scenarios that need an SMTP submission MSA. Skips on backends with none
+///   (Cyrus injects mail over LMTP only; its mail-flow is covered over JMAP submission).
+/// </summary>
+public sealed class SmtpSubmissionFactAttribute : FactAttribute
+{
+	public SmtpSubmissionFactAttribute()
+	{
+		if (!TestBackend.IsAvailable)
+			Skip = TestBackend.SkipReason;
+		else if (!TestBackend.SmtpSubmissionAvailable)
+			Skip = $"No SMTP submission MSA at {TestBackend.SmtpHost}:{TestBackend.SmtpPort} (LMTP-only backend).";
+	}
+}
+
+/// <summary>
+///   A [Fact] that skips on a named stack whose server-side semantics make the scenario
+///   inapplicable — used for genuine backend behavior differences with no cheap capability
+///   probe (e.g. Cyrus's test image auto-schedules iMIP internally rather than emailing,
+///   surfaces shared collections differently, and doesn't push IDLE on non-INBOX folders).
+/// </summary>
+public sealed class SkipOnStackFactAttribute : FactAttribute
+{
+	public SkipOnStackFactAttribute(string stack, string reason)
+	{
+		if (!TestBackend.IsAvailable)
+			Skip = TestBackend.SkipReason;
+		else if (TestBackend.Stack.Equals(stack, StringComparison.OrdinalIgnoreCase))
+			Skip = reason;
+	}
+}
+
+/// <summary>
+///   A [Fact] for JMAP VacationResponse (Oof) round-trips: requires a JMAP mail server and
+///   skips on Cyrus, whose VacationResponse state semantics differ from what RFC-8621 clients
+///   (and this gateway) expect.
+/// </summary>
+public sealed class JmapVacationFactAttribute : FactAttribute
+{
+	public JmapVacationFactAttribute()
+	{
+		if (TestBackend.JmapUrl is not { } url)
+		{
+			Skip = "No JMAP endpoint configured (AS_TEST_JMAP_URL / AS_TEST_DAV_URL).";
+			return;
+		}
+
+		string? body = TestBackend.TryFetchJmapSession(url, TestBackend.User1, TestBackend.Password);
+		if (body is null || !body.Contains("urn:ietf:params:jmap:vacationresponse"))
+			Skip = $"No JMAP VacationResponse capability at {url}.";
+		else if (TestBackend.Stack.Equals("cyrus", StringComparison.OrdinalIgnoreCase))
+			Skip = "Cyrus JMAP VacationResponse state semantics differ from RFC 8621 clients.";
+	}
+}
+
 /// <summary>A [Fact] that runs only when a JMAP-groupware server (calendars + contacts) is reachable.</summary>
 public sealed class JmapGroupwareFactAttribute : FactAttribute
 {
 	private static readonly Lazy<string?> Reason = new(() =>
 	{
-		try
-		{
-			// Synchronous HttpClient.Send + ReadAsStream: this runs in the xunit discovery path
-			// (attribute ctor), where blocking on async would trip the threading analyzer.
-			using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(5) };
-			string token = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
-				$"{TestBackend.JmapGroupwareUser}:{TestBackend.JmapGroupwarePassword}"));
-			// The session resource directly (not /.well-known/jmap): HttpClient strips the
-			// Authorization header across the well-known redirect, which would 401 the probe.
-			HttpRequestMessage request = new(
-				HttpMethod.Get, new Uri(new Uri(TestBackend.JmapGroupwareUrl), "/jmap/session"));
-			request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", token);
-			using HttpResponseMessage response = http.Send(request);
-			using StreamReader reader = new(response.Content.ReadAsStream());
-			string body = reader.ReadToEnd();
-			return body.Contains("urn:ietf:params:jmap:contacts") && body.Contains("urn:ietf:params:jmap:calendars")
-				? null
-				: $"JMAP-groupware server at {TestBackend.JmapGroupwareUrl} lacks calendars/contacts capabilities.";
-		}
-		catch (Exception ex)
-		{
-			return $"No JMAP-groupware server at {TestBackend.JmapGroupwareUrl} " +
-			       "(start docker/backends/stalwart) — " + ex.GetBaseException().Message;
-		}
+		string? body = TestBackend.TryFetchJmapSession(
+			TestBackend.JmapGroupwareUrl, TestBackend.JmapGroupwareUser, TestBackend.JmapGroupwarePassword);
+		if (body is null)
+			return $"No JMAP-groupware server at {TestBackend.JmapGroupwareUrl} (start docker/backends/stalwart or cyrus).";
+		return body.Contains("urn:ietf:params:jmap:contacts") && body.Contains("urn:ietf:params:jmap:calendars")
+			? null
+			: $"JMAP-groupware server at {TestBackend.JmapGroupwareUrl} lacks calendars/contacts capabilities.";
 	});
 
 	public JmapGroupwareFactAttribute()
@@ -154,31 +324,14 @@ public sealed class JmapMailFactAttribute : FactAttribute
 	{
 		if (TestBackend.JmapUrl is not { } url)
 			return "No JMAP endpoint configured (AS_TEST_JMAP_URL / AS_TEST_DAV_URL).";
-		try
-		{
-			// Synchronous HttpClient.Send + ReadAsStream: this runs in the xunit discovery path
-			// (attribute ctor), where blocking on async would trip the threading analyzer.
-			using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(5) };
-			string token = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
-				$"{TestBackend.User1}:{TestBackend.Password}"));
-			// The session resource directly (not /.well-known/jmap): HttpClient strips the
-			// Authorization header across the well-known redirect, which would 401 the probe.
-			HttpRequestMessage request = new(HttpMethod.Get, new Uri(new Uri(url), "/jmap/session"));
-			request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", token);
-			using HttpResponseMessage response = http.Send(request);
-			using StreamReader reader = new(response.Content.ReadAsStream());
-			string body = reader.ReadToEnd();
-			return body.Contains("urn:ietf:params:jmap:mail")
-			       && body.Contains("urn:ietf:params:jmap:submission")
-			       && body.Contains("urn:ietf:params:jmap:vacationresponse")
-				? null
-				: $"JMAP server at {url} lacks mail/submission/vacation capabilities.";
-		}
-		catch (Exception ex)
-		{
-			return $"No JMAP mail server at {url} " +
-			       "(start docker/backends/stalwart) — " + ex.GetBaseException().Message;
-		}
+		string? body = TestBackend.TryFetchJmapSession(url, TestBackend.User1, TestBackend.Password);
+		if (body is null)
+			return $"No JMAP mail server at {url} (start docker/backends/stalwart or cyrus).";
+		return body.Contains("urn:ietf:params:jmap:mail")
+		       && body.Contains("urn:ietf:params:jmap:submission")
+		       && body.Contains("urn:ietf:params:jmap:vacationresponse")
+			? null
+			: $"JMAP server at {url} lacks mail/submission/vacation capabilities.";
 	});
 
 	public JmapMailFactAttribute()

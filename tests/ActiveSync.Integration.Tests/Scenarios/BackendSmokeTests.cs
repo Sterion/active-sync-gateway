@@ -29,7 +29,7 @@ public class BackendSmokeTests
 		}
 	}
 
-	[BackendFact]
+	[SmtpSubmissionFact]
 	public async Task SmtpSubmission_DeliversToOtherUsersInbox()
 	{
 		string subject = $"smoke-{Guid.NewGuid():N}";

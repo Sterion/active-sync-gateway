@@ -163,12 +163,21 @@ public sealed class SieveBackendFactAttribute : FactAttribute
 			return TestBackend.SkipReason;
 		try
 		{
-			using TcpClient probe = new();
+			using TcpClient probe = new() { ReceiveTimeout = 3000 };
 			IAsyncResult result = probe.BeginConnect(TestBackend.SieveHost, TestBackend.SievePort, null, null);
 			if (!result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(3)) || !probe.Connected)
 				return $"No ManageSieve listener at {TestBackend.SieveHost}:{TestBackend.SievePort} " +
 				       "(the mailserver stack has none; Stalwart needs the sieve listener).";
 			probe.EndConnect(result);
+				// The gateway's sieve OOF path requires STARTTLS (Stalwart advertises it). Cyrus
+				// timsieved is plaintext-only, so skip there rather than fail on the missing STARTTLS.
+				using NetworkStream stream = probe.GetStream();
+				byte[] buffer = new byte[2048];
+				int bytes = stream.Read(buffer, 0, buffer.Length);
+				string greeting = System.Text.Encoding.ASCII.GetString(buffer, 0, bytes);
+				if (!greeting.Contains("STARTTLS", StringComparison.OrdinalIgnoreCase))
+					return $"ManageSieve at {TestBackend.SieveHost}:{TestBackend.SievePort} offers no STARTTLS " +
+					       "(Cyrus timsieved is plaintext-only).";
 			return null;
 		}
 		catch (Exception ex)

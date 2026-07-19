@@ -93,7 +93,7 @@ public class UserOverrideTests(GatewayFixture gateway) : IDisposable
 		await AssertSyncsInboxAsync(CreateClient("phone2@gw.local", GatewayPassword));
 	}
 
-	[BackendFact]
+	[BackendEnforcesAuthFact]
 	public async Task ImapUserNameOverride_ProbesWithThePresentedPassword()
 	{
 		// No passwords configured for phone3 — presenting user2's REAL IMAP password must

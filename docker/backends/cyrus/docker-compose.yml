@@ -1,0 +1,32 @@
+# Cyrus IMAP test backend (CI + local): an independent C implementation of IMAP, CalDAV,
+# CardDAV, JMAP and ManageSieve in ONE container. The upstream cyrus-docker-test-server is
+# purpose-built for throwaway testing: it auto-creates user1..user5 (password "pass",
+# defaultdomain example.com) and each user's default calendar + address book on first boot,
+# and stores nothing persistently. It maps onto the canonical host ports so the only per-leg
+# switches are the DAV home-set templates + JMAP URL (carried in the CI matrix / test-backends).
+#
+#   docker compose -f docker/backends/cyrus/docker-compose.yml up -d --wait
+#   $env:AS_TEST_STACK = "cyrus"
+#   dotnet test --filter Category=Integration
+#
+# Coverage: IMAP (folders), CalDAV/CardDAV, JMAP (mail + submission + calendars + contacts +
+# vacation, discovered via /.well-known/jmap), and ManageSieve. Cyrus injects mail only over
+# LMTP (no SMTP submission MSA), so the plain smtp-submission send path is gated off here
+# (SmtpSubmissionFact); mail-flow is instead exercised over JMAP submission. Plaintext only —
+# test use exclusively.
+services:
+  cyrus:
+    # Pinned by digest — the project publishes only :latest, which is not reproducible.
+    image: ghcr.io/cyrusimap/cyrus-docker-test-server@sha256:93d18aea2400d8d34941929782aed93c1c1eb37d847dacb8db20a7d071ab1e1b
+    ports:
+      - "143:8143"     # IMAP
+      - "5232:8080"    # HTTP: CalDAV + CardDAV + JMAP
+      - "4190:4190"    # ManageSieve
+    healthcheck:
+      # Ready once IMAP + the HTTP (DAV/JMAP) listener answer. start_period covers the
+      # user/collection auto-creation the entrypoint runs on first boot.
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8143 && </dev/tcp/127.0.0.1/8080'"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 20s

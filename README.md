@@ -1099,11 +1099,12 @@ scripts/test-backends.sh               # Linux / devcontainer
   pipeline that compiles the solution exactly once:
   - **`test`** — the Dockerfile `test` stage builds everything and runs the unit tests,
     exporting every layer to a `type=gha` build cache.
-  - **`integration`** — a matrix leg per backend (`stalwart`, `mailserver`) runs in
+  - **`integration`** — a matrix leg per backend (`stalwart`, `mailserver`, `cyrus`) runs in
     parallel. Each loads the cached test image, brings its backend + a throwaway Postgres
     up, and runs the integration suite **from that image** (`dotnet test --no-build`).
     Tests for capabilities a backend lacks (JMAP/Sieve on docker-mailserver, CalDAV
-    free-busy on Radicale) skip cleanly. Legs push nothing.
+    free-busy on Radicale, SMTP submission / password-enforcement on the Cyrus test image)
+    skip cleanly. Legs push nothing.
   - **`publish`** — only when **every** backend leg is green: the multi-arch runtime image,
     the NuGet packages and the release zips are built from the warm cache and pushed.
 

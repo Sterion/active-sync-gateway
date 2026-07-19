@@ -227,7 +227,7 @@ public class LocalStoreTests(GatewayFixture gateway)
 			a.ApplicationData.Element(N + "Subject")?.Value == marker);
 	}
 
-	[BackendFact]
+	[BackendEnforcesAuthFact]
 	public async Task LocalStores_RequireSuccessfulImapAuthentication()
 	{
 		// Local data has no backend of its own — access is gated by the IMAP login probe

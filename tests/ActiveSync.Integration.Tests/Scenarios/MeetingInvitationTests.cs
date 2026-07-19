@@ -148,7 +148,7 @@ public sealed class MeetingInvitationTests(GatewayFixture gateway)
 			TestBackend.User2, "INBOX", $"Cancelled occurrence: {marker}"));
 	}
 
-	[BackendFact]
+	[SkipOnStackFact("cyrus", "Cyrus auto-schedules iMIP internally (schedule-inbox), it does not email invitations.")]
 	public async Task CalDav_AutoProbe_LeavesSchedulingToTheServer()
 	{
 		EasTestClient organizer = gateway.CreateEasClient(TestBackend.User1);

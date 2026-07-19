@@ -63,6 +63,18 @@ function Stop-Postgres {
 	Remove-Item Env:AS_TEST_PG -ErrorAction SilentlyContinue
 }
 
+# Per-backend AS_TEST_* beyond AS_TEST_STACK (mirrors the CI matrix). Backends whose DAV lives
+# under non-default roots, whose mail submits over JMAP, or whose ManageSieve is plaintext set
+# these; others inherit TestBackend's defaults.
+$BackendEnv = @{
+	cyrus = @{
+		AS_TEST_DAV_HOMESET          = '/dav/calendars/user/{user}/'
+		AS_TEST_DAV_CONTACTS_HOMESET = '/dav/addressbooks/user/{user}/'
+		AS_TEST_MAILSUBMIT           = 'jmap'
+		AS_TEST_SIEVE_TLS            = 'false'
+	}
+}
+
 try {
 	if ($Postgres) {
 		if (-not (Start-Postgres)) { exit 1 }
@@ -88,6 +100,11 @@ try {
 			}
 
 			$env:AS_TEST_STACK = $backend
+			if ($BackendEnv.ContainsKey($backend)) {
+				foreach ($kv in $BackendEnv[$backend].GetEnumerator()) {
+					Set-Item "Env:$($kv.Key)" $kv.Value
+				}
+			}
 			Write-Host "==> dotnet test (AS_TEST_STACK=$backend, filter=$Filter)" -ForegroundColor Cyan
 			Push-Location $RepoRoot
 			dotnet test ActiveSync.slnx --nologo --filter $Filter
@@ -99,6 +116,11 @@ try {
 			Write-Host "==> docker compose down -v" -ForegroundColor Cyan
 			docker compose -f $file down -v 2>$null | Out-Null
 			Remove-Item Env:AS_TEST_STACK -ErrorAction SilentlyContinue
+			if ($BackendEnv.ContainsKey($backend)) {
+				foreach ($key in $BackendEnv[$backend].Keys) {
+					Remove-Item "Env:$key" -ErrorAction SilentlyContinue
+				}
+			}
 		}
 	}
 }

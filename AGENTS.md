@@ -527,11 +527,16 @@ banner. Rules:
   capability-gated fact attribute on each test. `[BackendFact]` skips when no IMAP backend
   answers — **never** make integration tests hard-fail on a docker-less machine. The
   narrower gates skip a test cleanly on a backend that lacks the feature (so the *same*
-  suite runs against every stack): `[SieveBackendFact]` (ManageSieve 4190), `[JmapMailFact]`
-  / `[JmapGroupwareFact]` (probe `/jmap/session` for the mail resp. calendars+contacts
-  capabilities), and `[CalDavFreeBusyFact]` (probe the calendar's `supported-report-set` for
-  `free-busy-query`; Radicale omits it). Add a gate rather than a hard `[BackendFact]` when a
-  test needs a capability not every backend has.
+  suite runs against every stack): `[SieveBackendFact]` (ManageSieve 4190 **offering STARTTLS**
+  — Cyrus timsieved is plaintext-only), `[JmapMailFact]` / `[JmapGroupwareFact]` /
+  `[JmapVacationFact]` (fetch the session via `/.well-known/jmap` discovery — works for both
+  Stalwart's `/jmap/session` and Cyrus's `/jmap/` — and check the mail / calendars+contacts /
+  vacation capabilities), `[CalDavFreeBusyFact]` (probe `supported-report-set` for
+  `free-busy-query`; Radicale omits it), `[BackendEnforcesAuthFact]` (probe that the IMAP
+  backend rejects a bad password — the Cyrus test image accepts any), `[SmtpSubmissionFact]`
+  (a submission MSA on 587 — Cyrus is LMTP-only), and `[SkipOnStackFact(stack, reason)]` for
+  genuine per-server behavior differences with no cheap probe. Add a gate rather than a hard
+  `[BackendFact]` when a test needs a capability not every backend has.
 - Backends resolve via `TestBackend` env vars (`AS_TEST_IMAP_HOST`, `AS_TEST_SMTP_HOST`,
   `AS_TEST_DAV_URL`, `AS_TEST_STACK`, …) with localhost defaults matching both compose
   stacks under `docker/backends/` (same ports 143/587/5232, same users user1/user2 @
@@ -540,9 +545,17 @@ banner. Rules:
   `postgresql://` URI: when set, each gateway factory creates its own fresh Postgres
   database instead of a SQLite temp file — never dropped, the CI container is discarded —
   so Npgsql migrations, URI conversion and provider inference all run in CI.
-- Two stacks, one suite, both in CI: `stalwart` (default; **v0.16.13**, self-provisioning)
-  and `mailserver` (docker-mailserver + Radicale; set `AS_TEST_STACK=mailserver` so the DAV
-  `HomeSetPath` preset switches to `/{user}/`). The mailserver compose runs a one-shot
+- Three stacks, one suite, all in CI: `stalwart` (default; **v0.16.13**, self-provisioning),
+  `mailserver` (docker-mailserver + Radicale; set `AS_TEST_STACK=mailserver` so the DAV
+  `HomeSetPath` preset switches to `/{user}/`), and `cyrus` (`cyrus-docker-test-server`: an
+  independent C implementation of IMAP + CalDAV/CardDAV + JMAP + ManageSieve, auto-provisioning
+  user1..5 + default collections; `docker/backends/cyrus`). Cyrus is driven purely by
+  `matrix.include` env — `AS_TEST_DAV_HOMESET=/dav/calendars/user/{user}/`,
+  `AS_TEST_DAV_CONTACTS_HOMESET=/dav/addressbooks/user/{user}/`, `AS_TEST_MAILSUBMIT=jmap`
+  (LMTP-only, so it submits over JMAP), `AS_TEST_SIEVE_TLS=false`. Its permissive test-image
+  auth, no-SMTP-submission, plaintext-sieve, internal iMIP auto-scheduling and non-INBOX-IDLE
+  behaviors are handled by the capability gates above (see the `SkipOnStackFact("cyrus", …)`
+  reasons). The mailserver compose runs a one-shot
   `radicale-provision` (`docker/backends/mailserver/radicale/provision.sh`) that MKCALENDARs
   each user's default calendar + address book — Radicale auto-creates none, so without it DAV
   discovery finds nothing and every DAV test silently no-ops. Radicale lacks JMAP, ManageSieve
@@ -591,7 +604,7 @@ banner. Rules:
     it to a `type=gha` build cache. Uses the default docker-container buildx driver (the old
     single-daemon containerd-store step is gone; the job split replaces daemon layer reuse
     with the shared cache).
-  - `integration` — `strategy.matrix.backend: [stalwart, mailserver]`, `fail-fast: false`,
+  - `integration` — `strategy.matrix.backend: [stalwart, mailserver, cyrus]`, `fail-fast: false`,
     `needs: test`. Each leg loads the cached test image (`cache-from: type=gha`, no
     recompile), `docker compose ... up --wait`s its backend + a Postgres sidecar, warms mail,
     and runs the suite `--no-build` with `--network host` (so `localhost` reaches the

@@ -24,7 +24,7 @@ public sealed class SharedCalendarTests(GatewayFixture gateway)
 	private static readonly XNamespace AS = EasNamespaces.AirSync;
 	private static readonly XNamespace Cal = EasNamespaces.Calendar;
 
-	[BackendFact]
+	[SkipOnStackFact("cyrus", "Cyrus shared-collection read-only enforcement differs from the gateway's revert model.")]
 	public async Task ReadOnlyGrant_RevertsClientWrites_AndBadHrefIsSkipped()
 	{
 		if (TestBackend.DavUrl is null)
