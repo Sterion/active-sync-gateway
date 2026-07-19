@@ -45,7 +45,7 @@ internal static class CliApp
 			user.AddCommand<UserRemoveCommand>("remove")
 				.WithDescription("Delete the database entry (a config entry becomes active again).");
 			user.AddCommand<UserSetCommand>("set")
-				.WithDescription("Set one field by config path (e.g. Imap:Host); password keys are hashed/sealed.");
+				.WithDescription("Set one field by config path (e.g. Backends:MailStore:Settings:Host); password keys are hashed/sealed.");
 			user.AddCommand<UserUnsetCommand>("unset")
 				.WithDescription("Clear one field by config path.");
 			user.AddCommand<UserPasswordCommand>("password")

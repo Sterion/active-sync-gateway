@@ -42,7 +42,7 @@ MS-ASCNTC, MS-ASTZ) in modern async C#.
   degrade to a clean per-recipient "no data" status otherwise — RFC 6638 scheduling is
   not implemented because no supported backend offers it.
 - **Shared calendars**: extra CalDAV collections sync as additional calendar folders —
-  statically via `CalDav:SharedCollections` or per user at runtime via `eas share`
+  statically via `Backends:Calendar:SharedCollections` or per user at runtime via `eas share`
   grants, each read-write or **gateway-enforced read-only**.
 - **Meeting invitations (iMIP)**: create/update/cancel a meeting on the phone and the
   gateway mails the attendees (`METHOD:REQUEST`/`CANCEL`) — unless the CalDAV server
@@ -960,7 +960,7 @@ dotnet ef migrations add <Name> --context NpgsqlSyncDbContext \
   gateway database. Still protect the `/data` volume (permissions, backups) — and back up
   the key separately from the database.
 - **Outgoing mail** is submitted over authenticated SMTP with the client's MIME as-is;
-  sender-alignment policy is the SMTP server's job (or set `Smtp.ForceFrom`).
+  sender-alignment policy is the SMTP server's job (or set `Backends:MailSubmit:ForceFrom`).
 
 ## Operator CLI (`eas`)
 
@@ -1182,15 +1182,15 @@ src/
                          snapshots, DAV href map), differential sync engine (CollectionDiff).
   ActiveSync.Backends.Common/   MIME/iCalendar/vCard ↔ EAS converters, MS-ASTZ timezone
                          blob, TLS/wire-logging helpers — shared by the providers.
-  ActiveSync.Backends.{Imap,Smtp,Dav,Sieve,Local}/   one assembly per provider (Dav serves
-                         both caldav + carddav); Local is the gateway-DB fallback. New
-                         backends (e.g. jmap) drop in as another such assembly.
+  ActiveSync.Backends.{Imap,Smtp,Dav,Sieve,Jmap,Local}/   one assembly per provider (Dav
+                         serves both caldav + carddav); Local is the gateway-DB fallback.
+                         New backends drop in as another such assembly.
   ActiveSync.Server/     Kestrel host, /Microsoft-Server-ActiveSync endpoint, Basic auth,
                          one handler class per EAS command, provider DI wiring, the `eas` CLI.
 ```
 
 **Backend plugins.** Backends are named *providers* that fill *roles*; a new backend (e.g.
-Stalwart-native JMAP, or your own) is just another provider assembly. Out-of-repo plugins
+a Microsoft Graph bridge, or your own) is just another provider assembly. Out-of-repo plugins
 drop into `/app/plugins` and register themselves — no fork required. The contract
 (`ActiveSync.Protocol`, `ActiveSync.Core`, `ActiveSync.Backends.Common`) is published to
 NuGet per release. See **[docs/plugins.md](docs/plugins.md)**.
