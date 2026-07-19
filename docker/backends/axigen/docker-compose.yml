@@ -1,0 +1,36 @@
+# Backend leg (reduced-trigger CI + local): Axigen full groupware -- IMAP/SMTP + CalDAV/CardDAV
+# from a single container, via Axigen's built-in 3-day TRIAL/DEMO mode (no license key).
+#
+# LICENSING: trial mode is licensed for EVALUATION ONLY. This leg runs only on
+# workflow_dispatch / schedule (never on push) and never gates the publish pipeline. The trial
+# clock resets on every fresh container, so `down -v` between runs keeps it evaluation-scoped.
+# EAS is an Axigen paid add-on, but the gateway speaks IMAP/SMTP/CalDAV/CardDAV to it, not EAS.
+#
+#   docker compose -f docker/backends/axigen/docker-compose.yml up -d --build --wait
+#   $env:AS_TEST_STACK = "axigen"
+#   dotnet test --filter Category=Integration
+#
+# Self-provisioning custom image (Dockerfile + ax-entrypoint.sh + provision.py): on first boot
+# it creates domain example.com with users user1/user2 (password "pass") and opens the
+# canonical listeners -- IMAP 143, submission 587, HTTP/DAV 80 -- then enables the mail + DAV
+# services (the demo default ships none) and serves. DAV home sets are /Calendar/ and
+# /Contacts/ (Axigen reports each from its own root; /Calendar/Tasks/ ships out of the box).
+# No JMAP, no ManageSieve. Plaintext everywhere -- test use exclusively.
+services:
+  axigen:
+    build:
+      context: .
+    environment:
+      ADMIN_PASSWORD: axigen-int-admin   # trial admin; the suite never uses it
+    ports:
+      - "143:143"                        # IMAP
+      - "587:587"                        # SMTP submission
+      - "5232:80"                        # CalDAV/CardDAV over HTTP (canonical DAV port)
+    healthcheck:
+      # Ready once the IMAP service answers with its greeting (post-provisioning final boot).
+      # Invoke bash explicitly: the image's /bin/sh is dash, which has no /dev/tcp.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/143 && head -c 20 <&3 | grep -q AXIGEN"]
+      interval: 5s
+      timeout: 4s
+      retries: 60
+      start_period: 40s

@@ -24,7 +24,7 @@ public sealed class SharedCalendarTests(GatewayFixture gateway)
 	private static readonly XNamespace AS = EasNamespaces.AirSync;
 	private static readonly XNamespace Cal = EasNamespaces.Calendar;
 
-	[SkipOnStackFact("cyrus", "Cyrus shared-collection read-only enforcement differs from the gateway's revert model.")]
+	[SkipOnStackFact("cyrus,axigen", "Shared calendars need a DAV backend with per-user-addressable collection paths: Cyrus's shared-collection enforcement differs from the gateway's revert model, and Axigen serves calendars from a fixed mailbox-relative /Calendar/ root with no cross-principal href.")]
 	public async Task ReadOnlyGrant_RevertsClientWrites_AndBadHrefIsSkipped()
 	{
 		if (TestBackend.DavUrl is null)

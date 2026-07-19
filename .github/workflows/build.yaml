@@ -6,6 +6,9 @@ on:
     tags:
       - '**'
   workflow_dispatch:
+  schedule:
+    # Nightly, so the reduced-trigger backend legs (Axigen trial/demo) run without gating pushes.
+    - cron: '0 3 * * *'
 
 # Three-stage pipeline, one compile:
 #   test         -> the Dockerfile `test` stage builds the solution and runs the UNIT tests
@@ -93,8 +96,17 @@ jobs:
           - backend: baikal
             dav_homeset: "/dav.php/calendars/{user}/"
             dav_contacts_homeset: "/dav.php/addressbooks/{user}/"
+          # Axigen runs its trial/demo mode (evaluation-only licensing), so this leg is
+          # reduced-trigger: it only does real work on workflow_dispatch / schedule (RUN_LEG
+          # below). On push its steps skip, the leg still reports success, and `publish`
+          # (needs: integration) stays green without ever depending on the trial backend.
+          - backend: axigen
+            dav_homeset: "/Calendar/"
+            dav_contacts_homeset: "/Contacts/"
     env:
       POSTGRES: as-ci-postgres-${{ github.run_id }}-${{ matrix.backend }}
+      # Every leg runs on every trigger EXCEPT axigen, which runs only on dispatch/schedule.
+      RUN_LEG: ${{ matrix.backend != 'axigen' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
     steps:
       - name: Check out code
         uses: actions/checkout@v7
@@ -105,6 +117,7 @@ jobs:
       # Materialise the cached test image into the local daemon (cache hit from `test`: no
       # recompile, the unit-test layer is reused) so the suite runs FROM it with --no-build.
       - name: Load test image from cache
+        if: env.RUN_LEG == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -122,6 +135,7 @@ jobs:
       # ports (143/587/5232, +4190 on Stalwart). --wait blocks until healthy AND, for
       # mailserver, until the radicale-provision one-shot has created the DAV collections.
       - name: Start backend (${{ matrix.backend }})
+        if: env.RUN_LEG == 'true'
         run: |
           docker compose -f "docker/backends/${{ matrix.backend }}/docker-compose.yml" \
             up -d --build --wait --wait-timeout 300
@@ -129,6 +143,7 @@ jobs:
       # The gateway state DB for the suite: with AS_TEST_PG set, every gateway factory creates
       # its own database here, so the Npgsql provider + migrations run in CI.
       - name: Start Postgres state DB
+        if: env.RUN_LEG == 'true'
         run: |
           docker run -d --name "$POSTGRES" -p 5432:5432 \
             -e POSTGRES_USER=activesync -e POSTGRES_PASSWORD=ci-pw -e POSTGRES_DB=activesync \
@@ -143,6 +158,7 @@ jobs:
       # A freshly booted stack stalls the FIRST delivery into each mailbox; warm both
       # directions before the suite (the fixture also warms as a second line of defence).
       - name: Warm up mail delivery
+        if: env.RUN_LEG == 'true'
         run: |
           docker run --rm --network host --entrypoint /bin/sh curlimages/curl:8.11.1 -c '
             send() {
@@ -166,6 +182,7 @@ jobs:
       # suite needs (it flips the CalDAV home-set style); Sieve/JMAP tests self-skip when the
       # backend has no such listener.
       - name: Run integration tests (${{ matrix.backend }})
+        if: env.RUN_LEG == 'true'
         run: |
           docker run --rm --network host \
             -e AS_TEST_STACK=${{ matrix.backend }} \
@@ -182,7 +199,7 @@ jobs:
             dotnet test ActiveSync.slnx -c Release --nologo --no-build --filter "Category=Integration"
 
       - name: Cleanup
-        if: always()
+        if: always() && env.RUN_LEG == 'true'
         run: |
           docker compose -f "docker/backends/${{ matrix.backend }}/docker-compose.yml" down -v 2>/dev/null || true
           docker rm -f "$POSTGRES" 2>/dev/null || true

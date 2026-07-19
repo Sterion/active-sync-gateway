@@ -13,3 +13,5 @@ docker/backends/stalwart/bootstrap.json text eol=lf
 docker/backends/baikal/Dockerfile text eol=lf
 docker/backends/baikal/seed.php text eol=lf
 docker/backends/baikal/baikal.yaml text eol=lf
+docker/backends/axigen/Dockerfile text eol=lf
+docker/backends/axigen/provision.py text eol=lf

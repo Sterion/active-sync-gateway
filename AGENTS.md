@@ -545,12 +545,13 @@ banner. Rules:
   `postgresql://` URI: when set, each gateway factory creates its own fresh Postgres
   database instead of a SQLite temp file — never dropped, the CI container is discarded —
   so Npgsql migrations, URI conversion and provider inference all run in CI.
-- Four stacks, one suite, all in CI: `stalwart` (default; **v0.16.13**, self-provisioning),
-  `mailserver` (docker-mailserver + Radicale; set `AS_TEST_STACK=mailserver` so the DAV
-  `HomeSetPath` preset switches to `/{user}/`), `cyrus` (`cyrus-docker-test-server`: an
-  independent C implementation of IMAP + CalDAV/CardDAV + JMAP + ManageSieve, auto-provisioning
-  user1..5 + default collections; `docker/backends/cyrus`), and `baikal`
-  (`docker/backends/baikal`). Cyrus is driven purely by
+- Five stacks, one suite: four gate every push (`stalwart`, `mailserver`, `cyrus`, `baikal`)
+  and `axigen` is reduced-trigger (dispatch/schedule — see the Axigen note below). `stalwart`
+  (default; **v0.16.13**, self-provisioning), `mailserver` (docker-mailserver + Radicale; set
+  `AS_TEST_STACK=mailserver` so the DAV `HomeSetPath` preset switches to `/{user}/`), `cyrus`
+  (`cyrus-docker-test-server`: an independent C implementation of IMAP + CalDAV/CardDAV + JMAP +
+  ManageSieve, auto-provisioning user1..5 + default collections; `docker/backends/cyrus`), and
+  `baikal` (`docker/backends/baikal`). Cyrus is driven purely by
   `matrix.include` env — `AS_TEST_DAV_HOMESET=/dav/calendars/user/{user}/`,
   `AS_TEST_DAV_CONTACTS_HOMESET=/dav/addressbooks/user/{user}/`, `AS_TEST_MAILSUBMIT=jmap`
   (LMTP-only, so it submits over JMAP), `AS_TEST_SIEVE_TLS=false`. Its permissive test-image
@@ -597,6 +598,24 @@ banner. Rules:
   groupware tests (formerly a separate `stalwart-jmap` 0.16 stack, now removed) —
   `JmapGroupware*` in `TestBackend` default to it with a real user. Compose/CI/devcontainer
   use `build:` (the custom image); the GitHub workflow `docker build`s it then runs it.
+- **Axigen** (`docker/backends/axigen`, `AS_TEST_STACK=axigen`) — full groupware
+  (IMAP/SMTP + CalDAV/CardDAV, no JMAP/ManageSieve) from one container via Axigen's built-in
+  **3-day trial/demo mode** (no license key). DAV home sets are `/Calendar/` and `/Contacts/`
+  (`matrix.include`; Axigen reports each from the mailbox root, and `/Calendar/Tasks/` ships
+  out of the box). It is a **self-provisioning custom image** (`Dockerfile` + `ax-entrypoint.sh`
+  + `provision.py`): a fresh demo starts with only the log/processing/cli/webadmin services and
+  no domain, so the entrypoint boots Axigen once, drives the CLI (port 7000) to create domain
+  `example.com` + users user1/user2 and open the canonical listeners (IMAP 143, submission 587,
+  HTTP/DAV 80), `SAVE CONFIG`, then **edits the top-level `services` list** in the saved
+  `axigen.cfg` to enable `imap smtpIncoming smtpOutgoing webmail` (there is no CLI verb for that
+  list) and execs the final server. A `.provisioned` marker makes it idempotent; `down -v`
+  gives each run a fresh trial. **Licensing:** trial mode is evaluation-only, so this leg is
+  **reduced-trigger** — the `build.yaml` matrix gates its work steps behind
+  `RUN_LEG` (`matrix.backend != 'axigen' || event is workflow_dispatch/schedule`), so on push
+  the leg's steps skip (the leg still reports success) and `publish` never depends on the trial
+  backend; a nightly `schedule:` runs it for real. Axigen enforces auth and emails iMIP
+  invitations from the same system, so the auth-rejection and CalDav-auto-schedule tests run
+  (not skipped); JMAP/ManageSieve tests self-skip by probe.
 - Tests use **GUID subjects/markers** and poll with `WaitUntil` — never assume an empty
   mailbox and never assert on absolute counts. `MailboxJanitor` exists for best-effort
   purges when needed.
@@ -621,7 +640,8 @@ banner. Rules:
     it to a `type=gha` build cache. Uses the default docker-container buildx driver (the old
     single-daemon containerd-store step is gone; the job split replaces daemon layer reuse
     with the shared cache).
-  - `integration` — `strategy.matrix.backend: [stalwart, mailserver, cyrus, baikal]`, `fail-fast: false`,
+  - `integration` — `strategy.matrix.backend: [stalwart, mailserver, cyrus, baikal, axigen]`
+    (axigen is reduced-trigger via `RUN_LEG` — dispatch/schedule only), `fail-fast: false`,
     `needs: test`. Each leg loads the cached test image (`cache-from: type=gha`, no
     recompile), `docker compose ... up --wait`s its backend + a Postgres sidecar, warms mail,
     and runs the suite `--no-build` with `--network host` (so `localhost` reaches the

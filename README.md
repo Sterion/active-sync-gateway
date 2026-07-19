@@ -133,7 +133,8 @@ MS-ASCNTC, MS-ASTZ) in modern async C#.
 
 - ~330 automated tests, including an integration suite that hosts the gateway in-process
   and drives it with a real WBXML-speaking mini-EAS client against **live backends**
-  (Stalwart; docker-mailserver + Radicale; Cyrus IMAP; Baikal + docker-mailserver).
+  (Stalwart; docker-mailserver + Radicale; Cyrus IMAP; Baikal + docker-mailserver; and Axigen
+  in trial mode on a nightly, reduced-trigger leg).
 - CI compiles the solution exactly once and only pushes an image after both the unit and
   integration suites pass.
 - Async end-to-end: all I/O uses async/await with `CancellationToken` propagation;
@@ -1088,6 +1089,12 @@ docker compose -f docker/backends/cyrus/docker-compose.yml up -d --build --wait
 # self-provisioning custom image bakes the config + a seeded SQLite DB, so DAV works on first
 # boot with no installer. Home-sets live under /dav.php/…/{user}/.
 docker compose -f docker/backends/baikal/docker-compose.yml up -d --build --wait
+
+# Axigen full groupware (IMAP/SMTP + CalDAV/CardDAV) via its built-in 3-day trial/demo mode.
+# A self-provisioning custom image creates the domain/users and opens the listeners on first
+# boot. Trial mode is EVALUATION ONLY, so in CI this leg is reduced-trigger (nightly / dispatch).
+# Home-sets live under /Calendar/ and /Contacts/.
+docker compose -f docker/backends/axigen/docker-compose.yml up -d --build --wait
 ```
 
 Or run the suite against **every** stack in turn with one command (brings each up, tests,
@@ -1108,12 +1115,15 @@ scripts/test-backends.sh               # Linux / devcontainer
   pipeline that compiles the solution exactly once:
   - **`test`** — the Dockerfile `test` stage builds everything and runs the unit tests,
     exporting every layer to a `type=gha` build cache.
-  - **`integration`** — a matrix leg per backend (`stalwart`, `mailserver`, `cyrus`, `baikal`)
-    runs in parallel. Each loads the cached test image, brings its backend + a throwaway
-    Postgres up, and runs the integration suite **from that image** (`dotnet test --no-build`).
-    Tests for capabilities a backend lacks (JMAP/Sieve on docker-mailserver, CalDAV
-    free-busy on Radicale, SMTP submission / password-enforcement on the Cyrus test image,
-    JMAP/Sieve on the Baikal DAV stack) skip cleanly. Legs push nothing.
+  - **`integration`** — a matrix leg per backend (`stalwart`, `mailserver`, `cyrus`, `baikal`,
+    `axigen`) runs in parallel. Each loads the cached test image, brings its backend + a
+    throwaway Postgres up, and runs the integration suite **from that image**
+    (`dotnet test --no-build`). Tests for capabilities a backend lacks (JMAP/Sieve on
+    docker-mailserver, CalDAV free-busy on Radicale, SMTP submission / password-enforcement on
+    the Cyrus test image, JMAP/Sieve on the Baikal DAV stack) skip cleanly. Legs push nothing.
+    The **`axigen`** leg runs Axigen's evaluation-only trial mode, so it is reduced-trigger —
+    real work happens only on `workflow_dispatch`/`schedule` (nightly); on push its steps skip
+    and it never gates `publish`.
   - **`publish`** — only when **every** backend leg is green: the multi-arch runtime image,
     the NuGet packages and the release zips are built from the warm cache and pushed.
 
