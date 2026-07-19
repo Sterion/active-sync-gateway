@@ -36,17 +36,13 @@ public static class ServiceCollectionExtensions
 		services.AddSingleton<IBackendProvider, LocalBackendProvider>();
 		services.AddSingleton<BackendProviderRegistry>();
 		services.AddSingleton<BackendConfigurationValidator>();
-		// The validator reports section problems as a full list first; this factory is for
-		// consumers after startup validation, so it fails hard.
-		services.AddSingleton(sp =>
-		{
-			List<string> failures = new();
-			BackendRolesConfig roles = BackendRolesConfig.Load(
-				sp.GetRequiredService<IConfiguration>(), failures);
-			return failures.Count == 0
-				? roles
-				: throw new InvalidOperationException(string.Join(Environment.NewLine, failures));
-		});
+		// Live-reloadable backend role configuration: the provider rebuilds it when a settings
+		// change moves the ActiveSync:Backends subtree (and throws on an invalid STARTUP config,
+		// as the old factory did). BackendRolesConfig is exposed as a current snapshot for
+		// consumers that read once (the CLI, banners); the resolver and session factory take the
+		// provider itself so they see live backend changes.
+		services.AddSingleton<BackendRolesProvider>();
+		services.AddTransient(sp => sp.GetRequiredService<BackendRolesProvider>().Current);
 		return services;
 	}
 

@@ -29,17 +29,20 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	private readonly IOptionsMonitor<ActiveSyncOptions> _options;
 	private readonly BackendProviderRegistry _registry;
 	private readonly AccountResolver _resolver;
+	private readonly BackendRolesProvider _rolesProvider;
 	private readonly ConcurrentDictionary<string, Lazy<CompositeBackendSession>> _sessions = new();
 
 	public BackendSessionFactory(
 		IOptionsMonitor<ActiveSyncOptions> options,
 		AccountResolver resolver,
+		BackendRolesProvider rolesProvider,
 		ISyncDbContextFactory dbFactory,
 		BackendProviderRegistry registry,
 		ILogger<BackendSessionFactory> logger)
 	{
 		_options = options;
 		_resolver = resolver;
+		_rolesProvider = rolesProvider;
 		_dbFactory = dbFactory;
 		_registry = registry;
 		_logger = logger;
@@ -52,6 +55,9 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			_authCache.Clear();
 			_authNegativeCache.Clear();
 		};
+		// A live global backend-settings change (eas config set Backends:...) recycles every
+		// session so the next request rebuilds connections against the new host/port/settings.
+		_rolesProvider.Changed += RecycleAll;
 		// Per-user live-count gauge. Keys are "user\ndevice"; only materialized Lazy
 		// values count (an unrealized slot is not a live connection).
 		GatewayMetrics.SetSessionsObserver(() => _sessions
@@ -192,6 +198,26 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 				_authNegativeCache[cacheKey] =
 					(passwordHash, DateTime.UtcNow.AddSeconds(_options.CurrentValue.Auth.NegativeCacheSeconds));
 		}
+	}
+
+	/// <summary>
+	///   Recycles every cached session and per-user watcher after a live global backend-settings
+	///   change, so the next request rebuilds connections against the new host/port/settings. EAS
+	///   is stateless HTTP — evicting a session does NOT disconnect the phone; its next Ping/Sync
+	///   transparently reopens the backend connection. Auth verdict caches are cleared too.
+	/// </summary>
+	private void RecycleAll()
+	{
+		_logger.LogInformation("Backend settings changed — recycling all backend sessions");
+		foreach (string key in _sessions.Keys.ToList())
+			if (_sessions.TryRemove(key, out Lazy<CompositeBackendSession>? removed) && removed.IsValueCreated)
+				_ = DisposeSessionAsync(removed.Value);
+		_authCache.Clear();
+		_authNegativeCache.Clear();
+		// With no live sessions left, every provider's per-user resources (IDLE watchers) are trimmed.
+		foreach (IBackendProvider provider in _registry.All)
+			if (provider is IPerUserResourceOwner owner)
+				owner.TrimUserResources(new HashSet<string>(StringComparer.Ordinal));
 	}
 
 	private void EvictIdleSessions()

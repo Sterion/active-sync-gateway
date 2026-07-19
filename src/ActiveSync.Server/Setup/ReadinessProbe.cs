@@ -15,7 +15,7 @@ namespace ActiveSync.Server.Setup;
 /// </summary>
 public sealed class ReadinessProbe(
 	ISyncDbContextFactory dbFactory,
-	BackendRolesConfig roles,
+	BackendRolesProvider rolesProvider,
 	BackendProviderRegistry registry,
 	ILogger<ReadinessProbe> logger)
 {
@@ -33,7 +33,7 @@ public sealed class ReadinessProbe(
 				return (cached.Components.Values.All(v => v), cached.Components);
 
 			List<(string Name, Task<bool> Probe)> probes = [("database", ProbeDatabaseAsync(ct))];
-			foreach ((BackendRole role, RoleAssignment assignment) in roles.Assignments.OrderBy(a => a.Key))
+			foreach ((BackendRole role, RoleAssignment assignment) in rolesProvider.Current.Assignments.OrderBy(a => a.Key))
 				if (registry.GetFor(assignment.ProviderName, role) is IReadinessSource source)
 					probes.Add(($"{role}".ToLowerInvariant(),
 						ProbeRoleAsync(source, role, assignment, ct)));

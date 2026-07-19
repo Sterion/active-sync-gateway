@@ -50,6 +50,12 @@ public class AccountResolverTests
 		], NullLogger<BackendProviderRegistry>.Instance);
 	}
 
+	private static BackendRolesProvider RolesProvider(Dictionary<string, string?> config)
+	{
+		IConfigurationRoot root = new ConfigurationBuilder().AddInMemoryCollection(config).Build();
+		return new BackendRolesProvider(root);
+	}
+
 	private static BackendRolesConfig Roles(Dictionary<string, string?> config)
 	{
 		IConfigurationRoot root = new ConfigurationBuilder().AddInMemoryCollection(config).Build();
@@ -62,7 +68,7 @@ public class AccountResolverTests
 	private static AccountResolver Resolver(ActiveSyncOptions options, Dictionary<string, string?> config)
 	{
 		return new AccountResolver(
-			TestOptionsMonitor.Of(options), Roles(config), Registry());
+			TestOptionsMonitor.Of(options), RolesProvider(config), Registry());
 	}
 
 	// ---------- pass-through baseline ----------

@@ -26,7 +26,7 @@ public sealed record MergedAccount(AccountOptions Options, bool FromDatabase, bo
 public sealed class AccountResolver
 {
 	private readonly IOptionsMonitor<ActiveSyncOptions> _options;
-	private readonly BackendRolesConfig _roles;
+	private readonly BackendRolesProvider _rolesProvider;
 	private readonly BackendProviderRegistry _registry;
 	private readonly AccountStore? _store;
 	private readonly ILogger<AccountResolver>? _logger;
@@ -34,6 +34,7 @@ public sealed class AccountResolver
 	private volatile Snapshot _snapshot;
 	private long _nextCheckTicks;
 	private Guid? _lastStamp;
+	private Dictionary<string, AccountOptions>? _lastDbUsers;
 	private bool _refreshErrorLogged;
 
 	/// <summary>Raised after the snapshot was rebuilt from a database change (caches should reset).</summary>
@@ -41,23 +42,26 @@ public sealed class AccountResolver
 
 	public AccountResolver(
 		IOptionsMonitor<ActiveSyncOptions> options,
-		BackendRolesConfig roles,
+		BackendRolesProvider rolesProvider,
 		BackendProviderRegistry registry,
 		AccountStore? store = null,
 		ILogger<AccountResolver>? logger = null)
 	{
 		_options = options;
-		_roles = roles;
+		_rolesProvider = rolesProvider;
 		_registry = registry;
 		_store = store;
 		_logger = logger;
 		// Config-only snapshot first; database entries arrive with the first EnsureFreshAsync
 		// (the server forces one right after migrations, before any request).
-		_snapshot = BuildSnapshot(_options.CurrentValue, _roles, _registry, null, logger);
+		_snapshot = BuildSnapshot(_options.CurrentValue, _rolesProvider.Current, _registry, null, logger);
+		// A live backend-settings change (eas config set Backends:...) rebuilds the snapshot so
+		// declared users pick up the new global role settings; pass-through reads Current directly.
+		_rolesProvider.Changed += OnRolesChanged;
 	}
 
 	/// <summary>The global role assignments (for banners, readiness probes and the CLI).</summary>
-	public BackendRolesConfig Roles => _roles;
+	public BackendRolesConfig Roles => _rolesProvider.Current;
 
 	/// <summary>The merged, effective user view (database entries replacing config ones).</summary>
 	public IReadOnlyDictionary<string, MergedAccount> MergedUsers => _snapshot.Users;
@@ -91,7 +95,8 @@ public sealed class AccountResolver
 				Dictionary<string, AccountOptions>? dbUsers = stamp is null
 					? null
 					: await _store.LoadAllAsync(_logger, ct).ConfigureAwait(false);
-				_snapshot = BuildSnapshot(_options.CurrentValue, _roles, _registry, dbUsers, _logger);
+				_lastDbUsers = dbUsers;
+				_snapshot = BuildSnapshot(_options.CurrentValue, _rolesProvider.Current, _registry, dbUsers, _logger);
 				_lastStamp = stamp;
 				_logger?.LogInformation(
 					"Accounts snapshot rebuilt: {Count} declared user(s) ({Db} from database)",
@@ -115,6 +120,19 @@ public sealed class AccountResolver
 				Environment.TickCount64 + (long)(Math.Max(refreshSeconds, 0) * 1000));
 			_refreshGate.Release();
 		}
+	}
+
+	/// <summary>
+	///   Rebuilds the snapshot when the global backend role configuration changed (a live
+	///   settings edit), so declared users inherit the new role settings. Uses the last-loaded
+	///   database users; pass-through resolution already reads the current roles directly. The
+	///   snapshot swap is atomic, so this needs no lock against the request-path refresh.
+	/// </summary>
+	private void OnRolesChanged()
+	{
+		_snapshot = BuildSnapshot(
+			_options.CurrentValue, _rolesProvider.Current, _registry, _lastDbUsers, _logger);
+		SnapshotChanged?.Invoke();
 	}
 
 	/// <summary>
@@ -144,7 +162,7 @@ public sealed class AccountResolver
 		{
 			// Pass-through: same credentials everywhere, the global role sections verbatim.
 			Dictionary<BackendRole, ResolvedRole> passThrough = new();
-			foreach ((BackendRole role, RoleAssignment assignment) in _roles.Assignments)
+			foreach ((BackendRole role, RoleAssignment assignment) in _rolesProvider.Current.Assignments)
 				passThrough[role] = new ResolvedRole(role, assignment.ProviderName, assignment.Settings, presented);
 			return new ResolvedAccount(
 				login, login.Contains('@') ? login : null, false, passThrough);

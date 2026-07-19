@@ -54,9 +54,7 @@ public sealed class AccountStoreTests : IDisposable
 				["ActiveSync:Backends:MailSubmit:Provider"] = "smtp",
 				["ActiveSync:Backends:MailSubmit:Host"] = "smtp.global",
 			}).Build();
-		List<string> failures = new();
-		BackendRolesConfig roles = BackendRolesConfig.Load(config, failures);
-		Assert.Empty(failures);
+		BackendRolesProvider rolesProvider = new(config);
 		BackendProviderRegistry registry = new(
 		[
 			new ActiveSync.Backends.Imap.ImapBackendProvider(
@@ -64,7 +62,7 @@ public sealed class AccountStoreTests : IDisposable
 			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
 			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!)
 		], NullLogger<BackendProviderRegistry>.Instance);
-		return new AccountResolver(TestOptionsMonitor.Of(options), roles, registry, _store);
+		return new AccountResolver(TestOptionsMonitor.Of(options), rolesProvider, registry, _store);
 	}
 
 	[Fact]
