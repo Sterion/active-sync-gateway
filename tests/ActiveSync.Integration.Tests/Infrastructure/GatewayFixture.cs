@@ -84,7 +84,9 @@ public sealed class GatewayFixture : IAsyncLifetime
 			return rows;
 		}
 
-		using SqliteConnection sqlite = new($"{_localStoresConnectionString};Mode=ReadOnly");
+		// Not Mode=ReadOnly: a strictly read-only connection cannot reliably read a WAL database
+		// (the gateway runs in WAL). A normal connection doing only SELECTs sees committed data.
+		using SqliteConnection sqlite = new(_localStoresConnectionString);
 		sqlite.Open();
 		using SqliteCommand sqliteCommand = sqlite.CreateCommand();
 		sqliteCommand.CommandText =

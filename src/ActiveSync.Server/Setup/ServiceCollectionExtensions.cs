@@ -66,7 +66,7 @@ public static class ServiceCollectionExtensions
 				break;
 			case "sqlite":
 				AddProvider<SqliteSyncDbContext>(services, (sp, db) =>
-					db.UseSqlite(ConnectionString(sp)));
+					db.UseSqlite(ConnectionString(sp)).AddInterceptors(new SqlitePragmaInterceptor()));
 				break;
 			default:
 				throw new InvalidOperationException(

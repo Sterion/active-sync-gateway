@@ -120,6 +120,19 @@ public sealed class LogOptions
 	///   choice for Loki/Elastic; multi-line payload dumps become single events).
 	/// </summary>
 	public string Format { get; set; } = "Text";
+
+	/// <summary>
+	///   Also persist logs to the state database (a rolling buffer for `eas logs` and a future
+	///   admin UI). Live-toggleable. Trace/Debug are never persisted regardless — only the
+	///   rendered event at <see cref="DbMinimumLevel" /> or above.
+	/// </summary>
+	public bool Database { get; set; } = true;
+
+	/// <summary>Minimum level persisted to the database: Information, Warning, Error or Fatal.</summary>
+	public string DbMinimumLevel { get; set; } = "Information";
+
+	/// <summary>Days of database log history to keep (a background sweep deletes older; 0 disables the sweep).</summary>
+	public int RetentionDays { get; set; } = 7;
 }
 
 public sealed class SelfSignedTlsOptions

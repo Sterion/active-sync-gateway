@@ -61,12 +61,16 @@ public partial class Program
 			o.ValidateOnBuild = true;
 		});
 
+		// Persists Information+ to the state database; its background drain begins after migrations
+		// (Activate below), so it never writes before the table exists.
+		DatabaseLogSink databaseLogSink = new();
 		builder.Host.UseSerilog((context, configuration) =>
 		{
 			configuration
 				.ReadFrom.Configuration(context.Configuration)
 				.Enrich.FromLogContext();
 			LoggingSetup.ConfigureConsole(configuration, context.Configuration);
+			configuration.WriteTo.Sink(databaseLogSink);
 		});
 
 		builder.Services.AddOptions<ActiveSyncOptions>()
@@ -130,6 +134,7 @@ public partial class Program
 		builder.Services.AddSingleton(settingsSource.Provider);
 		builder.Services.AddSingleton<SettingsRefresher>();
 		builder.Services.AddHostedService<SettingsRefreshService>();
+		builder.Services.AddHostedService<LogRetentionService>();
 		builder.Services.AddSingleton<AuthThrottle>();
 		builder.Services.AddSingleton<LocalChangeNotifier>();
 		builder.Services.AddBackendProviders();
@@ -174,6 +179,10 @@ public partial class Program
 		// already covered host construction) and prime the change-stamp poll before the banner.
 		await app.Services.GetRequiredService<SettingsRefresher>()
 			.EnsureFreshAsync(true, CancellationToken.None);
+
+		// Start persisting logs now the LogEntries table exists (events buffered since startup flush).
+		databaseLogSink.Activate(app.Services.GetRequiredService<ISyncDbContextFactory>(),
+			app.Services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>());
 
 		// Load (or generate once) the self-signed certificate — the Kestrel selector above
 		// picks it up when the server starts listening a few lines further down.

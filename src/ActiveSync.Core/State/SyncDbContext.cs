@@ -22,6 +22,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	public DbSet<AccountsStamp> AccountsStamps => Set<AccountsStamp>();
 	public DbSet<GlobalSetting> GlobalSettings => Set<GlobalSetting>();
 	public DbSet<SettingsStamp> SettingsStamps => Set<SettingsStamp>();
+	public DbSet<LogEntry> LogEntries => Set<LogEntry>();
 	public DbSet<ServerCertificate> ServerCertificates => Set<ServerCertificate>();
 	public DbSet<OofSetting> OofSettings => Set<OofSetting>();
 	public DbSet<SharedCalendarGrant> SharedCalendarGrants => Set<SharedCalendarGrant>();
@@ -79,6 +80,10 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 		// Single well-known row (Id=1), same explicit-key idiom as AccountsStamp.
 		modelBuilder.Entity<SettingsStamp>(e =>
 			e.Property(s => s.Id).ValueGeneratedNever());
+
+		// Indexed by time for the `eas logs` window queries and the retention sweep.
+		modelBuilder.Entity<LogEntry>(e =>
+			e.HasIndex(l => l.TimestampUtc));
 
 		// Single well-known row (Id=1) — same explicit-key idiom as AccountsStamp, and the
 		// primary-key conflict is what serializes concurrent first-boot generation races.

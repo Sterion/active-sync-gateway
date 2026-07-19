@@ -77,6 +77,13 @@ internal static class SettingKeys
 			"Console line shape.", EnumValues: ["Simple", "Standard", "Extended"]),
 		new("ActiveSync:Log:Format", ValueType.Enum, true, "Text",
 			"Console output format.", EnumValues: ["Text", "Json"]),
+		new("ActiveSync:Log:Database", ValueType.Bool, false, "true",
+			"Persist logs to the state database (for 'eas logs' and a future admin UI)."),
+		new("ActiveSync:Log:DbMinimumLevel", ValueType.Enum, false, "Information",
+			"Minimum level persisted to the database.",
+			EnumValues: ["Information", "Warning", "Error", "Fatal"]),
+		new("ActiveSync:Log:RetentionDays", ValueType.Int, false, "7",
+			"Days of database log history to keep (0 disables the sweep).", Min: 0, Max: 3650),
 
 		new("ActiveSync:Policy:Enabled", ValueType.Bool, false, "false",
 			"Master switch for device policy enforcement."),

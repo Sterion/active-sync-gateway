@@ -54,6 +54,11 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 			failures.Add($"ActiveSync:Log:Mode '{options.Log.Mode}' is unknown (use Simple, Standard or Extended).");
 		if (options.Log.Format.ToLowerInvariant() is not ("text" or "json"))
 			failures.Add($"ActiveSync:Log:Format '{options.Log.Format}' is unknown (use Text or Json).");
+		if (options.Log.DbMinimumLevel.ToLowerInvariant() is not ("information" or "warning" or "error" or "fatal"))
+			failures.Add($"ActiveSync:Log:DbMinimumLevel '{options.Log.DbMinimumLevel}' is unknown " +
+			             "(use Information, Warning, Error or Fatal).");
+		if (options.Log.RetentionDays < 0)
+			failures.Add("ActiveSync:Log:RetentionDays must be 0 or greater.");
 
 		ValidateEncryption(options.Encryption, failures);
 

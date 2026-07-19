@@ -283,6 +283,42 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.ToTable("LocalItems");
                 });
 
+            modelBuilder.Entity("ActiveSync.Core.State.LogEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Exception")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Machine")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceContext")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("TimestampUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("User")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TimestampUtc");
+
+                    b.ToTable("LogEntries");
+                });
+
             modelBuilder.Entity("ActiveSync.Core.State.LoginBlock", b =>
                 {
                     b.Property<int>("Id")

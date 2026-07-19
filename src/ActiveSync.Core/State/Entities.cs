@@ -246,6 +246,23 @@ public class SettingsStamp
 }
 
 /// <summary>
+///   One persisted log line — a rolling buffer for `eas logs` and a future admin UI. Written by
+///   the DatabaseLogSink at Information or above (never Trace/Debug wire dumps); old rows are swept
+///   per ActiveSync:Log:RetentionDays. <see cref="Machine" /> disambiguates rows across replicas.
+/// </summary>
+public class LogEntry
+{
+	public long Id { get; set; }
+	public DateTime TimestampUtc { get; set; }
+	public required string Level { get; set; }
+	public required string Message { get; set; }
+	public string? Exception { get; set; }
+	public string? SourceContext { get; set; }
+	public string? User { get; set; }
+	public string? Machine { get; set; }
+}
+
+/// <summary>
 ///   The gateway's self-signed TLS certificate (Id always 1): a PKCS#12 blob, base64-encoded
 ///   and sealed with the Encryption master key, generated on first serve and shared by every
 ///   replica so the fingerprint stays stable. Deleting the row generates a fresh certificate
