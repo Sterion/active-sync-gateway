@@ -1,6 +1,6 @@
 using System.ComponentModel;
-using System.Text.Json;
 using ActiveSync.Core.Accounts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
@@ -35,21 +35,13 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 	protected abstract Task<int> RunAsync(
 		AccountStore store, ActiveSyncOptions options, TSettings settings, CancellationToken cancellationToken);
 
-	protected static AccountOptions Clone(AccountOptions source)
-	{
-		return JsonSerializer.Deserialize<AccountOptions>(
-			JsonSerializer.Serialize(source, AccountStore.JsonOptions), AccountStore.JsonOptions)!;
-	}
+	protected static AccountOptions Clone(AccountOptions source) => AccountEditing.Clone(source);
 
 	/// <summary>DB entry, else a copy of the config entry, else a fresh one.</summary>
-	protected static async Task<AccountOptions> LoadStartingEntryAsync(
+	protected static Task<AccountOptions> LoadStartingEntryAsync(
 		AccountStore store, ActiveSyncOptions options, string login, CancellationToken ct)
 	{
-		if (await store.GetAsync(login, ct) is { } fromDb)
-			return fromDb;
-		return options.Users?.GetValueOrDefault(login) is { } fromConfig
-			? Clone(fromConfig)
-			: new AccountOptions();
+		return AccountEditing.LoadStartingEntryAsync(store, options, login, ct);
 	}
 
 	/// <summary>Validates, saves and reports; refuses invalid entries with config-grade messages.</summary>
@@ -101,7 +93,7 @@ internal sealed class UserListCommand(IAnsiConsole terminal) : UserCommandBase<U
 		}
 
 		Table table = new Table().Border(TableBorder.Rounded);
-		table.AddColumns("Login", "Origin", "Mail", "Gateway pw", "Overrides");
+		table.AddColumns("Login", "Origin", "Mail", "Gateway pw", "Admin", "Overrides");
 		foreach (string login in logins)
 		{
 			bool inDb = dbEntries.Any(e => string.Equals(e.UserName, login, StringComparison.OrdinalIgnoreCase));
@@ -122,6 +114,7 @@ internal sealed class UserListCommand(IAnsiConsole terminal) : UserCommandBase<U
 						? $"{roleName.ToLowerInvariant()}={switched}"
 						: roleName.ToLowerInvariant());
 			AddRow(table, login, origin, effective.MailAddress ?? "-", password,
+				effective.Admin == true ? "yes" : "-",
 				sections.Count > 0 ? string.Join(", ", sections) : "-");
 		}
 
@@ -260,65 +253,40 @@ internal sealed class UserSetCommand(IAnsiConsole terminal) : UserCommandBase<Us
 	}
 
 	/// <summary>
-	///   Password keys on argv: an already-prepared value (pbkdf2$/enc:v1:) is stored as-is;
-	///   plaintext is hashed (gateway Password) or sealed (backend passwords) with a warning —
-	///   the stdin commands ('user password'/'user secret') keep secrets out of shell history.
+	///   Password keys on argv, via the shared <see cref="AccountSecretPolicy" /> (same rules
+	///   as the web API): an already-prepared value (pbkdf2$/enc:v1:) is stored as-is; plaintext
+	///   is hashed (gateway Password) or sealed (backend passwords) with a shell-history
+	///   warning — the stdin commands ('user password'/'user secret') keep secrets out of argv.
 	/// </summary>
 	private static async Task<string?> PrepareSecretAsync(
 		AccountFieldPaths.FieldPath field, string raw, ActiveSyncOptions options)
 	{
 		bool isGatewayPassword = !field.Key.Contains(':');
-		if (isGatewayPassword)
+		AccountSecretPolicy.SecretResult result = isGatewayPassword
+			? AccountSecretPolicy.PrepareGatewayPassword(raw)
+			: AccountSecretPolicy.PrepareBackendPassword(raw, options.Encryption, field.Key);
+		if (result.Error is not null)
 		{
-			if (GatewayPasswordHasher.IsHashed(raw))
-			{
-				if (!GatewayPasswordHasher.TryParse(raw, out string? error))
-				{
-					await Console.Error.WriteLineAsync($"Not a valid pbkdf2$ value: {error}");
-					return null;
-				}
-
-				return raw;
-			}
-
-			if (SecretValue.IsSealed(raw))
-			{
-				await Console.Error.WriteLineAsync(
-					"The gateway Password takes a pbkdf2$ hash (or plaintext), not an enc:v1: sealed value.");
-				return null;
-			}
-
-			await Console.Error.WriteLineAsync(
-				"Warning: plaintext password on the command line (visible in shell history/ps) — " +
-				"prefer: echo -n '...' | eas user password <login>. Stored as a pbkdf2$ hash.");
-			return GatewayPasswordHasher.Hash(raw);
-		}
-
-		if (SecretValue.IsSealed(raw))
-			return raw;
-		if (GatewayPasswordHasher.IsHashed(raw))
-		{
-			await Console.Error.WriteLineAsync(
-				$"{field.Key} is a backend password — it must be the real password (sealed enc:v1: or plaintext), " +
-				"not a pbkdf2$ hash the backend cannot verify against.");
+			await Console.Error.WriteLineAsync(result.Error);
 			return null;
 		}
 
-		byte[]? key = EncryptionKeyLoader.TryLoadKey(options.Encryption, out _);
-		if (key is null)
+		string? warning = result.Plaintext switch
 		{
-			await Console.Error.WriteLineAsync(
+			AccountSecretPolicy.PlaintextDisposition.Hashed =>
+				"Warning: plaintext password on the command line (visible in shell history/ps) — " +
+				"prefer: echo -n '...' | eas user password <login>. Stored as a pbkdf2$ hash.",
+			AccountSecretPolicy.PlaintextDisposition.Sealed =>
+				"Warning: plaintext password on the command line (visible in shell history/ps) — " +
+				$"prefer: echo -n '...' | eas user secret <login> {field.Key}. Stored sealed (enc:v1:).",
+			AccountSecretPolicy.PlaintextDisposition.StoredPlaintext =>
 				"Warning: no Encryption key configured — the backend password is stored in PLAINTEXT. " +
-				"Prefer: echo -n '...' | eas user secret <login> " + field.Key);
-			return raw;
-		}
-
-		await Console.Error.WriteLineAsync(
-			"Warning: plaintext password on the command line (visible in shell history/ps) — " +
-			$"prefer: echo -n '...' | eas user secret <login> {field.Key}. Stored sealed (enc:v1:).");
-		string sealedValue = SecretValue.Seal(raw, key);
-		System.Security.Cryptography.CryptographicOperations.ZeroMemory(key);
-		return sealedValue;
+				$"Prefer: echo -n '...' | eas user secret <login> {field.Key}",
+			_ => null
+		};
+		if (warning is not null)
+			await Console.Error.WriteLineAsync(warning);
+		return result.Value;
 	}
 }
 

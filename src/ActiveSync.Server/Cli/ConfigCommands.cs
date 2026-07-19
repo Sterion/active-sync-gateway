@@ -1,3 +1,4 @@
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Settings;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -51,6 +52,10 @@ internal abstract class SettingsCommandBase<TSettings>(IAnsiConsole terminal) : 
 	/// <summary>Plain-text row cells — Text, not markup, so user-supplied strings render verbatim.</summary>
 	protected static void AddRow(Table table, params string[] cells)
 		=> table.AddRow(cells.Select(c => new Text(c)).ToArray());
+
+	/// <summary>Masks a secret-flagged key's value; unset values stay readable.</summary>
+	protected static string Mask(SettingKeys.SettingKey? definition, string value)
+		=> definition is { Secret: true } && value != "(unset)" ? "***" : value;
 }
 
 internal sealed class ConfigListCommand(IAnsiConsole terminal) : SettingsCommandBase<ConfigListCommand.Settings>(terminal)
@@ -68,7 +73,7 @@ internal sealed class ConfigListCommand(IAnsiConsole terminal) : SettingsCommand
 		foreach (SettingKeys.SettingKey key in SettingKeys.All)
 		{
 			(string value, string source) = Effective(key.Key, key.Default, db, fileConfig);
-			AddRow(table, key.Key, value, source, key.Tier);
+			AddRow(table, key.Key, Mask(key, value), source, key.Tier);
 			shown.Add(key.Key);
 		}
 
@@ -86,7 +91,8 @@ internal sealed class ConfigListCommand(IAnsiConsole terminal) : SettingsCommand
 		foreach (string key in extra)
 		{
 			(string value, string source) = Effective(key, null, db, fileConfig);
-			AddRow(table, key, value, source, SettingKeys.Find(key)?.Tier ?? "live");
+			SettingKeys.SettingKey? definition = SettingKeys.Find(key);
+			AddRow(table, key, Mask(definition, value), source, definition?.Tier ?? "live");
 		}
 
 		Terminal.Write(table);
@@ -118,7 +124,7 @@ internal sealed class ConfigGetCommand(IAnsiConsole terminal) : SettingsCommandB
 			return 1;
 		}
 
-		Terminal.WriteLine($"{settings.Key} = {value}  (source: {source}"
+		Terminal.WriteLine($"{settings.Key} = {Mask(definition, value)}  (source: {source}"
 		                   + (definition is not null ? $"; tier: {definition.Tier}" : "") + ")");
 		return 0;
 	}

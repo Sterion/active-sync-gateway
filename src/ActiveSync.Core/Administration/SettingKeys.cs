@@ -1,12 +1,13 @@
 using System.Globalization;
 using ActiveSync.Core.Backend;
 
-namespace ActiveSync.Server.Cli;
+namespace ActiveSync.Core.Administration;
 
 /// <summary>
-///   The catalogue of CLI-settable global configuration keys: full configuration path → type,
+///   The catalogue of settable global configuration keys: full configuration path → type,
 ///   value bounds, apply tier (live vs restart) and one-line help. It is the single source of
-///   truth for `eas config set/unset/list` validation and enumeration. Backend role settings
+///   truth for `eas config set/unset/list` AND the web admin settings editor — both surfaces
+///   validate and enumerate from here. Backend role settings
 ///   (<c>ActiveSync:Backends:&lt;Role&gt;:*</c>) are open-ended per provider, so they are matched
 ///   dynamically rather than listed. The two bootstrap sections (Database, Encryption) are
 ///   explicitly NOT settable — they are needed to open and decrypt the database that stores
@@ -24,7 +25,8 @@ internal static class SettingKeys
 		string Help,
 		string[]? EnumValues = null,
 		long? Min = null,
-		long? Max = null)
+		long? Max = null,
+		bool Secret = false)
 	{
 		public string Tier => Restart ? "restart" : "live";
 	}
@@ -78,7 +80,7 @@ internal static class SettingKeys
 		new("ActiveSync:Log:Format", ValueType.Enum, true, "Text",
 			"Console output format.", EnumValues: ["Text", "Json"]),
 		new("ActiveSync:Log:Database", ValueType.Bool, false, "true",
-			"Persist logs to the state database (for 'eas logs' and a future admin UI)."),
+			"Persist logs to the state database (for 'eas logs' and the web admin logs view)."),
 		new("ActiveSync:Log:DbMinimumLevel", ValueType.Enum, false, "Information",
 			"Minimum level persisted to the database.",
 			EnumValues: ["Information", "Warning", "Error", "Fatal"]),
@@ -123,6 +125,29 @@ internal static class SettingKeys
 			"Serve HTTPS with a persisted self-signed certificate."),
 		new("ActiveSync:SelfSignedTls:Port", ValueType.Int, true, "5443",
 			"Self-signed HTTPS listen port.", Min: 1, Max: 65535),
+
+		new("ActiveSync:WebUi:Admin:Enabled", ValueType.Bool, false, "false",
+			"Serve the web admin interface under /admin."),
+		new("ActiveSync:WebUi:UserPortal:Enabled", ValueType.Bool, false, "false",
+			"Serve the user self-service portal under /user."),
+		new("ActiveSync:WebUi:Oidc:Authority", ValueType.String, true, null,
+			"OIDC issuer URL; when set, web logins go through the identity provider (local web login off)."),
+		new("ActiveSync:WebUi:Oidc:ClientId", ValueType.String, true, null,
+			"OIDC client id of this gateway."),
+		new("ActiveSync:WebUi:Oidc:ClientSecret", ValueType.String, true, null,
+			"OIDC client secret (plaintext or enc:v1: sealed).", Secret: true),
+		new("ActiveSync:WebUi:Oidc:Scopes", ValueType.String, true, "openid profile email",
+			"Space-separated OIDC scopes to request."),
+		new("ActiveSync:WebUi:Oidc:LoginClaim", ValueType.String, true, "preferred_username",
+			"Token claim mapped to the gateway login."),
+		new("ActiveSync:WebUi:Oidc:AdminClaim", ValueType.String, false, null,
+			"Token claim granting web admin access (alternative to the account Admin flag)."),
+		new("ActiveSync:WebUi:Oidc:AdminClaimValue", ValueType.String, false, null,
+			"Required value of AdminClaim (unset = any value grants admin)."),
+		new("ActiveSync:WebUi:Oidc:AutoProvision", ValueType.Bool, false, "false",
+			"Create a database account for unknown OIDC logins on first sign-in."),
+		new("ActiveSync:WebUi:Oidc:RequireHttpsMetadata", ValueType.Bool, true, "true",
+			"Require HTTPS for the OIDC discovery endpoint (disable only for dev)."),
 	];
 
 	private static readonly Dictionary<string, SettingKey> ByKey =
@@ -155,7 +180,8 @@ internal static class SettingKeys
 		    parts[1].Equals("Backends", StringComparison.OrdinalIgnoreCase) &&
 		    Roles.Contains(parts[2]))
 			return new SettingKey(key, ValueType.String, false, null,
-				$"Backend setting for the {parts[2]} role (validated by its provider).");
+				$"Backend setting for the {parts[2]} role (validated by its provider).",
+				Secret: parts[^1].Equals("Password", StringComparison.OrdinalIgnoreCase));
 
 		return null;
 	}

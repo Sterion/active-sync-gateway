@@ -226,6 +226,70 @@ public sealed class MetricsOptions
 	public bool PerUser { get; set; } = true;
 }
 
+/// <summary>Web admin interface (/admin). Off by default; the enable flag applies live.</summary>
+public sealed class WebUiAdminOptions
+{
+	public bool Enabled { get; set; }
+}
+
+/// <summary>User self-service portal (/user). Off by default; the enable flag applies live.</summary>
+public sealed class WebUiUserPortalOptions
+{
+	public bool Enabled { get; set; }
+}
+
+/// <summary>
+///   OIDC login for the web interfaces. When <see cref="Authority" /> is set, ALL web logins
+///   go through the identity provider and the local login form is disabled (the local
+///   password is really the ActiveSync connect password). The mapped claim must match a
+///   declared account login unless <see cref="AutoProvision" /> creates one. Authority,
+///   client and scope changes need a restart (the OIDC handler registers at startup); the
+///   admin-claim and AutoProvision knobs apply live (evaluated per login).
+/// </summary>
+public sealed class WebUiOidcOptions
+{
+	/// <summary>Issuer URL of the identity provider (e.g. https://id.example.com/realms/main).</summary>
+	public string? Authority { get; set; }
+
+	public string? ClientId { get; set; }
+
+	/// <summary>Client secret, plaintext or "enc:v1:..." sealed with the encryption master key.</summary>
+	public string? ClientSecret { get; set; }
+
+	/// <summary>Space-separated scopes requested from the identity provider.</summary>
+	public string Scopes { get; set; } = "openid profile email";
+
+	/// <summary>Token claim mapped to the gateway login.</summary>
+	public string LoginClaim { get; set; } = "preferred_username";
+
+	/// <summary>
+	///   Token claim granting web ADMIN access as an alternative to the account Admin flag
+	///   (e.g. "groups"). Unset: only the account flag grants admin.
+	/// </summary>
+	public string? AdminClaim { get; set; }
+
+	/// <summary>Required value of <see cref="AdminClaim" /> (unset = any value grants admin).</summary>
+	public string? AdminClaimValue { get; set; }
+
+	/// <summary>
+	///   Create a database account entry for unknown OIDC logins on first sign-in, so they can
+	///   use the portal. Admin access for such accounts comes only from the admin claim until
+	///   an admin grants the flag.
+	/// </summary>
+	public bool AutoProvision { get; set; }
+
+	/// <summary>Require HTTPS for the OIDC discovery endpoint. Disable only for local dev IdPs.</summary>
+	public bool RequireHttpsMetadata { get; set; } = true;
+}
+
+/// <summary>The web interfaces (admin + user portal), served by the same listeners.</summary>
+public sealed class WebUiOptions
+{
+	public WebUiAdminOptions Admin { get; set; } = new();
+	public WebUiUserPortalOptions UserPortal { get; set; } = new();
+	public WebUiOidcOptions? Oidc { get; set; }
+}
+
 /// <summary>
 ///   Host options. Backend endpoints are NOT bound here — the ActiveSync:Backends section
 ///   is role-keyed raw configuration each role's provider binds itself (see
@@ -242,6 +306,7 @@ public sealed class ActiveSyncOptions
 	public LogOptions Log { get; set; } = new();
 	public PolicyOptions Policy { get; set; } = new();
 	public MetricsOptions Metrics { get; set; } = new();
+	public WebUiOptions WebUi { get; set; } = new();
 
 	/// <summary>
 	///   Public base URL of this gateway (e.g. https://eas.example.com) advertised by

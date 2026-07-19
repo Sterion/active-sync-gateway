@@ -153,6 +153,23 @@ public sealed class CliConfigTests : IDisposable
 	}
 
 	[Fact]
+	public void WebUiKeys_SettableAndSecretMasked()
+	{
+		// The live enable flag round-trips like any live key.
+		(int enableExit, _, string enableOut) = Run("config", "set", "ActiveSync:WebUi:Admin:Enabled", "true");
+		Assert.Equal(0, enableExit);
+		Assert.Contains("within ~1s", enableOut);
+
+		// A secret-flagged key is stored but never echoed back by get/list.
+		Assert.Equal(0, Run("config", "set", "ActiveSync:WebUi:Oidc:ClientSecret", "super-secret").ExitCode);
+		(_, _, string getOut) = Run("config", "get", "ActiveSync:WebUi:Oidc:ClientSecret");
+		Assert.Contains("***", getOut);
+		Assert.DoesNotContain("super-secret", getOut);
+		(_, _, string listOut) = Run("config", "list");
+		Assert.DoesNotContain("super-secret", listOut);
+	}
+
+	[Fact]
 	public void Set_BackendKey_IsAcceptedAndRestartTierNoted()
 	{
 		// Open-ended backend settings are accepted (validated on the server by the provider).

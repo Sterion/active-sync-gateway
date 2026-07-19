@@ -12,6 +12,17 @@
 		<ProjectReference Include="..\ActiveSync.Protocol\ActiveSync.Protocol.csproj" />
 	</ItemGroup>
 
+	<!-- The Administration namespace (settings catalogue, account field paths, secret policy)
+	     is deliberately internal: it is host plumbing shared by the CLI and the web UI, not
+	     part of the plugin contract this package publishes. -->
+	<ItemGroup>
+		<InternalsVisibleTo Include="ActiveSync.Server" />
+		<InternalsVisibleTo Include="ActiveSync.WebUi" />
+		<InternalsVisibleTo Include="ActiveSync.Core.Tests" />
+		<InternalsVisibleTo Include="ActiveSync.Server.Tests" />
+		<InternalsVisibleTo Include="ActiveSync.WebUi.Tests" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Extensions.Configuration" />
 		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" />

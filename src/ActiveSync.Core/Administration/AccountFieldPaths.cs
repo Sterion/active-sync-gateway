@@ -1,14 +1,15 @@
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 
-namespace ActiveSync.Server.Cli;
+namespace ActiveSync.Core.Administration;
 
 /// <summary>
-///   Config-path access to <see cref="AccountOptions" /> fields. Reserved keys are fixed
-///   ("MailAddress", "Password", "Backends:&lt;Role&gt;:Provider|Enabled|UserName|Password");
-///   provider settings are free-form under "Backends:&lt;Role&gt;:Settings:&lt;Key&gt;" — the
-///   host cannot enumerate them (each provider binds its own options), so they are accepted
-///   as-is and validated by the role's provider on save.
+///   Config-path access to <see cref="AccountOptions" /> fields, shared by the CLI and the
+///   web admin API. Reserved keys are fixed ("MailAddress", "Password", "Admin",
+///   "Backends:&lt;Role&gt;:Provider|Enabled|UserName|Password"); provider settings are
+///   free-form under "Backends:&lt;Role&gt;:Settings:&lt;Key&gt;" — the host cannot enumerate
+///   them (each provider binds its own options), so they are accepted as-is and validated by
+///   the role's provider on save.
 /// </summary>
 internal static class AccountFieldPaths
 {
@@ -20,7 +21,7 @@ internal static class AccountFieldPaths
 
 	internal static IReadOnlyCollection<string> Keys { get; } =
 	[
-		"MailAddress", "Password",
+		"MailAddress", "Password", "Admin",
 		"Backends:<Role>:Provider", "Backends:<Role>:Enabled",
 		"Backends:<Role>:UserName", "Backends:<Role>:Password",
 		"Backends:<Role>:Settings:<Key>",
@@ -39,6 +40,9 @@ internal static class AccountFieldPaths
 		if (key.Equals("Password", StringComparison.OrdinalIgnoreCase))
 			return new FieldPath("Password", typeof(string), true,
 				(account, value) => account.Password = (string?)value);
+		if (key.Equals("Admin", StringComparison.OrdinalIgnoreCase))
+			return new FieldPath("Admin", typeof(bool?), false,
+				(account, value) => account.Admin = (bool?)value);
 
 		string[] parts = key.Split(':');
 		if (parts.Length < 3 ||

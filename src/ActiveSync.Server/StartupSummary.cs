@@ -119,6 +119,10 @@ public static partial class StartupSummary
 			options.Auth.NegativeCacheSeconds > 0 ? $"{options.Auth.NegativeCacheSeconds}s" : "off");
 		if (httpsSummary is not null)
 			logger.LogInformation("HTTPS:    {State}", httpsSummary);
+		logger.LogInformation("WebUI:    admin {Admin}, user portal {Portal}{Oidc}",
+			options.WebUi.Admin.Enabled ? "/admin" : "off",
+			options.WebUi.UserPortal.Enabled ? "/user" : "off",
+			options.WebUi.Oidc?.Authority is { Length: > 0 } authority ? $", OIDC {authority}" : "");
 		if (!string.IsNullOrWhiteSpace(options.PublicUrl))
 			logger.LogInformation("Public:   {PublicUrl} (advertised by Autodiscover)", options.PublicUrl);
 		logger.LogInformation("========================================================");
@@ -154,6 +158,8 @@ public static partial class StartupSummary
 			parts.Add(GatewayPasswordHasher.IsHashed(o.Password)
 				? "password=***(pbkdf2)"
 				: "password=***(PLAINTEXT)");
+		if (o.Admin == true)
+			parts.Add("admin");
 		foreach ((string roleName, BackendRoleOverride roleOverride) in
 		         (o.Backends ?? []).OrderBy(b => b.Key, StringComparer.OrdinalIgnoreCase))
 			parts.Add($"{roleName.ToLowerInvariant()}[{DescribeRoleOverride(roleOverride)}]");

@@ -203,6 +203,22 @@ public sealed class CliUserTests : IDisposable
 	}
 
 	[Fact]
+	public void Set_AdminFlag_RoundTrip()
+	{
+		(int setExit, _, string setOutput) = Run(null, "user", "set", "u7", "Admin", "true");
+		Assert.Equal(0, setExit);
+		Assert.Contains("admin", setOutput);
+
+		(int listExit, _, string listOutput) = Run(null, "user", "list");
+		Assert.Equal(0, listExit);
+		Assert.Contains("yes", listOutput);
+
+		(int unsetExit, _, string unsetOutput) = Run(null, "user", "unset", "u7", "Admin");
+		Assert.Equal(0, unsetExit);
+		Assert.DoesNotContain("admin", unsetOutput);
+	}
+
+	[Fact]
 	public void Unset_ClearsField_AndEmptySectionCollapses()
 	{
 		(int _, _, _) = Run(null, "user", "set", "u6", "Backends:MailSubmit:Settings:Host", "smtp.x");

@@ -57,6 +57,12 @@ public sealed class AccountOptions
 	/// </summary>
 	public string? MailAddress { get; set; }
 
+	/// <summary>
+	///   Grants access to the web admin interface (/admin). Irrelevant to EAS itself; under
+	///   OIDC an admin claim can grant the same access without this flag.
+	/// </summary>
+	public bool? Admin { get; set; }
+
 	/// <summary>Per-role overrides, keyed by role name (MailStore, Calendar, Oof, ...).</summary>
 	public Dictionary<string, BackendRoleOverride>? Backends { get; set; }
 }

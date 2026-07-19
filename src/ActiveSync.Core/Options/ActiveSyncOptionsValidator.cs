@@ -49,6 +49,7 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 
 		ValidatePolicy(options.Policy, failures);
 		ValidateMetrics(options.Metrics, failures);
+		ValidateWebUi(options.WebUi, failures);
 
 		if (options.Log.Mode.ToLowerInvariant() is not ("simple" or "standard" or "extended"))
 			failures.Add($"ActiveSync:Log:Mode '{options.Log.Mode}' is unknown (use Simple, Standard or Extended).");
@@ -114,5 +115,30 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 	{
 		if (metrics.Port is { } port and (< 1 or > 65535))
 			failures.Add($"ActiveSync:Metrics:Port {port} is out of range (1-65535).");
+	}
+
+	private static void ValidateWebUi(WebUiOptions webUi, List<string> failures)
+	{
+		if (webUi.Oidc is not { } oidc)
+			return;
+		// Any client/authority field present signals OIDC intent — then the pair is required.
+		bool intended = !string.IsNullOrWhiteSpace(oidc.Authority) ||
+		                !string.IsNullOrWhiteSpace(oidc.ClientId) ||
+		                !string.IsNullOrWhiteSpace(oidc.ClientSecret);
+		if (intended)
+		{
+			if (string.IsNullOrWhiteSpace(oidc.Authority))
+				failures.Add("ActiveSync:WebUi:Oidc:Authority is required when OIDC is configured.");
+			else if (!Uri.TryCreate(oidc.Authority, UriKind.Absolute, out Uri? authority) ||
+			         (authority.Scheme != Uri.UriSchemeHttp && authority.Scheme != Uri.UriSchemeHttps))
+				failures.Add($"ActiveSync:WebUi:Oidc:Authority '{oidc.Authority}' must be an absolute http(s) URL.");
+			if (string.IsNullOrWhiteSpace(oidc.ClientId))
+				failures.Add("ActiveSync:WebUi:Oidc:ClientId is required when OIDC is configured.");
+			if (string.IsNullOrWhiteSpace(oidc.LoginClaim))
+				failures.Add("ActiveSync:WebUi:Oidc:LoginClaim must not be empty.");
+		}
+
+		if (!string.IsNullOrWhiteSpace(oidc.AdminClaimValue) && string.IsNullOrWhiteSpace(oidc.AdminClaim))
+			failures.Add("ActiveSync:WebUi:Oidc:AdminClaimValue requires AdminClaim to be set.");
 	}
 }
