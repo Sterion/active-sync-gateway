@@ -17,15 +17,24 @@
 .PARAMETER Down
   Tear both stacks down (-v) at the end. Default: leave them running.
 
+.PARAMETER Sequential
+  Run the two legs one after another instead of in parallel. Slower, but avoids the CPU contention
+  of two dotnet-test processes sharing one machine -- steadier on a constrained box. (That parallel
+  contention is what makes timing-sensitive tests flake locally; CI is unaffected, as each backend
+  leg runs on its own runner.)
+
 .EXAMPLE
   ./scripts/test-fast.ps1
 .EXAMPLE
   ./scripts/test-fast.ps1 -Filter "FullyQualifiedName~DavRoundTrip"
+.EXAMPLE
+  ./scripts/test-fast.ps1 -Sequential
 #>
 [CmdletBinding()]
 param(
 	[string]$Filter = 'Category=Integration',
-	[switch]$Down
+	[switch]$Down,
+	[switch]$Sequential
 )
 
 $ErrorActionPreference = 'Continue'
@@ -61,34 +70,48 @@ $legs = @(
 		AS_TEST_DAV_HOMESET = '/Calendar/'; AS_TEST_DAV_CONTACTS_HOMESET = '/Contacts/' } }
 )
 
-Write-Host "==> Running stalwart + axigen suites in parallel (filter: $Filter)" -ForegroundColor Cyan
-$jobs = foreach ($leg in $legs) {
-	Start-Job -Name $leg.name -ScriptBlock {
-		param($root, $proj, $filter, $envMap)
-		foreach ($k in $envMap.Keys) { Set-Item "Env:$k" $envMap[$k] }
-		Set-Location $root
-		$out = dotnet test $proj -c Release --no-build --nologo --filter $filter 2>&1 | Out-String
-		[pscustomobject]@{ rc = $LASTEXITCODE; out = $out }
-	} -ArgumentList $RepoRoot, $Proj, $Filter, $leg.env
+if ($Sequential) {
+	Write-Host "==> Running stalwart + axigen suites SEQUENTIALLY (filter: $Filter)" -ForegroundColor Cyan
+	$results = foreach ($leg in $legs) {
+		Write-Host "==> leg: $($leg.name)" -ForegroundColor Cyan
+		foreach ($k in $leg.env.Keys) { Set-Item "Env:$k" $leg.env[$k] }
+		$out = dotnet test $Proj -c Release --no-build --nologo --filter $Filter 2>&1 | Out-String
+		[pscustomobject]@{ name = $leg.name; rc = $LASTEXITCODE; out = $out }
+	}
 }
-$jobs | Wait-Job | Out-Null
+else {
+	Write-Host "==> Running stalwart + axigen suites in parallel (filter: $Filter)" -ForegroundColor Cyan
+	$jobs = foreach ($leg in $legs) {
+		Start-Job -Name $leg.name -ScriptBlock {
+			param($root, $proj, $filter, $envMap)
+			foreach ($k in $envMap.Keys) { Set-Item "Env:$k" $envMap[$k] }
+			Set-Location $root
+			$out = dotnet test $proj -c Release --no-build --nologo --filter $filter 2>&1 | Out-String
+			[pscustomobject]@{ rc = $LASTEXITCODE; out = $out }
+		} -ArgumentList $RepoRoot, $Proj, $Filter, $leg.env
+	}
+	$jobs | Wait-Job | Out-Null
+	$results = foreach ($job in $jobs) {
+		$r = Receive-Job $job
+		Remove-Job $job
+		[pscustomobject]@{ name = $job.Name; rc = $r.rc; out = $r.out }
+	}
+}
 
 $failed = $false
 Write-Host "`n==================== summary ====================" -ForegroundColor Yellow
-foreach ($job in $jobs) {
-	$r = Receive-Job $job
-	$result = ($r.out -split "`n" | Select-String -Pattern 'Passed!|Failed!' | Select-Object -Last 1).Line
-	if ($r.rc -eq 0) {
-		Write-Host ("{0,-10} PASS  {1}" -f $job.Name, ($result ?? '').Trim()) -ForegroundColor Green
+foreach ($res in $results) {
+	$line = ($res.out -split "`n" | Select-String -Pattern 'Passed!|Failed!' | Select-Object -Last 1).Line
+	if ($res.rc -eq 0) {
+		Write-Host ("{0,-10} PASS  {1}" -f $res.name, ($line ?? '').Trim()) -ForegroundColor Green
 	}
 	else {
 		$failed = $true
-		Write-Host ("{0,-10} FAIL  {1}" -f $job.Name, ($result ?? '').Trim()) -ForegroundColor Red
-		$r.out -split "`n" | Select-String -Pattern '^\s*Failed ' |
+		Write-Host ("{0,-10} FAIL  {1}" -f $res.name, ($line ?? '').Trim()) -ForegroundColor Red
+		$res.out -split "`n" | Select-String -Pattern '^\s*Failed ' |
 			ForEach-Object { ($_.Line -replace ' \[.*', '').Trim() } | Sort-Object -Unique |
 			Select-Object -First 20 | ForEach-Object { Write-Host "   $_" -ForegroundColor Red }
 	}
-	Remove-Job $job
 }
 
 if ($Down) {

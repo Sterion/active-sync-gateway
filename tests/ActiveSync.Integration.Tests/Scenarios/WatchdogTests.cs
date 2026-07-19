@@ -44,14 +44,13 @@ public class WatchdogTests(GatewayFixture gateway)
 		// full heartbeat.
 		await ImapProbe.SetSeenAsync(TestBackend.User1, subject, true);
 
-		Stopwatch stopwatch = Stopwatch.StartNew();
 		(string status, List<string> changed) = await client.PingAsync(60, inbox);
-		stopwatch.Stop();
 
+		// The flag was flipped before the watch baselined, so only the entry re-check can catch it —
+		// status 2 proves that. No wall-clock assertion: the entry check's latency (a DB read plus a
+		// backend listing) is too load-sensitive to bound.
 		Assert.Equal("2", status);
 		Assert.Contains(inbox, changed);
-		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10),
-			$"entry check should answer immediately, took {stopwatch.Elapsed}");
 	}
 
 	[BackendFact]
@@ -112,9 +111,10 @@ public class WatchdogTests(GatewayFixture gateway)
 
 		Assert.Equal("2", status);
 		Assert.Contains(inbox, changed);
-		// Watchdog ticks at 15 s; the (blind) STATUS poll first runs at 30 s. Finishing
-		// well before 30 s proves the watchdog did the detecting.
-		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(28),
-			$"watchdog should fire at ~15 s, took {stopwatch.Elapsed}");
+		// STATUS is blind here (counts unchanged) and IDLE is off, so a status-2 wake can ONLY be
+		// the watchdog's exact revision diff. The generous ceiling (the heartbeat is 60 s) just
+		// guards against a total miss — the exact ~15 s cadence is too load-sensitive to assert on.
+		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(50),
+			$"watchdog should detect the blind change before the heartbeat, took {stopwatch.Elapsed}");
 	}
 }

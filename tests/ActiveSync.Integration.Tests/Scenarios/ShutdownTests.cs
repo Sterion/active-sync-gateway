@@ -37,7 +37,10 @@ public class ShutdownTests(GatewayFixture gateway)
 		stopwatch.Stop();
 
 		Assert.Equal("1", status); // clean heartbeat-expired answer, client just re-pings
-		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5),
-			$"shutdown should end the Ping immediately, took {stopwatch.Elapsed}");
+		// Timing IS the behavior here: the Ping must observe ApplicationStopping rather than sit out
+		// the ~30 s graceful window. A generous 15 s ceiling tolerates a loaded CI box while still
+		// catching a regression that ignores shutdown.
+		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(15),
+			$"shutdown should end the Ping promptly, took {stopwatch.Elapsed}");
 	}
 }

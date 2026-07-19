@@ -82,6 +82,9 @@ jobs:
     if: github.server_url == 'https://github.com'
     needs: test
     runs-on: ubuntu-latest
+    # A stuck long-poll (a Ping that never returns) would otherwise hang to GitHub's 360 min
+    # default; cap the leg so a hang fails fast. --blame-hang-timeout below names the offender.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -203,7 +206,8 @@ jobs:
             -e AS_TEST_PG=postgresql://activesync:ci-pw@localhost:5432/activesync \
             -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
             "$TEST_IMAGE" \
-            dotnet test ActiveSync.slnx -c Release --nologo --no-build --filter "Category=Integration"
+            dotnet test ActiveSync.slnx -c Release --nologo --no-build --filter "Category=Integration" \
+              --blame-hang-timeout 180s
 
       - name: Cleanup
         if: always() && env.RUN_LEG == 'true'

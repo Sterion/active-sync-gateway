@@ -72,7 +72,14 @@ public sealed class FreeBusyTests(GatewayFixture gateway)
 			new XElement(Cal + "Sensitivity", "0"));
 		Assert.Equal("1", add.Status);
 
-		string merged = await QueryOwnAvailabilityAsync(client, TestBackend.User2, day);
+		// The CalDAV backend indexes the just-created event asynchronously, so the free-busy-query
+		// REPORT can lag the PUT (more so under load). Poll until the busy block shows rather than
+		// reading once — the same eventual-consistency stance the rest of the suite takes.
+		string merged = await WaitUntil.ResultAsync(async () =>
+		{
+			string m = await QueryOwnAvailabilityAsync(client, TestBackend.User2, day);
+			return m.Length == 48 && m[28] == '2' ? m : null;
+		}, "CalDAV free/busy to reflect the new event");
 		Assert.Equal(48, merged.Length);
 		Assert.Equal('2', merged[28]); // 14:00–14:30
 		Assert.Equal('2', merged[29]);

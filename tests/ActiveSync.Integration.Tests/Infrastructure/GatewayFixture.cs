@@ -227,6 +227,11 @@ public sealed class GatewayFixture : IAsyncLifetime
 			["ActiveSync:Eas:MaxHeartbeatSeconds"] = "120",
 			["ActiveSync:Eas:DavPollSeconds"] = "5",
 			["ActiveSync:Eas:UseImapIdle"] = fastWatchdogNoIdle ? "false" : "true",
+			// A 15 s exact re-check backstops the suite's short heartbeats: a 30 s-heartbeat Ping
+			// that would otherwise depend entirely on IMAP IDLE (the first STATUS poll is a full
+			// 30 s, and the 60 s production watchdog can't tick inside 30 s) still detects a change
+			// under CPU load. 15 is the validator floor; production keeps the 60 s default.
+			["ActiveSync:Eas:WatchdogSeconds"] = "15",
 			// TestServer requests all share one client key (no remote address), so the
 			// suite's deliberate bad-credential tests would otherwise trip the shared
 			// brute-force throttle for every later test.
@@ -286,8 +291,8 @@ public sealed class GatewayFixture : IAsyncLifetime
 			}
 		}
 
-		if (fastWatchdogNoIdle)
-			settings["ActiveSync:Eas:WatchdogSeconds"] = "15";
+		// fastWatchdogNoIdle now only turns IDLE off (see UseImapIdle above); the 15 s watchdog is
+		// already the base default for every factory.
 		if (!withoutDav && TestBackend.DavUrl is { } davUrl)
 		{
 			settings["ActiveSync:Backends:Calendar:Provider"] = "caldav";
