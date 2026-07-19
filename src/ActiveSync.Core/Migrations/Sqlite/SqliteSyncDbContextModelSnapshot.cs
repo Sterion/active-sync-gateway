@@ -216,6 +216,31 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.ToTable("DeviceFolders");
                 });
 
+            modelBuilder.Entity("ActiveSync.Core.State.GlobalSetting", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.ToTable("GlobalSettings");
+                });
+
             modelBuilder.Entity("ActiveSync.Core.State.LocalItem", b =>
                 {
                     b.Property<int>("Id")
@@ -338,6 +363,19 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.HasKey("Id");
 
                     b.ToTable("ServerCertificates");
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.SettingsStamp", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("Version")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SettingsStamps");
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.SharedCalendarGrant", b =>

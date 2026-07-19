@@ -4,6 +4,7 @@ using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
+using ActiveSync.Core.Settings;
 using ActiveSync.Core.State;
 using ActiveSync.Server;
 using ActiveSync.Server.Eas;
@@ -37,6 +38,19 @@ public partial class Program
 		string? usersFile = builder.Configuration["ActiveSync:UsersFile"];
 		if (!string.IsNullOrWhiteSpace(usersFile))
 			builder.Configuration.AddJsonFile(Path.GetFullPath(usersFile), false, false);
+
+		// Database-backed global settings: added LAST so database values win over appsettings/env,
+		// which win over the code (POCO) defaults. Populated synchronously from the bootstrap
+		// Database options BEFORE the host is built, so restart-bound settings stored only in the
+		// database (listener ports, TLS/metrics enable) take effect on the next start; live changes
+		// are then polled by SettingsRefreshService. The two bootstrap sections (Database,
+		// Encryption) are never stored in the database — they are needed to open and decrypt it.
+		DbSettingsConfigurationSource settingsSource = new();
+		DatabaseOptions bootstrapDatabase =
+			builder.Configuration.GetSection("ActiveSync:Database").Get<DatabaseOptions>() ?? new DatabaseOptions();
+		settingsSource.Provider.SetData(DbSettingsLoader.TryLoad(bootstrapDatabase,
+			new Serilog.Extensions.Logging.SerilogLoggerFactory(Log.Logger).CreateLogger("ActiveSync.Settings")));
+		builder.Configuration.Sources.Add(settingsSource);
 
 		// DI lifetime bugs must fail fast in every environment (Development-only scope validation
 		// once hid a scoped-from-root resolve that crashed real deployments at startup). The
@@ -111,6 +125,10 @@ public partial class Program
 		builder.Services.AddScoped<FolderService>();
 		builder.Services.AddSingleton<AccountStore>();
 		builder.Services.AddSingleton<AccountResolver>();
+		builder.Services.AddSingleton<GlobalSettingStore>();
+		builder.Services.AddSingleton(settingsSource.Provider);
+		builder.Services.AddSingleton<SettingsRefresher>();
+		builder.Services.AddHostedService<SettingsRefreshService>();
 		builder.Services.AddSingleton<AuthThrottle>();
 		builder.Services.AddSingleton<LocalChangeNotifier>();
 		builder.Services.AddBackendProviders();
@@ -139,6 +157,11 @@ public partial class Program
 		// without it the deserializer would silently DROP those overrides.
 		await app.Services.GetRequiredService<AccountStore>()
 			.UpgradeLegacyRowsAsync(startupLogger, CancellationToken.None);
+
+		// Refresh the live database settings view now the schema exists (the build-time load
+		// already covered host construction) and prime the change-stamp poll before the banner.
+		await app.Services.GetRequiredService<SettingsRefresher>()
+			.EnsureFreshAsync(true, CancellationToken.None);
 
 		// Load (or generate once) the self-signed certificate — the Kestrel selector above
 		// picks it up when the server starts listening a few lines further down.

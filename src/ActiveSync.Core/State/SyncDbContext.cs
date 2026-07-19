@@ -20,6 +20,8 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	public DbSet<LoginBlock> LoginBlocks => Set<LoginBlock>();
 	public DbSet<AccountEntry> AccountEntries => Set<AccountEntry>();
 	public DbSet<AccountsStamp> AccountsStamps => Set<AccountsStamp>();
+	public DbSet<GlobalSetting> GlobalSettings => Set<GlobalSetting>();
+	public DbSet<SettingsStamp> SettingsStamps => Set<SettingsStamp>();
 	public DbSet<ServerCertificate> ServerCertificates => Set<ServerCertificate>();
 	public DbSet<OofSetting> OofSettings => Set<OofSetting>();
 	public DbSet<SharedCalendarGrant> SharedCalendarGrants => Set<SharedCalendarGrant>();
@@ -69,6 +71,13 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 		// Deliberately no identity column: the CLI writes Id=1 explicitly so the stamp
 		// stays a single well-known row on both providers.
 		modelBuilder.Entity<AccountsStamp>(e =>
+			e.Property(s => s.Id).ValueGeneratedNever());
+
+		modelBuilder.Entity<GlobalSetting>(e =>
+			e.HasIndex(s => s.Key).IsUnique());
+
+		// Single well-known row (Id=1), same explicit-key idiom as AccountsStamp.
+		modelBuilder.Entity<SettingsStamp>(e =>
 			e.Property(s => s.Id).ValueGeneratedNever());
 
 		// Single well-known row (Id=1) — same explicit-key idiom as AccountsStamp, and the

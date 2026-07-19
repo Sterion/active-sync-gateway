@@ -219,6 +219,33 @@ public class AccountsStamp
 }
 
 /// <summary>
+///   One database-stored global configuration value: <see cref="Key" /> is the full
+///   configuration path (e.g. "ActiveSync:Eas:MaxHeartbeatSeconds"), <see cref="Value" /> the
+///   string form a configuration provider supplies. A row OVERRIDES the same key from
+///   appsettings/env (the database wins); deleting it falls back to file/env, then the code
+///   default. The two bootstrap sections (Database, Encryption) are never stored here — they are
+///   needed to open and decrypt this very database.
+/// </summary>
+public class GlobalSetting
+{
+	public int Id { get; set; }
+	public required string Key { get; set; }
+	public required string Value { get; set; }
+	public DateTime UpdatedUtc { get; set; }
+}
+
+/// <summary>
+///   Single-row change signal (Id always 1) for <see cref="GlobalSetting" />: every settings
+///   mutation bumps Version in the same SaveChanges, and each gateway replica point-reads it to
+///   notice CLI/admin changes cheaply — the same idiom as <see cref="AccountsStamp" />.
+/// </summary>
+public class SettingsStamp
+{
+	public int Id { get; set; }
+	public Guid Version { get; set; }
+}
+
+/// <summary>
 ///   The gateway's self-signed TLS certificate (Id always 1): a PKCS#12 blob, base64-encoded
 ///   and sealed with the Encryption master key, generated on first serve and shared by every
 ///   replica so the fingerprint stays stable. Deleting the row generates a fresh certificate
