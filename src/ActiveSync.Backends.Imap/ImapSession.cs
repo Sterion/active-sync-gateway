@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using ActiveSync.Core.Backend;
 using MailKit;
 using MailKit.Net.Imap;
@@ -47,24 +48,53 @@ public sealed class ImapSession(
 			: throw new BackendException($"Not an IMAP folder key: {backendKey}");
 	}
 
-	public async Task<T> RunAsync<T>(Func<ImapClient, Task<T>> action, CancellationToken ct)
+	public async Task<T> RunAsync<T>(
+		Func<ImapClient, Task<T>> action, CancellationToken ct, bool idempotent = true)
 	{
+		// Idempotent ops (reads, flag stores, moves, deletes, folder ops) replay on any transient
+		// drop. A non-idempotent op (APPEND: draft create, content-bearing draft edit, save-to-Sent)
+		// replays ONLY on a clean "not connected" — the command never left the client (e.g. the
+		// pooled connection idled out between requests). A mid-flight IOException/timeout might have
+		// reached the server, so it is surfaced rather than risk a duplicate message.
+		bool IsTransient(Exception ex)
+		{
+			if (ct.IsCancellationRequested)
+				return false;
+			if (ex is OperationCanceledException)
+				return true; // a MailKit per-op Timeout cancels an INTERNAL token, not ours
+			return ex is IOException or ImapProtocolException or ServiceNotConnectedException or SocketException;
+		}
+
+		bool IsCleanNotConnected(Exception ex)
+		{
+			return !ct.IsCancellationRequested && ex is ServiceNotConnectedException;
+		}
+
+		Func<Exception, bool> transient = idempotent ? IsTransient : IsCleanNotConnected;
+
 		await _gate.WaitAsync(ct).ConfigureAwait(false);
 		try
 		{
-			ImapClient client = await EnsureConnectedAsync(ct).ConfigureAwait(false);
-			try
+			// idempotent:true here always — the safety choice is already baked into `transient`
+			// (a non-idempotent op only ever matches the clean not-connected case).
+			return await TransientRetry.RunAsync(async () =>
 			{
-				return await action(client).ConfigureAwait(false);
-			}
-			catch (Exception ex) when (ex is IOException or ImapProtocolException or ServiceNotConnectedException)
+				ImapClient client = await EnsureConnectedAsync(ct).ConfigureAwait(false);
+				try
+				{
+					return await action(client).ConfigureAwait(false);
+				}
+				catch (Exception ex) when (transient(ex))
+				{
+					await DisposeClientAsync().ConfigureAwait(false); // next attempt reconnects clean
+					throw;
+				}
+			}, transient, ct, idempotent: true, onRetry: (ex, attempt) =>
 			{
-				Core.Observability.GatewayMetrics.RecordBackendError("imap");
-				logger.LogWarning(ex, "IMAP connection dropped for {User}; reconnecting", credentials.UserName);
-				await DisposeClientAsync().ConfigureAwait(false);
-				client = await EnsureConnectedAsync(ct).ConfigureAwait(false);
-				return await action(client).ConfigureAwait(false);
-			}
+				Core.Observability.GatewayMetrics.RecordBackendRetry("imap");
+				logger.LogWarning(ex, "IMAP transient failure for {User}; reconnecting (retry {Attempt}/{Max})",
+					credentials.UserName, attempt, TransientRetry.DelaysMs.Length);
+			}).ConfigureAwait(false);
 		}
 		finally
 		{
@@ -72,13 +102,13 @@ public sealed class ImapSession(
 		}
 	}
 
-	public Task RunAsync(Func<ImapClient, Task> action, CancellationToken ct)
+	public Task RunAsync(Func<ImapClient, Task> action, CancellationToken ct, bool idempotent = true)
 	{
 		return RunAsync(async client =>
 		{
 			await action(client).ConfigureAwait(false);
 			return true;
-		}, ct);
+		}, ct, idempotent);
 	}
 
 	private async Task<ImapClient> EnsureConnectedAsync(CancellationToken ct)
@@ -88,6 +118,11 @@ public sealed class ImapSession(
 
 		await DisposeClientAsync().ConfigureAwait(false);
 		_client = await ImapConnectionFactory.ConnectAsync(options, credentials, ct, wireLogger).ConfigureAwait(false);
+		// Per-op inactivity timeout, tighter than MailKit's 120 s default, so a hung command fails
+		// fast enough to retry within a short heartbeat. Set on the session client only — the IMAP
+		// IDLE watcher builds its own client via the factory and keeps the long default (its slices
+		// are minutes long). MailKit resets this on socket activity, so streaming FETCHes are fine.
+		_client.Timeout = 30_000;
 		return _client;
 	}
 

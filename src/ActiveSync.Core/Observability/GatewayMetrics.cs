@@ -33,6 +33,9 @@ public static class GatewayMetrics
 	private static readonly Counter<long> BackendErrors = Meter.CreateCounter<long>(
 		"backend_errors", null, "Backend operation failures by protocol.");
 
+	private static readonly Counter<long> BackendRetries = Meter.CreateCounter<long>(
+		"backend_retries", null, "Backend operations replayed after a transient failure, by protocol.");
+
 	private static readonly Counter<long> ThrottleRejections = Meter.CreateCounter<long>(
 		"auth_throttle_rejections", null, "Authentication attempts rejected by the brute-force throttle.");
 
@@ -96,6 +99,12 @@ public static class GatewayMetrics
 	public static void RecordBackendError(string protocol)
 	{
 		BackendErrors.Add(1, new KeyValuePair<string, object?>("protocol", protocol));
+	}
+
+	/// <summary>One transient backend failure that was replayed (not a final error).</summary>
+	public static void RecordBackendRetry(string protocol)
+	{
+		BackendRetries.Add(1, new KeyValuePair<string, object?>("protocol", protocol));
 	}
 
 	public static void RecordThrottleRejection()

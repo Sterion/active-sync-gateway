@@ -190,7 +190,7 @@ public sealed class JmapClient : IDisposable
 		using HttpResponseMessage response = await SendAsync(() => new HttpRequestMessage(HttpMethod.Post, session.ApiUrl)
 		{
 			Content = new StringContent(json, Encoding.UTF8, "application/json")
-		}, ct).ConfigureAwait(false);
+		}, ct, idempotent: AllReadOnly(calls)).ConfigureAwait(false);
 		await EnsureSuccessAsync(response, "POST", "api", ct).ConfigureAwait(false);
 		string responseBody = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 		try
@@ -334,10 +334,49 @@ public sealed class JmapClient : IDisposable
 	}
 
 	/// <summary>
+	///   Every JMAP call funnels through here, so fast transient retry lives at this one seam.
+	///   Reads (Foo/get, Foo/query, …) are replayed on a transient blip; writes are NOT — a
+	///   replayed */set or Email/import would create a duplicate, since JMAP creationIds dedup only
+	///   within a single request (see <see cref="AllReadOnly" />). The caller sets
+	///   <paramref name="idempotent" /> accordingly.
+	/// </summary>
+	private Task<HttpResponseMessage> SendAsync(
+		Func<HttpRequestMessage> createRequest, CancellationToken ct, bool idempotent = true)
+	{
+		return TransientRetry.SendHttpAsync(
+			() => SendFollowingRedirectsAsync(createRequest, ct), ct, idempotent,
+			onRetry: (reason, attempt) =>
+			{
+				GatewayMetrics.RecordBackendRetry("jmap");
+				_wireLogger?.LogDebug("JMAP request transient failure ({Reason}); retry {Attempt}/{Max}",
+					reason, attempt, TransientRetry.DelaysMs.Length);
+			});
+	}
+
+	/// <summary>
+	///   True only when every call is a side-effect-free read; any */set, */import, */copy, … can
+	///   create or mutate server state and must never be replayed (a JMAP creationId such as "c" or
+	///   "m" dedups only within one method call, so a replayed request creates a duplicate).
+	/// </summary>
+	private static bool AllReadOnly(IReadOnlyList<JmapCall> calls)
+	{
+		foreach (JmapCall call in calls)
+		{
+			int slash = call.Name.IndexOf('/');
+			string verb = slash >= 0 ? call.Name[(slash + 1)..] : call.Name;
+			if (verb is not ("get" or "query" or "changes" or "queryChanges"))
+				return false;
+		}
+
+		return true;
+	}
+
+	/// <summary>
 	///   Sends a request, following same-origin redirects manually with the method, body and
 	///   Authorization header intact (auto-redirect would strip auth). Mirrors WebDavClient.
 	/// </summary>
-	private async Task<HttpResponseMessage> SendAsync(Func<HttpRequestMessage> createRequest, CancellationToken ct)
+	private async Task<HttpResponseMessage> SendFollowingRedirectsAsync(
+		Func<HttpRequestMessage> createRequest, CancellationToken ct)
 	{
 		bool trace = _wireLogger?.IsEnabled(LogLevel.Trace) == true;
 		Uri? redirectTarget = null;

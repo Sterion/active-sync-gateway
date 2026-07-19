@@ -170,7 +170,7 @@ public sealed partial class ImapMailBackend(
 			if (uid is null)
 				throw new BackendException("The IMAP server did not report a UID for the appended draft.");
 			return (uid.Value.Id.ToString(), RevisionOf(MessageFlags.None));
-		}, ct);
+		}, ct, idempotent: false); // APPEND: a replay would duplicate the draft
 	}
 
 	public Task<string> UpdateItemAsync(
@@ -266,7 +266,9 @@ public sealed partial class ImapMailBackend(
 			return summaries.Count > 0
 				? RevisionOf(summaries[0].Flags ?? MessageFlags.None, summaries[0].Keywords)
 				: "000";
-		}, ct);
+			// A content-bearing draft edit does append+delete+expunge and is not replayable; a
+			// pure flag change (Read/Flag/Categories) is idempotent and retries normally.
+		}, ct, idempotent: !HasDraftContent(applicationData));
 	}
 
 	private static bool IsDraftsFolder(IMailFolder folder)
@@ -382,7 +384,7 @@ public sealed partial class ImapMailBackend(
 			MimeMessage message = await MimeMessage.LoadAsync(stream, ct).ConfigureAwait(false);
 			await sent.AppendAsync(message, MessageFlags.Seen, ct).ConfigureAwait(false);
 			return true;
-		}, ct);
+		}, ct, idempotent: false); // APPEND to Sent: a replay would duplicate the sent copy
 	}
 
 	public Task<byte[]?> GetRawMessageAsync(string folderBackendKey, string itemKey, CancellationToken ct)

@@ -222,6 +222,17 @@ public static class EasEndpoint
 			if (!http.Response.HasStarted)
 				http.Response.StatusCode = StatusCodes.Status400BadRequest;
 		}
+		catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+		{
+			// Not the client going away (that is the first catch): a backend library timeout.
+			// MailKit implements its per-op Timeout by cancelling an INTERNAL token, so a hung
+			// IMAP/SMTP op surfaces as an OCE whose token is not http.RequestAborted. Log it and
+			// answer 503 instead of letting it bubble to the framework unlogged.
+			logger.LogWarning(ex, "EAS {Command} timed out talking to the backend for {User}/{DeviceId}",
+				LogText.Clean(parameters.Command, 32), LogText.Clean(credentials.UserName, 128), parameters.DeviceId);
+			if (!http.Response.HasStarted)
+				http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
 			logger.LogError(ex, "EAS {Command} failed for {User}/{DeviceId}",

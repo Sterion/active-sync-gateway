@@ -150,6 +150,51 @@ public class JmapClientTests
 			() => client.GetSessionAsync(CancellationToken.None));
 	}
 
+	[Fact]
+	public async Task Invoke_ReadOnly_RetriesOnTransientStatus()
+	{
+		int apiCalls = 0;
+		StubHandler stub = new((request, _) =>
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			apiCalls++;
+			return apiCalls == 1
+				? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+				: Json("""{"methodResponses":[["Mailbox/get",{"list":[]},"0"]],"sessionState":"x"}""");
+		});
+		using JmapClient client = new(Base, new HttpClient(stub));
+
+		using JmapResponse response = await client.CallAsync(
+			[JmapCapabilities.Core, JmapCapabilities.Mail], "Mailbox/get",
+			new Dictionary<string, object?> { ["accountId"] = "c" }, CancellationToken.None);
+
+		Assert.Equal(2, apiCalls); // a read is replayed after the transient 503
+		Assert.Equal(0, response.Arguments("0").GetProperty("list").GetArrayLength());
+	}
+
+	[Fact]
+	public async Task Invoke_Write_NotRetriedOnTransientStatus()
+	{
+		int apiCalls = 0;
+		StubHandler stub = new((request, _) =>
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			apiCalls++;
+			return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+		});
+		using JmapClient client = new(Base, new HttpClient(stub));
+
+		// A request containing a write (Email/set) must NEVER be replayed — a JMAP create dedups
+		// only within one call, so a replay would duplicate — the 503 surfaces after ONE attempt.
+		await Assert.ThrowsAsync<BackendException>(() => client.CallAsync(
+			[JmapCapabilities.Core, JmapCapabilities.Mail], "Email/set",
+			new Dictionary<string, object?> { ["accountId"] = "c" }, CancellationToken.None));
+
+		Assert.Equal(1, apiCalls); // never replayed
+	}
+
 	private static HttpResponseMessage Json(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)

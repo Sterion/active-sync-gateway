@@ -161,11 +161,29 @@ public sealed class WebDavClient : IDisposable
 	}
 
 	/// <summary>
+	///   Every DAV verb funnels through here, so fast transient retry lives at this one seam. All
+	///   DAV writes are idempotent — create-PUT carries If-None-Match:* (a replay 412s, never
+	///   duplicates), update-PUT carries If-Match, DELETE treats 404 as success — and the rest are
+	///   reads, so a replay is always safe.
+	/// </summary>
+	private Task<HttpResponseMessage> SendAsync(Func<HttpRequestMessage> createRequest, CancellationToken ct)
+	{
+		return TransientRetry.SendHttpAsync(
+			() => SendFollowingRedirectsAsync(createRequest, ct), ct, idempotent: true,
+			onRetry: (reason, attempt) =>
+			{
+				Core.Observability.GatewayMetrics.RecordBackendRetry("dav");
+				_wireLogger?.LogDebug("DAV request transient failure ({Reason}); retry {Attempt}/{Max}",
+					reason, attempt, TransientRetry.DelaysMs.Length);
+			});
+	}
+
+	/// <summary>
 	///   Sends a request, following same-host redirects manually with the method, body and
 	///   Authorization header intact (auto-redirect would strip auth and downgrade methods).
 	///   The factory is invoked once per hop because HttpRequestMessage is single-use.
 	/// </summary>
-	private async Task<HttpResponseMessage> SendAsync(
+	private async Task<HttpResponseMessage> SendFollowingRedirectsAsync(
 		Func<HttpRequestMessage> createRequest, CancellationToken ct)
 	{
 		bool trace = _wireLogger?.IsEnabled(LogLevel.Trace) == true;
