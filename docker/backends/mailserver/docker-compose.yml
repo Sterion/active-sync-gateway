@@ -14,6 +14,13 @@ services:
   mailserver:
     image: mailserver/docker-mailserver:15.1.0
     hostname: mail.example.com
+    # Anchor the one-shot provisioner to a long-running service as an expected-completion
+    # dependency: without this, `docker compose up --wait` treats radicale-provision's (0) exit
+    # as an unexpected container death and returns exit 1, failing the CI bring-up step even
+    # though everything is healthy.
+    depends_on:
+      radicale-provision:
+        condition: service_completed_successfully
     ports:
       - "143:143"
       - "587:587"
