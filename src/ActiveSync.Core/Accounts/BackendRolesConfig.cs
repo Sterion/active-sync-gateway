@@ -8,10 +8,11 @@ public sealed record RoleAssignment(BackendRole Role, string ProviderName, Provi
 
 /// <summary>
 ///   The parsed ActiveSync:Backends section: one sub-section per role, each carrying the
-///   host-reserved "Provider" key plus provider-owned settings the host never binds.
-///   MailStore and MailSubmit are mandatory; absent content roles fall back to the "local"
-///   provider; an absent Oof role means the feature is off. Parsed once at startup —
-///   configuration reloads are not supported (restart to apply).
+///   host-reserved "Provider" key plus provider-owned settings the host never binds. MailStore
+///   and MailSubmit enable mail; when they are absent the gateway runs UNCONFIGURED (it still
+///   starts, so it can be configured via `eas config set`). Absent content roles fall back to the
+///   "local" provider; an absent Oof role means the feature is off. Rebuilt live by
+///   <see cref="BackendRolesProvider" /> when the backend configuration changes.
 /// </summary>
 public sealed class BackendRolesConfig
 {
@@ -25,6 +26,14 @@ public sealed class BackendRolesConfig
 
 	/// <summary>Every role that exists for this deployment (Oof only when configured).</summary>
 	public IReadOnlyDictionary<BackendRole, RoleAssignment> Assignments { get; }
+
+	/// <summary>
+	///   True when both mail roles are assigned. When false the gateway is UNCONFIGURED: it starts
+	///   and stays live (so an operator can configure it via `eas config set`), but the EAS and
+	///   Autodiscover endpoints answer 503 and /readyz reports not-ready until mail is configured.
+	/// </summary>
+	public bool IsMailConfigured =>
+		Assignments.ContainsKey(BackendRole.MailStore) && Assignments.ContainsKey(BackendRole.MailSubmit);
 
 	public static BackendRolesConfig Load(IConfiguration configuration, IList<string> failures)
 	{
@@ -52,11 +61,8 @@ public sealed class BackendRolesConfig
 				failures.Add($"ActiveSync:Backends declares the {role} role twice (keys are case-insensitive).");
 		}
 
-		foreach (BackendRole mandatory in (BackendRole[])[BackendRole.MailStore, BackendRole.MailSubmit])
-			if (!assignments.ContainsKey(mandatory))
-				failures.Add(
-					$"ActiveSync:Backends:{mandatory} is required — this gateway cannot run without mail access " +
-					$"(e.g. {{ \"Provider\": \"{(mandatory == BackendRole.MailStore ? "imap" : "smtp")}\", \"Host\": ... }}).");
+		// Mail roles are NOT mandatory here: a gateway with neither runs unconfigured (see
+		// IsMailConfigured) so it can be set up via `eas config set` rather than refusing to start.
 
 		// Content classes without a configured backend are served from the gateway database;
 		// Notes is always local unless explicitly assigned. Absent Oof = feature off.

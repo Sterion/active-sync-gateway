@@ -59,6 +59,34 @@ public sealed class BackendRolesProviderTests
 	}
 
 	[Fact]
+	public void NoMailBackends_StartsUnconfigured_ThenConfiguresLive()
+	{
+		// An empty backend configuration must NOT throw (start-without-config) and reports
+		// unconfigured — the gateway starts so it can be set up via `eas config set`.
+		DbSettingsConfigurationSource dbSource = new();
+		IConfigurationRoot config = new ConfigurationBuilder()
+			.AddInMemoryCollection(new Dictionary<string, string?>())
+			.Add(dbSource)
+			.Build();
+		BackendRolesProvider provider = new(config);
+		Assert.False(provider.Current.IsMailConfigured);
+
+		int changed = 0;
+		provider.Changed += () => changed++;
+
+		// Configuring both mail roles live (as `eas config set` would) flips it to configured.
+		dbSource.Provider.SetData(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:MailStore:Provider"] = "imap",
+			["ActiveSync:Backends:MailStore:Host"] = "imap.x",
+			["ActiveSync:Backends:MailSubmit:Provider"] = "smtp",
+			["ActiveSync:Backends:MailSubmit:Host"] = "smtp.x",
+		});
+		Assert.Equal(1, changed);
+		Assert.True(provider.Current.IsMailConfigured);
+	}
+
+	[Fact]
 	public void InvalidBackendChange_IsIgnored_KeepsLastGood()
 	{
 		(BackendRolesProvider provider, DbSettingsConfigurationProvider db) = Build();

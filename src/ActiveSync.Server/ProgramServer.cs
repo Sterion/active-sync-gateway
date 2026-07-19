@@ -72,8 +72,11 @@ public partial class Program
 		builder.Services.AddOptions<ActiveSyncOptions>()
 			.Bind(builder.Configuration.GetSection("ActiveSync"));
 
+		// A completely absent ActiveSync section is fine — the gateway starts UNCONFIGURED (mail
+		// can be set later via `eas config set`). Only the bootstrap Encryption key/AllowPlaintext
+		// is still required, validated after Build.
 		ActiveSyncOptions options = builder.Configuration.GetSection("ActiveSync").Get<ActiveSyncOptions>()
-			?? throw new InvalidOperationException("Missing 'ActiveSync' configuration section.");
+			?? new ActiveSyncOptions();
 
 		// Long-polls end themselves on ApplicationStopping (Ping answers status 1, Sync answers
 		// empty), so shutdown is normally instant; this backstop bounds pathological cases.
@@ -195,6 +198,12 @@ public partial class Program
 			app.Services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value,
 			resolver.Roles, app.Services.GetRequiredService<BackendProviderRegistry>(),
 			resolver.MergedUsers, httpsSummary);
+
+		if (!resolver.Roles.IsMailConfigured)
+			startupLogger.LogWarning(
+				"Gateway is UNCONFIGURED — no mail backend set. EAS and Autodiscover answer 503 and " +
+				"/readyz is not-ready until you configure mail, e.g. 'eas config set " +
+				"ActiveSync:Backends:MailStore:Provider imap' (and Host, and the MailSubmit role).");
 
 		// Report the bound addresses and public endpoints once the server is listening.
 		app.Lifetime.ApplicationStarted.Register(() =>

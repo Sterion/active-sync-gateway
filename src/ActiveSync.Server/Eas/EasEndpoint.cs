@@ -1,3 +1,4 @@
+using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
@@ -50,10 +51,20 @@ public static class EasEndpoint
 		IEnumerable<IEasCommandHandler> handlers,
 		AuthThrottle authThrottle,
 		IOptionsSnapshot<ActiveSyncOptions> options,
+		BackendRolesProvider rolesProvider,
 		ILoggerFactory loggerFactory)
 	{
 		ILogger logger = loggerFactory.CreateLogger("ActiveSync.Endpoint");
 		CancellationToken ct = http.RequestAborted;
+
+		// Unconfigured gateway (no mail backend yet): answer 503 until it is configured via
+		// `eas config set` (applied within ~1s by the settings change-stamp poll).
+		if (!rolesProvider.Current.IsMailConfigured)
+		{
+			logger.LogWarning("EAS request refused: the gateway has no mail backend configured (503)");
+			http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+			return;
+		}
 
 		// --- Basic auth ---
 		string clientKey = EndpointAuth.ClientKey(http);

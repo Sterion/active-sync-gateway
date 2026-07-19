@@ -39,6 +39,9 @@ public sealed class ReadinessProbe(
 						ProbeRoleAsync(source, role, assignment, ct)));
 
 			Dictionary<string, bool> components = new(StringComparer.Ordinal);
+			// An unconfigured gateway (no mail backends) is deliberately not ready until it is
+			// configured via `eas config set` — the EAS endpoints answer 503 in the meantime.
+			components["configured"] = rolesProvider.Current.IsMailConfigured;
 			foreach ((string name, Task<bool> probe) in probes)
 				components[name] = await probe;
 

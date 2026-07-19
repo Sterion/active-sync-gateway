@@ -180,9 +180,19 @@ public sealed class GatewayFixture : IAsyncLifetime
 		return CreateFactory(false, overrides: overrides);
 	}
 
+	/// <summary>
+	///   A gateway started with NO mail backend — the "unconfigured" state: it boots and stays
+	///   live (so it can be set up via `eas config set`) but answers 503 on EAS/Autodiscover and
+	///   is not-ready. The caller owns and disposes it.
+	/// </summary>
+	public WebApplicationFactory<Program> CreateUnconfiguredFactory()
+	{
+		return CreateFactory(false, noMail: true);
+	}
+
 	private WebApplicationFactory<Program> CreateFactory(
 		bool readOnly, bool fastWatchdogNoIdle = false, bool withoutDav = false,
-		Dictionary<string, string?>? overrides = null, bool jmap = false)
+		Dictionary<string, string?>? overrides = null, bool jmap = false, bool noMail = false)
 	{
 		string connectionString;
 		if (TestBackend.PostgresUri is { } adminUri)
@@ -229,7 +239,11 @@ public sealed class GatewayFixture : IAsyncLifetime
 			["ActiveSync:Backends:Oof:UseTls"] = TestBackend.SieveUseTls ? "true" : "false",
 			["ActiveSync:Backends:Oof:AllowInvalidCertificates"] = "true"
 		};
-		if (jmap)
+		if (noMail)
+		{
+			// Unconfigured mode: deliberately assign no mail backend (IsMailConfigured == false).
+		}
+		else if (jmap)
 		{
 			// Stalwart serves JMAP on the same HTTP listener as DAV; one session fills both
 			// mail roles. AllowInvalidCertificates is harmless over the plaintext test URL.

@@ -41,9 +41,19 @@ public static class AutodiscoverEndpoint
 		AccountResolver resolver,
 		SyncStateService state,
 		IOptionsSnapshot<ActiveSyncOptions> options,
+		BackendRolesProvider rolesProvider,
 		ILoggerFactory loggerFactory)
 	{
 		CancellationToken ct = http.RequestAborted;
+
+		// Unconfigured gateway (no mail backend yet): answer 503 until configured via `eas config set`.
+		if (!rolesProvider.Current.IsMailConfigured)
+		{
+			loggerFactory.CreateLogger("ActiveSync.Autodiscover")
+				.LogWarning("Autodiscover request refused: the gateway has no mail backend configured (503)");
+			http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+			return;
+		}
 
 		// Autodiscover is authenticated (Basic) just like the EAS endpoint, and shares its
 		// brute-force throttle and credential-verification prologue.
