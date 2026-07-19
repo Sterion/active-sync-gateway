@@ -1,0 +1,32 @@
+# Pre-seeded Baikal configuration — bypasses the first-run web installer.
+#
+# Baked into the image by the Dockerfile alongside a pre-built SQLite database
+# (see seed.php). `configured_version` matching BAIKAL_VERSION is what tells
+# Baikal the install/upgrade wizard has already run.
+#
+# dav_auth_type is Basic because the gateway's WebDavClient sends HTTP Basic
+# (SocketsHttpHandler + a fixed Authorization: Basic header). The stored
+# credential is digesta1 = md5("<username>:<auth_realm>:<password>"), which
+# Baikal's PDOBasicAuth recomputes and compares on every request — so the realm
+# below MUST match the realm used when the digests were generated in seed.php.
+system:
+  configured_version: "0.9.5"
+  timezone: UTC
+  card_enabled: true
+  cal_enabled: true
+  dav_auth_type: Basic
+  # md5("admin:BaikalDAV:admin") — the admin panel is unused by the suite.
+  admin_passwordhash: 142ff212f9ed2f8f8b5e7b96f6929f78
+  failed_access_message: "user %u authentication failure for Baikal"
+  auth_realm: BaikalDAV
+  base_uri: ""
+  invite_from: noreply@example.com
+
+database:
+  sqlite_file: /var/www/baikal/Specific/db/db.sqlite
+  mysql: false
+  mysql_host: ""
+  mysql_dbname: ""
+  mysql_username: ""
+  mysql_password: ""
+  encryption_key: "activesync-integration-fixed-key"

@@ -256,6 +256,9 @@ public sealed class SmtpSubmissionFactAttribute : FactAttribute
 ///   inapplicable — used for genuine backend behavior differences with no cheap capability
 ///   probe (e.g. Cyrus's test image auto-schedules iMIP internally rather than emailing,
 ///   surfaces shared collections differently, and doesn't push IDLE on non-INBOX folders).
+///   <paramref name="stack" /> may name several stacks as a comma-separated list when one
+///   reason covers all of them (e.g. Baikal, like Cyrus, never emails an iMIP invitation into
+///   the attendee's IMAP mailbox — its DAV server and the mail companion are separate systems).
 /// </summary>
 public sealed class SkipOnStackFactAttribute : FactAttribute
 {
@@ -263,7 +266,8 @@ public sealed class SkipOnStackFactAttribute : FactAttribute
 	{
 		if (!TestBackend.IsAvailable)
 			Skip = TestBackend.SkipReason;
-		else if (TestBackend.Stack.Equals(stack, StringComparison.OrdinalIgnoreCase))
+		else if (stack.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+			.Any(s => TestBackend.Stack.Equals(s, StringComparison.OrdinalIgnoreCase)))
 			Skip = reason;
 	}
 }

@@ -95,6 +95,11 @@ for backend in "${LIST[@]}"; do
 				'AS_TEST_MAILSUBMIT=jmap'
 				'AS_TEST_SIEVE_TLS=false'
 			) ;;
+		baikal)
+			extra_env=(
+				'AS_TEST_DAV_HOMESET=/dav.php/calendars/{user}/'
+				'AS_TEST_DAV_CONTACTS_HOMESET=/dav.php/addressbooks/{user}/'
+			) ;;
 	esac
 	env AS_TEST_STACK="$backend" "${extra_env[@]}" dotnet test ActiveSync.slnx --nologo --filter "$FILTER"
 	code=$?

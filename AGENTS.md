@@ -545,17 +545,34 @@ banner. Rules:
   `postgresql://` URI: when set, each gateway factory creates its own fresh Postgres
   database instead of a SQLite temp file — never dropped, the CI container is discarded —
   so Npgsql migrations, URI conversion and provider inference all run in CI.
-- Three stacks, one suite, all in CI: `stalwart` (default; **v0.16.13**, self-provisioning),
+- Four stacks, one suite, all in CI: `stalwart` (default; **v0.16.13**, self-provisioning),
   `mailserver` (docker-mailserver + Radicale; set `AS_TEST_STACK=mailserver` so the DAV
-  `HomeSetPath` preset switches to `/{user}/`), and `cyrus` (`cyrus-docker-test-server`: an
+  `HomeSetPath` preset switches to `/{user}/`), `cyrus` (`cyrus-docker-test-server`: an
   independent C implementation of IMAP + CalDAV/CardDAV + JMAP + ManageSieve, auto-provisioning
-  user1..5 + default collections; `docker/backends/cyrus`). Cyrus is driven purely by
+  user1..5 + default collections; `docker/backends/cyrus`), and `baikal`
+  (`docker/backends/baikal`). Cyrus is driven purely by
   `matrix.include` env — `AS_TEST_DAV_HOMESET=/dav/calendars/user/{user}/`,
   `AS_TEST_DAV_CONTACTS_HOMESET=/dav/addressbooks/user/{user}/`, `AS_TEST_MAILSUBMIT=jmap`
   (LMTP-only, so it submits over JMAP), `AS_TEST_SIEVE_TLS=false`. Its permissive test-image
   auth, no-SMTP-submission, plaintext-sieve, internal iMIP auto-scheduling and non-INBOX-IDLE
   behaviors are handled by the capability gates above (see the `SkipOnStackFact("cyrus", …)`
-  reasons). The mailserver compose runs a one-shot
+  reasons; `SkipOnStackFact` also accepts a comma-separated stack list for one shared reason,
+  e.g. `"cyrus,baikal"`).
+- The **companion pattern** (Baikal): a DAV-only server paired with a mail server so the
+  mandatory mail roles still have a backend. `baikal` = **Baikal** (sabre/dav — the most-deployed
+  CalDAV/CardDAV codebase, absent from the other stacks) for calendar/contacts + a
+  **docker-mailserver** service (reusing `../mailserver/config`, incl. `dovecot.cf`) for IMAP 143
+  / submission 587. `matrix.include` carries `AS_TEST_DAV_HOMESET=/dav.php/calendars/{user}/`
+  and `AS_TEST_DAV_CONTACTS_HOMESET=/dav.php/addressbooks/{user}/` (sabre/dav's `/dav.php/…`
+  roots, keyed by the full `user@example.com`). Baikal is a **self-provisioning custom image**
+  (`docker/backends/baikal/Dockerfile` + `seed.php`): it bakes a pre-installed `baikal.yaml`
+  (Basic auth, realm `BaikalDAV`) and a pre-seeded SQLite DB (users user1/user2, one default
+  calendar + address book each — `digesta1 = md5("user@example.com:BaikalDAV:pass")`), so DAV
+  works on first boot with no web installer and no one-shot provisioner (the base image's
+  `config`/`Specific` VOLUMEs initialise from the baked layers each `up`). JMAP/ManageSieve/
+  free-busy tests skip via the capability gates; the iMIP-auto-schedule test skips because
+  Baikal's DAV server and the mail companion are separate systems (`SkipOnStackFact("cyrus,baikal", …)`).
+  The mailserver compose runs a one-shot
   `radicale-provision` (`docker/backends/mailserver/radicale/provision.sh`) that MKCALENDARs
   each user's default calendar + address book — Radicale auto-creates none, so without it DAV
   discovery finds nothing and every DAV test silently no-ops. Radicale lacks JMAP, ManageSieve
@@ -604,7 +621,7 @@ banner. Rules:
     it to a `type=gha` build cache. Uses the default docker-container buildx driver (the old
     single-daemon containerd-store step is gone; the job split replaces daemon layer reuse
     with the shared cache).
-  - `integration` — `strategy.matrix.backend: [stalwart, mailserver, cyrus]`, `fail-fast: false`,
+  - `integration` — `strategy.matrix.backend: [stalwart, mailserver, cyrus, baikal]`, `fail-fast: false`,
     `needs: test`. Each leg loads the cached test image (`cache-from: type=gha`, no
     recompile), `docker compose ... up --wait`s its backend + a Postgres sidecar, warms mail,
     and runs the suite `--no-build` with `--network host` (so `localhost` reaches the
@@ -614,7 +631,7 @@ banner. Rules:
     green. Loads the cached test image for the NuGet-pack and zip steps, then builds+pushes
     the multi-arch runtime image (`cache-from: type=gha`), publishes NuGet, uploads the zips
     and creates/attaches the release. This is the only pushing job; nothing is published until
-    both backends pass. Pushes to ghcr.io with the built-in GITHUB_TOKEN; no repository
+    every backend leg passes. Pushes to ghcr.io with the built-in GITHUB_TOKEN; no repository
     secrets are needed.
 - Release flow (`release.yaml`, workflow_dispatch): validate version → generate notes
   from commit subjects since the previous RELEASE (not tag) → push the tag → create the

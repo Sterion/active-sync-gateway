@@ -10,9 +10,9 @@ on:
 # Three-stage pipeline, one compile:
 #   test         -> the Dockerfile `test` stage builds the solution and runs the UNIT tests
 #                   once, exporting every layer to a type=gha build cache.
-#   integration  -> a matrix leg per backend (Stalwart, docker-mailserver + Radicale) loads
-#                   that cached image and runs the EAS integration suite against a throwaway
-#                   backend + Postgres. Legs push nothing.
+#   integration  -> a matrix leg per backend (Stalwart; docker-mailserver + Radicale; Cyrus;
+#                   Baikal + docker-mailserver) loads that cached image and runs the EAS
+#                   integration suite against a throwaway backend + Postgres. Legs push nothing.
 #   publish      -> only when EVERY backend leg is green: assemble + push the multi-arch
 #                   image, the NuGet packages and the release zips.
 # All with the built-in GITHUB_TOKEN, no repository secrets. The job split trades the old
@@ -90,6 +90,9 @@ jobs:
             dav_contacts_homeset: "/dav/addressbooks/user/{user}/"
             mailsubmit: jmap
             sieve_tls: "false"
+          - backend: baikal
+            dav_homeset: "/dav.php/calendars/{user}/"
+            dav_contacts_homeset: "/dav.php/addressbooks/{user}/"
     env:
       POSTGRES: as-ci-postgres-${{ github.run_id }}-${{ matrix.backend }}
     steps:

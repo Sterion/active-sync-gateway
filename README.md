@@ -133,7 +133,7 @@ MS-ASCNTC, MS-ASTZ) in modern async C#.
 
 - ~330 automated tests, including an integration suite that hosts the gateway in-process
   and drives it with a real WBXML-speaking mini-EAS client against **live backends**
-  (Stalwart, or docker-mailserver + Radicale).
+  (Stalwart; docker-mailserver + Radicale; Cyrus IMAP; Baikal + docker-mailserver).
 - CI compiles the solution exactly once and only pushes an image after both the unit and
   integration suites pass.
 - Async end-to-end: all I/O uses async/await with `CancellationToken` propagation;
@@ -1061,7 +1061,7 @@ dedicated throwaway mailbox — the tests create and delete real items.
 
 ### Backend stacks
 
-Both stacks publish the same ports (IMAP 143, SMTP 587, DAV 5232) and users
+All stacks publish the same ports (IMAP 143, SMTP 587, DAV 5232) and users
 (`user1@example.com` / `user2@example.com`, password `pass`); the Stalwart stack also
 publishes ManageSieve 4190 and serves the full JMAP surface (mail + calendars + contacts +
 vacation) on the DAV port:
@@ -1079,6 +1079,15 @@ docker compose -f docker/backends/stalwart/docker-compose.yml up -d --build --wa
 # ships none). --wait blocks until healthy AND provisioned.
 docker compose -f docker/backends/mailserver/docker-compose.yml up -d --wait
 AS_TEST_STACK=mailserver dotnet test --filter Category=Integration
+
+# Cyrus IMAP — an independent C server: IMAP + CalDAV/CardDAV + JMAP + ManageSieve (mail
+# submits over JMAP; LMTP-only for delivery). Home-sets live under /dav/…/user/{user}/.
+docker compose -f docker/backends/cyrus/docker-compose.yml up -d --build --wait
+
+# Baikal (sabre/dav) for CalDAV/CardDAV + docker-mailserver as the mail companion. A
+# self-provisioning custom image bakes the config + a seeded SQLite DB, so DAV works on first
+# boot with no installer. Home-sets live under /dav.php/…/{user}/.
+docker compose -f docker/backends/baikal/docker-compose.yml up -d --build --wait
 ```
 
 Or run the suite against **every** stack in turn with one command (brings each up, tests,
@@ -1099,12 +1108,12 @@ scripts/test-backends.sh               # Linux / devcontainer
   pipeline that compiles the solution exactly once:
   - **`test`** — the Dockerfile `test` stage builds everything and runs the unit tests,
     exporting every layer to a `type=gha` build cache.
-  - **`integration`** — a matrix leg per backend (`stalwart`, `mailserver`, `cyrus`) runs in
-    parallel. Each loads the cached test image, brings its backend + a throwaway Postgres
-    up, and runs the integration suite **from that image** (`dotnet test --no-build`).
+  - **`integration`** — a matrix leg per backend (`stalwart`, `mailserver`, `cyrus`, `baikal`)
+    runs in parallel. Each loads the cached test image, brings its backend + a throwaway
+    Postgres up, and runs the integration suite **from that image** (`dotnet test --no-build`).
     Tests for capabilities a backend lacks (JMAP/Sieve on docker-mailserver, CalDAV
-    free-busy on Radicale, SMTP submission / password-enforcement on the Cyrus test image)
-    skip cleanly. Legs push nothing.
+    free-busy on Radicale, SMTP submission / password-enforcement on the Cyrus test image,
+    JMAP/Sieve on the Baikal DAV stack) skip cleanly. Legs push nothing.
   - **`publish`** — only when **every** backend leg is green: the multi-arch runtime image,
     the NuGet packages and the release zips are built from the warm cache and pushed.
 

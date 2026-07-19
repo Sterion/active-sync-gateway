@@ -73,6 +73,10 @@ $BackendEnv = @{
 		AS_TEST_MAILSUBMIT           = 'jmap'
 		AS_TEST_SIEVE_TLS            = 'false'
 	}
+	baikal = @{
+		AS_TEST_DAV_HOMESET          = '/dav.php/calendars/{user}/'
+		AS_TEST_DAV_CONTACTS_HOMESET = '/dav.php/addressbooks/{user}/'
+	}
 }
 
 try {

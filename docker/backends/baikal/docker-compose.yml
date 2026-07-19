@@ -1,0 +1,62 @@
+# Backend leg (CI + local): Baikal (sabre/dav) for CalDAV/CardDAV, with docker-mailserver
+# as the mail companion. Baikal is DAV-only, so mail roles (IMAP 143 / submission 587) are
+# served by the same docker-mailserver image the `mailserver` leg uses — reusing its config
+# (../mailserver/config, incl. dovecot.cf) and its users, password "pass". Same published
+# ports and users as every other stack, so the only switch is AS_TEST_STACK (+ the DAV
+# home-set knobs carried in the CI matrix / scripts/test-backends).
+#
+#   docker compose -f docker/backends/baikal/docker-compose.yml up -d --build --wait
+#   $env:AS_TEST_STACK = "baikal"
+#   dotnet test --filter Category=Integration
+#
+# Baikal is a self-provisioning image (see Dockerfile + seed.php): config + a seeded SQLite DB
+# (users user1/user2, one default calendar + address book each) are baked in, so DAV works on
+# first boot with no web installer and no runtime one-shot. DavTaskTests creates its own
+# "Tasks" collection via MKCALENDAR. Plaintext everywhere — test use exclusively.
+services:
+  mailserver:
+    image: mailserver/docker-mailserver:15.1.0
+    hostname: mail.example.com
+    ports:
+      - "143:143"
+      - "587:587"
+    environment:
+      SSL_TYPE: ""              # no TLS — test only
+      ENABLE_CLAMAV: "0"
+      ENABLE_AMAVIS: "0"
+      ENABLE_RSPAMD: "0"
+      ENABLE_SPAMASSASSIN: "0"
+      ENABLE_OPENDKIM: "0"
+      ENABLE_OPENDMARC: "0"
+      ENABLE_POLICYD_SPF: "0"
+      ENABLE_FAIL2BAN: "0"
+      SPOOF_PROTECTION: "0"
+      PERMIT_DOCKER: connected-network
+      LOG_LEVEL: warn
+    volumes:
+      - ../mailserver/config/:/tmp/docker-mailserver/
+      - mailserver-data:/var/mail
+      - mailserver-state:/var/mail-state
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 143 && nc -z 127.0.0.1 587"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+
+  baikal:
+    build:
+      context: .
+    ports:
+      - "5232:80"              # DAV under /dav.php/ (canonical DAV/HTTP port for the suite)
+    healthcheck:
+      # An unauthenticated DAV request returns 401 once sabre/dav + the seeded DB are live.
+      test: ["CMD-SHELL", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost/dav.php/); [ \"$$code\" = '401' ]"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
+
+volumes:
+  mailserver-data:
+  mailserver-state:
