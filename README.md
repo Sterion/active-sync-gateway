@@ -340,8 +340,9 @@ whatever was active); `jmap` gives real HTML and precise start/end times.
 > defaults**. A database change is applied by every running replica within ~1s (no restart), except
 > a few listener settings — HTTP/HTTPS ports, self-signed-TLS and metrics enable/port — that apply
 > on the next restart. The gateway also starts with **no mail configuration at all**: with only the
-> bootstrap Encryption key set it runs **unconfigured** (EAS/Autodiscover answer 503, `/readyz` is
-> not-ready) until you point it at a backend with `eas config set`. So the shipped `appsettings.json`
+> bootstrap Encryption key set it runs **unconfigured** (EAS/Autodiscover answer 503; `/readyz`
+> stays ready and reports `"configured": false`) until you point it at a backend — from the web
+> admin's **Backends** page or with `eas config set`. So the shipped `appsettings.json`
 > carries only the two **bootstrap** sections — `Database` and `Encryption`, which are needed to
 > open and decrypt the database itself and are the only settings that cannot live in it. Everything
 > shown below is a **code default or example**; set the real values with the
@@ -889,6 +890,12 @@ credentials) and `calendar`/`contacts` (any HTTP answer counts, including 401). 
 names in the JSON are the role names; the probe returns 503 with per-component detail when
 something is down. `/healthz` stays a trivial liveness 200 on purpose: a dead mail server
 should drain traffic, not restart gateway pods.
+
+A gateway that has no mail backend yet reports `"configured": false` but stays **ready** — it
+is working, it just answers 503 on EAS until you configure it, and an orchestrator that never
+routes traffic to it is an orchestrator you can never reach the admin UI through. (Before
+1.1 this component failed the probe; deployments that gated on it will now see the pod go
+healthy earlier.)
 
 ### Device security policies
 

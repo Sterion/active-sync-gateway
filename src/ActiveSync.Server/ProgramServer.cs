@@ -211,9 +211,10 @@ public partial class Program
 			resolver.MergedUsers, httpsSummary);
 
 		if (!resolver.Roles.IsMailConfigured)
-			startupLogger.LogWarning(
-				"Gateway is UNCONFIGURED — no mail backend set. EAS and Autodiscover answer 503 and " +
-				"/readyz is not-ready until you configure mail, e.g. 'eas config set " +
+			startupLogger.LogInformation(
+				"No mail backend is set yet — EAS and Autodiscover answer 503 until one is. Set it up in " +
+				"the web admin under Backends (enable it with 'eas config set " +
+				"ActiveSync:WebUi:Admin:Enabled true'), or from the CLI, e.g. 'eas config set " +
 				"ActiveSync:Backends:MailStore:Provider imap' (and Host, and the MailSubmit role).");
 
 		// Report the bound addresses and public endpoints once the server is listening.

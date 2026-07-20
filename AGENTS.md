@@ -261,7 +261,8 @@ live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
   ALWAYS emit the user tag so Prometheus series shapes stay consistent). With
   `Metrics:Port` set, /metrics is gated on `Connection.LocalPort` (not Host headers).
   /readyz = cached ReadinessProbe (DB SELECT 1, IMAP TCP, DAV OPTIONS where any HTTP
-  status counts); /healthz stays trivial liveness — the container healthcheck depends on
+  status counts); the `configured` component is REPORTED but never gates the verdict.
+  /healthz stays trivial liveness — the container healthcheck depends on
   that. Test-fixture gotcha: `Metrics:Enabled` gates EAGER service registrations, so
   isolated-factory overrides must travel via UseSetting (GatewayFixture does this for all
   overrides now).
@@ -407,7 +408,8 @@ derive an address from `UserName` with `Contains('@')`.
   directly: `ActiveSync:Backends:<Role>` sections carry a `Provider` discriminator, parsed by
   `BackendRolesConfig` and held live by `BackendRolesProvider` (rebuilt when a settings change
   moves the `Backends` subtree — the session cache recycles, no restart; absent mail roles =
-  UNCONFIGURED, so EAS/Autodiscover answer 503 and `/readyz` is not-ready until set);
+  UNCONFIGURED, so EAS/Autodiscover answer 503 until set — but `/readyz` stays READY and only
+  reports `"configured": false`, since configuring the gateway is what the admin UI is for);
   `AccountResolver` produces role→provider resolutions
   (`ResolvedRole`), per-user overrides are role-keyed with subtree-replace list merges, and
   each provider binds its OWN options from its raw `ProviderSettings` (the host never knows
