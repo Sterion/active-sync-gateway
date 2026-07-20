@@ -75,9 +75,10 @@ internal static class BackendsEndpoints
 			Dictionary<string, string?> db = new(await store.LoadAllAsync(ct), StringComparer.OrdinalIgnoreCase);
 			Dictionary<string, string?> merged = Merge(parsed, request, db, config, out string? providerName);
 
+			IBackendProvider? provider = null;
 			if (providerName is not null)
 			{
-				IBackendProvider? provider = Resolve(registry, providerName, parsed, out string? providerError);
+				provider = Resolve(registry, providerName, parsed, out string? providerError);
 				if (provider is null)
 					return Results.BadRequest(new { error = providerError });
 
@@ -91,7 +92,7 @@ internal static class BackendsEndpoints
 					});
 			}
 
-			await PersistAsync(parsed, request, db, config, store, ct);
+			await PersistAsync(parsed, request, db, config, store, provider, ct);
 			return Results.Ok(Describe(parsed, registry,
 				new Dictionary<string, string?>(await store.LoadAllAsync(ct), StringComparer.OrdinalIgnoreCase),
 				config));
@@ -249,12 +250,18 @@ internal static class BackendsEndpoints
 	/// </summary>
 	private static async Task PersistAsync(
 		BackendRole role, RoleWriteRequest request, Dictionary<string, string?> db,
-		IConfiguration config, GlobalSettingStore store, CancellationToken ct)
+		IConfiguration config, GlobalSettingStore store, IBackendProvider? provider,
+		CancellationToken ct)
 	{
 		Dictionary<string, string?> configLeafs = new(ConfigLeafs(role, config), StringComparer.OrdinalIgnoreCase);
+		// Below the config file sits the provider's own default, which is just as much "not an
+		// override" — storing it would only pin a value that already applies.
+		foreach (BackendConfigField field in provider?.DescribeConfiguration(role) ?? [])
+			if (field.Default is { } declared && !configLeafs.ContainsKey(field.Name))
+				configLeafs[field.Name] = declared;
 		Dictionary<string, string?> changes = new(request.Settings ?? [], StringComparer.OrdinalIgnoreCase);
-		if (request.Provider is { } provider)
-			changes[BackendRolesConfig.ProviderKey] = string.IsNullOrWhiteSpace(provider) ? null : provider;
+		if (request.Provider is { } requested)
+			changes[BackendRolesConfig.ProviderKey] = string.IsNullOrWhiteSpace(requested) ? null : requested;
 
 		foreach ((string leaf, string? value) in changes)
 		{

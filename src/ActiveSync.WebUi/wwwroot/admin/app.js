@@ -5,7 +5,7 @@ import { api } from '/shared/api.js';
 import { initTheme, bindThemeToggle } from '/shared/theme.js';
 import { h, render } from '/shared/ui.js';
 
-const VIEWS = ['dashboard', 'settings', 'users', 'devices', 'shares', 'logs', 'state'];
+const VIEWS = ['dashboard', 'backends', 'settings', 'users', 'devices', 'shares', 'logs', 'state'];
 
 initTheme();
 bindThemeToggle(document.getElementById('theme-toggle'));

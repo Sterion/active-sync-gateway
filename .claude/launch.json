@@ -1,0 +1,11 @@
+{
+	"version": "0.0.1",
+	"configurations": [
+		{
+			"name": "gateway",
+			"runtimeExecutable": "dotnet",
+			"runtimeArgs": ["run", "--project", "src/ActiveSync.Server", "--no-build", "--", "serve"],
+			"port": 5000
+		}
+	]
+}

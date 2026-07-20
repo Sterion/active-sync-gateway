@@ -183,6 +183,32 @@ public sealed class WebUiBackendsApiTests(GatewayFixture gateway) : IAsyncLifeti
 	}
 
 	[Fact]
+	public async Task Save_ElidesTheProvidersOwnDefault()
+	{
+		// Nothing in the config file sets ForceFrom, so saving its declared default ("false")
+		// would pin a value that already applies — no row for it.
+		Assert.Equal(HttpStatusCode.OK, (await SendAsync("PUT", "/admin/api/backends/MailSubmit", new
+		{
+			provider = "smtp",
+			settings = new Dictionary<string, string?> { ["ForceFrom"] = "false" }
+		})).StatusCode);
+		Assert.Null(Source(await RoleAsync("MailSubmit"), "ForceFrom"));
+
+		// The non-default value is stored, and going back to the default removes it again.
+		Assert.Equal(HttpStatusCode.OK, (await SendAsync("PUT", "/admin/api/backends/MailSubmit", new
+		{
+			settings = new Dictionary<string, string?> { ["ForceFrom"] = "true" }
+		})).StatusCode);
+		Assert.Equal("db", Source(await RoleAsync("MailSubmit"), "ForceFrom"));
+
+		Assert.Equal(HttpStatusCode.OK, (await SendAsync("PUT", "/admin/api/backends/MailSubmit", new
+		{
+			settings = new Dictionary<string, string?> { ["ForceFrom"] = "false" }
+		})).StatusCode);
+		Assert.Null(Source(await RoleAsync("MailSubmit"), "ForceFrom"));
+	}
+
+	[Fact]
 	public async Task Save_RejectsWhatTheProviderWouldReject()
 	{
 		HttpResponseMessage badPort = await SendAsync("PUT", "/admin/api/backends/MailStore", new
