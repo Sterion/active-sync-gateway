@@ -50,6 +50,18 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 		BackendSettingsValidation.CaPath(options.CaCertificatePath, context, failures);
 	}
 
+	public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role)
+	{
+		return
+		[
+			new BackendConfigField("BaseUrl", "Base URL", BackendFieldType.Url, Required: true,
+				Help: "Absolute http(s) URL of the JMAP server, e.g. https://mail.example.com. " +
+				      "The session is fetched from /.well-known/jmap. " +
+				      "One server serving several roles repeats the same URL in each."),
+			.. BackendSchemaFields.Network()
+		];
+	}
+
 	public string DescribeRole(BackendRole role, ProviderSettings settings)
 	{
 		JmapOptions options = settings.Bind<JmapOptions>();
