@@ -97,6 +97,7 @@ public static class WebUiApplicationExtensions
 		AuthEndpoints.Map(adminApi, admin: true);
 		AuthEndpoints.Map(userApi, admin: false);
 		Api.SettingsEndpoints.Map(adminApi);
+		Api.BackendsEndpoints.Map(adminApi);
 		Api.UsersEndpoints.Map(adminApi);
 		Api.SharesEndpoints.Map(adminApi);
 		Api.DevicesEndpoints.Map(adminApi);
