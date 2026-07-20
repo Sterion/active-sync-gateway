@@ -36,4 +36,15 @@
 	<ItemGroup Condition="'$(IsPackable)' == 'true'">
 		<PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
 	</ItemGroup>
+
+	<!-- Docker builds (image + the in-image NuGet pack) have no .git — .dockerignore excludes
+	     it — so the SourceLink git tasks warned twice per packable project ("unable to locate
+	     repository" / "source link is empty") and produced an empty source link anyway. Turn
+	     the queries off explicitly when the repo folder is absent: same output, no warnings.
+	     Repository package metadata is unaffected (RepositoryUrl above is static), and builds
+	     from a real checkout (IDE, local dotnet) keep full SourceLink. -->
+	<PropertyGroup Condition="!Exists('$(MSBuildThisFileDirectory).git')">
+		<EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
+		<EnableSourceLink>false</EnableSourceLink>
+	</PropertyGroup>
 </Project>
