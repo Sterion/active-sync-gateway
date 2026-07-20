@@ -78,7 +78,7 @@ internal static class PortalEndpoints
 				if (account?.Options.Backends?.TryGetValue(role.ToString(), out BackendRoleOverride? own) == true)
 					provider = own.Provider;
 				if (string.IsNullOrWhiteSpace(provider))
-					provider = roles.Assignments.TryGetValue(role, out RoleAssignment assignment)
+					provider = roles.Assignments.TryGetValue(role, out RoleAssignment? assignment)
 						? assignment.ProviderName
 						: null;
 
