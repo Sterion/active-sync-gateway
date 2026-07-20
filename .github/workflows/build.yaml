@@ -5,6 +5,9 @@ on:
       - main
     tags:
       - '**'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
   schedule:
     # Nightly full run (regression safety net; all enabled backend legs + publish).
@@ -21,6 +24,12 @@ on:
 # All with the built-in GITHUB_TOKEN, no repository secrets. The job split trades the old
 # single-daemon containerd layer reuse for the shared type=gha cache; that buys real
 # per-backend parallelism and a separate status check per backend.
+#
+# Pull requests targeting main run the SAME three stages (full signal before merge), but
+# `publish`'s actual side effects stay no-ops: the Docker push step's `push:` is gated on
+# `github.event_name != 'pull_request'` and the NuGet/release steps are gated on a non-empty
+# derived VERSION, which is only set for a tag ref — a PR ref never matches. The zip-packaging
+# step still runs and uploads downloadable build artifacts, which is harmless (no external push).
 permissions:
   contents: write
   packages: write
