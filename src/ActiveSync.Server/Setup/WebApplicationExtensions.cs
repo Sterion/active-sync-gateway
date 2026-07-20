@@ -64,13 +64,31 @@ public static class WebApplicationExtensions
 				// unconfigured — a polled probe result, not a server failure worth an Error.
 				httpContext.Request.Path.StartsWithSegments("/readyz") && exception is null
 					? LogEventLevel.Debug
-					: exception is not null || httpContext.Response.StatusCode >= 500
-						? LogEventLevel.Error
-						: httpContext.Response.StatusCode >= 400
-							? LogEventLevel.Warning
-							: LogEventLevel.Debug;
+					// The admin/portal SPA shell probes GET .../api/session on every page load to
+					// decide login-form-vs-shell BEFORE the visitor has signed in — a 401 here is
+					// the routine "no session yet" answer, not an admin-worth event.
+					: IsAnonymousSessionProbe(httpContext) && exception is null
+						? LogEventLevel.Verbose
+						: exception is not null || httpContext.Response.StatusCode >= 500
+							? LogEventLevel.Error
+							: httpContext.Response.StatusCode >= 400
+								? LogEventLevel.Warning
+								: LogEventLevel.Debug;
 		});
 		return app;
+	}
+
+	/// <summary>
+	///   True for GET /admin/api/session or GET /user/api/session with a 401 — the SPA shell's
+	///   unauthenticated "am I already signed in?" check, which is EXPECTED to answer 401 on
+	///   every fresh page load and carries no information an operator needs to see.
+	/// </summary>
+	private static bool IsAnonymousSessionProbe(HttpContext httpContext)
+	{
+		return httpContext.Response.StatusCode == StatusCodes.Status401Unauthorized &&
+		       HttpMethods.IsGet(httpContext.Request.Method) &&
+		       (httpContext.Request.Path.Equals("/admin/api/session", StringComparison.OrdinalIgnoreCase) ||
+		        httpContext.Request.Path.Equals("/user/api/session", StringComparison.OrdinalIgnoreCase));
 	}
 
 	/// <summary>
