@@ -406,7 +406,7 @@ public sealed class AccountResolver
 				continue;
 			}
 
-			string root = ListRoot(userKey);
+			string root = BackendConfigValidation.ListRoot(userKey);
 			foreach (string existing in flat.Keys
 				         .Where(k => k.Equals(root, StringComparison.OrdinalIgnoreCase) ||
 				                     k.StartsWith(root + ":", StringComparison.OrdinalIgnoreCase))
@@ -418,22 +418,7 @@ public sealed class AccountResolver
 			if (value is not null && !userKey.Equals(BackendRolesConfig.ProviderKey, StringComparison.OrdinalIgnoreCase))
 				flat[userKey] = value;
 
-		IConfigurationRoot materialized = new ConfigurationBuilder()
-			.AddInMemoryCollection(flat.ToDictionary(pair => "S:" + pair.Key, string? (pair) => pair.Value))
-			.Build();
-		return new ProviderSettings(materialized.GetSection("S"));
-	}
-
-	/// <summary>"SharedCollections:0" → "SharedCollections"; "Host" → "Host".</summary>
-	private static string ListRoot(string key)
-	{
-		while (true)
-		{
-			int separator = key.LastIndexOf(':');
-			if (separator < 0 || !int.TryParse(key[(separator + 1)..], out int _))
-				return key;
-			key = key[..separator];
-		}
+		return ProviderSettings.FromFlat(flat);
 	}
 
 	private static void ValidateLogin(string login, List<string> failures)

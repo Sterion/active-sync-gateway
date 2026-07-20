@@ -43,6 +43,23 @@ public sealed class ProviderSettings(IConfigurationSection section)
 		section.Bind(options);
 		return options;
 	}
+
+	/// <summary>
+	///   Materializes flat leaf keys ("Host", "SharedCollections:0") into a section, so a set of
+	///   entered/stored values can be handed to a provider for binding or validation without a
+	///   file behind it. Null values are dropped (an absent key, not an empty one).
+	/// </summary>
+	public static ProviderSettings FromFlat(IReadOnlyDictionary<string, string?> flat)
+	{
+		if (flat.Count == 0)
+			return Empty;
+		IConfigurationRoot materialized = new ConfigurationBuilder()
+			.AddInMemoryCollection(flat
+				.Where(pair => pair.Value is not null)
+				.ToDictionary(pair => "S:" + pair.Key, string? (pair) => pair.Value))
+			.Build();
+		return new ProviderSettings(materialized.GetSection("S"));
+	}
 }
 
 /// <summary>
@@ -127,6 +144,15 @@ public interface IBackendProvider
 
 	/// <summary>One redacted human-readable line for the startup banner (never secrets).</summary>
 	string DescribeRole(BackendRole role, ProviderSettings settings);
+
+	/// <summary>
+	///   The settings this provider reads for the role, described so a UI can render a form for
+	///   them without knowing the option type. The default is empty — a provider (in particular
+	///   an out-of-repo plugin built against an older contract) that describes nothing simply
+	///   falls back to the raw key/value editors. Credentials are NOT fields: UserName/Password
+	///   are host-reserved per-user override keys, rendered separately.
+	/// </summary>
+	IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role) => [];
 }
 
 /// <summary>
