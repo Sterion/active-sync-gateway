@@ -255,4 +255,24 @@ public class ActiveSyncOptionsValidatorTests
 			File.Delete(path);
 		}
 	}
+
+	[Fact]
+	public void Oidc_Enabled_ButIncomplete_Fails()
+	{
+		ActiveSyncOptions options = Valid();
+		// Authority present signals OIDC intent; ClientId missing must fail while enabled.
+		options.WebUi.Oidc = new WebUiOidcOptions { Authority = "https://id.example.com" };
+		ValidateOptionsResult result = Validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains(result.Failures!, f => f.Contains("Oidc:ClientId"));
+	}
+
+	[Fact]
+	public void Oidc_Disabled_IsInert_EvenWhenIncomplete()
+	{
+		ActiveSyncOptions options = Valid();
+		// The settings are kept but the block is switched off — validation must not object.
+		options.WebUi.Oidc = new WebUiOidcOptions { Enabled = false, Authority = "https://id.example.com" };
+		Assert.True(Validator.Validate(null, options).Succeeded);
+	}
 }

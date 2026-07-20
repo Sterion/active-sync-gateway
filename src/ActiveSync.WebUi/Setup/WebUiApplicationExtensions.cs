@@ -84,7 +84,7 @@ public static class WebUiApplicationExtensions
 		// SSO challenge entry points (full-page navigations, not API calls). Mapped only when
 		// the OIDC handler is registered — same restart-tier read as the registration itself.
 		ActiveSyncOptions startup = app.Services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value;
-		if (!string.IsNullOrWhiteSpace(startup.WebUi.Oidc?.Authority))
+		if (AuthEndpoints.IsOidcConfigured(startup.WebUi))
 		{
 			app.MapGet("/admin/oidc/login", () => Results.Challenge(
 				new AuthenticationProperties { RedirectUri = "/admin" },

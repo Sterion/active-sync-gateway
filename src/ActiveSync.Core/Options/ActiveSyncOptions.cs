@@ -229,6 +229,13 @@ public sealed class WebUiUserPortalOptions
 /// </summary>
 public sealed class WebUiOidcOptions
 {
+	/// <summary>
+	///   Master switch for OIDC. When false, the identity-provider settings are kept but ignored:
+	///   web login falls back to local passwords, so OIDC can be turned off without deleting its
+	///   configuration. Restart-tier (the handler is wired at startup).
+	/// </summary>
+	public bool Enabled { get; set; } = true;
+
 	/// <summary>Issuer URL of the identity provider (e.g. https://id.example.com/realms/main).</summary>
 	public string? Authority { get; set; }
 

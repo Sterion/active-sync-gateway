@@ -60,7 +60,7 @@ public static class WebUiServiceCollectionExtensions
 		// other listener-shaping options ProgramServer reads from the raw configuration.
 		ActiveSyncOptions startup = builder.Configuration.GetSection("ActiveSync").Get<ActiveSyncOptions>()
 			?? new ActiveSyncOptions();
-		if (startup.WebUi.Oidc is { } oidc && !string.IsNullOrWhiteSpace(oidc.Authority))
+		if (startup.WebUi.Oidc is { Enabled: true } oidc && !string.IsNullOrWhiteSpace(oidc.Authority))
 			authentication.AddOpenIdConnect(OidcScheme,
 				options => ConfigureOidc(options, oidc, startup.Encryption));
 

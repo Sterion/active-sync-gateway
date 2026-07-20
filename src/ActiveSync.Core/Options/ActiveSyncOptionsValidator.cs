@@ -119,7 +119,9 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 
 	private static void ValidateWebUi(WebUiOptions webUi, List<string> failures)
 	{
-		if (webUi.Oidc is not { } oidc)
+		// A disabled OIDC block is inert — its settings are kept but ignored — so don't hold up
+		// startup over a half-filled configuration the operator has switched off.
+		if (webUi.Oidc is not { Enabled: true } oidc)
 			return;
 		// Any client/authority field present signals OIDC intent — then the pair is required.
 		bool intended = !string.IsNullOrWhiteSpace(oidc.Authority) ||

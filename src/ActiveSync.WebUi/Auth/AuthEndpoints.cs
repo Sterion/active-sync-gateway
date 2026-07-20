@@ -62,7 +62,7 @@ internal static class AuthEndpoints
 
 	internal static bool IsOidcConfigured(WebUiOptions webUi)
 	{
-		return !string.IsNullOrWhiteSpace(webUi.Oidc?.Authority);
+		return webUi.Oidc is { Enabled: true } oidc && !string.IsNullOrWhiteSpace(oidc.Authority);
 	}
 
 	private static async Task<IResult> LoginAsync(
