@@ -25,6 +25,13 @@ export async function render(container) {
 
 	renderList();
 
+	// Deep link: #/users/<login> (e.g. from the dashboard) opens that user's editor.
+	const target = decodeURIComponent(location.hash.replace(/^#\/users\/?/, ''));
+	if (target) {
+		const linked = users.find(u => u.login.toLowerCase() === target.toLowerCase());
+		if (linked) openEditor(linked);
+	}
+
 	function renderList() {
 		renderInto(list, users.length === 0
 			? h('div', { class: 'notice' }, 'No declared users — every login is pure pass-through.')

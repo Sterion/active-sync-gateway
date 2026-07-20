@@ -5,12 +5,18 @@ import { api } from '/shared/api.js';
 import { h, render as renderInto, table, toast } from '/shared/ui.js';
 
 export async function render(container) {
-	const devices = await api('/admin/api/devices');
+	// Deep link: #/devices/<user> (e.g. from the dashboard) filters to that user.
+	const userFilter = decodeURIComponent(location.hash.replace(/^#\/devices\/?/, ''));
+	const devices = await api(userFilter
+		? `/admin/api/devices?user=${encodeURIComponent(userFilter)}`
+		: '/admin/api/devices');
 
 	renderInto(container,
 		h('h1', { class: 'page-title' }, 'Devices'),
 		h('div', { class: 'card' },
-			h('h2', {}, 'Partnerships'),
+			h('h2', {}, 'Partnerships',
+				userFilter ? h('span', { class: 'badge accent', style: 'margin-left:8px' }, userFilter) : null,
+				userFilter ? h('a', { href: '#/devices', style: 'margin-left:8px; font-size:12px' }, 'show all') : null),
 			devices.length === 0
 				? h('div', { class: 'notice' }, 'No devices have synced yet.')
 				: table([
