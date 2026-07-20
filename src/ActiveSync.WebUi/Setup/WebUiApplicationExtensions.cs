@@ -81,6 +81,9 @@ public static class WebUiApplicationExtensions
 
 		AuthEndpoints.Map(adminApi, admin: true);
 		AuthEndpoints.Map(userApi, admin: false);
+		Api.SettingsEndpoints.Map(adminApi);
+		Api.UsersEndpoints.Map(adminApi);
+		Api.SharesEndpoints.Map(adminApi);
 	}
 
 	private static IFileProvider CreateAssetProvider()
