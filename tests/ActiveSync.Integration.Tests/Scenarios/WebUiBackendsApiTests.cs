@@ -119,11 +119,12 @@ public sealed class WebUiBackendsApiTests(GatewayFixture gateway) : IAsyncLifeti
 		Assert.Null(notes.GetProperty("provider").GetString());
 	}
 
-	[Fact]
+	[DavBackendFact]
 	public async Task Save_StoresOverride_AndResetBringsTheConfigValueBack()
 	{
 		// The config file assigns carddav here; moving the role to another provider is a real
-		// deviation and is stored as one.
+		// deviation and is stored as one. Needs a DAV backend: on the no-DAV stack (AS_TEST_DAV_URL=none,
+		// e.g. Apache James) the fixture leaves Contacts unassigned in the config file.
 		HttpResponseMessage saved = await SendAsync("PUT", "/admin/api/backends/Contacts", new
 		{
 			provider = "jmap",
