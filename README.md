@@ -1013,7 +1013,7 @@ appsettings.json in the working directory.
 | `user show <login>` | The effective entry for one login, secrets masked. |
 | `user add <login>` | Declare a user in the database (an empty entry is an allowlist grant; copies a same-login config entry as the starting point). |
 | `user remove <login>` | Delete the database entry — a same-login config entry becomes active again. |
-| `user set <login> <key> <value>` | Set one field by path (`MailAddress`, `Backends:Calendar:Enabled`, `Backends:MailStore:Settings:Host`, ...); password keys are hashed/sealed automatically. |
+| `user set <login> <key> <value>` | Set one field by path (`MailAddress`, `Admin` — grants the web admin UI, `Backends:Calendar:Enabled`, `Backends:MailStore:Settings:Host`, ...); password keys are hashed/sealed automatically. |
 | `user unset <login> <key>` | Clear one field (an emptied entry remains an allowlist grant). |
 | `user password <login>` | Set the gateway password from stdin (stored as a pbkdf2$ hash). |
 | `user secret <login> <key>` | Set a backend password (`Backends:MailStore:Password`, ...) from stdin (stored sealed, enc:v1:). |
@@ -1068,6 +1068,30 @@ Secrets travel via **stdin** (never argv, so they stay out of shell history and 
 The database commands read the same configuration as `serve`, so inside a running pod they
 just work; blocking answers the device's next request with HTTP 403 (no credential
 re-prompt loop), and `purge` is the reset lever when a device should re-sync from scratch.
+
+## Web interfaces (`/admin` and `/user`)
+
+The gateway can serve a web **admin interface** under `/admin` (full CLI parity: settings
+editor, user management, devices with block/wipe/purge, shared calendars, live logs, state
+dashboard) and a **user self-service portal** under `/user` (own password + backend
+credentials only). Both are **off by default** and toggle **live** (~1 s, no restart):
+
+```bash
+# Bootstrap on a fresh gateway (works even before any mail backend is configured):
+echo -n 'admin-password' | eas user password admin
+eas user set admin Admin true
+eas config set ActiveSync:WebUi:Admin:Enabled true          # then open http://host:5080/admin
+eas config set ActiveSync:WebUi:UserPortal:Enabled true     # optional, also on the admin Settings page
+```
+
+Local logins check the same account machinery as the phones (declared accounts only; the
+admin UI additionally requires the account's `Admin` flag). With
+`ActiveSync:WebUi:Oidc:Authority` + `ClientId` set, all web logins go through your **OIDC**
+identity provider instead and the local login form is disabled — see
+[docs/webui.md](docs/webui.md) for the full endpoint reference, the OIDC claim mapping
+(`LoginClaim`, `AdminClaim`, `AutoProvision` JIT accounts) and the security model (cookie
+auth is passive and never touches the EAS Basic-auth path; sessions survive restarts via a
+DataProtection key-ring in the state database, sealed with the Encryption master key).
 
 ## Testing
 

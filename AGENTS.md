@@ -145,9 +145,13 @@ src/ActiveSync.Backends.Dav/     "caldav" + "carddav" providers (one assembly �
 src/ActiveSync.Backends.Sieve/   "sieve" provider (ManageSieve). Depends on Core + Common.
 src/ActiveSync.Backends.Local/   always-shipped "local" fallback stores (gateway DB) +
                             LocalChangeNotifier. Depends on Core + Common.
+src/ActiveSync.WebUi/       Web admin interface (/admin) + user portal (/user): cookie/OIDC
+                            auth, the JSON API, and the embedded no-build SPA (wwwroot).
+                            Depends on Core ONLY (see "Web UI layer notes").
 src/ActiveSync.Server/      Kestrel host, /Microsoft-Server-ActiveSync endpoint, Basic auth,
                             one IEasCommandHandler per EAS command, provider DI registration
-                            (AddBackendProviders). References Core + all seven backend assemblies.
+                            (AddBackendProviders). References Core + all seven backend
+                            assemblies + WebUi.
 tests/ActiveSync.Protocol.Tests/   WBXML round-trip + query parser tests
 tests/ActiveSync.Core.Tests/       diff engine, sync-key state machine, options validator,
                                    provider engine + resolver, AND the backend unit tests
@@ -155,6 +159,7 @@ tests/ActiveSync.Core.Tests/       diff engine, sync-key state machine, options 
                                    there is no per-provider test project, so Core.Tests
                                    references the provider assemblies and hosts them.
 tests/ActiveSync.Server.Tests/     handler-level tests (has InternalsVisibleTo into Server)
+tests/ActiveSync.WebUi.Tests/      web UI unit tests (key repository, OIDC decision matrix)
 tests/ActiveSync.Integration.Tests/  real-backend E2E tests (see "Integration tests" below)
 ```
 
@@ -525,6 +530,39 @@ derive an address from `UserName` with `Contains('@')`.
   handles both; keep it that way.
 - Success for SendMail/SmartReply/SmartForward is an **empty 200**, not a WBXML body.
 - MoveItems status quirk: **3 = success** (1 and 2 are the error codes).
+
+## Web UI layer notes (`src/ActiveSync.WebUi`)
+
+- A class library (plain `Microsoft.NET.Sdk` + `FrameworkReference Microsoft.AspNetCore.App`)
+  referenced by the Server; it references **Core only** — never the Server (that would be
+  circular) and never backend assemblies (cross-provider state goes through Core capability
+  interfaces like `IWatcherDiagnostics`). `ProgramServer.cs` touches it in exactly two
+  lines: `builder.AddWebUi()` + `app.MapWebUi()`.
+- Everything is mapped unconditionally and gated at runtime by the LIVE
+  `ActiveSync:WebUi:{Admin,UserPortal}:Enabled` flags (404 when off) — same pattern as the
+  `/metrics` port filter. The admin UI must keep working in unconfigured mode (bootstrap).
+- Auth: one passive cookie scheme (`WebUi`), policies `WebUiAdmin` (claim `eas:admin`) /
+  `WebUiUser`; CSRF = SameSite=Strict + the `X-EAS-WebUi` header filter on non-GET. The
+  cookie scheme never challenges — the EAS Basic-auth path must stay byte-identical.
+  DataProtection keys persist in the `DataProtectionKeys` table via `DbXmlRepository`
+  (sealed with the master key) — do NOT swap in the official EF package; it would drag
+  ASP.NET into Core's packed plugin contract.
+- API endpoints reuse the exact CLI pipelines from `ActiveSync.Core.Administration`
+  (`SettingKeys`, `AccountFieldPaths`, `AccountSecretPolicy`, `AccountEditing`) — the web
+  must never accept what `eas` would reject, and stored secrets never leave the server
+  (DTOs carry set/unset flags; there is a leak-guard test asserting no `pbkdf2$`/`enc:v1:`
+  in responses).
+- `wwwroot/` is a **no-build SPA**: plain HTML/CSS/native ES modules, zero npm/bundler —
+  keep it that way. `shared/theme.css` owns all visual tokens (restyle there);
+  `shared/app.css` consumes only variables; no inline scripts/styles ever (strict CSP).
+  Set `EAS_WEBUI_ASSETS=<path to wwwroot>` to serve live files from disk while designing.
+  The default-as-placeholder convention: unset fields render empty with the default as a
+  dimmed placeholder + badge; clearing reverts to the default.
+- OIDC (`WebUiServiceCollectionExtensions`): handler registered only when
+  `Oidc:Authority` is set at startup (restart tier); the ticket→account decision matrix
+  lives in `Auth/OidcLogin.cs` (unit-tested in isolation); AdminClaim/AutoProvision are
+  read live per sign-in. The callback is `/oidc/callback` — outside the gated prefixes on
+  purpose.
 
 ## Integration tests
 
