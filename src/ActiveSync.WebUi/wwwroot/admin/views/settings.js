@@ -65,8 +65,8 @@ function settingRow(setting) {
 		h('td', {}, control),
 		status,
 		h('td', { style: 'width:72px' }, h('span', { class: 'badge' }, setting.tier)),
-		h('td', { style: 'width:46px' },
-			h('button', { title: 'Reset to default', onclick: () => {
+		h('td', { style: 'width:44px; text-align:right' },
+			h('button', { class: 'icon', title: 'Reset to default', onclick: () => {
 				control.value = '';
 				save(null);
 			} }, '↺')));
@@ -76,10 +76,13 @@ function buildControl(setting) {
 	const current = setting.source === 'default' ? '' : (setting.value ?? '');
 	if (setting.type === 'Bool' || setting.enumValues) {
 		const values = setting.enumValues ?? ['true', 'false'];
+		// Configuration providers normalize JSON literals ("True"/"False", any enum casing) —
+		// match case-insensitively or a set value would silently render as the default.
+		const selected = values.find(v => v.toLowerCase() === current.toLowerCase()) ?? '';
 		return h('select', {},
-			h('option', { value: '', selected: current === '' },
+			h('option', { value: '', selected: selected === '' },
 				`(default: ${setting.default ?? 'unset'})`),
-			values.map(v => h('option', { value: v, selected: current === v }, v)));
+			values.map(v => h('option', { value: v, selected: v === selected }, v)));
 	}
 
 	return h('input', {

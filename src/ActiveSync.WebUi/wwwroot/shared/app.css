@@ -262,6 +262,12 @@ button.danger {
 	border-color: var(--danger);
 }
 
+/* Compact single-glyph button (fits narrow table cells without overflowing the row). */
+button.icon {
+	padding: 4px 9px;
+	line-height: 1.2;
+}
+
 /* ---- Badges + notices ------------------------------------------------------------------ */
 
 .badge {
