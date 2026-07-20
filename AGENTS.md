@@ -554,7 +554,8 @@ derive an address from `UserName` with `Contains('@')`.
   in responses).
 - `wwwroot/` is a **no-build SPA**: plain HTML/CSS/native ES modules, zero npm/bundler —
   keep it that way. `shared/theme.css` owns all visual tokens (restyle there);
-  `shared/app.css` consumes only variables; no inline scripts/styles ever (strict CSP).
+  `shared/app.css` consumes only variables; no inline SCRIPTS ever (the CSP forbids them —
+  inline `style=` attributes are allowed for layout).
   Set `EAS_WEBUI_ASSETS=<path to wwwroot>` to serve live files from disk while designing.
   The default-as-placeholder convention: unset fields render empty with the default as a
   dimmed placeholder + badge; clearing reverts to the default.

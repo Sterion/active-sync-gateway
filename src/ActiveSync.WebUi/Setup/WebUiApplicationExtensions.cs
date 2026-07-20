@@ -55,10 +55,11 @@ public static class WebUiApplicationExtensions
 
 			context.Response.OnStarting(() =>
 			{
-				// No inline scripts/styles anywhere in the SPA — set the strict policy from
-				// day one (a retrofit would be painful).
+				// No inline SCRIPTS anywhere in the SPA — scripts stay locked to 'self'.
+				// Inline style ATTRIBUTES are allowed: the views lay themselves out with
+				// them, and a style-injection is a far smaller risk than script injection.
 				context.Response.Headers.ContentSecurityPolicy =
-					"default-src 'self'; frame-ancestors 'none'";
+					"default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'";
 				context.Response.Headers.XFrameOptions = "DENY";
 				context.Response.Headers["Referrer-Policy"] = "no-referrer";
 				return Task.CompletedTask;

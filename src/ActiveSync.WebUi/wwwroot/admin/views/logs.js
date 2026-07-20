@@ -27,13 +27,15 @@ export async function render(container) {
 		h('div', { class: 'card' },
 			h('div', { style: 'display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px' },
 				level, user, machine, text, refresh, live),
-			h('table', { class: 'data' },
+			// Fixed layout: the message column absorbs the width, source/user truncate with
+			// an ellipsis instead of pushing the table off-screen.
+			h('table', { class: 'data compact', style: 'table-layout:fixed; width:100%' },
 				h('thead', {}, h('tr', {},
-					h('th', { style: 'width:135px' }, 'Time (UTC)'),
-					h('th', { style: 'width:70px' }, 'Level'),
+					h('th', { style: 'width:128px' }, 'Time (UTC)'),
+					h('th', { style: 'width:76px' }, 'Level'),
 					h('th', {}, 'Message'),
-					h('th', { style: 'width:110px' }, 'User'),
-					h('th', { style: 'width:110px' }, 'Source'))),
+					h('th', { style: 'width:95px' }, 'User'),
+					h('th', { style: 'width:130px' }, 'Source'))),
 				body)));
 
 	refresh.addEventListener('click', () => loadHistory());
@@ -82,15 +84,17 @@ export async function render(container) {
 		const levelClass = entry.level === 'Error' || entry.level === 'Fatal' ? 'danger'
 			: entry.level === 'Warning' ? 'warn' : '';
 		return h('tr', {},
-			h('td', { class: 'mono' }, (entry.timestampUtc ?? '').replace('T', ' ').slice(0, 19)),
-			h('td', {}, h('span', { class: `badge ${levelClass}` }, entry.level)),
+			h('td', { class: 'mono' }, (entry.timestampUtc ?? '').replace('T', ' ').slice(5, 19)),
+			h('td', {}, h('span', { class: `badge ${levelClass}` }, entry.level.slice(0, 4))),
 			h('td', {},
-				h('div', {}, entry.message),
-				entry.exception ? h('pre', { class: 'mono', style: 'white-space:pre-wrap; color:var(--danger); margin:4px 0 0' },
-					entry.exception) : null,
-				entry.machine ? h('span', { class: 'badge', title: 'replica' }, entry.machine) : null),
-			h('td', {}, entry.user ?? ''),
-			h('td', { class: 'mono', title: entry.sourceContext ?? '' },
+				h('div', { title: entry.machine ? `replica: ${entry.machine}` : undefined }, entry.message),
+				// Stack traces collapse behind a toggle — one log line stays one row tall.
+				entry.exception ? h('details', {},
+					h('summary', { style: 'cursor:pointer; color:var(--danger); font-size:12px' }, 'stack trace'),
+					h('pre', { class: 'mono', style: 'white-space:pre-wrap; color:var(--danger); margin:4px 0 0' },
+						entry.exception)) : null),
+			h('td', { class: 'ellipsis', title: entry.user ?? '' }, entry.user ?? ''),
+			h('td', { class: 'mono ellipsis', title: entry.sourceContext ?? '' },
 				(entry.sourceContext ?? '').split('.').pop() ?? ''));
 	}
 }

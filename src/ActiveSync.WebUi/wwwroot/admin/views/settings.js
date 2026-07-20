@@ -26,14 +26,16 @@ export async function render(container) {
 		[...groups.entries()].map(([name, entries]) =>
 			h('div', { class: 'card' },
 				h('h2', {}, name),
-				h('table', { class: 'data' },
+				// Fixed layout with identical column widths in every group card, so the
+				// controls line up across the whole page.
+				h('table', { class: 'data', style: 'table-layout:fixed; width:100%' },
 					h('tbody', {}, entries.map(settingRow))))));
 }
 
 function settingRow(setting) {
 	const shortKey = setting.key.replace(/^ActiveSync:/, '');
 	const control = buildControl(setting);
-	const status = h('td', { style: 'width:120px' }, sourceBadge(setting.source));
+	const status = h('td', { style: 'width:86px' }, sourceBadge(setting.source));
 
 	async function save(value) {
 		try {
@@ -57,13 +59,13 @@ function settingRow(setting) {
 	control.addEventListener('change', () => save(control.value));
 
 	return h('tr', {},
-		h('td', { style: 'width:34%' },
+		h('td', { style: 'width:36%; vertical-align:top; padding-top:10px' },
 			h('div', { class: 'mono' }, shortKey),
 			h('div', { style: 'color:var(--fg-muted); font-size:12px' }, setting.help)),
 		h('td', {}, control),
 		status,
-		h('td', { style: 'width:70px' }, h('span', { class: 'badge' }, setting.tier)),
-		h('td', { style: 'width:70px' },
+		h('td', { style: 'width:72px' }, h('span', { class: 'badge' }, setting.tier)),
+		h('td', { style: 'width:46px' },
 			h('button', { title: 'Reset to default', onclick: () => {
 				control.value = '';
 				save(null);

@@ -60,11 +60,15 @@ public static class WebApplicationExtensions
 					httpContext.Items[EasEndpoint.RequestSummaryKey] as string
 					?? $"{httpContext.Request.Method} {httpContext.Request.Path}");
 			o.GetLevel = (httpContext, _, exception) =>
-				exception is not null || httpContext.Response.StatusCode >= 500
-					? LogEventLevel.Error
-					: httpContext.Response.StatusCode >= 400
-						? LogEventLevel.Warning
-						: LogEventLevel.Debug;
+				// /readyz answers 503 BY DESIGN while a component is down or the gateway is
+				// unconfigured — a polled probe result, not a server failure worth an Error.
+				httpContext.Request.Path.StartsWithSegments("/readyz") && exception is null
+					? LogEventLevel.Debug
+					: exception is not null || httpContext.Response.StatusCode >= 500
+						? LogEventLevel.Error
+						: httpContext.Response.StatusCode >= 400
+							? LogEventLevel.Warning
+							: LogEventLevel.Debug;
 		});
 		return app;
 	}

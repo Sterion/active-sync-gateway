@@ -80,8 +80,9 @@ eas config set ActiveSync:WebUi:Oidc:AutoProvision true                         
   never challenges, so the EAS Basic-auth endpoints and `/metrics` are untouched.
 - CSRF: SameSite=Strict **plus** a required `X-EAS-WebUi: 1` header on every non-GET API
   call — a cross-site request can produce neither.
-- Strict CSP (`default-src 'self'`, no inline scripts/styles), `X-Frame-Options: DENY`,
-  `Referrer-Policy: no-referrer` on the UI prefixes.
+- Strict CSP (`default-src 'self'` — no inline **scripts**; inline style attributes are
+  allowed for view layout), `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` on the
+  UI prefixes.
 - Cookie signing keys live in the state database (`DataProtectionKeys`), sealed with the
   Encryption master key — sessions survive restarts and validate on every replica, and a
   database dump alone cannot forge web sessions.
@@ -117,7 +118,8 @@ iteration loop).
 - The **default-as-placeholder** convention everywhere: an unset field renders empty with
   its default (or inherited value) as a dimmed placeholder / `(default: X)` option plus a
   badge; typing replaces it, clearing reverts to the default.
-- No inline scripts or styles — the CSP forbids them; keep it that way.
+- No inline scripts (`onclick=`, `<script>` blocks) — the CSP forbids them; keep it that
+  way. Inline `style=` attributes are fine (the views lay themselves out with them).
 
 ## Token-auth forward compatibility
 

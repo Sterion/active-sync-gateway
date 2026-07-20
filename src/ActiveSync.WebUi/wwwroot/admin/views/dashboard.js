@@ -1,4 +1,4 @@
-// Dashboard: readiness + summary tiles + a peek at live activity. Rate/latency charts stay
+// Dashboard: health badges + a compact counters panel (top right). Rate/latency charts stay
 // in Prometheus/Grafana — this is the "is everything alright" page.
 
 import { api } from '/shared/api.js';
@@ -14,34 +14,36 @@ export async function render(container) {
 
 	renderInto(container,
 		h('h1', { class: 'page-title' }, 'Dashboard'),
-		h('div', { class: 'card' },
-			h('h2', {}, 'Health'),
-			ready === null
-				? h('div', { class: 'notice' }, '/readyz is unreachable.')
-				: h('div', { style: 'display:flex; gap:8px; flex-wrap:wrap' },
-					Object.entries(ready.components ?? {}).map(([name, ok]) =>
-						h('span', { class: ok ? 'badge ok' : 'badge danger' }, `${name}: ${ok ? 'ok' : 'DOWN'}`)))),
-		h('div', { style: 'display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:14px' },
-			tile('Declared users', summary.declaredUsers),
-			tile('Users with devices', summary.deviceUsers),
-			tile('Devices', summary.devices),
-			tile('Live sessions', state.sessions.length),
-			tile('Push watchers', state.watchers.length),
-			tile('Parked long-polls', state.longPolls.reduce((sum, p) => sum + p.count, 0)),
-			tile('Login blocks', summary.blocks, summary.blocks > 0 ? 'warn' : ''),
-			tile('Pending wipes', summary.pendingWipes, summary.pendingWipes > 0 ? 'warn' : ''),
-			tile('Errors (1 h)', summary.errorsLastHour, summary.errorsLastHour > 0 ? 'danger' : ''),
-			tile('Warnings (1 h)', summary.warningsLastHour, summary.warningsLastHour > 0 ? 'warn' : '')),
-		h('div', { class: 'notice', style: 'margin-top:16px' },
-			'Signed in as ', h('strong', {}, session.login ?? '?'),
-			'. Request-rate and latency charts live in Prometheus/Grafana (ActiveSync:Metrics).'));
+		h('div', { style: 'display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:16px; align-items:start' },
+			h('div', {},
+				h('div', { class: 'card' },
+					h('h2', {}, 'Health'),
+					ready === null
+						? h('div', { class: 'notice' }, '/readyz is unreachable.')
+						: h('div', { style: 'display:flex; gap:8px; flex-wrap:wrap' },
+							Object.entries(ready.components ?? {}).map(([name, ok]) =>
+								h('span', { class: ok ? 'badge ok' : 'badge danger' }, `${name}: ${ok ? 'ok' : 'DOWN'}`)))),
+				h('div', { class: 'notice' },
+					'Signed in as ', h('strong', {}, session.login ?? '?'),
+					'. Request-rate and latency charts live in Prometheus/Grafana (ActiveSync:Metrics).')),
+			h('div', { class: 'card', style: 'margin-bottom:0' },
+				h('h2', {}, 'Counters'),
+				stat('Declared users', summary.declaredUsers),
+				stat('Users with devices', summary.deviceUsers),
+				stat('Devices', summary.devices),
+				stat('Live sessions', state.sessions.length),
+				stat('Push watchers', state.watchers.length),
+				stat('Parked long-polls', state.longPolls.reduce((sum, p) => sum + p.count, 0)),
+				stat('Login blocks', summary.blocks, summary.blocks > 0 ? 'warn' : ''),
+				stat('Pending wipes', summary.pendingWipes, summary.pendingWipes > 0 ? 'warn' : ''),
+				stat('Errors (1 h)', summary.errorsLastHour, summary.errorsLastHour > 0 ? 'danger' : ''),
+				stat('Warnings (1 h)', summary.warningsLastHour, summary.warningsLastHour > 0 ? 'warn' : ''))));
 }
 
-function tile(label, value, tone = '') {
-	return h('div', { class: 'card', style: 'margin-bottom:0' },
-		h('div', { style: 'color:var(--fg-muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em' }, label),
-		h('div', {
-			style: `font-size:26px; font-weight:600; margin-top:4px;` +
-				(tone === 'danger' ? 'color:var(--danger)' : tone === 'warn' ? 'color:var(--warn)' : ''),
+function stat(label, value, tone = '') {
+	return h('div', { class: 'stat-row' },
+		h('span', {}, label),
+		h('strong', {
+			style: tone === 'danger' ? 'color:var(--danger)' : tone === 'warn' ? 'color:var(--warn)' : '',
 		}, String(value ?? 0)));
 }

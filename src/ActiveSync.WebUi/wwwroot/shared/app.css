@@ -168,6 +168,35 @@ table.data tr:hover td {
 	background: var(--bg-hover);
 }
 
+table.data td {
+	vertical-align: middle;
+}
+
+/* Dense variant for high-volume views (logs). */
+table.data.compact th,
+table.data.compact td {
+	padding: 3px 8px;
+	font-size: 12.5px;
+}
+
+.ellipsis {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Compact label/value counter rows (dashboard side panel). */
+.stat-row {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 3px 0;
+}
+
+.stat-row span {
+	color: var(--fg-muted);
+}
+
 label {
 	display: block;
 	margin: 10px 0 4px;
