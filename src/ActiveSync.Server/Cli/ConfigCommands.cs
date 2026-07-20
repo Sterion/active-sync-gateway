@@ -55,13 +55,21 @@ internal abstract class SettingsCommandBase<TSettings>(IAnsiConsole terminal) : 
 		? "Restart the gateway for this to take effect."
 		: "A running gateway applies this within ~1s.";
 
-	/// <summary>Plain-text row cells — Text, not markup, so user-supplied strings render verbatim.</summary>
-	protected static void AddRow(Table table, params string[] cells)
-		=> table.AddRow(cells.Select(c => new Text(c)).ToArray());
-
 	/// <summary>Masks a secret-flagged key's value; unset values stay readable.</summary>
 	protected static string Mask(SettingKeys.SettingKey? definition, string value)
 		=> definition is { Secret: true } && value != "(unset)" ? "***" : value;
+
+	// Markup for the source/tier so they pop when the terminal supports colour (and render as the
+	// plain word otherwise). These are fixed tokens, so the markup is safe to embed unescaped.
+	protected static string SourceTag(string source) => source switch
+	{
+		"db" => "[green]db[/]",
+		"config" => "[blue]config[/]",
+		_ => "[grey]default[/]"
+	};
+
+	protected static string TierTag(string tier) =>
+		string.Equals(tier, "restart", StringComparison.OrdinalIgnoreCase) ? "[yellow]restart[/]" : "[green]live[/]";
 }
 
 internal sealed class ConfigListCommand(IAnsiConsole terminal) : SettingsCommandBase<ConfigListCommand.Settings>(terminal)
@@ -79,7 +87,8 @@ internal sealed class ConfigListCommand(IAnsiConsole terminal) : SettingsCommand
 		foreach (SettingKeys.SettingKey key in SettingKeys.All)
 		{
 			(string value, string source) = Effective(key.Key, key.Default, db, fileConfig);
-			AddRow(table, key.Key, Mask(key, value), source, key.Tier);
+			table.AddRow(new Text(key.Key), new Text(Mask(key, value)),
+				new Markup(SourceTag(source)), new Markup(TierTag(key.Tier)));
 			shown.Add(key.Key);
 		}
 
@@ -98,7 +107,8 @@ internal sealed class ConfigListCommand(IAnsiConsole terminal) : SettingsCommand
 		{
 			(string value, string source) = Effective(key, null, db, fileConfig);
 			SettingKeys.SettingKey? definition = SettingKeys.Find(key);
-			AddRow(table, key, Mask(definition, value), source, definition?.Tier ?? "live");
+			table.AddRow(new Text(key), new Text(Mask(definition, value)),
+				new Markup(SourceTag(source)), new Markup(TierTag(definition?.Tier ?? "live")));
 		}
 
 		Terminal.Write(table);
@@ -130,8 +140,10 @@ internal sealed class ConfigGetCommand(IAnsiConsole terminal) : SettingsCommandB
 			return 1;
 		}
 
-		Terminal.WriteLine($"{settings.Key} = {Mask(definition, value)}  (source: {source}"
-		                   + (definition is not null ? $"; tier: {definition.Tier}" : "") + ")");
+		// Colour the source/tier tokens; escape the (user-controlled) key + value so their contents
+		// can't be read as markup. Renders plain when the terminal has no colour.
+		Terminal.MarkupLine($"{Markup.Escape(settings.Key)} = {Markup.Escape(Mask(definition, value))}  (source: {SourceTag(source)}"
+		                    + (definition is not null ? $"; tier: {TierTag(definition.Tier)}" : "") + ")");
 		return 0;
 	}
 }

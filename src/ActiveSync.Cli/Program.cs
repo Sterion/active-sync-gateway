@@ -27,11 +27,26 @@ if (forceLocal || localOnly)
 // Read piped stdin once, up front: it feeds the forward, and is replayed to the local fallback.
 string? stdin = Console.IsInputRedirected ? await Console.In.ReadToEndAsync() : null;
 
+// Ask the gateway to render with ANSI colour + our terminal width when our stdout is a real
+// terminal that wants colour (a TTY, NO_COLOR unset) — piped/redirected output stays plain.
+bool color = !Console.IsOutputRedirected
+	&& string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NO_COLOR"));
+int width = 0;
+try
+{
+	if (!Console.IsOutputRedirected)
+		width = Console.WindowWidth;
+}
+catch
+{
+	// No attached console (width stays 0 → the gateway uses a wide default).
+}
+
 byte[]? key = LoadKey();
 CliRequest request = key is null
-	? new CliRequest(arguments, stdin, null)
+	? new CliRequest(arguments, stdin, null, color, width)
 	: new CliRequest(null, null, new LocalCliEnvelope(
-		arguments, stdin, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()).Seal(key));
+		arguments, stdin, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()).Seal(key), color, width);
 
 string baseUrl = ResolveBaseUrl();
 try
@@ -143,6 +158,6 @@ static int RunLocal(string[] arguments, string? stdin)
 	return process.ExitCode;
 }
 
-internal sealed record CliRequest(string[]? Args, string? Stdin, string? Sealed);
+internal sealed record CliRequest(string[]? Args, string? Stdin, string? Sealed, bool Color, int Width);
 
 internal sealed record CliResponse(int ExitCode, string Stdout, string Stderr);

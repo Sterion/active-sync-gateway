@@ -32,7 +32,11 @@ internal static class LocalCliEndpoint
 	/// <summary>How far a sealed request's timestamp may be from now before it's treated as a replay.</summary>
 	internal const long AuthWindowMs = 60_000;
 
-	internal sealed record CliRequest(string[]? Args, string? Stdin, string? Sealed);
+	// Color/Width are rendering hints from the caller's terminal (not secret, so they ride outside
+	// the sealed envelope). Color adds ANSI escapes to the output; Width wraps tables to the
+	// caller's terminal. A tampering sidecar still can't get a response (it can't seal a request),
+	// and at worst these only affect cosmetics of a legitimate caller's own output.
+	internal sealed record CliRequest(string[]? Args, string? Stdin, string? Sealed, bool Color = false, int Width = 0);
 
 	internal sealed record CliResponse(int ExitCode, string Stdout, string Stderr);
 
@@ -53,7 +57,8 @@ internal static class LocalCliEndpoint
 				    out string[] args, out string stdin))
 				return Results.NotFound();
 
-			CliResponse response = await ExecuteAsync(args, stdin, context.RequestAborted);
+			CliResponse response = await ExecuteAsync(args, stdin, context.RequestAborted,
+				request?.Color ?? false, request?.Width ?? 0);
 			return Results.Json(response);
 		});
 	}
@@ -93,12 +98,13 @@ internal static class LocalCliEndpoint
 	///   Runs one CLI command line in-process and returns its captured output + exit code. Refuses
 	///   <c>serve</c> (no nested gateway); every other verb — secret-bearing or not — is allowed.
 	/// </summary>
-	internal static async Task<CliResponse> ExecuteAsync(string[] args, string stdin, CancellationToken ct)
+	internal static async Task<CliResponse> ExecuteAsync(
+		string[] args, string stdin, CancellationToken ct, bool color = false, int width = 0)
 	{
 		if (args.Length > 0 && string.Equals(args[0], "serve", StringComparison.OrdinalIgnoreCase))
 			return new CliResponse(1, "", "serve is not available over /cli; run it locally.\n");
 
-		return await RunCapturedAsync(args, stdin, ct);
+		return await RunCapturedAsync(args, stdin, ct, color, width);
 	}
 
 	/// <summary>
@@ -107,7 +113,8 @@ internal static class LocalCliEndpoint
 	///   <see cref="AnsiConsole.Console" />) and the raw process-global <see cref="Console" />, so
 	///   both are redirected under the lock and restored in <c>finally</c>.
 	/// </summary>
-	private static async Task<CliResponse> RunCapturedAsync(string[] args, string stdin, CancellationToken ct)
+	private static async Task<CliResponse> RunCapturedAsync(
+		string[] args, string stdin, CancellationToken ct, bool color, int width)
 	{
 		await Gate.WaitAsync(ct);
 		TextWriter originalOut = Console.Out;
@@ -121,17 +128,18 @@ internal static class LocalCliEndpoint
 			Console.SetOut(outWriter);
 			Console.SetError(errorWriter);
 			Console.SetIn(new StringReader(stdin));
-			// Plain-text console (no ANSI/colour/prompts): the client re-emits this verbatim. Pin a
-			// wide profile so rendering never depends on the ambient terminal width (a redirected
-			// System.Console can report width 0, which would wrap every line away to nothing).
+			// Render with ANSI colour only when the CALLER's terminal wants it (a TTY, NO_COLOR
+			// unset) — the client detects that and sends the hint, so piped/redirected output stays
+			// plain. Pin the profile width to the caller's terminal (or a wide default) so tables
+			// wrap correctly and never depend on this process's ambient console width.
 			IAnsiConsole captured = AnsiConsole.Create(new AnsiConsoleSettings
 			{
-				Ansi = AnsiSupport.No,
-				ColorSystem = ColorSystemSupport.NoColors,
+				Ansi = color ? AnsiSupport.Yes : AnsiSupport.No,
+				ColorSystem = color ? ColorSystemSupport.Standard : ColorSystemSupport.NoColors,
 				Interactive = InteractionSupport.No,
 				Out = new AnsiConsoleOutput(outWriter),
 			});
-			captured.Profile.Width = 200;
+			captured.Profile.Width = width > 0 ? width : 200;
 			captured.Profile.Height = 100;
 			// Static AnsiConsole.* helpers write here; commands that take an injected IAnsiConsole
 			// get the same instance via CapturingRegistrar (Spectre's DEFAULT registrar caches the

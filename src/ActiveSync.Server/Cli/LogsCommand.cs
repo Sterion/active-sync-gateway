@@ -79,7 +79,7 @@ internal sealed class LogsCommand(IAnsiConsole terminal) : AsyncCommand<LogsComm
 		foreach (LogEntry row in rows)
 			table.AddRow(
 				new Text(row.TimestampUtc.ToString("MM-dd HH:mm:ss", CultureInfo.InvariantCulture)),
-				new Text(row.Level),
+				LevelMarkup(row.Level),
 				new Text(row.User ?? "-"),
 				new Text(ShortSource(row.SourceContext)),
 				new Text(OneLine(row.Message)));
@@ -89,6 +89,17 @@ internal sealed class LogsCommand(IAnsiConsole terminal) : AsyncCommand<LogsComm
 			: $"{rows.Count} entr{(rows.Count == 1 ? "y" : "ies")} shown.");
 		return 0;
 	}
+
+	// Colour the level so errors/warnings pop when the caller's terminal supports it; the markup
+	// degrades to the plain level name when colour is off (piped output, or non-colour terminals).
+	private static Markup LevelMarkup(string level) => level switch
+	{
+		"Fatal" => new Markup("[white on red]Fatal[/]"),
+		"Error" => new Markup("[red]Error[/]"),
+		"Warning" => new Markup("[yellow]Warning[/]"),
+		"Information" => new Markup("[green]Information[/]"),
+		_ => new Markup($"[grey]{Markup.Escape(level)}[/]")
+	};
 
 	private static bool TryParseWindow(string value, out TimeSpan window)
 	{

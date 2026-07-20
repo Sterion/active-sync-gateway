@@ -5,6 +5,7 @@ using ActiveSync.Crypto;
 using ActiveSync.Server.Cli;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Spectre.Console;
 
 namespace ActiveSync.Server.Tests;
 
@@ -90,6 +91,24 @@ public sealed class CliLocalEndpointTests : IDisposable
 		Assert.NotEqual(0, response.ExitCode);
 		Assert.Contains("not available over /cli", response.Stderr);
 		Assert.Equal("", response.Stdout);
+	}
+
+	[Fact]
+	public void ColorRendering_ForcesAnsiEscapes_ToTheCapturedBuffer()
+	{
+		// The /cli buffer is a StringWriter, not a terminal. Prove that forcing Ansi+colour makes
+		// Spectre emit escapes anyway, so any markup a command DOES colour survives the wire. (Most
+		// eas output is plain tables, so the common commands look the same coloured or not.)
+		StringWriter sw = new();
+		IAnsiConsole console = AnsiConsole.Create(new AnsiConsoleSettings
+		{
+			Ansi = AnsiSupport.Yes,
+			ColorSystem = ColorSystemSupport.Standard,
+			Interactive = InteractionSupport.No,
+			Out = new AnsiConsoleOutput(sw),
+		});
+		console.Markup("[red]x[/]");
+		Assert.Contains(((char)27) + "[", sw.ToString());
 	}
 
 	[Fact]
