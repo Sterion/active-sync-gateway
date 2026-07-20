@@ -69,6 +69,13 @@ eas config set ActiveSync:WebUi:Oidc:AutoProvision true                         
 - The **`LoginClaim`** (default `preferred_username`) maps the token to a gateway login.
   Register the redirect URI `https://<gateway>/oidc/callback` at the IdP (the callback is
   deliberately outside `/admin` and `/user` so a portal-only deployment works).
+- **Behind a TLS-terminating proxy** (e.g. a Kubernetes ingress that forwards to the plain-HTTP
+  port), the gateway must know it's serving https so the `redirect_uri` it sends the IdP — used
+  at both the authorize step and the token exchange — is `https`, not `http`. Set
+  `eas config set ActiveSync:PublicUrl https://<gateway>` (preferred; header-independent), or make
+  the proxy send `X-Forwarded-Proto: https`. Without one of these the browser refuses the callback
+  ("the information you're about to submit is not secure") because the IdP form-posts tokens to an
+  `http` URL.
 - **Admin** = the account's `Admin` flag **or** the `AdminClaim` (with `AdminClaimValue`
   set, the claim must carry exactly that value; without it, any value grants).
 - **`AutoProvision`**: an unknown login is JIT-created as a plain database account

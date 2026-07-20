@@ -1,8 +1,10 @@
+using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using ActiveSync.Server.Eas;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.Options;
 using Serilog;
 using Serilog.Events;
 using ILogger = Microsoft.Extensions.Logging.ILogger;
@@ -129,5 +131,40 @@ public static class WebApplicationExtensions
 			await next();
 		});
 		return app;
+	}
+
+	/// <summary>
+	///   Corrects <c>Request.Scheme</c> when the gateway sits behind a TLS-terminating proxy (e.g. a
+	///   Kubernetes ingress that forwards to the plain-HTTP port). Absolute URLs the app builds from
+	///   the request scheme then come out https — most importantly the OIDC <c>redirect_uri</c>, which
+	///   the handler derives from the scheme at BOTH the authorize step and the token exchange, so the
+	///   identity provider is never handed an http callback. <see cref="ActiveSyncOptions.PublicUrl" />
+	///   wins (it never depends on client-supplied headers); otherwise <c>X-Forwarded-Proto</c> is
+	///   trusted. Host and <c>RemoteIpAddress</c> are left untouched, so the /cli loopback gate and the
+	///   auth throttle are unaffected.
+	/// </summary>
+	public static WebApplication UsePublicScheme(this WebApplication app)
+	{
+		app.Use(async (context, next) =>
+		{
+			string? publicUrl = context.RequestServices
+				.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>().CurrentValue.PublicUrl;
+			if (ResolvePublicScheme(publicUrl, context.Request.Headers["X-Forwarded-Proto"].FirstOrDefault()) is { } scheme)
+				context.Request.Scheme = scheme;
+			await next();
+		});
+		return app;
+	}
+
+	/// <summary>
+	///   The scheme to force onto the request, or null to keep its own. A configured
+	///   <paramref name="publicUrl" /> beats the <paramref name="forwardedProto" /> header (which may
+	///   be a proxy-chain list — the first entry, the original client, wins).
+	/// </summary>
+	internal static string? ResolvePublicScheme(string? publicUrl, string? forwardedProto)
+	{
+		if (!string.IsNullOrWhiteSpace(publicUrl) && Uri.TryCreate(publicUrl, UriKind.Absolute, out Uri? uri))
+			return uri.Scheme;
+		return string.IsNullOrWhiteSpace(forwardedProto) ? null : forwardedProto.Split(',')[0].Trim();
 	}
 }

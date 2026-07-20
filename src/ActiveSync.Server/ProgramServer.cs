@@ -232,6 +232,9 @@ public partial class Program
 					: "");
 		});
 
+		// Correct the request scheme first (behind a TLS-terminating proxy the gateway is hit on
+		// HTTP), so every downstream absolute URL — notably the OIDC redirect_uri — is https.
+		app.UsePublicScheme();
 		app.UseEasMetrics();
 		app.UseEasRequestLogging();
 		app.UseNosniffHeader();
