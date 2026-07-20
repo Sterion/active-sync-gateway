@@ -56,6 +56,57 @@ internal static class PortalEndpoints
 			});
 		});
 
+		// What the portal needs to render a form instead of asking a user to know that CardDAV
+		// calls its server "BaseUrl": for each role, who serves it and which fields that
+		// provider reads. Schemas are descriptions, never values — nothing configured leaks.
+		api.MapGet("backends/meta", (
+			ClaimsPrincipal principal, AccountResolver resolver,
+			BackendRolesProvider rolesProvider, BackendProviderRegistry registry) =>
+		{
+			string? login = principal.Identity?.Name;
+			if (login is null)
+				return Results.Unauthorized();
+
+			BackendRolesConfig roles = rolesProvider.Current;
+			resolver.MergedUsers.TryGetValue(login, out MergedAccount? account);
+
+			Dictionary<string, object> meta = new(StringComparer.OrdinalIgnoreCase);
+			foreach (BackendRole role in Enum.GetValues<BackendRole>())
+			{
+				// The user's own provider override wins, exactly as AccountResolver resolves it.
+				string? provider = null;
+				if (account?.Options.Backends?.TryGetValue(role.ToString(), out BackendRoleOverride? own) == true)
+					provider = own.Provider;
+				if (string.IsNullOrWhiteSpace(provider))
+					provider = roles.Assignments.TryGetValue(role, out RoleAssignment assignment)
+						? assignment.ProviderName
+						: null;
+
+				IReadOnlyList<BackendConfigField> fields = [];
+				if (provider is not null)
+					try
+					{
+						fields = registry.GetFor(provider, role).DescribeConfiguration(role);
+					}
+					catch (InvalidOperationException)
+					{
+						// A provider that no longer serves the role: no form, raw editing only.
+					}
+
+				meta[role.ToString()] = new
+				{
+					provider,
+					fields = fields.Select(f => new
+					{
+						name = f.Name, label = f.Label, type = f.Type.ToString(), required = f.Required,
+						@default = f.Default, enumValues = f.EnumValues, help = f.Help, min = f.Min, max = f.Max
+					})
+				};
+			}
+
+			return Results.Ok(meta);
+		});
+
 		api.MapPut("password", async (
 			PasswordChangeRequest request, ClaimsPrincipal principal, HttpContext http,
 			AccountStore store, AccountResolver resolver, IBackendSessionFactory sessionFactory,

@@ -138,4 +138,54 @@ public sealed class WebUiPortalTests(GatewayFixture gateway) : IAsyncLifetime
 		Assert.Equal(HttpStatusCode.OK, (await SendAsync(fresh, "POST", "/user/api/login",
 			new { username = UserB, password = "new-pa55!" })).StatusCode);
 	}
+
+	[Fact]
+	public async Task BackendsMeta_NamesTheServingProviderAndItsFields()
+	{
+		using HttpClient client = await LoginAsync(UserA);
+		JsonElement meta = await client.GetFromJsonAsync<JsonElement>("/user/api/backends/meta");
+
+		// The fixture serves mail over imap; the portal gets that provider's field descriptions
+		// so it can render "Host" rather than asking the user to invent a key.
+		JsonElement mailStore = meta.GetProperty("MailStore");
+		Assert.Equal("imap", mailStore.GetProperty("provider").GetString());
+		string[] names = [.. mailStore.GetProperty("fields").EnumerateArray()
+			.Select(f => f.GetProperty("name").GetString()!)];
+		Assert.Contains("Host", names);
+		Assert.Contains("Port", names);
+
+		// Descriptions only — no configured value, and nothing secret-shaped, is in there.
+		string body = await client.GetStringAsync("/user/api/backends/meta");
+		Assert.DoesNotContain("pbkdf2$", body);
+		Assert.DoesNotContain("enc:v1:", body);
+	}
+
+	[Fact]
+	public async Task Saving_KeepsSettingsTheSchemaDoesNotCover()
+	{
+		// The portal renders only described fields, and its PUT replaces the settings wholesale
+		// — so a key it cannot show has to ride along, or saving a password would delete it.
+		using HttpClient client = await LoginAsync(UserA);
+		Assert.Equal(HttpStatusCode.OK, (await SendAsync(client, "PUT", "/user/api/backends/Contacts", new
+		{
+			settings = new Dictionary<string, string?>
+			{
+				["BaseUrl"] = "https://dav.example.com", ["PluginOnlyKey"] = "keep-me"
+			}
+		})).StatusCode);
+
+		// What the view does on save: described values from the form, undescribed ones carried.
+		Assert.Equal(HttpStatusCode.OK, (await SendAsync(client, "PUT", "/user/api/backends/Contacts", new
+		{
+			settings = new Dictionary<string, string?>
+			{
+				["BaseUrl"] = "https://dav2.example.com", ["PluginOnlyKey"] = "keep-me"
+			}
+		})).StatusCode);
+
+		JsonElement me = await client.GetFromJsonAsync<JsonElement>("/user/api/me");
+		JsonElement settings = me.GetProperty("backends").GetProperty("Contacts").GetProperty("settings");
+		Assert.Equal("https://dav2.example.com", settings.GetProperty("BaseUrl").GetString());
+		Assert.Equal("keep-me", settings.GetProperty("PluginOnlyKey").GetString());
+	}
 }
