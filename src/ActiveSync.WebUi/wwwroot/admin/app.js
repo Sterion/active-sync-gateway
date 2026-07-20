@@ -45,6 +45,16 @@ document.getElementById('logout').addEventListener('click', async () => {
 window.addEventListener('hashchange', route);
 
 async function boot() {
+	// SSO round-trips land back here with a hash flag instead of an error page.
+	if (location.hash === '#sso-denied' || location.hash === '#sso-failed') {
+		const error = document.getElementById('login-error');
+		error.textContent = location.hash === '#sso-denied'
+			? 'Signed in at the identity provider, but this gateway has no matching account (or it is blocked).'
+			: 'SSO sign-in failed or was cancelled.';
+		error.classList.remove('hidden');
+		history.replaceState(null, '', location.pathname);
+	}
+
 	try {
 		const mode = await api('/admin/api/auth/mode');
 		document.getElementById('login-local').classList.toggle('hidden', mode.mode === 'oidc');

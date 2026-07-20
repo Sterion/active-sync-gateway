@@ -146,6 +146,27 @@ public sealed class WebUiTests(GatewayFixture gateway)
 	}
 
 	[Fact]
+	public async Task OidcConfigured_DisablesLocalLogin()
+	{
+		Dictionary<string, string?> settings = UserSettings();
+		settings["ActiveSync:WebUi:Oidc:Authority"] = "https://id.example.invalid/realms/test";
+		settings["ActiveSync:WebUi:Oidc:ClientId"] = "eas-gateway";
+		await using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(settings);
+		HttpClient client = Client(factory);
+
+		// The login view switches to SSO...
+		HttpResponseMessage mode = await client.GetAsync("/admin/api/auth/mode");
+		Assert.Contains("oidc", await mode.Content.ReadAsStringAsync());
+
+		// ...and the local login form no longer exists — the local password is really the
+		// ActiveSync connect password, never a web credential under OIDC.
+		Assert.Equal(HttpStatusCode.NotFound,
+			(await LoginAsync(client, "admin", AdminUser, Password)).StatusCode);
+		Assert.Equal(HttpStatusCode.NotFound,
+			(await LoginAsync(client, "user", PlainUser, Password)).StatusCode);
+	}
+
+	[Fact]
 	public async Task EasEndpoint_Unaffected_WhenWebUiEnabled()
 	{
 		await using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(UserSettings());

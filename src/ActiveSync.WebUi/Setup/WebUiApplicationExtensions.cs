@@ -1,5 +1,6 @@
 using ActiveSync.Core.Options;
 using ActiveSync.WebUi.Auth;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -78,6 +79,19 @@ public static class WebUiApplicationExtensions
 		RouteGroupBuilder userApi = app.MapGroup("/user/api")
 			.RequireAuthorization(WebUiAuth.UserPolicy)
 			.AddEndpointFilter(RequireCsrfHeaderAsync);
+
+		// SSO challenge entry points (full-page navigations, not API calls). Mapped only when
+		// the OIDC handler is registered — same restart-tier read as the registration itself.
+		ActiveSyncOptions startup = app.Services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value;
+		if (!string.IsNullOrWhiteSpace(startup.WebUi.Oidc?.Authority))
+		{
+			app.MapGet("/admin/oidc/login", () => Results.Challenge(
+				new AuthenticationProperties { RedirectUri = "/admin" },
+				[WebUiServiceCollectionExtensions.OidcScheme]));
+			app.MapGet("/user/oidc/login", () => Results.Challenge(
+				new AuthenticationProperties { RedirectUri = "/user" },
+				[WebUiServiceCollectionExtensions.OidcScheme]));
+		}
 
 		AuthEndpoints.Map(adminApi, admin: true);
 		AuthEndpoints.Map(userApi, admin: false);
