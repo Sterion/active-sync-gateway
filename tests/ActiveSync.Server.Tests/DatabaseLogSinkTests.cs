@@ -12,25 +12,37 @@ namespace ActiveSync.Server.Tests;
 
 /// <summary>
 ///   The database log sink (Information+ only, live level/enable, per-row machine name) and the
-///   retention sweep, over a shared in-memory SQLite database.
+///   retention sweep, over a temp-file SQLite database. NOT a single shared :memory: connection:
+///   every context sharing one physical connection made EF's per-context connection init
+///   (CreateFunction for the ef_* SQL functions) race the sink's background drain — SQLite answers
+///   "unable to delete/modify user-function due to active statements" when another context is
+///   mid-query on the same connection. A file database gives each context its own pooled
+///   connection, exactly like production, with the production WAL/busy-timeout pragmas.
 /// </summary>
 public sealed class DatabaseLogSinkTests : IDisposable
 {
-	private readonly SqliteConnection _connection;
+	private readonly string _dbPath;
 	private readonly TestContextFactory _factory;
 
 	public DatabaseLogSinkTests()
 	{
-		_connection = new SqliteConnection("Data Source=:memory:");
-		_connection.Open();
-		_factory = new TestContextFactory(_connection);
+		_dbPath = Path.Combine(Path.GetTempPath(), $"as-dblogsink-{Guid.NewGuid():N}.db");
+		_factory = new TestContextFactory($"Data Source={_dbPath}");
 		using SyncDbContext db = _factory.CreateDbContext();
 		db.Database.EnsureCreated();
 	}
 
 	public void Dispose()
 	{
-		_connection.Dispose();
+		SqliteConnection.ClearAllPools();
+		try
+		{
+			File.Delete(_dbPath);
+		}
+		catch (IOException)
+		{
+			// still locked on Windows — temp files get cleaned eventually
+		}
 	}
 
 	private static ActiveSyncOptions Options(bool database, string level) =>
@@ -124,12 +136,13 @@ public sealed class DatabaseLogSinkTests : IDisposable
 		Assert.Equal("fresh", rows[0].Message);
 	}
 
-	private sealed class TestContextFactory(SqliteConnection connection) : ISyncDbContextFactory
+	private sealed class TestContextFactory(string connectionString) : ISyncDbContextFactory
 	{
 		public SyncDbContext CreateDbContext()
 		{
 			DbContextOptions<SqliteSyncDbContext> options = new DbContextOptionsBuilder<SqliteSyncDbContext>()
-				.UseSqlite(connection)
+				.UseSqlite(connectionString)
+				.AddInterceptors(new SqlitePragmaInterceptor())
 				.Options;
 			return new SqliteSyncDbContext(options);
 		}
