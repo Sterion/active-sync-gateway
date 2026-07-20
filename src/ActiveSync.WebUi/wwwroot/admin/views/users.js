@@ -5,11 +5,18 @@
 
 import { api } from '/shared/api.js';
 import { h, render as renderInto, table, toast, confirmDialog } from '/shared/ui.js';
+import { schemaForm, schemaKeys, listRoot } from '/shared/schema-form.js';
 
 const ROLES = ['MailStore', 'MailSubmit', 'Calendar', 'Tasks', 'Contacts', 'Notes', 'Oof'];
 
 export async function render(container) {
-	const users = await api('/admin/api/users');
+	// The backend schemas turn each role's override into a real form: pick a provider, fill
+	// the fields it says it needs. Nobody has to know that CardDAV calls its server "BaseUrl".
+	const [users, providers, globalRoles] = await Promise.all([
+		api('/admin/api/users'),
+		api('/admin/api/backends/providers'),
+		api('/admin/api/backends'),
+	]);
 
 	const list = h('div', {});
 	const editor = h('div', {});
@@ -62,7 +69,8 @@ export async function render(container) {
 		});
 		let clearPassword = false;
 
-		const roleEditors = ROLES.map(role => roleEditor(role, user?.backends?.[role]));
+		const roleEditors = ROLES.map(role => roleEditor(
+			role, user?.backends?.[role], providers, globalRoles.find(g => g.role === role)));
 
 		renderInto(editor, h('div', { class: 'card' },
 			h('h2', {}, isNew ? 'Add user' : `Edit ${user.login}`),
@@ -133,14 +141,23 @@ export async function render(container) {
 	}
 }
 
-function roleEditor(role, current) {
+/**
+ * One role's per-user override. Credentials are host-reserved fields (they are not provider
+ * settings); everything below them is rendered from the schema of whichever provider ends up
+ * serving the role — the one selected here, or the global one when inheriting.
+ */
+function roleEditor(role, current, providers, globalRole) {
+	const candidates = providers.filter(p => p.roles.includes(role));
+	const inheritedProvider = globalRole?.provider ?? null;
+
 	const enabled = h('select', {},
 		h('option', { value: '', selected: current?.enabled == null }, '(default: on)'),
 		h('option', { value: 'true', selected: current?.enabled === true }, 'on'),
 		h('option', { value: 'false', selected: current?.enabled === false }, 'off'));
-	const provider = h('input', {
-		value: current?.provider ?? '', placeholder: 'inherits the global provider', spellcheck: 'false',
-	});
+	const provider = h('select', {},
+		h('option', { value: '', selected: !current?.provider },
+			inheritedProvider ? `(inherit: ${inheritedProvider})` : '(inherit: none configured)'),
+		candidates.map(p => h('option', { value: p.name, selected: p.name === current?.provider }, p.name)));
 	const userName = h('input', {
 		value: current?.userName ?? '', placeholder: 'inherits the MailStore user (gateway login)', spellcheck: 'false',
 	});
@@ -149,9 +166,39 @@ function roleEditor(role, current) {
 		placeholder: current?.passwordSet ? '••• set — leave empty to keep' : 'inherits the login password',
 	});
 	let clearPassword = false;
-	const settingsRows = h('div', {});
-	const rows = Object.entries(current?.settings ?? {});
-	renderSettings();
+
+	const settingsBox = h('div', {});
+	const inheritNote = h('div', { class: 'field-help' });
+	let form = null;
+	let advanced = null;
+
+	function drawSettings() {
+		const effective = provider.value || inheritedProvider;
+		const described = providers.find(p => p.name === effective);
+		const fields = described?.schemas?.[role] ?? [];
+
+		// Settings inherit the global section ONLY while the provider matches it — a switched
+		// provider's keys mean something else entirely (the same rule AccountResolver applies).
+		const inheritsGlobal = !provider.value || provider.value === inheritedProvider;
+		const inherited = {};
+		if (inheritsGlobal)
+			for (const setting of globalRole?.settings ?? []) inherited[setting.key] = setting.value;
+
+		inheritNote.replaceChildren(inheritsGlobal
+			? 'Empty fields inherit the global setting shown dimmed.'
+			: `Different provider than the global ${inheritedProvider ?? 'none'} — these settings start fresh.`);
+
+		const values = current?.settings ?? {};
+		const known = schemaKeys(fields);
+		const leftover = Object.entries(values).filter(([k]) => !known.has(listRoot(k)));
+
+		form = schemaForm({ fields, values, inherited });
+		advanced = rawEditor(leftover, fields.length > 0);
+		settingsBox.replaceChildren(form.node, advanced.node);
+	}
+
+	provider.addEventListener('change', drawSettings);
+	drawSettings();
 
 	const element = h('details', current ? { open: true } : {},
 		h('summary', { style: 'cursor:pointer; padding:6px 0' }, role,
@@ -167,30 +214,23 @@ function roleEditor(role, current) {
 					password.value = '';
 					password.placeholder = 'will be REMOVED on save';
 				} }, 'Clear')),
-			h('label', {}, 'Settings (provider-specific keys, e.g. Host, Port, BaseUrl — the token-auth keys land here later)'),
-			settingsRows,
-			h('button', { onclick: () => { rows.push(['', '']); renderSettings(); } }, 'Add setting')));
-
-	function renderSettings() {
-		renderInto(settingsRows, rows.map((pair, index) =>
-			h('div', { style: 'display:flex; gap:8px; margin-bottom:6px' },
-				h('input', { value: pair[0], placeholder: 'Key', spellcheck: 'false',
-					oninput: e => { rows[index][0] = e.target.value; } }),
-				h('input', { value: pair[1] ?? '', placeholder: 'Value', spellcheck: 'false',
-					oninput: e => { rows[index][1] = e.target.value; } }),
-				h('button', { onclick: () => { rows.splice(index, 1); renderSettings(); } }, '✕'))));
-	}
+			inheritNote,
+			settingsBox));
 
 	return {
 		role,
 		element,
 		value() {
+			// The PUT replaces the override wholesale, so a value equal to what is inherited is
+			// simply left out — and keys the schema does not cover ride along from the raw rows.
+			const collected = { ...form.collect(), ...advanced.collect() };
 			const settings = {};
-			for (const [key, value] of rows)
-				if (key.trim()) settings[key.trim()] = value;
+			for (const [key, value] of Object.entries(collected))
+				if (value !== null && value !== undefined) settings[key] = value;
+
 			const result = {
 				enabled: enabled.value === '' ? null : enabled.value === 'true',
-				provider: provider.value.trim() || null,
+				provider: provider.value || null,
 				userName: userName.value.trim() || null,
 				password: clearPassword ? '' : (password.value || null),
 				settings: Object.keys(settings).length ? settings : null,
@@ -199,6 +239,39 @@ function roleEditor(role, current) {
 				result.password === null && !result.settings;
 			// Keep the override when only a stored password exists (password: null = keep it).
 			return empty && !current?.passwordSet ? null : result;
+		},
+	};
+}
+
+/** Key/value rows for settings the effective provider does not describe, so they survive a save. */
+function rawEditor(existing, collapsed) {
+	const rows = existing.map(([key, value]) => [key, value]);
+	const list = h('div', {});
+
+	function draw() {
+		renderInto(list, rows.map((pair, index) =>
+			h('div', { class: 'list-row' },
+				h('input', { value: pair[0], placeholder: 'Key', spellcheck: 'false',
+					oninput: e => { rows[index][0] = e.target.value; } }),
+				h('input', { value: pair[1] ?? '', placeholder: 'Value', spellcheck: 'false',
+					oninput: e => { rows[index][1] = e.target.value; } }),
+				h('button', { class: 'icon', type: 'button', title: 'Remove',
+					onclick: () => { rows.splice(index, 1); draw(); } }, '✕'))));
+		list.append(h('button', { type: 'button',
+			onclick: () => { rows.push(['', '']); draw(); } }, 'Add setting'));
+	}
+
+	draw();
+
+	return {
+		node: h('details', { open: !collapsed || existing.length > 0 },
+			h('summary', {}, 'Advanced — settings this provider does not describe'),
+			list),
+		collect() {
+			const settings = {};
+			for (const [key, value] of rows)
+				if (key.trim()) settings[key.trim()] = value;
+			return settings;
 		},
 	};
 }
