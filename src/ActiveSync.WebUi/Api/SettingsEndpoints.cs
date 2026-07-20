@@ -42,18 +42,14 @@ internal static class SettingsEndpoints
 				shown.Add(key.Key);
 			}
 
-			// Open-ended backend settings (and any other stored keys) aren't in the static
-			// catalogue — gather them from the file/env backend section and the database rows.
-			SortedSet<string> extra = new(StringComparer.OrdinalIgnoreCase);
-			foreach ((string leafKey, string? leafValue) in
-			         config.GetSection("ActiveSync:Backends").AsEnumerable(false))
-				if (leafValue is not null)
-					extra.Add(leafKey);
-			foreach (string dbKey in db.Keys)
-				extra.Add(dbKey);
+			// Any other stored keys not in the static catalogue (stray/legacy overrides) are
+			// surfaced so they can be cleared. Backend role settings are DELIBERATELY excluded —
+			// they have their own structured "Backends" page and must not appear as raw key/value
+			// rows here.
+			SortedSet<string> extra = new(db.Keys, StringComparer.OrdinalIgnoreCase);
 			extra.ExceptWith(shown);
 			foreach (string key in extra)
-				if (SettingKeys.Find(key) is { } definition)
+				if (!IsBackendKey(key) && SettingKeys.Find(key) is { } definition)
 					entries.Add(Describe(definition, db, config));
 
 			return Results.Ok(entries);
@@ -116,6 +112,11 @@ internal static class SettingsEndpoints
 	{
 		return SettingKeys.All.Any(k => k.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
 	}
+
+	// Backend role settings (ActiveSync:Backends:<Role>:*) are owned by the structured Backends
+	// page, not the raw settings grid.
+	private static bool IsBackendKey(string key) =>
+		key.StartsWith("ActiveSync:Backends:", StringComparison.OrdinalIgnoreCase);
 
 	/// <summary>Effective value + source: database wins, then config file/env, then the code default.</summary>
 	private static SettingDto Describe(
