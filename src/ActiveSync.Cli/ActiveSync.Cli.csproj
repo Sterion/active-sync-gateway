@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+	  The slim `eas` forwarding client. It reads the gateway's HTTP port from the same config the
+	  server does and POSTs the command line + stdin to the running gateway's loopback /cli endpoint,
+	  so everyday verbs skip a cold .NET start of the full server app. It references NO gateway code
+	  (only the BCL) so its own start is tiny; when no gateway is reachable it falls back to running
+	  `dotnet ActiveSync.Server.dll <args>` sitting next to it. Shipped only in the Docker image.
+	-->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<AssemblyName>eas</AssemblyName>
+		<RootNamespace>ActiveSync.Cli</RootNamespace>
+		<!-- Native launcher (`eas`), and precompiled so the forwarding path adds almost no startup. -->
+		<UseAppHost>true</UseAppHost>
+		<PublishReadyToRun>true</PublishReadyToRun>
+		<InvariantGlobalization>true</InvariantGlobalization>
+	</PropertyGroup>
+
+</Project>

@@ -7,6 +7,7 @@
 		<Project Path="src/ActiveSync.Backends.Local/ActiveSync.Backends.Local.csproj" />
 		<Project Path="src/ActiveSync.Backends.Sieve/ActiveSync.Backends.Sieve.csproj" />
 		<Project Path="src/ActiveSync.Backends.Smtp/ActiveSync.Backends.Smtp.csproj" />
+		<Project Path="src/ActiveSync.Cli/ActiveSync.Cli.csproj" />
 		<Project Path="src/ActiveSync.Core/ActiveSync.Core.csproj" />
 		<Project Path="src/ActiveSync.Protocol/ActiveSync.Protocol.csproj" />
 		<Project Path="src/ActiveSync.Server/ActiveSync.Server.csproj" />
