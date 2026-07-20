@@ -48,7 +48,7 @@ function Start-Postgres {
 	docker rm -f $PgContainer 2>$null | Out-Null
 	docker run -d --name $PgContainer -p 5432:5432 `
 		-e POSTGRES_USER=activesync -e POSTGRES_PASSWORD=ci-pw -e POSTGRES_DB=activesync `
-		postgres:17-alpine | Out-Null
+		postgres:17-alpine -c max_connections=300 | Out-Null
 	for ($i = 0; $i -lt 30; $i++) {
 		docker exec $PgContainer pg_isready -U activesync -d activesync -q 2>$null
 		if ($LASTEXITCODE -eq 0) { return $true }
