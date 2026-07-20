@@ -148,6 +148,9 @@ internal static class SettingKeys
 			"Create a database account for unknown OIDC logins on first sign-in."),
 		new("ActiveSync:WebUi:Oidc:RequireHttpsMetadata", ValueType.Bool, true, "true",
 			"Require HTTPS for the OIDC discovery endpoint (disable only for dev)."),
+
+		new("ActiveSync:Cli:Enabled", ValueType.Bool, false, "true",
+			"Answer the loopback CLI-forwarding endpoint (/cli) that the slim 'eas' client uses."),
 	];
 
 	private static readonly Dictionary<string, SettingKey> ByKey =

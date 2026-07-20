@@ -291,6 +291,17 @@ public sealed class WebUiOptions
 }
 
 /// <summary>
+///   The loopback CLI-forwarding endpoint (<c>POST /cli</c>). The slim <c>eas</c> client posts a
+///   command line here so it runs against the already-warm gateway instead of paying a cold
+///   process start. Reachable only from loopback connections — that gate is the whole auth
+///   boundary, so keeping it on is safe; set <see cref="Enabled" /> false to remove the endpoint.
+/// </summary>
+public sealed class CliOptions
+{
+	public bool Enabled { get; set; } = true;
+}
+
+/// <summary>
 ///   Host options. Backend endpoints are NOT bound here — the ActiveSync:Backends section
 ///   is role-keyed raw configuration each role's provider binds itself (see
 ///   <see cref="Accounts.BackendRolesConfig" />); the option classes above are what the
@@ -307,6 +318,7 @@ public sealed class ActiveSyncOptions
 	public PolicyOptions Policy { get; set; } = new();
 	public MetricsOptions Metrics { get; set; } = new();
 	public WebUiOptions WebUi { get; set; } = new();
+	public CliOptions Cli { get; set; } = new();
 
 	/// <summary>
 	///   Public base URL of this gateway (e.g. https://eas.example.com) advertised by

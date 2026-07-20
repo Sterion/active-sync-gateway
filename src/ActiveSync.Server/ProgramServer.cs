@@ -261,6 +261,7 @@ public partial class Program
 		EasEndpoint.Map(app);
 		AutodiscoverEndpoint.Map(app);
 		app.MapWebUi();
+		ActiveSync.Server.Cli.LocalCliEndpoint.Map(app);
 
 		await app.RunAsync();
 		return 0;

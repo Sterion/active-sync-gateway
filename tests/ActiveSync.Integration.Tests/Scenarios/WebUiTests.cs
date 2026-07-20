@@ -176,4 +176,16 @@ public sealed class WebUiTests(GatewayFixture gateway)
 		Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 		Assert.Contains("Basic", response.Headers.WwwAuthenticate.ToString());
 	}
+
+	[Fact]
+	public async Task CliEndpoint_RejectsNonLoopbackCallers()
+	{
+		// The loopback gate is the whole auth boundary for /cli. TestServer requests carry no
+		// remote address (never loopback), so the endpoint must answer 404 — never execute a
+		// command for a caller it can't prove is on the loopback interface.
+		HttpClient client = gateway.CreateHttpClient();
+		HttpResponseMessage response = await client.PostAsJsonAsync(
+			"/cli", new { args = new[] { "config", "list" }, stdin = (string?)null });
+		Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+	}
 }
