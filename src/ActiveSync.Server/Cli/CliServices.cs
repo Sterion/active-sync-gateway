@@ -115,6 +115,24 @@ internal static class CliServices
 		services.AddOptions<ActiveSyncOptions>().Bind(config.GetSection("ActiveSync"));
 		services.AddSyncDatabase(PostgresConnectionUri.EffectiveProvider(database));
 		services.AddSingleton<GlobalSettingStore>();
+		// The providers come along so `eas config set ActiveSync:Backends:...` is checked against
+		// the shape the provider actually reads. Registration is lazy: nothing here resolves
+		// BackendRolesProvider, which parses the config and would refuse to build on exactly the
+		// broken configuration this command exists to repair.
+		services.AddLocalContentProtection();
+		services.AddSingleton<ActiveSync.Backends.Local.LocalChangeNotifier>();
+		services.AddBackendProviders();
+		try
+		{
+			// Plugin providers describe their settings too — validate against theirs as well.
+			ActiveSync.Core.Plugins.PluginLoader.LoadInto(services, config,
+				Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+		}
+		catch (InvalidOperationException)
+		{
+			// A broken plugin must not block editing settings; `eas serve` reports it properly.
+		}
+
 		ServiceProvider provider = services.BuildServiceProvider();
 
 		try

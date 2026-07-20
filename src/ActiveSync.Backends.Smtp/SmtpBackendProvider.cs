@@ -27,6 +27,17 @@ public sealed class SmtpBackendProvider(ILoggerFactory loggerFactory) : IBackend
 		BackendSettingsValidation.CaPath(options.CaCertificatePath, context, failures);
 	}
 
+	public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role)
+	{
+		return
+		[
+			.. BackendSchemaFields.MailConnection(465),
+			new BackendConfigField("ForceFrom", "Rewrite the From header", BackendFieldType.Bool, Default: "false",
+				Help: "Replace the sender of outgoing mail with the authenticated user. " +
+				      "Enable only when your server does not enforce sender alignment itself.")
+		];
+	}
+
 	public string DescribeRole(BackendRole role, ProviderSettings settings)
 	{
 		SmtpOptions options = settings.Bind<SmtpOptions>();

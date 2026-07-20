@@ -105,6 +105,33 @@ A plugin provider is assigned to a role like any other, by name:
 
 `Endpoint` (and anything else in the section) is bound by your provider, not the host.
 
+### Describing your settings
+
+Override `DescribeConfiguration(role)` and the web UI renders a real form for your provider —
+labelled inputs, dropdowns for enums, defaults as placeholders, per-field validation — in the
+admin Backends page, the per-user override editor and the user portal alike. The host still
+binds nothing: it only knows the shapes you declare.
+
+```csharp
+public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role) =>
+[
+    new BackendConfigField("Endpoint", "Endpoint", BackendFieldType.Url, Required: true,
+        Help: "Absolute https URL of the notes service."),
+    new BackendConfigField("Mode", "Sync mode", BackendFieldType.Enum, Default: "Auto",
+        EnumValues: ["Auto", "Push", "Poll"])
+];
+```
+
+Field types: `String`, `Int` (with optional `Min`/`Max`), `Bool`, `Enum` (with `EnumValues`),
+`Url`, `Secret` (masked, never echoed back) and `StringList` (repeated `Name:0`, `Name:1` keys —
+give the list root as `Name`). `Default` must be the string form of your options class's own
+default, since it is what the UI shows as the dimmed placeholder.
+
+The method has a default implementation returning nothing, so an older plugin keeps compiling
+and working — its settings simply stay raw key/value rows in the UI. Describing only part of
+your surface is fine too: undescribed keys remain editable and are never dropped on save.
+`ValidateConfiguration` is still where semantic checks belong; the schema covers shape only.
+
 ## Packaging and deployment
 
 Build your plugin as a normal class library targeting the same framework as the gateway

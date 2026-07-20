@@ -3,11 +3,17 @@
 
 import { api } from '/shared/api.js';
 import { h, render as renderInto, toast } from '/shared/ui.js';
+import { schemaForm, schemaKeys, listRoot } from '/shared/schema-form.js';
 
 const ROLES = ['MailStore', 'MailSubmit', 'Calendar', 'Tasks', 'Contacts', 'Notes', 'Oof'];
 
 export async function render(container) {
-	const me = await api('/user/api/me');
+	// The schemas let the portal render named fields ("Base URL") instead of asking for a key
+	// nobody outside the provider knows.
+	const [me, meta] = await Promise.all([
+		api('/user/api/me'),
+		api('/user/api/backends/meta'),
+	]);
 
 	const current = h('input', { type: 'password', autocomplete: 'current-password' });
 	const next = h('input', { type: 'password', autocomplete: 'new-password' });
@@ -34,7 +40,7 @@ export async function render(container) {
 			h('div', { class: 'notice' },
 				'Per-role backend login overrides. Empty fields inherit: the user name defaults to ',
 				'your MailStore user (your login), the password to your sign-in password.'),
-			...ROLES.map(role => roleCard(role, me.backends?.[role]))));
+			...ROLES.map(role => roleCard(role, me.backends?.[role], meta?.[role]))));
 
 	async function changePassword() {
 		if (next.value !== confirm.value) {
@@ -53,7 +59,7 @@ export async function render(container) {
 	}
 }
 
-function roleCard(role, existing) {
+function roleCard(role, existing, meta) {
 	const userName = h('input', {
 		value: existing?.userName ?? '', spellcheck: 'false',
 		placeholder: role === 'MailStore' ? 'defaults to your login' : 'inherits the MailStore user',
@@ -63,24 +69,20 @@ function roleCard(role, existing) {
 		placeholder: existing?.passwordSet ? '••• set — leave empty to keep' : 'inherits your sign-in password',
 	});
 	let clearPassword = false;
-	const rows = Object.entries(existing?.settings ?? {});
-	const settingsRows = h('div', {});
-	renderSettings();
 
-	function renderSettings() {
-		renderInto(settingsRows, rows.map((pair, index) =>
-			h('div', { style: 'display:flex; gap:8px; margin-bottom:6px' },
-				h('input', { value: pair[0], placeholder: 'Key', spellcheck: 'false',
-					oninput: e => { rows[index][0] = e.target.value; } }),
-				h('input', { value: pair[1] ?? '', placeholder: 'Value', spellcheck: 'false',
-					oninput: e => { rows[index][1] = e.target.value; } }),
-				h('button', { onclick: () => { rows.splice(index, 1); renderSettings(); } }, '✕'))));
-	}
+	const values = existing?.settings ?? {};
+	const fields = meta?.fields ?? [];
+	const known = schemaKeys(fields);
+	// Keys the provider does not describe are carried through the save untouched rather than
+	// shown here: this is the end-user surface, and the admin editor owns the raw view.
+	const untouched = Object.fromEntries(
+		Object.entries(values).filter(([key]) => !known.has(listRoot(key))));
+	const form = schemaForm({ fields, values });
 
 	async function save() {
-		const settings = {};
-		for (const [key, value] of rows)
-			if (key.trim()) settings[key.trim()] = value;
+		const settings = { ...untouched };
+		for (const [key, value] of Object.entries(form.collect()))
+			if (value !== null && value !== undefined) settings[key] = value;
 		try {
 			await api(`/user/api/backends/${role}`, {
 				method: 'PUT',
@@ -92,14 +94,16 @@ function roleCard(role, existing) {
 			});
 			toast(`${role} saved. Applies when your session is next built (within minutes).`, 'ok');
 		} catch (e) {
-			toast(e.body?.error ?? `Saving ${role} failed.`, 'error');
+			const failures = e.body?.failures ?? [];
+			const unattached = form.markFailures(failures);
+			toast(unattached[0] ?? e.body?.error ?? `Saving ${role} failed.`, 'error');
 		}
 	}
 
 	return h('details', existing ? { open: true } : {},
 		h('summary', { style: 'cursor:pointer; padding:6px 0' }, role,
 			existing ? h('span', { class: 'badge accent', style: 'margin-left:8px' }, 'customized') : null,
-			existing?.provider ? h('span', { class: 'badge', style: 'margin-left:6px' }, existing.provider) : null,
+			meta?.provider ? h('span', { class: 'badge', style: 'margin-left:6px' }, meta.provider) : null,
 			existing?.enabled === false ? h('span', { class: 'badge warn', style: 'margin-left:6px' }, 'off') : null),
 		h('div', { style: 'padding:4px 0 10px 14px' },
 			h('label', {}, 'Backend user'), userName,
@@ -110,9 +114,11 @@ function roleCard(role, existing) {
 					password.value = '';
 					password.placeholder = 'will be REMOVED on save';
 				} }, 'Clear')),
-			h('label', {}, 'Settings (advanced, provider-specific keys)'),
-			settingsRows,
-			h('div', { style: 'display:flex; gap:8px; margin-top:8px' },
-				h('button', { onclick: () => { rows.push(['', '']); renderSettings(); } }, 'Add setting'),
+			meta?.provider
+				? h('div', { class: 'field-help' },
+					`Server settings for ${meta.provider}. Empty fields use what the gateway is configured with.`)
+				: null,
+			form.node,
+			h('div', { class: 'row-actions' },
 				h('button', { class: 'primary', onclick: save }, `Save ${role}`))));
 }

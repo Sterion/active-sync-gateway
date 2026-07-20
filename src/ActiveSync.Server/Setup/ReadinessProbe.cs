@@ -12,6 +12,9 @@ namespace ActiveSync.Server.Setup;
 ///   the role names, lowercased. Results are cached briefly so probes from an orchestrator
 ///   cannot hammer the backends. /healthz stays a trivial liveness 200 — a dead mail
 ///   server should drain traffic, not restart pods.
+///   "configured" is reported but does NOT gate the verdict: a gateway awaiting its first
+///   mail backend is a working gateway (the admin UI is how you configure one), it just
+///   answers 503 on EAS and Autodiscover until a backend is assigned.
 /// </summary>
 public sealed class ReadinessProbe(
 	ISyncDbContextFactory dbFactory,
@@ -30,7 +33,7 @@ public sealed class ReadinessProbe(
 		try
 		{
 			if (_cached is { } cached && DateTime.UtcNow - cached.AtUtc < CacheTtl)
-				return (cached.Components.Values.All(v => v), cached.Components);
+				return (IsReady(cached.Components), cached.Components);
 
 			List<(string Name, Task<bool> Probe)> probes = [("database", ProbeDatabaseAsync(ct))];
 			foreach ((BackendRole role, RoleAssignment assignment) in rolesProvider.Current.Assignments.OrderBy(a => a.Key))
@@ -39,19 +42,27 @@ public sealed class ReadinessProbe(
 						ProbeRoleAsync(source, role, assignment, ct)));
 
 			Dictionary<string, bool> components = new(StringComparer.Ordinal);
-			// An unconfigured gateway (no mail backends) is deliberately not ready until it is
-			// configured via `eas config set` — the EAS endpoints answer 503 in the meantime.
-			components["configured"] = rolesProvider.Current.IsMailConfigured;
+			// Informational only (see IsReady): an unconfigured gateway is ready to be
+			// configured, and an orchestrator that never sees it healthy can never get there.
+			components[ConfiguredComponent] = rolesProvider.Current.IsMailConfigured;
 			foreach ((string name, Task<bool> probe) in probes)
 				components[name] = await probe;
 
 			_cached = (DateTime.UtcNow, components);
-			return (components.Values.All(v => v), components);
+			return (IsReady(components), components);
 		}
 		finally
 		{
 			_gate.Release();
 		}
+	}
+
+	private const string ConfiguredComponent = "configured";
+
+	/// <summary>Every probed component must pass; "configured" is reported, not required.</summary>
+	private static bool IsReady(Dictionary<string, bool> components)
+	{
+		return components.All(c => c.Key == ConfiguredComponent || c.Value);
 	}
 
 	private async Task<bool> ProbeDatabaseAsync(CancellationToken ct)

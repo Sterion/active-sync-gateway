@@ -1,3 +1,4 @@
+using ActiveSync.Backends.Common;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using Microsoft.Extensions.Configuration;
@@ -47,6 +48,42 @@ public sealed class CalDavBackendProvider(ILoggerFactory loggerFactory) : IBacke
 		foreach (string entry in options.SharedCollections ?? [])
 			if (SharedCollection.Validate(entry, options.BaseUrl) is { } sharedFailure)
 				failures.Add($"{context}: SharedCollections: {sharedFailure}");
+	}
+
+	public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role)
+	{
+		// The Tasks section is an overlay on the Calendar one when both run here, so its URL
+		// fields are optional — typically it only names the VTODO collection.
+		if (role == BackendRole.Tasks)
+			return
+			[
+				new BackendConfigField("TaskFolder", "VTODO collection", BackendFieldType.String, Default: "Tasks",
+					Help: "Display name or path segment of the tasks collection in the calendar home set. " +
+					      "Empty stores tasks in the gateway database instead."),
+				new BackendConfigField("BaseUrl", "Base URL", BackendFieldType.Url,
+					Help: "Only when tasks live on a different server than the calendar."),
+				new BackendConfigField("HomeSetPath", "Home set path", BackendFieldType.String,
+					Help: "Overrides the calendar section's home set for tasks.")
+			];
+
+		return
+		[
+			new BackendConfigField("BaseUrl", "Base URL", BackendFieldType.Url, Required: true,
+				Help: "Absolute http(s) URL of the CalDAV server, e.g. https://dav.example.com."),
+			new BackendConfigField("HomeSetPath", "Home set path", BackendFieldType.String,
+				Help: "Path template of the user's collection home set — {user} and {localpart} are substituted, " +
+				      "e.g. \"/{user}/\". Empty discovers it via .well-known and current-user-principal."),
+			new BackendConfigField("CalendarAttachments", "Event attachments", BackendFieldType.Enum,
+				Default: "Auto", EnumValues: ["Auto", "On", "Off"],
+				Help: "Inline (base64) attachments for EAS 16.x clients. Auto caps them at 1 MiB, On at 16 MiB."),
+			new BackendConfigField("SendInvitations", "Send iMIP invitations", BackendFieldType.Enum,
+				Default: "Auto", EnumValues: ["Auto", "On", "Off"],
+				Help: "Auto sends unless the server advertises a scheduling outbox and invites on its own."),
+			new BackendConfigField("SharedCollections", "Extra calendar collections", BackendFieldType.StringList,
+				Help: "Absolute paths or same-host URLs synced as additional calendar folders, " +
+				      "each optionally suffixed \"|ro\" for read-only."),
+			.. BackendSchemaFields.Network()
+		];
 	}
 
 	public string DescribeRole(BackendRole role, ProviderSettings settings)

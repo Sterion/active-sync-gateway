@@ -10,7 +10,8 @@ public sealed record RoleAssignment(BackendRole Role, string ProviderName, Provi
 ///   The parsed ActiveSync:Backends section: one sub-section per role, each carrying the
 ///   host-reserved "Provider" key plus provider-owned settings the host never binds. MailStore
 ///   and MailSubmit enable mail; when they are absent the gateway runs UNCONFIGURED (it still
-///   starts, so it can be configured via `eas config set`). Absent content roles fall back to the
+///   starts and is ready, so it can be configured — web admin Backends page, or `eas config
+///   set`). Absent content roles fall back to the
 ///   "local" provider; an absent Oof role means the feature is off. Rebuilt live by
 ///   <see cref="BackendRolesProvider" /> when the backend configuration changes.
 /// </summary>
@@ -28,9 +29,10 @@ public sealed class BackendRolesConfig
 	public IReadOnlyDictionary<BackendRole, RoleAssignment> Assignments { get; }
 
 	/// <summary>
-	///   True when both mail roles are assigned. When false the gateway is UNCONFIGURED: it starts
-	///   and stays live (so an operator can configure it via `eas config set`), but the EAS and
-	///   Autodiscover endpoints answer 503 and /readyz reports not-ready until mail is configured.
+	///   True when both mail roles are assigned. When false the gateway is UNCONFIGURED: it starts,
+	///   stays live and reports ready (so an operator can configure it — via the web admin's
+	///   Backends page or `eas config set`), but the EAS and Autodiscover endpoints answer 503
+	///   until mail is configured. /readyz reports "configured": false without failing on it.
 	/// </summary>
 	public bool IsMailConfigured =>
 		Assignments.ContainsKey(BackendRole.MailStore) && Assignments.ContainsKey(BackendRole.MailSubmit);

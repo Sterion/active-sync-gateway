@@ -261,7 +261,8 @@ live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
   ALWAYS emit the user tag so Prometheus series shapes stay consistent). With
   `Metrics:Port` set, /metrics is gated on `Connection.LocalPort` (not Host headers).
   /readyz = cached ReadinessProbe (DB SELECT 1, IMAP TCP, DAV OPTIONS where any HTTP
-  status counts); /healthz stays trivial liveness — the container healthcheck depends on
+  status counts); the `configured` component is REPORTED but never gates the verdict.
+  /healthz stays trivial liveness — the container healthcheck depends on
   that. Test-fixture gotcha: `Metrics:Enabled` gates EAGER service registrations, so
   isolated-factory overrides must travel via UseSetting (GatewayFixture does this for all
   overrides now).
@@ -407,13 +408,23 @@ derive an address from `UserName` with `Contains('@')`.
   directly: `ActiveSync:Backends:<Role>` sections carry a `Provider` discriminator, parsed by
   `BackendRolesConfig` and held live by `BackendRolesProvider` (rebuilt when a settings change
   moves the `Backends` subtree — the session cache recycles, no restart; absent mail roles =
-  UNCONFIGURED, so EAS/Autodiscover answer 503 and `/readyz` is not-ready until set);
+  UNCONFIGURED, so EAS/Autodiscover answer 503 until set — but `/readyz` stays READY and only
+  reports `"configured": false`, since configuring the gateway is what the admin UI is for);
   `AccountResolver` produces role→provider resolutions
   (`ResolvedRole`), per-user overrides are role-keyed with subtree-replace list merges, and
   each provider binds its OWN options from its raw `ProviderSettings` (the host never knows
   a plugin provider's option shape — that is the whole point). Providers validate their
   sections via `ValidateConfiguration` and describe themselves for the banner via
-  `DescribeRole`. Pre-role-model DB account rows are upgraded at startup by
+  `DescribeRole`. **`DescribeConfiguration(role)`** (a DEFAULT interface member, so older
+  plugins still compile and just fall back to raw key/value editing) returns
+  `BackendConfigField`s — name, type, default, enum values, help — which is the ONLY thing
+  the web UI and CLI know about a provider's settings; they render forms from it and never
+  hard-code a field. In-repo providers compose the shared bases from
+  `Backends.Common/BackendSchemaFields`; a declared `Default` MUST equal the options class's
+  own (BackendSchemaTests binds an empty section and compares — a drift renders a wrong
+  "(default: X)"). `BackendConfigValidation` holds the generic shape checks + the
+  effective-section pass, `ProviderSettings.FromFlat` materializes entered values, and
+  `BackendKeyValidator` applies the schema to `eas config set ActiveSync:Backends:...`. Pre-role-model DB account rows are upgraded at startup by
   `AccountStore.UpgradeLegacyRowsAsync` (`LegacyAccountJson`) — unconvertible rows are
   logged as errors, never silently dropped. Optional provider capabilities:
   `ICredentialVerifier` (auth probe — the MailStore role's provider verifies pass-through
@@ -547,6 +558,17 @@ derive an address from `UserName` with `Contains('@')`.
   DataProtection keys persist in the `DataProtectionKeys` table via `DbXmlRepository`
   (sealed with the master key) — do NOT swap in the official EF package; it would drag
   ASP.NET into Core's packed plugin contract.
+- **Backends page** (`BackendsEndpoints` + `admin/views/backends.js`): role→provider assignment
+  and settings as `GlobalSetting` rows over the file config — the same write path as settings,
+  so `BackendRolesProvider` applies it live (~1 s, no restart). Two invariants: (1) the DB
+  settings layer is INSIDE `IConfiguration`, so "what the config file says" must be read by
+  walking the providers and skipping `DbSettingsConfigurationProvider` (`FileValue`) — reading
+  it naively makes a save look redundant and delete its own row; (2) saves ELIDE values equal
+  to the layer below (config file, else the provider's declared default) and delete any
+  existing row for them, so an override always means a real deviation and typing the default
+  is the reset. `shared/schema-form.js` renders the fields for all three editors (Backends
+  page, admin user editor, portal); keys no schema claims must survive the full-replacement
+  PUTs — Advanced section in the admin views, invisible carry-through in the portal.
 - API endpoints reuse the exact CLI pipelines from `ActiveSync.Core.Administration`
   (`SettingKeys`, `AccountFieldPaths`, `AccountSecretPolicy`, `AccountEditing`) — the web
   must never accept what `eas` would reject, and stored secrets never leave the server

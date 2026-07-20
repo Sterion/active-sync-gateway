@@ -378,3 +378,75 @@ button.icon {
 .hidden {
 	display: none !important;
 }
+
+/* ---- Schema-driven forms (Backends page, user editors) --------------------------------- */
+
+/* Rendered from a provider's own field descriptions, so the layout has to work for whatever
+   combination of inputs, selects and repeated rows it hands us. */
+.card-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 12px;
+}
+
+.card-head h2 {
+	margin: 0;
+}
+
+.card-head select {
+	width: auto;
+	min-width: 170px;
+}
+
+.schema-form {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+	gap: 4px 18px;
+}
+
+.field-help {
+	color: var(--fg-muted);
+	font-size: 12px;
+	margin: 4px 0 2px;
+}
+
+.field-error {
+	color: var(--danger);
+	font-size: 12px;
+}
+
+.field-error:empty {
+	display: none;
+}
+
+.list-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 6px;
+}
+
+.list-field button,
+.row-actions button {
+	flex: none;
+}
+
+.row-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 14px;
+}
+
+details > summary {
+	cursor: pointer;
+	color: var(--fg-muted);
+	font-size: 12.5px;
+	margin: 14px 0 8px;
+}
+
+.notice.warn {
+	color: var(--warn);
+	border-color: var(--warn);
+}

@@ -57,6 +57,16 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		BackendSettingsValidation.CaPath(options.CaCertificatePath, context, failures);
 	}
 
+	public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role)
+	{
+		return
+		[
+			.. BackendSchemaFields.MailConnection(993),
+			new BackendConfigField("PathSeparator", "Folder path separator", BackendFieldType.String,
+				Help: "Override for the IMAP hierarchy delimiter (a single character). Autodetected when empty.")
+		];
+	}
+
 	public string DescribeRole(BackendRole role, ProviderSettings settings)
 	{
 		ImapOptions options = settings.Bind<ImapOptions>();

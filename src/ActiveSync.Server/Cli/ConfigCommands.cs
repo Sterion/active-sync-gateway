@@ -1,4 +1,5 @@
 using ActiveSync.Core.Administration;
+using ActiveSync.Core.Backend;
 using ActiveSync.Core.Settings;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,8 +9,9 @@ using Spectre.Console.Cli;
 namespace ActiveSync.Server.Cli;
 
 /// <summary>
-///   Base for the `eas config` commands: builds the lean provider (DbContext + settings store, no
-///   backend/validation graph — so it works even against a broken or unconfigured gateway) and
+///   Base for the `eas config` commands: builds the lean provider (DbContext, settings store and
+///   the backend providers for their own key validation — but nothing that PARSES the current
+///   configuration, so it works even against a broken or unconfigured gateway) and
 ///   hands the command body the settings store plus the file/env configuration (used to label
 ///   whether an effective value comes from the database, a config file, or the code default).
 /// </summary>
@@ -27,8 +29,12 @@ internal abstract class SettingsCommandBase<TSettings>(IAnsiConsole terminal) : 
 		await using ServiceProvider _ = services;
 		GlobalSettingStore store = services.GetRequiredService<GlobalSettingStore>();
 		IConfiguration fileConfig = services.GetRequiredService<IConfiguration>();
+		Registry = services.GetRequiredService<BackendProviderRegistry>();
 		return await RunAsync(store, fileConfig, settings, cancellationToken);
 	}
+
+	/// <summary>The registered backend providers, for validating their own settings keys.</summary>
+	protected BackendProviderRegistry Registry { get; private set; } = null!;
 
 	protected abstract Task<int> RunAsync(
 		GlobalSettingStore store, IConfiguration fileConfig, TSettings settings, CancellationToken cancellationToken);
@@ -161,7 +167,14 @@ internal sealed class ConfigSetCommand(IAnsiConsole terminal) : SettingsCommandB
 			return 1;
 		}
 
-		string? error = SettingKeys.Validate(definition, settings.Value);
+		// The role's provider is usually a stored override, so the lookup has to see the
+		// database — this command's configuration is the file/env layer only.
+		Dictionary<string, string?> stored = new(
+			await store.LoadAllAsync(cancellationToken), StringComparer.OrdinalIgnoreCase);
+		string? error = SettingKeys.Validate(definition, settings.Value) ??
+		                BackendKeyValidator.Validate(Registry,
+			                key => stored.TryGetValue(key, out string? v) ? v : fileConfig[key],
+			                settings.Key, settings.Value);
 		if (error is not null)
 		{
 			await Console.Error.WriteLineAsync(error);
