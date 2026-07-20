@@ -9,8 +9,8 @@
 	</PropertyGroup>
 
 	<!-- NuGet: nothing packs unless a project opts in with <IsPackable>true</IsPackable>.
-	     The plugin contract assemblies (Protocol, Core, Backends.Common) do; see the CI
-	     pack/push step. Metadata lives here so the three packages stay consistent. -->
+	     The plugin contract assemblies (Protocol, Crypto, Core, Backends.Common) do; see the CI
+	     pack/push step. Metadata lives here so the packages stay consistent. -->
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
 		<Authors>Sterion</Authors>

@@ -1,5 +1,7 @@
 using System.Net;
 using ActiveSync.Core.Options;
+using ActiveSync.Core.Security;
+using ActiveSync.Crypto;
 using Microsoft.Extensions.Options;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -27,26 +29,65 @@ internal static class LocalCliEndpoint
 	// single lock costs nothing in practice.
 	private static readonly SemaphoreSlim Gate = new(1, 1);
 
-	internal sealed record CliRequest(string[]? Args, string? Stdin);
+	/// <summary>How far a sealed request's timestamp may be from now before it's treated as a replay.</summary>
+	internal const long AuthWindowMs = 60_000;
+
+	internal sealed record CliRequest(string[]? Args, string? Stdin, string? Sealed);
 
 	internal sealed record CliResponse(int ExitCode, string Stdout, string Stderr);
 
 	internal static void Map(WebApplication app)
 	{
+		// The master key is a restart-tier bootstrap setting, so derive it once. null = no key
+		// configured (AllowPlaintext dev/test), where loopback is the only gate.
+		byte[]? key = EncryptionKeyLoader.TryLoadKey(
+			app.Services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value.Encryption, out _);
+
 		app.MapPost("/cli", async (HttpContext context, IOptionsMonitor<ActiveSyncOptions> options, CliRequest? request) =>
 		{
-			// Disabled or non-loopback: answer 404 so the endpoint is invisible to the outside.
-			// The loopback check is the entire auth boundary (see the type summary).
+			// Disabled or non-loopback: 404 so the endpoint is invisible. Loopback is a cheap
+			// pre-filter; the real auth is proof of the master key (see TryAuthorize).
 			if (!options.CurrentValue.Cli.Enabled || !IsLoopback(context.Connection.RemoteIpAddress))
 				return Results.NotFound();
+			if (!TryAuthorize(request, key, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+				    out string[] args, out string stdin))
+				return Results.NotFound();
 
-			CliResponse response = await ExecuteAsync(request?.Args ?? [], request?.Stdin ?? "", context.RequestAborted);
+			CliResponse response = await ExecuteAsync(args, stdin, context.RequestAborted);
 			return Results.Json(response);
 		});
 	}
 
 	/// <summary>True only for a loopback transport peer (127.0.0.0/8 or ::1); null is never allowed.</summary>
 	internal static bool IsLoopback(IPAddress? peer) => peer is not null && IPAddress.IsLoopback(peer);
+
+	/// <summary>
+	///   Authenticates a request as a master-key holder. With a key configured, the caller MUST
+	///   supply a fresh <see cref="LocalCliEnvelope" /> sealed with it (a co-located sidecar without
+	///   the key can't) — the plaintext args/stdin are ignored. With no key (AllowPlaintext dev/test)
+	///   there is nothing to prove, so the plain body is accepted behind the loopback gate alone.
+	/// </summary>
+	internal static bool TryAuthorize(CliRequest? request, byte[]? key, long nowUnixMs, out string[] args, out string stdin)
+	{
+		if (key is null)
+		{
+			args = request?.Args ?? [];
+			stdin = request?.Stdin ?? "";
+			return true;
+		}
+
+		if (!LocalCliEnvelope.TryOpen(request?.Sealed, key, nowUnixMs, AuthWindowMs, out LocalCliEnvelope? envelope)
+			|| envelope is null)
+		{
+			args = [];
+			stdin = "";
+			return false;
+		}
+
+		args = envelope.Args;
+		stdin = envelope.Stdin ?? "";
+		return true;
+	}
 
 	/// <summary>
 	///   Runs one CLI command line in-process and returns its captured output + exit code. Refuses

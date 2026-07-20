@@ -112,9 +112,15 @@ docker compose -f docker/docker-compose.ci.yml run --rm tests        # full suit
 ```
 src/ActiveSync.Protocol/    WBXML codec, code pages, MS-ASHTTP query parser, EAS constants.
                             Depends on NOTHING project-wise. No ASP.NET, no MailKit.
+src/ActiveSync.Crypto/      BCL-only master-key primitives: EncryptionKeyLoader (base64-or-
+                            passphrase → 32-byte key), SecretValue (enc:v1: AES-GCM seal of
+                            config secrets), LocalCliEnvelope (the sealed /cli request),
+                            EncryptionOptions. Depends on NOTHING. Shared by Core AND the slim
+                            eas client (so the client can seal without Core's heavy graph);
+                            published as a plugin-contract package.
 src/ActiveSync.Core/        Backend interfaces + provider engine (BackendProviderRegistry,
                             CompositeBackendSession, BackendSessionFactory), EF Core state
-                            store, diff engine, options. Depends on Protocol only
+                            store, diff engine, options. Depends on Protocol + Crypto
                             (+ EF Core / config-binder packages). Provider-agnostic.
 src/ActiveSync.Backends.Common/  Shared building blocks: MIME/iCal/vCard ⇄ EAS converters
                             + TLS/wire-logging helpers + the shared backend-options bases
@@ -367,15 +373,20 @@ users/devices/folders/items/show/block/unblock/purge/user query the state DB via
 `eas` in the image is the SLIM forwarding client (`src/ActiveSync.Cli`): it POSTs the command
 line + stdin to the running gateway's `Cli/LocalCliEndpoint` (`POST /cli`), which runs the SAME
 Spectre tree (`CliApp.Configure`) in the warm process and returns stdout/stderr/exit-code — so a
-command skips a cold start. `/cli` is gated to loopback peers ONLY (the whole auth boundary; the
-host installs no forwarded-headers middleware, so `Connection.RemoteIpAddress` is the true peer),
-refuses `serve`, and is toggled by `ActiveSync:Cli:Enabled` (live, default true). Output capture:
-the endpoint swaps the process-global `Console` + `AnsiConsole.Console` under a lock AND injects
-the captured console via a small `ITypeRegistrar` (Spectre's default registrar caches the console
+command skips a cold start. **Auth = the client AES-GCM-SEALS the request with the
+`ActiveSync:Encryption` master key** (`ActiveSync.Crypto.LocalCliEnvelope`, reusing `SecretValue`);
+the server opens it (`LocalCliEndpoint.TryAuthorize`) and checks a ±60 s timestamp window (replay
+bound). The key is injected only into the gateway container, so a co-located k8s sidecar / host-net
+peer that shares loopback but NOT the key is refused — which a bare loopback check can't do.
+Loopback + no-forwarded-headers is kept as a cheap pre-filter; `Cli:Enabled` (live, default true)
+toggles it; `serve` is refused. `AllowPlaintext` (no key) ⇒ loopback-only. Output capture: the
+endpoint swaps the process-global `Console` + `AnsiConsole.Console` under a lock AND injects the
+captured console via a small `ITypeRegistrar` (Spectre's default registrar caches the console
 process-statically). The client targets `127.0.0.1` (never "localhost" — the gateway is IPv4-only,
 and a `::1`-first resolve costs a ~2 s failed connect) and falls back to `dotnet
 ActiveSync.Server.dll` when no gateway answers; `serve`/`protect` always run locally,
-`EAS_NO_FORWARD=1` forces all-local.
+`EAS_NO_FORWARD=1` forces all-local. `EncryptionKeyLoader`/`SecretValue` live in the BCL-only
+`ActiveSync.Crypto` assembly (shared by Core + the client; a 4th published contract package).
 **Database-declared accounts**: `AccountEntry` rows (serialized `AccountOptions` JSON,
 managed by `AccountStore` / the `eas user` branch) REPLACE the whole config entry for the
 same login. Every store mutation bumps the single `AccountsStamp` row in the same

@@ -1,5 +1,7 @@
 using System.Net;
+using System.Security.Cryptography;
 using ActiveSync.Core.State;
+using ActiveSync.Crypto;
 using ActiveSync.Server.Cli;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -99,5 +101,62 @@ public sealed class CliLocalEndpointTests : IDisposable
 		Assert.True(LocalCliEndpoint.IsLoopback(IPAddress.Parse("127.0.0.5")));
 		Assert.False(LocalCliEndpoint.IsLoopback(IPAddress.Parse("8.8.8.8")));
 		Assert.False(LocalCliEndpoint.IsLoopback(IPAddress.Parse("10.0.0.1")));
+	}
+
+	/* ---- Envelope auth: proof of the master key, so a keyless co-located caller is refused ------ */
+
+	private static byte[] NewKey() => RandomNumberGenerator.GetBytes(32);
+
+	[Fact]
+	public void Authorize_AcceptsAFreshEnvelopeSealedWithTheKey()
+	{
+		byte[] key = NewKey();
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		string sealed_ = new LocalCliEnvelope(["users", "--all"], "pw", now).Seal(key);
+
+		Assert.True(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(null, null, sealed_), key, now, out string[] args, out string stdin));
+		Assert.Equal(["users", "--all"], args);
+		Assert.Equal("pw", stdin);
+	}
+
+	[Fact]
+	public void Authorize_RejectsWrongKey_MissingSeal_AndPlaintextWhenKeyed()
+	{
+		byte[] key = NewKey();
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		string sealedWithOther = new LocalCliEnvelope(["users"], null, now).Seal(NewKey());
+
+		// Sealed by a DIFFERENT key (a sidecar guessing) — rejected.
+		Assert.False(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(null, null, sealedWithOther), key, now, out _, out _));
+		// No envelope at all — rejected.
+		Assert.False(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(null, null, null), key, now, out _, out _));
+		// A plaintext body is ignored when a key is configured — rejected.
+		Assert.False(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(["users"], null, null), key, now, out _, out _));
+	}
+
+	[Fact]
+	public void Authorize_RejectsAReplayedEnvelopeOutsideTheWindow()
+	{
+		byte[] key = NewKey();
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		string stale = new LocalCliEnvelope(["users"], null, now - LocalCliEndpoint.AuthWindowMs - 5_000).Seal(key);
+
+		Assert.False(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(null, null, stale), key, now, out _, out _));
+	}
+
+	[Fact]
+	public void Authorize_NoKeyConfigured_AcceptsPlaintext()
+	{
+		// AllowPlaintext dev/test: nothing to prove, so the plain body passes (loopback still gates).
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		Assert.True(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(["users"], "in", null), key: null, now, out string[] args, out string stdin));
+		Assert.Equal(["users"], args);
+		Assert.Equal("in", stdin);
 	}
 }

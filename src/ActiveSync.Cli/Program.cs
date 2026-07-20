@@ -1,12 +1,20 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
+using ActiveSync.Core.Options;
+using ActiveSync.Core.Security;
+using ActiveSync.Crypto;
 
 // Slim `eas`: forward the command line to the running gateway's loopback /cli endpoint so everyday
 // verbs run against warm services instead of paying a cold start of the full server app. `serve` and
 // `protect` (the full app's pre-parse specials, which accept arbitrary --Section:Key=value overrides
 // a strict parser would reject) always run locally; EAS_NO_FORWARD=1 forces everything local. When no
 // gateway answers, fall back to running the full app locally so server-less/repair verbs still work.
+//
+// The request is SEALED with the ActiveSync:Encryption master key (read from the same config the
+// server uses): possessing the key is the real auth — a co-located Kubernetes sidecar or host-network
+// peer that shares loopback but NOT the key can't call /cli. Falls back to a plain body only when no
+// key is configured (AllowPlaintext dev/test), where the server also relies on loopback alone.
 
 string[] arguments = args;
 bool forceLocal = Environment.GetEnvironmentVariable("EAS_NO_FORWARD") == "1";
@@ -19,12 +27,17 @@ if (forceLocal || localOnly)
 // Read piped stdin once, up front: it feeds the forward, and is replayed to the local fallback.
 string? stdin = Console.IsInputRedirected ? await Console.In.ReadToEndAsync() : null;
 
+byte[]? key = LoadKey();
+CliRequest request = key is null
+	? new CliRequest(arguments, stdin, null)
+	: new CliRequest(null, null, new LocalCliEnvelope(
+		arguments, stdin, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()).Seal(key));
+
 string baseUrl = ResolveBaseUrl();
 try
 {
 	using HttpClient http = new() { Timeout = TimeSpan.FromMinutes(5) };
-	using HttpResponseMessage response = await http.PostAsJsonAsync(
-		$"{baseUrl}/cli", new CliRequest(arguments, stdin));
+	using HttpResponseMessage response = await http.PostAsJsonAsync($"{baseUrl}/cli", request);
 	if (response.IsSuccessStatusCode)
 	{
 		CliResponse? result = await response.Content.ReadFromJsonAsync<CliResponse>();
@@ -37,7 +50,7 @@ try
 			return result.ExitCode;
 		}
 	}
-	// 404 (endpoint disabled or the caller wasn't loopback) or an unparsable body → run locally.
+	// 404 (endpoint disabled, non-loopback, or a rejected envelope) or unparsable body → run locally.
 }
 catch (HttpRequestException)
 {
@@ -52,6 +65,15 @@ return RunLocal(arguments, stdin);
 
 static bool Eq(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
+static byte[]? LoadKey()
+{
+	string? keyValue = ConfigValue("ActiveSync__Encryption__Key", "ActiveSync", "Encryption", "Key");
+	string? keyFile = ConfigValue("ActiveSync__Encryption__KeyFile", "ActiveSync", "Encryption", "KeyFile");
+	if (string.IsNullOrWhiteSpace(keyValue) && string.IsNullOrWhiteSpace(keyFile))
+		return null;
+	return EncryptionKeyLoader.TryLoadKey(new EncryptionOptions { Key = keyValue, KeyFile = keyFile }, out _);
+}
+
 static string ResolveBaseUrl()
 {
 	// Same derivation the container HEALTHCHECK uses, plus a fallback read of the co-located
@@ -60,14 +82,22 @@ static string ResolveBaseUrl()
 	// first makes the client wait out a failed IPv6 connect (~2 s) before retrying IPv4.
 	string url = Environment.GetEnvironmentVariable("Kestrel__Endpoints__Http__Url")
 		?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS")?.Split(';')[0]
-		?? ReadAppSettingsUrl()
+		?? ConfigValue(null, "Kestrel", "Endpoints", "Http", "Url")
 		?? "http://127.0.0.1:5080";
 	return url.Replace("0.0.0.0", "127.0.0.1").Replace("[::]", "127.0.0.1")
 		.Replace("://localhost", "://127.0.0.1").TrimEnd('/');
 }
 
-static string? ReadAppSettingsUrl()
+// Env var (when named) wins, else the nested value from the co-located appsettings.json.
+static string? ConfigValue(string? envName, params string[] jsonPath)
 {
+	if (envName is not null)
+	{
+		string? fromEnv = Environment.GetEnvironmentVariable(envName);
+		if (!string.IsNullOrWhiteSpace(fromEnv))
+			return fromEnv;
+	}
+
 	try
 	{
 		string path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
@@ -75,18 +105,19 @@ static string? ReadAppSettingsUrl()
 			return null;
 		using FileStream file = File.OpenRead(path);
 		using JsonDocument doc = JsonDocument.Parse(file);
-		if (doc.RootElement.TryGetProperty("Kestrel", out JsonElement kestrel)
-			&& kestrel.TryGetProperty("Endpoints", out JsonElement endpoints)
-			&& endpoints.TryGetProperty("Http", out JsonElement http)
-			&& http.TryGetProperty("Url", out JsonElement value)
-			&& value.ValueKind == JsonValueKind.String)
-			return value.GetString();
+		JsonElement element = doc.RootElement;
+		foreach (string segment in jsonPath)
+		{
+			if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(segment, out element))
+				return null;
+		}
+		return element.ValueKind == JsonValueKind.String ? element.GetString() : null;
 	}
 	catch
 	{
-		// A missing or malformed appsettings.json just means we fall through to the default.
+		// A missing or malformed appsettings.json just means we fall through to the default/env.
+		return null;
 	}
-	return null;
 }
 
 static int RunLocal(string[] arguments, string? stdin)
@@ -112,6 +143,6 @@ static int RunLocal(string[] arguments, string? stdin)
 	return process.ExitCode;
 }
 
-internal sealed record CliRequest(string[] Args, string? Stdin);
+internal sealed record CliRequest(string[]? Args, string? Stdin, string? Sealed);
 
 internal sealed record CliResponse(int ExitCode, string Stdout, string Stderr);

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+	  Tiny BCL-only crypto primitives shared by Core (content-at-rest + config secrets) and the
+	  slim `eas` client (which seals its /cli request with the same master key). Kept in its own
+	  assembly so the client can reference it WITHOUT dragging in Core's heavy graph (EF Core,
+	  config binders, MailKit via the backends). Depends on nothing but the runtime.
+	-->
+	<PropertyGroup>
+		<RootNamespace>ActiveSync.Crypto</RootNamespace>
+	</PropertyGroup>
+
+	<!-- Published: Core (the plugin contract) depends on it, and plugin authors seal config
+	     secrets with SecretValue. Packs alongside Protocol/Core/Backends.Common in CI. -->
+	<PropertyGroup>
+		<IsPackable>true</IsPackable>
+		<PackageId>ActiveSync.Crypto</PackageId>
+		<Description>ActiveSync Gateway — master-key primitives (EncryptionKeyLoader, SecretValue) for sealing config secrets and local content at rest.</Description>
+	</PropertyGroup>
+
+</Project>

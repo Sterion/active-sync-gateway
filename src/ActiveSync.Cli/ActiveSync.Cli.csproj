@@ -17,4 +17,10 @@
 		<InvariantGlobalization>true</InvariantGlobalization>
 	</PropertyGroup>
 
+	<!-- The one project reference: BCL-only crypto to seal the /cli request with the master key
+	     (proves key possession — a co-located sidecar without the key can't call /cli). -->
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Crypto\ActiveSync.Crypto.csproj" />
+	</ItemGroup>
+
 </Project>

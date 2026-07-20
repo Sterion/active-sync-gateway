@@ -10,6 +10,7 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\ActiveSync.Protocol\ActiveSync.Protocol.csproj" />
+		<ProjectReference Include="..\ActiveSync.Crypto\ActiveSync.Crypto.csproj" />
 	</ItemGroup>
 
 	<!-- The Administration namespace (settings catalogue, account field paths, secret policy)

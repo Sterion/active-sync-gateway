@@ -994,12 +994,13 @@ line inside any deployed container (`kubectl exec <pod> -- eas users`, `docker e
 appsettings.json in the working directory.
 
 Inside the image, `eas` is a **slim forwarding client**: instead of cold-starting the whole
-gateway for each command, it POSTs the command line to the already-running gateway's
-loopback-only `/cli` endpoint and prints the result, so a command returns in a fraction of a
-second (handy when firing several in a row). If no gateway is running (e.g. repairing an
-unconfigured one with `config set`) it transparently falls back to running the command in
-process. `serve` and `protect` always run locally; `EAS_NO_FORWARD=1` forces every command
-local. See [How `eas` forwards](#how-eas-forwards) below.
+gateway for each command, it POSTs the command line to the already-running gateway's `/cli`
+endpoint and prints the result, so a command returns in a fraction of a second (handy when
+firing several in a row). The request is **sealed with the `ActiveSync:Encryption` master key**,
+so only a caller that holds the key (i.e. is really inside the gateway) is served. If no gateway
+is running (e.g. repairing an unconfigured one with `config set`) it transparently falls back to
+running the command in process. `serve` and `protect` always run locally; `EAS_NO_FORWARD=1`
+forces every command local. See [How `eas` forwards](#how-eas-forwards) below.
 
 **Server**
 
@@ -1092,15 +1093,21 @@ re-prompt loop), and `purge` is the reset lever when a device should re-sync fro
 The `eas` binary in the image is a tiny client that forwards each command over HTTP to the
 running gateway on its normal port and prints back stdout/stderr and the exit code. This
 avoids a cold start of the full app per command; secret-setting verbs (`user password`,
-`user secret`, …) forward too, over the loopback interface only.
+`user secret`, …) forward too.
 
-- **Auth is the loopback interface itself.** `/cli` answers only connections whose real peer
-  address is loopback (`127.0.0.1`/`::1`) — the same trust the CLI already assumes (anyone who
-  can `exec` into the pod has full CLI authority). The gateway installs no forwarded-headers
-  middleware, so the peer address can't be spoofed by a header; from outside the pod (through
-  ingress/a service) the peer is never loopback, so `/cli` returns 404. Forwarding secrets over
-  loopback adds no exposure: an in-pod caller already sits next to the Encryption key and the
-  database.
+- **Auth is proof of the master key.** The client AES-256-GCM **seals** the request (args, stdin
+  and a timestamp) with the `ActiveSync:Encryption` key it reads from the same config the server
+  uses; the gateway opens it with the same key. That key is injected only into the gateway
+  container — **not** a co-located Kubernetes sidecar or a `--network host` peer, which share the
+  loopback interface but not the container's environment/secrets. So a valid envelope proves the
+  caller is a real key holder (the trust set that can already decrypt everything at rest), which a
+  bare loopback check can't: in a shared network namespace a sidecar's `127.0.0.1` reaches the
+  gateway. The timestamp bounds replay of a sniffed ciphertext, and the payload is encrypted on
+  the wire. Loopback is kept as a cheap pre-filter (and no forwarded-headers middleware exists, so
+  the peer address is the real one); requests that fail either check get a 404.
+- **Dev/test without a key** (`ActiveSync:Encryption:AllowPlaintext=true`): there is no key to
+  seal with, so `/cli` falls back to loopback-only — acceptable for the same reason that mode runs
+  content unencrypted.
 - **Disable it** with `eas config set ActiveSync:Cli:Enabled false` (live) — `eas` then falls
   back to running every command in process.
 - **`serve` and `protect` never forward** (they take arbitrary `--Section:Key=value` overrides);
