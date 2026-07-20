@@ -26,6 +26,14 @@ RUN dotnet publish src/ActiveSync.Server/ActiveSync.Server.csproj -c Release -o 
     --no-restore -r "$(cat /rid)" --self-contained false -p:UseAppHost=false \
     -p:SatelliteResourceLanguages=en ${VERSION:+-p:Version=$VERSION}
 
+# The slim `eas` forwarding client ships next to the server in /app (native apphost + ReadyToRun,
+# references only the BCL). It POSTs `eas <verb>` command lines to the running gateway's loopback
+# /cli endpoint so everyday commands skip a cold start; when no gateway answers it falls back to
+# `dotnet /app/ActiveSync.Server.dll <args>` beside it. UseAppHost stays on for a real `eas` binary.
+RUN dotnet publish src/ActiveSync.Cli/ActiveSync.Cli.csproj -c Release -o /app \
+    --no-restore -r "$(cat /rid)" --self-contained false \
+    -p:SatelliteResourceLanguages=en ${VERSION:+-p:Version=$VERSION}
+
 # Unit tests gate every image build (natively — the stage inherits the BUILDPLATFORM
 # pin). Integration tests need sibling backend containers, which do not exist inside
 # `docker build` — run those via docker/docker-compose.ci.yml.
@@ -47,11 +55,10 @@ COPY --from=build /app .
 # Operator convenience: `eas <verb>` from any exec session — e.g.
 #   echo -n 'imap-password' | kubectl exec -i <pod> -- eas protect
 #   echo -n 'phone-password' | docker exec -i <container> eas hash-password
-# A wrapper script (not a symlink): the app is dll-hosted, and cd /app makes the verbs
-# find appsettings.json regardless of the exec working directory.
-RUN printf '#!/bin/sh\ncd /app\nexec dotnet /app/ActiveSync.Server.dll "$@"\n' \
-      > /usr/local/bin/eas \
-    && chmod 755 /usr/local/bin/eas
+#   docker exec -i <container> eas user set admin Admin true
+# `eas` is the slim forwarding client (it resolves paths via its own /app location, so the exec
+# working directory doesn't matter); a symlink onto PATH is enough.
+RUN ln -s /app/eas /usr/local/bin/eas
 
 # Run as the image's built-in non-root user; give it ownership of the state volume.
 # /app/plugins is where out-of-repo backend plugins are dropped (one subdir each) —

@@ -993,6 +993,14 @@ line inside any deployed container (`kubectl exec <pod> -- eas users`, `docker e
 `dotnet ActiveSync.Server.dll <command>` with the configuration available via env vars or
 appsettings.json in the working directory.
 
+Inside the image, `eas` is a **slim forwarding client**: instead of cold-starting the whole
+gateway for each command, it POSTs the command line to the already-running gateway's
+loopback-only `/cli` endpoint and prints the result, so a command returns in a fraction of a
+second (handy when firing several in a row). If no gateway is running (e.g. repairing an
+unconfigured one with `config set`) it transparently falls back to running the command in
+process. `serve` and `protect` always run locally; `EAS_NO_FORWARD=1` forces every command
+local. See [How `eas` forwards](#how-eas-forwards) below.
+
 **Server**
 
 | Command | What it does |
@@ -1078,6 +1086,28 @@ Secrets travel via **stdin** (never argv, so they stay out of shell history and 
 The database commands read the same configuration as `serve`, so inside a running pod they
 just work; blocking answers the device's next request with HTTP 403 (no credential
 re-prompt loop), and `purge` is the reset lever when a device should re-sync from scratch.
+
+### How `eas` forwards
+
+The `eas` binary in the image is a tiny client that forwards each command over HTTP to the
+running gateway on its normal port and prints back stdout/stderr and the exit code. This
+avoids a cold start of the full app per command; secret-setting verbs (`user password`,
+`user secret`, …) forward too, over the loopback interface only.
+
+- **Auth is the loopback interface itself.** `/cli` answers only connections whose real peer
+  address is loopback (`127.0.0.1`/`::1`) — the same trust the CLI already assumes (anyone who
+  can `exec` into the pod has full CLI authority). The gateway installs no forwarded-headers
+  middleware, so the peer address can't be spoofed by a header; from outside the pod (through
+  ingress/a service) the peer is never loopback, so `/cli` returns 404. Forwarding secrets over
+  loopback adds no exposure: an in-pod caller already sits next to the Encryption key and the
+  database.
+- **Disable it** with `eas config set ActiveSync:Cli:Enabled false` (live) — `eas` then falls
+  back to running every command in process.
+- **`serve` and `protect` never forward** (they take arbitrary `--Section:Key=value` overrides);
+  `EAS_NO_FORWARD=1` forces all commands to run in process. If the gateway isn't reachable, any
+  command falls back to in-process execution automatically.
+- The forwarding client ships **only in the container image**; the download zips run the full
+  app directly as before.
 
 ## Web interfaces (`/admin` and `/user`)
 

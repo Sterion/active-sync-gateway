@@ -1,5 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
+	<!-- Precompile to native on RID-targeted publishes (Docker image + download zips): faster
+	     `serve` startup and a faster in-container `eas` fallback. Ignored on plain builds. -->
+	<PropertyGroup>
+		<PublishReadyToRun>true</PublishReadyToRun>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<PackageReference Include="OpenTelemetry.Extensions.Hosting" />
 		<PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" />

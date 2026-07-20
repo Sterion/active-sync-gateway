@@ -152,6 +152,12 @@ src/ActiveSync.Server/      Kestrel host, /Microsoft-Server-ActiveSync endpoint,
                             one IEasCommandHandler per EAS command, provider DI registration
                             (AddBackendProviders). References Core + all seven backend
                             assemblies + WebUi.
+src/ActiveSync.Cli/         The slim `eas` forwarding client (AssemblyName eas). References
+                            NOTHING project-wise (BCL only) so its own start is tiny: it POSTs
+                            a command line to the running gateway's loopback /cli endpoint
+                            (Cli/LocalCliEndpoint in Server) and prints the result, falling
+                            back to `dotnet ActiveSync.Server.dll` when no gateway answers.
+                            Shipped only in the Docker image.
 tests/ActiveSync.Protocol.Tests/   WBXML round-trip + query parser tests
 tests/ActiveSync.Core.Tests/       diff engine, sync-key state machine, options validator,
                                    provider engine + resolver, AND the backend unit tests
@@ -357,6 +363,19 @@ banner and exits, the web host requires `serve`, and admin commands
 users/devices/folders/items/show/block/unblock/purge/user query the state DB via
 `CliServices`). Operator login blocks (`LoginBlocks` table) are enforced post-auth with
 403 in `EasEndpoint`/`AutodiscoverEndpoint`.
+
+`eas` in the image is the SLIM forwarding client (`src/ActiveSync.Cli`): it POSTs the command
+line + stdin to the running gateway's `Cli/LocalCliEndpoint` (`POST /cli`), which runs the SAME
+Spectre tree (`CliApp.Configure`) in the warm process and returns stdout/stderr/exit-code — so a
+command skips a cold start. `/cli` is gated to loopback peers ONLY (the whole auth boundary; the
+host installs no forwarded-headers middleware, so `Connection.RemoteIpAddress` is the true peer),
+refuses `serve`, and is toggled by `ActiveSync:Cli:Enabled` (live, default true). Output capture:
+the endpoint swaps the process-global `Console` + `AnsiConsole.Console` under a lock AND injects
+the captured console via a small `ITypeRegistrar` (Spectre's default registrar caches the console
+process-statically). The client targets `127.0.0.1` (never "localhost" — the gateway is IPv4-only,
+and a `::1`-first resolve costs a ~2 s failed connect) and falls back to `dotnet
+ActiveSync.Server.dll` when no gateway answers; `serve`/`protect` always run locally,
+`EAS_NO_FORWARD=1` forces all-local.
 **Database-declared accounts**: `AccountEntry` rows (serialized `AccountOptions` JSON,
 managed by `AccountStore` / the `eas user` branch) REPLACE the whole config entry for the
 same login. Every store mutation bumps the single `AccountsStamp` row in the same
