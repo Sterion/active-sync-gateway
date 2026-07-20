@@ -1,4 +1,5 @@
 using ActiveSync.Core.Administration;
+using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.Settings;
@@ -60,7 +61,8 @@ internal static class SettingsEndpoints
 
 		api.MapPut("settings/{**key}", async (
 			string key, SettingWriteRequest request, GlobalSettingStore store,
-			IOptions<ActiveSyncOptions> options, CancellationToken ct) =>
+			IOptions<ActiveSyncOptions> options, BackendProviderRegistry registry,
+			IConfiguration config, CancellationToken ct) =>
 		{
 			if (string.IsNullOrWhiteSpace(request.Value))
 				return Results.BadRequest(new { error = "value is required (DELETE clears an override)" });
@@ -73,7 +75,11 @@ internal static class SettingsEndpoints
 			SettingKeys.SettingKey? definition = SettingKeys.Find(key);
 			if (definition is null)
 				return Results.BadRequest(new { error = $"'{key}' is not a recognized setting" });
-			if (SettingKeys.Validate(definition, request.Value) is { } validationError)
+			// Backend leafs are strings to the catalogue; their provider knows their real shape.
+			// The configuration here already carries the database layer, so it IS the effective value.
+			if ((SettingKeys.Validate(definition, request.Value) ??
+			     BackendKeyValidator.Validate(registry, k => config[k], key, request.Value))
+			    is { } validationError)
 				return Results.BadRequest(new { error = validationError });
 
 			// Catalogue-level secrets (the OIDC client secret) are sealed at rest when the

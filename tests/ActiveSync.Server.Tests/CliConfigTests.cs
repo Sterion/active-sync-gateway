@@ -181,4 +181,42 @@ public sealed class CliConfigTests : IDisposable
 		(_, _, string tls) = Run("config", "set", "ActiveSync:SelfSignedTls:Port", "6443");
 		Assert.Contains("Restart the gateway", tls);
 	}
+
+	[Fact]
+	public void Set_BackendKey_IsCheckedAgainstTheProvidersOwnSchema()
+	{
+		// Nothing serves the role yet, so there is no shape to check against.
+		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:MailStore:Port", "abc").ExitCode);
+		Assert.Equal(0, Run("config", "unset", "ActiveSync:Backends:MailStore:Port").ExitCode);
+
+		// The provider must be one that exists AND serves the role.
+		(int unknown, string unknownErr, _) = Run("config", "set", "ActiveSync:Backends:MailStore:Provider", "nope");
+		Assert.Equal(1, unknown);
+		Assert.Contains("No backend provider named", unknownErr);
+
+		(int wrongRole, string wrongRoleErr, _) = Run("config", "set", "ActiveSync:Backends:Contacts:Provider", "imap");
+		Assert.Equal(1, wrongRole);
+		Assert.Contains("does not support the Contacts role", wrongRoleErr);
+
+		// Once imap serves the role, its own field descriptions apply — including to a value
+		// stored in the database, which is where the assignment usually lives.
+		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:MailStore:Provider", "imap").ExitCode);
+
+		(int badPort, string badPortErr, _) = Run("config", "set", "ActiveSync:Backends:MailStore:Port", "abc");
+		Assert.Equal(1, badPort);
+		Assert.Contains("whole number", badPortErr);
+
+		(int range, string rangeErr, _) = Run("config", "set", "ActiveSync:Backends:MailStore:Port", "99999");
+		Assert.Equal(1, range);
+		Assert.Contains("at most 65535", rangeErr);
+
+		(int badEnum, string enumErr, _) = Run("config", "set", "ActiveSync:Backends:MailStore:Security", "Quantum");
+		Assert.Equal(1, badEnum);
+		Assert.Contains("is unknown", enumErr);
+
+		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:MailStore:Port", "993").ExitCode);
+
+		// A key imap does not describe stays settable: plugin providers may describe nothing.
+		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:MailStore:FutureKnob", "42").ExitCode);
+	}
 }

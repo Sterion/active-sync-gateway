@@ -351,7 +351,10 @@ whatever was active); `jmap` gives real HTML and precise start/end times.
 One backend set serves all users; each user authenticates with their own credentials
 (HTTP Basic, validated by the MailStore provider's login probe and passed through to all
 backends). Backends are configured per **role** under `ActiveSync:Backends`, each naming
-the **provider** that serves it. Edit `src/ActiveSync.Server/appsettings.json`:
+the **provider** that serves it. The web admin's **Backends** page does this in a browser —
+pick a provider per role and fill the fields it asks for, rendered from the provider's own
+description of them — and stores the result as database overrides. To set it in the config
+file instead, edit `src/ActiveSync.Server/appsettings.json`:
 
 ```jsonc
 "ActiveSync": {
@@ -1078,10 +1081,11 @@ re-prompt loop), and `purge` is the reset lever when a device should re-sync fro
 
 ## Web interfaces (`/admin` and `/user`)
 
-The gateway can serve a web **admin interface** under `/admin` (full CLI parity: settings
-editor, user management, devices with block/wipe/purge, shared calendars, live logs, state
-dashboard) and a **user self-service portal** under `/user` (own password + backend
-credentials only). Both are **off by default** and toggle **live** (~1 s, no restart):
+The gateway can serve a web **admin interface** under `/admin` (full CLI parity: backends
+editor, settings editor, user management, devices with block/wipe/purge, shared calendars,
+live logs, state dashboard) and a **user self-service portal** under `/user` (own password
++ backend credentials only). Both are **off by default** and toggle **live** (~1 s, no
+restart):
 
 ```bash
 # Bootstrap on a fresh gateway (works even before any mail backend is configured):
@@ -1090,6 +1094,10 @@ eas user set admin Admin true
 eas config set ActiveSync:WebUi:Admin:Enabled true          # then open http://host:5080/admin
 eas config set ActiveSync:WebUi:UserPortal:Enabled true     # optional, also on the admin Settings page
 ```
+
+From there the **Backends** page is where a fresh gateway is pointed at its mail, calendar
+and contacts servers: a provider dropdown per role, then the fields that provider says it
+needs. Assigning MailStore and MailSubmit is what brings ActiveSync online.
 
 Local logins check the same account machinery as the phones (declared accounts only; the
 admin UI additionally requires the account's `Admin` flag). With

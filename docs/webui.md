@@ -30,6 +30,12 @@ eas config set ActiveSync:WebUi:Admin:Enabled true
 # open http://host:5080/admin (or https://host:5443 with the self-signed certificate)
 ```
 
+Then point the gateway at its backends on the **Backends** page: pick a provider per role
+and fill the fields it asks for. Assigning MailStore and MailSubmit is what brings EAS
+online — until then those endpoints answer 503, though the gateway itself reports ready
+(`/readyz` shows `"configured": false` without failing, so an orchestrator will route the
+traffic you need to reach this page).
+
 ## Who can log in
 
 **Local mode** (no OIDC configured): the login form runs the exact verdict path the phones
@@ -98,6 +104,10 @@ non-GET calls need the `X-EAS-WebUi` header. Login/logout/mode are anonymous.
 | --- | --- |
 | `GET/POST {portal}/api/auth/mode`, `login`, `logout`, `session` | Session lifecycle (login answers 404 under OIDC). |
 | `GET /admin/api/settings` · `PUT/DELETE /admin/api/settings/{key}` | The `eas config` catalogue with per-key default/value/source (default · config · db) and tier (live · restart); same validation. |
+| `GET /admin/api/backends/providers` | Every registered provider: the roles it serves, whether it can probe itself, and its config schema per role — what the forms are built from. |
+| `GET /admin/api/backends` · `PUT/DELETE /admin/api/backends/{role}` | Role assignment and settings as database overrides over the config file, per-leaf source. PUT stores only real deviations (a value equal to the config file or the provider default is removed instead); DELETE resets the role to the file. |
+| `POST /admin/api/backends/{role}/validate` · `/test` | Dry-run validation (per-field failures) and, where the provider implements `IReadinessSource`, a credential-less reachability probe. |
+| `GET /user/api/backends/meta` | Per role: the provider serving this caller and its field descriptions, so the portal renders named fields. Descriptions only — no configured values. |
 | `GET/PUT/DELETE /admin/api/users[/{login}]` | Declared users with provenance; PUT = full-replacement upsert with password sentinels (null = keep, `""` = clear, value = hash/seal), validated like the CLI. |
 | `GET/POST/DELETE /admin/api/shares` | Shared-calendar grants (`eas share`). |
 | `GET /admin/api/devices` · `POST .../block·unblock·wipe·purge` | Device management; wipe/purge require the target echoed back in `confirm`. |
@@ -117,14 +127,23 @@ iteration loop).
   `shared/app.css` consumes only those variables.
 - The **default-as-placeholder** convention everywhere: an unset field renders empty with
   its default (or inherited value) as a dimmed placeholder / `(default: X)` option plus a
-  badge; typing replaces it, clearing reverts to the default.
+  badge; typing replaces it, clearing reverts to the default. Its corollary on save: a
+  field equal to what it would inherit is **not stored**, and an existing override for it
+  is removed — so typing the default is how you reset.
+- `shared/schema-form.js` builds the backend forms from a provider's own
+  `DescribeConfiguration` schema (Backends page, admin user editor, user portal). No view
+  knows a provider's field names, so a plugin's settings render the day it ships. Settings
+  a provider does not describe stay editable — as an "Advanced" section in the admin views,
+  and carried through invisibly by the portal, since those PUTs replace settings wholesale.
 - No inline scripts (`onclick=`, `<script>` blocks) — the CSP forbids them; keep it that
   way. Inline `style=` attributes are fine (the views lay themselves out with them).
 
 ## Token-auth forward compatibility
 
-When XOAUTH2/Bearer backend auth lands, its per-role knobs go into the existing free-form
-role settings (`Backends:<Role>:Settings:...` — already editable in both UIs and the CLI,
-no schema change): reserved keys `Auth:Mode`, `Auth:TokenEndpoint`, `Auth:ClientId`,
-`Auth:ClientSecret`, `Auth:RefreshToken`. A browser-based consent flow would mount under
-the portal at `/user/oauth/{role}/connect` + `/user/oauth/callback`.
+When XOAUTH2/Bearer backend auth lands, its per-role knobs go into the existing role
+settings (`Backends:<Role>:Settings:...`): reserved keys `Auth:Mode`, `Auth:TokenEndpoint`,
+`Auth:ClientId`, `Auth:ClientSecret`, `Auth:RefreshToken`. A provider that adopts them
+should declare them in its `DescribeConfiguration` (with `BackendFieldType.Secret` for the
+two credentials) so both UIs render them properly; undeclared, they still work as raw keys.
+A browser-based consent flow would mount under the portal at `/user/oauth/{role}/connect`
++ `/user/oauth/callback`.
