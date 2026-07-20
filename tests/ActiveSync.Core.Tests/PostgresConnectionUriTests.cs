@@ -73,6 +73,19 @@ public class PostgresConnectionUriTests
 	}
 
 	[Fact]
+	public void PercentEncodedMultiWordKeywords_InQuery_PassThrough()
+	{
+		// The integration-test fixture tames each throwaway database's pool this way; the
+		// %20-encoded multi-word Npgsql keywords must survive the URI round trip.
+		NpgsqlConnectionStringBuilder result = Convert(
+			"postgresql://u:p@host:5432/db" +
+			"?Maximum%20Pool%20Size=10&Connection%20Idle%20Lifetime=10&Connection%20Pruning%20Interval=2");
+		Assert.Equal(10, result.MaxPoolSize);
+		Assert.Equal(10, result.ConnectionIdleLifetime);
+		Assert.Equal(2, result.ConnectionPruningInterval);
+	}
+
+	[Fact]
 	public void MissingDatabaseName_Fails()
 	{
 		Assert.False(PostgresConnectionUri.TryConvert("postgresql://u:p@host:5432", out _, out string? error));

@@ -151,13 +151,16 @@ jobs:
             up -d --build --wait --wait-timeout 300
 
       # The gateway state DB for the suite: with AS_TEST_PG set, every gateway factory creates
-      # its own database here, so the Npgsql provider + migrations run in CI.
+      # its own database here, so the Npgsql provider + migrations run in CI. max_connections
+      # is raised from the default 100: the suite spins up ~30 gateway hosts, each with its own
+      # database and connection pool, and their combined footprint overflowed the default
+      # (GatewayFixture also prunes idle pool connections fast — this is the headroom layer).
       - name: Start Postgres state DB
         if: env.RUN_LEG == 'true'
         run: |
           docker run -d --name "$POSTGRES" -p 5432:5432 \
             -e POSTGRES_USER=activesync -e POSTGRES_PASSWORD=ci-pw -e POSTGRES_DB=activesync \
-            postgres:17-alpine
+            postgres:17-alpine -c max_connections=300
           ok=0
           for i in $(seq 1 30); do
             if docker exec "$POSTGRES" pg_isready -U activesync -d activesync -q; then ok=1; break; fi

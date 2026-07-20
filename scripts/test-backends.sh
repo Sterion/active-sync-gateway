@@ -42,7 +42,7 @@ start_postgres() {
 	docker rm -f "$PG_CONTAINER" >/dev/null 2>&1 || true
 	docker run -d --name "$PG_CONTAINER" -p 5432:5432 \
 		-e POSTGRES_USER=activesync -e POSTGRES_PASSWORD=ci-pw -e POSTGRES_DB=activesync \
-		postgres:17-alpine >/dev/null
+		postgres:17-alpine -c max_connections=300 >/dev/null
 	for _ in $(seq 1 30); do
 		if docker exec "$PG_CONTAINER" pg_isready -U activesync -d activesync -q 2>/dev/null; then
 			return 0

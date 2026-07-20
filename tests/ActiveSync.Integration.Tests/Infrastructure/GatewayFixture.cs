@@ -348,8 +348,16 @@ public sealed class GatewayFixture : IAsyncLifetime
 		}
 
 		NpgsqlConnectionStringBuilder builder = new(adminKeywordForm);
+		// Npgsql pools are keyed by connection string and live for the PROCESS, not the host:
+		// disposing a WebApplicationFactory leaves its pool's idle physical connections open,
+		// and with a unique database per factory nothing ever reuses (or clears) that pool. At
+		// ~30 factories per run the leaked idles exhausted the server's max_connections
+		// ("53300: sorry, too many clients already" at the next factory's startup migration).
+		// Keep pooling while a host lives, but prune aggressively so an abandoned pool drains
+		// itself within seconds (the pruning timer is per-pool and keeps running after dispose).
 		return $"postgresql://{Uri.EscapeDataString(builder.Username ?? "")}:" +
-		       $"{Uri.EscapeDataString(builder.Password ?? "")}@{builder.Host}:{builder.Port}/{databaseName}";
+		       $"{Uri.EscapeDataString(builder.Password ?? "")}@{builder.Host}:{builder.Port}/{databaseName}" +
+		       "?Maximum%20Pool%20Size=10&Connection%20Idle%20Lifetime=10&Connection%20Pruning%20Interval=2";
 	}
 
 	private static async Task WarmDeliveryAsync(string from, string to)
