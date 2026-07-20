@@ -1,5 +1,7 @@
 bin/
 obj/
+# Personal local-run configuration (launchSettings runs with ASPNETCORE_ENVIRONMENT=Local).
+appsettings.Local.json
 artifacts/
 *.user
 *.db
