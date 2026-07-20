@@ -19,7 +19,7 @@ namespace ActiveSync.Backends.Imap;
 ///   live sessions.
 /// </summary>
 public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier, IPerUserResourceOwner,
-	IReadinessSource, IAsyncDisposable
+	IReadinessSource, IWatcherDiagnostics, IAsyncDisposable
 {
 	private static readonly IReadOnlySet<BackendRole> Roles = new HashSet<BackendRole> { BackendRole.MailStore };
 
@@ -111,6 +111,23 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		using System.Net.Sockets.TcpClient client = new();
 		await client.ConnectAsync(options.Host, options.Port, ct).ConfigureAwait(false);
 		return true;
+	}
+
+	/// <summary>Live (materialized) IDLE watchers for the admin dashboard.</summary>
+	public IReadOnlyList<WatcherInfo> SnapshotWatchers()
+	{
+		List<WatcherInfo> watchers = new();
+		foreach ((string key, Lazy<ImapIdleWatcher> lazy) in _watchers)
+		{
+			if (!lazy.IsValueCreated)
+				continue;
+			int separator = key.IndexOf('\n');
+			watchers.Add(new WatcherInfo(
+				separator < 0 ? key : key[..separator],
+				separator < 0 ? "" : key[(separator + 1)..]));
+		}
+
+		return watchers;
 	}
 
 	public void TrimUserResources(IReadOnlySet<string> activeGatewayLogins)

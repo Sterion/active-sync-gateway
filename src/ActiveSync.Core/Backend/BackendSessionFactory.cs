@@ -120,6 +120,27 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		return ok;
 	}
 
+	/// <summary>
+	///   Live (materialized) backend sessions for the admin dashboard — an unrealized Lazy
+	///   slot is not a live connection. Read-only over the concurrent map; never blocks.
+	/// </summary>
+	public IReadOnlyList<BackendSessionInfo> SnapshotSessions()
+	{
+		List<BackendSessionInfo> sessions = new();
+		foreach ((string key, Lazy<CompositeBackendSession> lazy) in _sessions)
+		{
+			if (!lazy.IsValueCreated)
+				continue;
+			int separator = key.IndexOf('\n');
+			sessions.Add(new BackendSessionInfo(
+				separator < 0 ? key : key[..separator],
+				separator < 0 ? "" : key[(separator + 1)..],
+				lazy.Value.LastUsedUtc));
+		}
+
+		return sessions;
+	}
+
 	public async Task<IBackendSession> GetSessionAsync(
 		BackendCredentials credentials, string deviceId, CancellationToken ct)
 	{

@@ -150,6 +150,21 @@ public interface IPerUserResourceOwner
 	void TrimUserResources(IReadOnlySet<string> activeGatewayLogins);
 }
 
+/// <summary>One live backend session of the factory cache (for the admin dashboard).</summary>
+public sealed record BackendSessionInfo(string User, string DeviceId, DateTime LastUsedUtc);
+
+/// <summary>One live push watcher a provider holds (for the admin dashboard).</summary>
+public sealed record WatcherInfo(string User, string Resource);
+
+/// <summary>
+///   Optional provider capability: live watcher state for the admin dashboard (e.g. the
+///   shared IMAP IDLE watchers). Purely observational — never mutates provider state.
+/// </summary>
+public interface IWatcherDiagnostics
+{
+	IReadOnlyList<WatcherInfo> SnapshotWatchers();
+}
+
 /// <summary>
 ///   Optional provider capability: a cheap reachability probe of the globally configured
 ///   endpoint for /readyz (no credentials — connectivity only, e.g. TCP banner or HTTP

@@ -112,6 +112,12 @@ public static class GatewayMetrics
 		ThrottleRejections.Add(1);
 	}
 
+	/// <summary>Currently-parked long-polls per user (for the admin dashboard).</summary>
+	public static IReadOnlyList<KeyValuePair<string, int>> SnapshotLongPolls()
+	{
+		return ActiveLongPolls.Where(pair => pair.Value > 0).ToList();
+	}
+
 	public static void SetSessionsObserver(Func<IEnumerable<Measurement<long>>> observe)
 	{
 		_sessionsObserver = observe;
