@@ -76,6 +76,22 @@ public class WbxmlDecoderHardeningTests
 	}
 
 	[Fact]
+	public void MultiByteInteger_WrappingToASmallValue_IsAParseError()
+	{
+		// 0x90 0x80 0x80 0x80 0x03 encodes 2^32 + 3, which truncates to exactly 3 in a uint
+		// accumulator. That is the dangerous shape: unlike a length that wraps negative, a
+		// wrap to a small legal value passes every downstream bounds check silently — here
+		// the OPAQUE run consumes 3 of the following bytes and the document decodes clean.
+		byte[] doc = Doc(
+			[0x45], // Sync, with content
+			[0xC3], // OPAQUE
+			[0x90, 0x80, 0x80, 0x80, 0x03],
+			[0x01, 0x02, 0x03],
+			[0x01]); // END
+		Assert.Throws<WbxmlException>(() => WbxmlDecoder.Decode(doc));
+	}
+
+	[Fact]
 	public void DeeplyNestedDocument_IsAParseError()
 	{
 		// 4000 nested airsync:Sync-with-content, each properly closed — so the document is

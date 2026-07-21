@@ -217,6 +217,12 @@ public static class WbxmlDecoder
 			for (int i = 0; i < 5; i++)
 			{
 				byte b = ReadByte();
+				// Five continuation bytes carry 35 bits; the accumulator holds 32. Shifting a
+				// value that already occupies the top 7 bits silently discards them, so a
+				// hostile length wraps to a small, legal-looking number that every downstream
+				// bounds check then waves through. Reject instead of truncating.
+				if (value > uint.MaxValue >> 7)
+					throw new WbxmlException("Multi-byte integer out of range.");
 				value = (value << 7) | (uint)(b & 0x7F);
 				if ((b & 0x80) == 0)
 					return value;
