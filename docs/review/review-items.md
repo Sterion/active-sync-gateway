@@ -179,7 +179,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **12. Local CLI authentication** — ~~`L22`~~ ~~`L23`~~ ~~`L24`~~ ~~`L25`~~ ~~`L26`~~ ~~`L27`~~ ~~`K54`~~ **COMPLETE**
 > `L22` with no encryption key, `/cli` silently degrades to loopback-only auth — the model the design explicitly rejects. Plus plaintext responses, no audit trail, and replayable envelopes.
 
-**13. Unified secret redaction** — ~~`S7`~~ ~~`L29`~~ ~~`L30`~~ ~~`E15`~~ ~~`E23`~~ ~~`C5`~~ ~~`K37`~~ `K53` ~~`L42`~~ ~~`L43`~~
+**13. Unified secret redaction** — ~~`S7`~~ ~~`L29`~~ ~~`L30`~~ ~~`E15`~~ ~~`E23`~~ ~~`C5`~~ ~~`K37`~~ ~~`K53`~~ **N/A** — SecretValue.TryUnseal already returns four distinct, specific error strings (not-sealed / bad-base64 / too-short / wrong-key-or-tampered), unchanged since baseline ce6259c; the wrong-key/tampered lumping is deliberate (indistinguishable, avoids an oracle) and finer-grained than its sibling LocalContentProtector. Nothing coarse to fix within this item; key-length/null validation is K52 (item 53). ~~`L42`~~ ~~`L43`~~
 > There are currently **four** independent redaction implementations with different ideas of what to hide. Build one, then apply it — that ordering matters, so do this before item 14.
 
 **14. Credential & key handling** — `K56` `B4` `B5` `B18` `B19` `C6` `K9` `K14` `K45` `K46` `K47`
