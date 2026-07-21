@@ -10,128 +10,62 @@ Baseline: solution builds clean, **0 warnings**. No `async void`, no empty catch
 
 ## How to use this document
 
-Findings have stable IDs (`D1`, `K56`, `F23`…). Hand back any set of IDs or any **Block** number and that is enough context to implement it — every finding carries `file:line`, the defect, and the intended fix.
+Findings have stable IDs (`D1`, `K56`, `F23`…). Part 1 is a **flat work queue of 56 numbered items, each sized for one session**, in the order to run them. Part 2 is the **full finding list** by area. Unabridged detail for areas A–D is in [`code-review-detail.md`](code-review-detail.md).
 
-Part 1 is the **work blocks** — groupings that make sense to do together, ordered by what to do first. Part 2 is the **full finding list** by area. Unabridged detail for areas A–D (Core state/sync/backend, Core accounts/settings/options, WebUi, Backends Common/Imap/Smtp/Local/Sieve) is in [`code-review-detail.md`](code-review-detail.md).
+### Starting a session
 
-### Working a block in a fresh session
+> Read `docs/code-review.md`. Implement **item 12**. Follow the working protocol in that document.
 
-Each block is written to be self-contained, so a new session can be pointed at exactly one:
+That is the whole prompt. Items are self-contained and pre-sized — there is nothing to choose. Work them in numerical order unless you have a reason not to.
 
-> Read `docs/code-review.md`. Implement **Block 5**. Follow the working protocol in that document.
+### Working protocol — follow this for every item
 
-That is deliberately short — the protocol below is the contract, so the prompt doesn't have to repeat it.
+**1. Work findings in the order listed.** Where an item carries a sequencing constraint (item 5 / `H7`), honour it.
 
-### Working protocol — follow this for every block
-
-**1. If the block is split into sub-blocks and the user didn't name one, ask which.** See "Block index" below. Do not pick one yourself, and do not attempt a whole split block in one session.
-
-**2. Work findings in the order listed.** Where a block has a sequencing constraint (Block 1 / `H7`), honour it.
-
-**3. Commit after each finding, or each tight cluster of related findings.** Put the ID in the subject:
+**2. Commit after each finding, or each tight cluster of related findings.** Put the ID in the subject:
 
 ```
 fix(imap): scope EXPUNGE to the deleted UID (D1)
 ```
 
-Small commits are the point — they make the work resumable and each finding independently revertible. Do not batch a whole block into one commit.
+Small commits are the point — they make the work resumable and each finding independently revertible. Do not batch a whole item into one commit.
 
-**4. Mark the finding in this document in the same commit** — `~~D1~~ **FIXED** (abc1234)`, or `~~D1~~ **N/A** — already fixed by <block/commit>` with one line of why.
+**3. Mark the finding in this document in the same commit** — `~~D1~~ **FIXED** (abc1234)`, or `~~D1~~ **N/A** — <one line why>`.
 
-**5. If you moved or renamed code other findings reference, fix their `file:line` anchors.** You are the only one who will know where it went. If it invalidates a whole block, add a row to the re-verify table.
+**4. If you moved or renamed code other findings reference, fix their `file:line` anchors.** You are the only one who will know where it went. If it invalidates a whole item, add a row to the re-verify table below.
 
-**6. Build and test before each commit.** `dotnet build ActiveSync.slnx` is ~16s and the baseline is **0 warnings** — keep it there. Run the relevant test project; see [`testing.md`](testing.md) for the live-backend suites where a finding needs real server verification.
+**5. Build and test before each commit.** `dotnet build ActiveSync.slnx` is ~16s and the baseline is **0 warnings** — keep it there. Run the relevant test project; see [`testing.md`](testing.md) for the live-backend suites where a finding needs real server verification.
 
-**7. If you run low on context, stop at a commit boundary** and report exactly which findings are done and which are untouched. Do not start a finding you cannot finish and verify. Because of steps 3–4, stopping early costs nothing — the next session resumes from the document.
+**6. If you run low on context, stop at a commit boundary** and report exactly which findings are done and which are untouched. Do not start a finding you cannot finish and verify. Because of steps 2–3, stopping early costs nothing — the next session resumes from this document.
 
----
+**7. Stay inside the item.** If you spot something outside it, note it at the bottom of Part 2 as a new finding rather than fixing it inline.
 
-## Block index — size and splitting
+### Running items in parallel
 
-| Block | Findings | Session sizing |
-|---|---|---|
-| 1 — Data loss in item handling | 17 | **Split → 1A–1E** |
-| 2 — Untrusted-input limits | 12 | Single |
-| 3 — Auth / session / privilege | 20 | Single (large) |
-| 4 — Secret handling | 21 | Single (large) |
-| 5 — Session lifetime | 8 | Single |
-| 6 — EF / state layer | 19 | Single |
-| 7 — Config validation | 14 | Single |
-| 8 — Account resolution | 14 | Single |
-| 9 — EAS protocol conformance | 22 | Single — many are one-line status fixes |
-| 10 — Send/submit ordering | 6 | Single |
-| 11 — Long-poll & push | 9 | Single |
-| 12 — Hot-path performance | 24 | **Split → 12A–12C** (independent; split anywhere) |
-| 13 — Incremental sync | 6 | Single — design-heavy, few edits |
-| 14 — Assembly boundaries | 15 | **Split → 14A–14F**, and run alone |
-| 15 — Silent failure | 15 | Single |
-| 16 — Timezone & dates | 8 | Single |
-| 17 — Test coverage | 7 areas | **Split → one suite per session** |
-| 18 — Nits | ~110 | **Split → 18A–18J by area** |
+Don't, by default — items are ordered partly because they overlap. Several touch the same files from different angles (`SyncHandler.cs` appears in items 6, 32 and 20; `SyncStateService.cs` in 22, 23 and 20).
 
-### Sub-block definitions
-
-**Block 1 — split by file cluster; `1D` has an internal ordering constraint.**
-| ID | Scope | Findings |
-|---|---|---|
-| **1A** | IMAP mailbox safety — `ImapMailBackend`, `ImapSession` ← **start here** (2 Criticals) | `D1` `D2` `D17` |
-| **1B** | Contact/vCard converter — `ContactConverter` | `D4` `D6` `D22` `D23` |
-| **1C** | Draft/MIME building — `DraftMessageBuilder` | `D15` `D16` |
-| **1D** | JMAP converters — **`H7` first, verified against a live server, then the rest** | `H7` → `H4` `H5` `H6` `H23` |
-| **1E** | Delete windowing & SoftDelete — `CollectionDiff`, `SyncHandler` | `F2` `F3` `A21` |
-
-**Block 12 — split by assembly; items are independent, so any cut works.**
-| ID | Scope | Findings |
-|---|---|---|
-| **12A** | Server request hot path | `E4` `E5` `E6` `E18` `E31` `E35` `F13` `F14` `F15` `F28` `F40` `F43` |
-| **12B** | Backend round trips | `D3` `D14` `D19` `D32` `H13` `H14` `H15` `H24` `H25` |
-| **12C** | Core & CLI | `B7` `B28` `L35` `L41` |
-
-**Block 14 — split by move. Each sub-block should land on a clean tree and be committed before the next.**
-| ID | Scope | Findings |
-|---|---|---|
-| **14A** | `Backends.Common` drops its `Core` reference (move `WireLog.Payload`, `TransientRetry`, `BackendConfigField` → Contracts) ← **do first, unblocks the rest** | `S1` |
-| **14B** | `ActiveSync.Crypto` namespace realignment | `S2` / `K49` |
-| **14C** | Contracts surface — move host types out, optional-capability split, signature fixes. **Breaking; bundle into one major.** | `K57` `K58` `K59` `K61` `K69` |
-| **14D** | WebUi → Core services (`DeviceAdminService`, `ShareAdminService`, `LogQueryService`) | `S3` / `C18` |
-| **14E** | Decompositions — `SyncHandler`, `SyncStateService`, `ProgramServer` | `F-decomp` `A33` `E27` |
-| **14F** | Guardrails — move `MergedFreeBusy`/`CollectionDiff` to Protocol, architecture test, migration-lockstep CI | `S4` `S5` `S6` |
-
-**Block 17 — one test suite per session.** Endpoint-authorization (`C19`) · `AuthThrottle` + `GatewayMetrics` (`K31`) · WBXML depth/fuzz + code-page table validation (`W13`) · JSCalendar/JSContact round-trip (`H-roundtrip`) · CLI error-path tests (`L33`) · per-backend test project (`S5`) · migration lockstep (`S6`).
-
-**Block 18 — split by area prefix.** `18A` = `A*` (Core state/backend) · `18B` = `B*` (Core accounts/settings) · `18C` = `C*` (WebUi) · `18D` = `D*` (Backends common/imap/smtp/local/sieve) · `18E` = `E*` (Server pipeline) · `18F` = `F*` (EAS handlers) · `18G` = `H*` (JMAP/DAV) · `18H` = `K*` (Security/crypto/contracts) · `18I` = `L*` (CLI) · `18J` = `W*` (WBXML/Protocol).
-
-> Several Block 18 items are **Medium**, not cosmetic — notably `H1` (DAV probe disables TLS validation), `H2` (wrong resource fetched), `H3` (lost update), `K19` (AAD ambiguity), `K62` (fails **open** to read-write), `K64` (cross-host guard skipped). Do `18G` and `18H` before the cosmetic areas.
-
-**Run one block at a time.** The blocks were grouped by *subject*, not by file, so several of them touch the same files from different angles — `SyncStateService.cs` appears in Blocks 6 and 14, `BackendSessionFactory.cs` in Blocks 5 and 6, `SyncHandler.cs` in Blocks 1, 9, 10 and 14. Two sessions working different blocks in parallel will conflict in those files.
-
-If parallel work is needed, these sets are close to file-disjoint and can overlap safely:
-- **Block 2** (Protocol/WBXML + metrics + throttle) — `ActiveSync.Protocol`, `GatewayMetrics`, `AuthThrottle`
-- **Block 3** (auth/session/privilege) — mostly `ActiveSync.WebUi` + `PluginLoader`
-- **Block 13/H-items** (JMAP/DAV incremental sync) — `ActiveSync.Backends.{Jmap,Dav}`
-
-Block 14 (assembly boundaries) moves types between projects, so it should run alone and land before or after everything else, never alongside.
+If you do want two at once, these are close to file-disjoint: **2** (Protocol/WBXML) · **8–9** (WebUi) · **28** (Jmap/Dav). **Item 20** (decompositions) must run alone on a clean tree.
 
 ### ⚠️ Locating a finding after code has moved
 
-**Every `file:line` in this document is exact as of commit `ce6259c`** (the last commit touching `src/` before the review; everything after it is docs-only). **Line numbers are a hint, not an address.** As soon as one block lands, they drift for every finding in the same file — and two blocks invalidate them wholesale:
+**Every `file:line` in this document is exact as of commit `ce6259c`** (the last commit touching `src/` before the review; everything after is docs-only). **Line numbers are a hint, not an address.** They drift as soon as one item lands, and two items invalidate them wholesale:
 
-- **Block 14** moves types between assemblies. After it, findings referencing `WireLog`, `TransientRetry`, `BackendConfigField`, `IBackendSession`, `MergedFreeBusy`, `CollectionDiff` and the `ActiveSync.Crypto` types point at the **wrong project**, not just the wrong line.
-- **`F-decomp`** splits `SyncHandler.cs` (826 lines) into six partials. Every `SyncHandler.cs:NNN` reference — Blocks 1, 9, 10 and 12 all have them — lands in a file that no longer holds that code.
+- **Item 15–17** move types between assemblies. After them, findings referencing `WireLog`, `TransientRetry`, `BackendConfigField`, `IBackendSession`, `MergedFreeBusy`, `CollectionDiff` and the `ActiveSync.Crypto` types point at the **wrong project**, not just the wrong line.
+- **Item 20** splits `SyncHandler.cs` (826 lines) into six partials. Every `SyncHandler.cs:NNN` reference — items 6, 26, 32 and 35 all have them — lands in a file that no longer holds that code.
 
 **Locate by symbol, not by line.** Each finding names the enclosing type and member, and most quote the offending expression. Grep for that first; use the line number only to disambiguate between several hits in one file.
 
-**Before editing, confirm the defect is still there.** Findings are not independent — an earlier block may have already fixed, moved, or obsoleted one. Specific overlaps worth knowing:
+**Before editing, confirm the defect is still there.** An earlier item may have already fixed, moved or obsoleted it:
 
 | If you already did | Re-verify before starting |
 |---|---|
-| Block 14 (`S1`, `K49`, `K57`) | anything referencing Core↔Contracts↔Crypto types |
-| `F-decomp` (SyncHandler split) | `F1`–`F15`, `F10`, `F29`, `F40`, `A21` |
-| Block 5 (session lease) | `A2` `A11` `A12` `A24` `D27` `D28` |
-| Block 6 (state layer) | `A1` `A3` `A4` `A9` `A10` `A18` `A19` |
-| Block 4 (unified redaction) | `L29` `L30` `E15` `C5` `B5` |
+| items 15–17 (assembly moves) | anything referencing Core↔Contracts↔Crypto types |
+| item 20 (decompositions) | items 6, 26, 32, 35 |
+| item 21 (session lease) | `A2` `A11` `A12` `A24` `D27` `D28` |
+| items 22–23 (state layer) | `A1` `A3` `A4` `A9` `A10` `A18` `A19` |
+| item 13 (unified redaction) | `L29` `L30` `E15` `C5` `B5` |
 
-To find where something moved, the baseline is pinned so git can trace it:
+The baseline is pinned so git can trace where something went:
 
 ```sh
 git show ce6259c:src/ActiveSync.Server/Eas/Handlers/SyncHandler.cs | sed -n '780,830p'   # what the review saw
@@ -141,164 +75,200 @@ git diff ce6259c..HEAD -- src/ActiveSync.Core/Backend/                          
 
 ### Keeping this document current
 
-Steps 4 and 5 of the working protocol cover the mechanics. The reason they matter:
+Protocol steps 3 and 4 cover the mechanics. Why they matter:
 
-**Never delete a finding — strike it through.** IDs are referenced by other blocks, by the re-verify table, and by any session started before the fix landed. A deleted ID turns those into dangling references; a struck-through one stays readable.
+**Never delete a finding — strike it through.** IDs are referenced by other items, by the re-verify table, and by any session started before the fix landed. A deleted ID turns those into dangling references; a struck-through one stays readable.
 
-**Updating the doc is part of the work, not paperwork.** It is what makes a block resumable and what stops the next session from chasing an anchor into a file that no longer holds the code.
+**Updating the doc is part of the work, not paperwork.** It is what makes an item resumable and what stops the next session chasing an anchor into a file that no longer holds the code.
 
-**Severity**: Critical = data loss or process death in normal operation · High = security hole, corruption, or a feature that silently doesn't work · Medium = wrong behaviour in a reachable case, or a real performance/maintainability problem · Low = latent, narrow, or defence-in-depth · Nit = polish.
+# PART 1 — WORK QUEUE
 
----
+**56 items, each sized for one session, in the order to run them.** Say *"Implement item 12"* — no sub-choices, no sizing decisions. Phase headings are context only; the numbering is a straight line.
 
-# PART 1 — WORK BLOCKS
-
-## Block 1 — Data loss and corruption in item handling ⚠️ do first
-**Why together:** every item here silently destroys or mangles user data during ordinary use. Same review pass, same test surface (a real-backend round-trip suite).
-`D1` `D2` `D4` `D6` `D15` `D16` `D17` `D22` `D23` `H4` `H5` `H6` `H7` `H23` `F2` `F3` `A21`
-
-The three worst: `D1` a folder-wide `EXPUNGE` that permanently deletes *other* clients' `\Deleted` mail on every EAS delete; `D2` zero UIDVALIDITY tracking anywhere in the repo, so after a mailbox restore/migration the gateway applies deletes and flag changes to the wrong messages; `D4` a ghosted contact Change wipes name, emails, address, photo and note.
-
-> ### ⚠️ Sequencing: do `H7` first, and verify it against a live server
->
-> **`H7` gates `H4`, `H5` and `H6`. Do not start those three until `H7` is settled and tested.**
->
-> The question `H7` raises is whether JMAP `update` is a **PatchObject** (RFC 8620 §5.3 — an absent member means *unchanged*) or a **full replace**. The codebase currently encodes *both beliefs at once*, and they are mutually exclusive:
-> - Under **patch** semantics, the "preserve unknown members" loops (`JsContactConverter.cs:160-163`, `JsCalendarConverter.cs:132-135`) are dead weight, and clearing a field is broken.
-> - Under **replace** semantics, those loops are load-bearing, and `media` being in `Managed` but never re-emitted explains the documented contact-photo loss.
->
-> The fix for `H4` (recurrence array-vs-map), `H5` (day-ordinals) and `H6` (birthday `utc`-vs-`date`) is *shaped differently* depending on the answer, because each is about what gets written into an update payload. Guessing wrong means redoing all three.
->
-> **How to settle it:** run against the Stalwart 0.16 test backend (see [`testing.md`](testing.md)) — set a contact field, then clear it, and inspect whether the server retains the old value. Write the answer down in this document and in `docs/backends.md` before touching `H4`–`H6`.
->
-> **Note:** emitting an explicit `null` for every `Managed` member that has no value is correct under **both** interpretations. If the live test is inconclusive or you want to move now, that is the safe change — it removes the ambiguity permanently, after which the preserve loops can be kept or dropped deliberately rather than by accident.
-
-## Block 2 — Untrusted-input limits
-**Why together:** all "the cap is applied one step too late". Phones are the attacker here; each is a cheap fix plus a hardening test.
-`W1` `W2` `W3` `W4` `W6` `W8` `W17` `K1` `K26` `K33` `E2` `L21`
-
-`W1` (no WBXML depth/element cap → multi-GB heap from one 64 MB body) and `W2` (unbounded encoder recursion → uncatchable `StackOverflowException`, process death) are ~15 lines of code between them and take down every user's sync. `K1`/`E2` let an *unauthenticated* caller mint unbounded Prometheus time series. `K26` grows the throttle table without bound while doing an O(n) scan per failed login.
-
-## Block 3 — Authentication, session and privilege boundaries
-**Why together:** one security pass over who can do what.
-`C1` `C2` `C3` `C4` `C7` `C8` `C14` `C16` `C17` `K38` `B22` `L22` `L27` `K54` `E3` `E14` `E26` `F23` `F21` `F46`
-
-Highest: `C1` a non-admin portal user can repoint their own backend at an arbitrary host and harvest the stored credential (SSRF + credential exfiltration from the lowest privilege level). `F23` the Provision phase-2 branch never compares the presented PolicyKey, so the entire device-policy handshake is bypassable in one request. `K38`+`B22` `Plugins:Directory` is DB-settable, turning admin-UI access into arbitrary code execution in-process. `C3` sessions are never revalidated, so disable/block/revoke don't take effect for up to 12 sliding hours. `E3` the auth throttle keys on `RemoteIpAddress`, which behind an ingress is one shared key — any user's password fumbles 429 the whole gateway.
-
-## Block 4 — Secret handling and redaction
-**Why together:** there are currently **four** independent redaction implementations (CLI `Mask`, `StartupSummary.Redact`, WebUi `SecretMask`, `MailKitWireLogger.Redact`) and each has a different idea of what to hide. Unify to one, then fix the leaks.
-`K56` `K9` `K14` `K45` `K46` `K47` `B4` `B5` `B18` `B19` `C5` `C6` `E15` `E23` `L23` `L29` `L30` `K37` `K53` `L42` `L43`
-
-`K56` is the one to fix today: `BackendCredentials` is a `record`, so its synthesized `ToString()` prints the plaintext password — and `ResolvedRole`/`BackendConnectionContext` recursively print it too. This is *published plugin contract*, so it's the easiest way for third-party code to dump every user's mail password into logs. `B4` conflates "no key configured" with "key misconfigured" and writes backend passwords in cleartext on the latter. `B5`/`L29`/`L30` the CLI stores and echoes secrets the web UI seals and masks.
-
-## Block 5 — Backend session lifetime and connection ownership
-**Why together:** one refactor fixes all of it. `CompositeBackendSession` is shared mutable state with no ownership model.
-`A2` `A11` `A12` `A24` `A28` `D27` `D28` `K60`
-
-`A2`: `SessionIdleMinutes` defaults to 15 while `MaxHeartbeatSeconds` defaults to 29.5 min, so the eviction timer disposes sessions mid-Ping while IMAP IDLE is still using them. Introduce an `IAsyncDisposable` lease that refcounts use, gates concurrent access per session (MailKit's `ImapClient` is not thread-safe and clients *do* pipeline), and defers disposal until the last lease releases.
-
-## Block 6 — EF Core / state-layer correctness and cost
-**Why together:** all rooted in one request-scoped `DbContext` used as a bag of independent repositories.
-`A1` `A3` `A4` `A5` `A6` `A7` `A8` `A9` `A10` `A17` `A18` `A19` `A22` `A34` `A35` `C10` `C15` `C18` `E13`
-
-`A1` is the sharp one: the folder-registry retry detaches the **entire** change tracker, silently dropping the already-tracked `Device.FolderSyncKey++` — the client is acked N+1 while the DB holds N, guaranteeing a Status 9 full resync. `A4` rewrites the full snapshot JSON twice per sync round (2–3 MB per request on a 50k mailbox) — this is the dominant steady-state cost. Decide one policy: explicit transaction per EAS command, or independent operations take their own context from `ISyncDbContextFactory`.
-
-## Block 7 — Configuration validation unification
-**Why together:** validation lives in three places that disagree, and every item here is the same bug shape — *accepted by the gate it passes, rejected by a gate it meets later*.
-`B1` `B9` `B10` `B11` `B12` `B14` `B24` `B25` `B26` `B31` `B32` `E11` `E19` `E33`
-
-`B1`: `eas config set ActiveSync:Eas:WatchdogSeconds 5` is accepted, persists to the DB, runs fine — and then the gateway **refuses to start** on the next restart with the bad value baked in. Delayed-brick failures like this are the dangerous ones in an unattended-restart deployment. One fix collapses most of the block: make the write path bind the candidate onto a cloned `ActiveSyncOptions` + `BackendRolesConfig` and run the *same* validator startup runs.
-
-## Block 8 — Account resolution, storage casing, and fail-closed
-**Why together:** one subsystem, and `B2` is the root of several.
-`B2` `B3` `B6` `B7` `B8` `B13` `B15` `B16` `B17` `B21` `B23` `B28` `L31` `L32`
-
-`B2`: logins/keys are matched **case-sensitively in SQL** and **case-insensitively in memory** — so `eas user set Phone1` when `phone1` exists inserts a second row the unique index doesn't catch, and which override wins flips between restarts. Two call sites already carry hand-written workarounds, which is the tell that the invariant belongs in the entity configuration (collation). `B3` is the fail-open one: an invalid DB account row degrades that login to credential pass-through **and un-disables it**.
-
-## Block 9 — EAS protocol conformance
-**Why together:** one MS-ASCMD pass; several are wrong status codes that push clients into resync loops.
-`F1` `F4` `F5` `F6` `F8` `F9` `F19` `F24` `F25` `F26` `F27` `F34` `F36` `F37` `F38` `F41` `F42` `F45` `F47` `F48` `W20` `W21`
-
-`F4` echoes the *rejected* sync key back with Status 3, so a trusting client re-sends it — the exact resync loop the codebase tries to avoid (Exchange returns key 0). `F1` `<Sync/>` with an empty `Collections` element gets Status 13 instead of replaying. `F6` `MIMESupport` is read nowhere in the repo and Type-4 BodyPreference is force-downgraded to HTML, so S/MIME can never be verified on-device. `F36` `Total` reports the page size, so search silently stops after page 1.
-
-## Block 10 — Send/submit ordering and idempotency
-**Why together:** identical bug shape in four places — work *after* an irreversible send can report the send as failed, and the client resends.
-`F10` `F29` `F30` `D9` `H18` `L36`
-
-The rule to apply everywhere: close the `try` around the submit only; everything after it (file-to-Sent, mark-answered, delete-draft, SMTP `QUIT`) is best-effort, logged and swallowed; and record the replay marker **before** the irreversible step, not after.
-
-## Block 11 — Long-poll and push reliability
-**Why together:** Ping is the most important path for battery life and perceived latency, and the watchdog↔caller contract isn't enforced.
-`E7` `E8` `E12` `F11` `F16` `F17` `F18` `H17` `H19`
-
-`E7` a watcher that completes non-positively is dropped for the rest of the heartbeat (with `WatchdogSeconds=0` this degenerates into a tight re-poll loop). `E8` one faulting watcher aborts the whole Ping into a 500, and the drain is unbounded. `E12` `KeepAliveTimeout = 65 min` doesn't do what its comment says — it has no effect on long-poll duration and instead keeps every dead phone socket alive for an hour.
-
-## Block 12 — Hot-path performance
-**Why together:** measurable win for a polling fleet, all in request-path code.
-`E4` `E5` `E6` `E18` `E31` `E35` `F13` `F14` `F15` `F28` `F40` `F43` `D3` `D14` `D19` `D32` `H13` `H14` `H15` `H24` `H25` `L35` `L41` `B7` `B28`
-
-`E4` every EAS request constructs **all 20 command handlers** and their full dependency graphs (MS.DI materializes `IEnumerable<T>` eagerly) and throws 19 away — switch to keyed services. `D3` every mail fetch downloads the complete message including attachments, then *decodes every attachment into a MemoryStream just to read `.Length`* for the size estimate — while holding the per-user IMAP gate. `L35` every CLI command builds a parallel DI container, EF model and plugin set next to the warm one the host already has.
-
-## Block 13 — Incremental sync (architectural)
-**Why together:** one design decision with the widest blast radius in the backends. Worth an explicit decision record either way.
-`H16` `H8` `H9` `H11` `H12` `A4`
-
-> **⚠️ If Block 1 has not been done yet:** `H7` (JMAP update patch-vs-replace) should be settled before any JMAP converter work, including anything here that touches update payloads. See the sequencing note in **Block 1**.
-
-Neither JMAP nor DAV ever uses `Foo/changes`, `sync-collection`, `queryState` or `ifInState` — verified by grep. Every sync is a full enumeration diffed against a snapshot. DAV even *fetches* `sync-token` and uses it only as a change sentinel. Defensible as v1 (always correct, never stale) but it directly causes `H8`, `H13`, `H14`, `H15` and doesn't scale past a few thousand items per collection.
-
-## Block 14 — Assembly boundaries and structure
-**Why together:** these are the "what should move where" decisions; doing them piecemeal causes churn.
-`S1` `S2` `S3` `S4` `S5` `K49` `K57` `K58` `K59` `K61` `K69` `A33` `D-split` `L-verdict` `F-decomp`
-
-- **`S1` (do this one):** `Backends.Common` is a *packed, plugin-facing* NuGet package that still `ProjectReference`s all of `ActiveSync.Core` — dragging EF Core, Npgsql, SQLite, migrations, account resolution and TLS into every plugin's graph. I verified its **only** real Core usage is a single `WireLog.Payload(...)` call at `MailKitWireLogger.cs:95`; the seven `using ActiveSync.Core.Backend;` directives are dead (Core/Backend declares exactly 7 types, no extension methods, none referenced anywhere in Backends.Common). Move `WireLog.Payload`, `TransientRetry` and `BackendConfigField` into Contracts → Backends.Common drops the Core reference entirely and becomes what its own csproj comment claims it is.
-- **`S2`/`K49`:** `ActiveSync.Crypto` declares its types in `ActiveSync.Core.Security` / `ActiveSync.Core.Options`. So the slim `eas` CLI — whose entire selling point is *not referencing Core* — compiles `using ActiveSync.Core.Security;`. Fix before the package has external consumers.
-- **`K57`:** `IBackendSession`/`IBackendSessionFactory`/`BackendSessionInfo` are host composition types, not plugin surface — move to Core so they stop being policed by the major-version gate.
-- **`S3`/`C18`:** WebUi injects `SyncDbContext` directly in four endpoint files, so there are two write paths to the same tables. That is precisely why `C10`, `C15` and `C16` exist only in those files.
-- **`S5`/`K71`:** make the boundary machine-checked — an architecture test asserting `typeof(IGatewayPlugin).Assembly.GetReferencedAssemblies()` contains only Protocol + Microsoft.Extensions + framework. Today it's enforced by a csproj comment.
-- **Verdicts:** Server→WebUi direction is **right**, keep it. Per-protocol backend split (Imap/Smtp/Sieve/Local) is **right**, keep Smtp and Sieve separate despite their size — they fill different *roles*. CLI should **not** be split out of Server (`ServeCommand` calls `RunServerAsync`, `/cli` needs the command tree in-process); the real problem it's reacting to is `L35`.
-- **Decomposition targets:** `SyncHandler.cs` (826 lines) → 6 partials + `SyncCollectionOptions` + `ClientCommandLedger` (detailed plan in `F-decomp`). `SyncStateService.cs` (535 lines, 6 responsibilities, unsealed) → 4 types along its own banner comments. `ProgramServer.RunServerAsync` (245 lines) → 4 Setup extensions.
-
-## Block 15 — Silent failure and observability
-**Why together:** same shape — a `catch` that's right in intent but leaves no trace when the failure is permanent rather than transient.
-`E9` `E10` `E11` `E24` `E34` `C11` `K2` `K3` `K4` `K5` `K10` `K43` `L24` `H12` `B9`
-
-`E9` is worst because its failure mode is *the loss of the diagnostic channel itself*: the DB log drain's bare unlogged catch means a persistent failure is indistinguishable from a blip, and anything thrown outside the inner try kills the drain permanently. Adopt one policy: log the first occurrence and every Nth thereafter, to `SelfLog` where the logger itself is suspect.
-
-## Block 16 — Timezone and date correctness
-**Why together:** all shift user-visible times, all need the same test corpus.
-`W15` `W16` `D5` `D12` `D24` `D33` `H23` `H30`
-
-`W15`: `EasDateTime.ToLong/ToCompact` call `ToUniversalTime()`, which for `DateTimeKind.Unspecified` (what SQLite hands back) treats the value as *local* and subtracts the machine offset — silent, timezone-dependent corruption of every `StartTime`/`DateReceived` that looks fine in UTC CI and wrong in production. `D12` calendar events are always anchored to UTC, discarding the client's timezone, so recurring meetings drift an hour across DST.
-
-## Block 17 — Test coverage gaps
-**Why together:** each converts a class of bug from "found by review" to "found by CI".
-`C19` `K31` `S5` `W13-test` `H-roundtrip` `L33` `S6`
-
-- No endpoint-authorization test (the highest-risk property in WebUi is guaranteed only by a mapping convention).
-- No `AuthThrottleTests`, no `GatewayMetricsTests` — the two files with mutable shared state and locks.
-- No per-backend test project (Core.Tests hosts them); WebUi.Tests is 269 lines for a 2k-line admin surface; Protocol.Tests is 456 lines for a codec parsing untrusted input.
-- No JSCalendar/JSContact round-trip suite — **five of seven High findings in the JMAP backend live in those two converters**, and they share a signature: written in one shape, read in another, round-tripping *stably* after the first pass so nothing notices.
-- CLI errors go to raw `Console.Error` rather than the injected console (`L33`), so no CLI test can assert on any error message or exit code — the entire failure surface of an admin CLI is untestable.
-- Nothing enforces the Sqlite/Npgsql migration sets stay in lockstep (they are 1:1 across all 15 today).
-
-## Block 18 — Remaining nits and small cleanups
-`A20` `A23` `A25` `A26` `A27` `A29` `A30` `A31` `A32` `B27` `B29` `B30` `C12` `C13` `C20` `C21` `D25` `D26` `D29` `D30` `D31` `D34` `D35` `D-nits` `E17` `E20` `E21` `E22` `E25` `E27` `E28` `E29` `E30` `E32` `F12` `F22` `F31` `F32` `F33` `F39` `F44` `F46` `H1` `H2` `H3` `H10` `H20` `H21` `H22` `H26` `H27` `H28` `H29` `H31` `K6` `K7` `K8` `K11` `K12` `K13` `K15` `K16` `K17` `K18` `K19` `K20` `K21` `K22` `K23` `K24` `K25` `K27` `K28` `K29` `K30` `K32` `K34` `K35` `K36` `K39` `K40` `K41` `K42` `K44` `K48` `K50` `K51` `K52` `K55` `K62` `K63` `K64` `K65` `K66` `K67` `K68` `K70` `L25` `L26` `L28` `L34` `L37` `L38` `L39` `L40` `L44` `L45` `L46` `L47` `L48` `W5` `W7` `W9` `W10` `W11` `W12` `W13` `W14` `W18` `W19`
-
-Note several of these are Medium and only "nit-blocked" because they're isolated — notably `H1` (DAV readiness probe disables TLS validation unconditionally), `H2` (percent-decoded hrefs re-resolved as URIs → wrong resource fetched), `H3` (`If-Match` silently dropped for unquoted ETags → lost update), `K19` (AAD delimiter ambiguity), `K62` (`SharedCollection.Parse` fails **open** on an unknown mode suffix → read-write), `K64` (unparseable `baseUrl` skips the cross-host guard entirely).
+Findings are grouped by *what breaks* and by *which files they touch*, so an item is one coherent piece of work. Every finding ID appears in exactly one item.
 
 ---
 
-## Recommended order
+## Phase 1 — Stop the bleeding
+*Data loss, corruption and process death. All Critical/High.*
 
-1. **Block 1** + **Block 2** — data loss and process-death.
-2. **Block 3** + **Block 4** — security.
-3. **Block 14 `S1`/`S2`** — cheap, and every later refactor is easier once the plugin boundary is real.
-4. **Block 7** + **Block 8** — the delayed-brick and fail-open configuration classes.
-5. **Block 5** + **Block 6** — the two big correctness refactors.
-6. **Block 9** + **Block 10** + **Block 11** — protocol conformance and reliability.
-7. **Block 17** — lock in what's been fixed.
-8. **Block 12**, **13**, **15**, **16**, **18** — as capacity allows.
+**1. IMAP mailbox safety** — `D1` `D2` `D17`
+> Two Criticals. `D1` a folder-wide `EXPUNGE` destroys other clients' `\Deleted` mail on every EAS delete; `D2` no UIDVALIDITY tracking anywhere, so after a restore or migration operations hit the wrong messages. Needs a real IMAP server to verify. **Best first item** — small, self-contained, highest value.
+
+**2. WBXML decoder & encoder hardening** — `W1` `W2` `W3` `W4` `W5` `W6` `W7` `W8`
+> `W1` (no depth/element cap → OOM from one request) and `W2` (unbounded recursion → uncatchable `StackOverflowException`) are ~15 lines between them and take down every user's sync. Add the hardening tests with the fix.
+
+**3. Contact, vCard & iTIP integrity** — `D4` `D6` `D7` `D22` `D23`
+> `D4` a ghosted contact Change wipes name, emails, address, photo, note. `D6`/`D7` are injection (vCard line, iCalendar CRLF). All in `ContactConverter` + `ImipMailBuilder`.
+
+**4. Draft & MIME building** — `D15` `D16`
+> `DraftMessageBuilder` only. Unnamed-attachment delete removes all unnamed attachments; attachments lose content type and the HTML alternative is dropped on merge.
+
+**5. JMAP converter semantics** — `H7` **then** `H4` `H5` `H6` `H23`
+> ⚠️ **`H7` first, verified against the live Stalwart backend, before touching the other four.** It decides patch-vs-replace, which changes the *shape* of the other fixes. Full rationale and the safe-under-both-readings fallback are in the Area H sequencing note. Adding the round-trip suite (item 45) alongside is worth it.
+
+**6. Delete windowing & SoftDelete** — `F2` `F3` `A21`
+> Deletes bypass `WindowSize` entirely (50k `<Delete>` elements in one response), and items aging out of the filter window are hard-deleted instead of soft-deleted. `CollectionDiff` + `SyncHandler`.
+
+**7. Unauthenticated resource limits** — `K1` `E2` `K26` `E21` `K33` `W17`
+> Unauthenticated callers control Prometheus label values (`K1`/`E2`), grow the throttle table without bound with an O(n) scan per failure (`K26`), and unlock 16.x behaviour via an unvalidated version byte (`W17`).
+
+## Phase 2 — Security
+
+**8. WebUi session & cookies** — `C2` `C3` `C4` `C7` `C8` `C14`
+> `C3` is the big one: no `OnValidatePrincipal`, so disable/block/admin-revoke don't affect live sessions for up to 12 sliding hours. `C2`/`C4` are the same `CookieSecurePolicy` change.
+
+**9. WebUi privilege & API hardening** — `C1` `C9` `C10` `C15` `C16` `C17` `C20` `C21`
+> `C1` — a non-admin portal user can repoint their backend at an arbitrary host and harvest the stored credential. Exploitable from the lowest privilege level in the system.
+
+**10. EAS & server auth** — `F21` `F23` `F24` `F46` `E3` `E14` `E26`
+> `F23` the Provision handshake is bypassable in one request. `F21` per-folder read-only grants are honoured in **1 of ~8** mutating handlers. `E3` the throttle keys on the proxy's IP, so one user's fumbles 429 everyone.
+
+**11. Plugin & settings privilege** — `K38` `B22` `K39` `K40` `K41` `K42` `K43` `K44`
+> `K38`+`B22` `Plugins:Directory` is DB-settable → admin UI to in-process arbitrary code execution. The rest is loader robustness: bypassable version guard, uncaught `GetTypes()`, host-first resolution downgrading plugin-private dependencies.
+
+**12. Local CLI authentication** — `L22` `L23` `L24` `L25` `L26` `L27` `K54`
+> `L22` with no encryption key, `/cli` silently degrades to loopback-only auth — the model the design explicitly rejects. Plus plaintext responses, no audit trail, and replayable envelopes.
+
+**13. Unified secret redaction** — `S7` `L29` `L30` `E15` `E23` `C5` `K37` `K53` `L42` `L43`
+> There are currently **four** independent redaction implementations with different ideas of what to hide. Build one, then apply it — that ordering matters, so do this before item 14.
+
+**14. Credential & key handling** — `K56` `B4` `B5` `B18` `B19` `C6` `K9` `K14` `K45` `K46` `K47`
+> `K56` `BackendCredentials` is a `record`, so `ToString()` prints the plaintext password — and it's *published plugin contract*. `B19` an empty gateway password hashes and verifies, bypassing the backend entirely.
+
+## Phase 3 — Boundaries
+*Do before the big refactors — everything downstream is easier once the plugin boundary is real. Each item lands on a clean tree.*
+
+**15. `Backends.Common` drops its Core reference** — `S1`
+> Move `WireLog.Payload`, `TransientRetry`, `BackendConfigField` → Contracts. Its *only* real Core usage is one call; the seven `using ActiveSync.Core.Backend;` directives are dead. Cheapest high-leverage change in the list.
+
+**16. Crypto namespace realignment** — `S2` `K49`
+> `ActiveSync.Crypto` ships types in `ActiveSync.Core.*` namespaces, so the slim CLI's "doesn't reference Core" property is invisible in its own source. Do it before the package has external consumers.
+
+**17. Contracts surface** — `K57` `K58` `K59` `K61` `K62` `K64` `K67` `K69` `K71`
+> ⚠️ **Breaking — bundle into one major version bump.** Move host-only types out, split `IContentStore` into optional capabilities, make `CreateConnection` async, fix fail-open `SharedCollection.Parse`, add `ContractVersion`.
+
+**18. WebUi → Core services** — `S3` `C18`
+> Extract `DeviceAdminService`, `ShareAdminService`, `LogQueryService` so CLI and WebUi share one validated path. Removes the second write path to the same tables.
+
+**19. Structural guardrails** — `S4` `S8`
+> Move `MergedFreeBusy`/`CollectionDiff` to Protocol; consolidate `Backends.Common`'s three namespaces.
+
+**20. Decompositions** — `F-decomp` `A33` `E27` `E28`
+> ⚠️ **Run alone.** `SyncHandler` (826 lines → 6 partials + 2 extracted types), `SyncStateService` (535, 6 responsibilities), `ProgramServer.RunServerAsync` (245), and the duplicated auth prologue. Invalidates line anchors wholesale — update them per protocol step 5.
+
+## Phase 4 — Correctness
+
+**21. Backend session lifetime** — `A2` `A11` `A12` `A13` `A24` `A28` `D27` `D28` `K60`
+> One refactor fixes all nine: an `IAsyncDisposable` lease that refcounts use, gates concurrent access (MailKit's `ImapClient` is not thread-safe and clients pipeline), and defers disposal to the last release.
+
+**22. State layer correctness** — `A1` `A5` `A6` `A7` `A8` `A9` `A10` `A17` `A18` `A22`
+> `A1` the retry detaches the *entire* change tracker, silently dropping the tracked `FolderSyncKey++` — client acked N+1, DB holds N, guaranteed full resync. Decide the transaction policy here; it settles `A10` and `A18`.
+
+**23. State layer performance & retention** — `A3` `A4` `A19` `A34` `A35`
+> `A4` rewrites the full snapshot JSON twice per round — 2–3 MB per request on a 50k mailbox, the dominant steady-state cost.
+
+**24. Config validation unification** — `B1` `B9` `B10` `B11` `B12` `B14` `B24` `B25` `B26` `A14`
+> `B1` a CLI-settable value passes validation, persists, runs — then **blocks the next startup**. One fix collapses most of the item: make the write path run the same validator startup runs.
+
+**25. Account resolution & storage casing** — `B2` `B3` `B6` `B8` `B13` `B15` `B16` `B17` `B21` `B23`
+> `B2` case-sensitive in SQL, case-insensitive in memory → duplicate rows, nondeterministic winner across restarts. `B3` an invalid row degrades to credential pass-through **and un-disables** the account.
+
+**26. Send/submit ordering & idempotency** — `F10` `F29` `F30` `F31` `D9` `H18` `L36`
+> One rule everywhere: close the `try` around the submit only; record the replay marker *before* the irreversible step; everything after is best-effort and swallowed. Otherwise the client resends and recipients get duplicates.
+
+**27. Long-poll & push reliability** — `E7` `E8` `F11` `F16` `F17` `F18` `H17` `H19`
+> `E7` a watcher completing non-positively is dropped for the rest of the heartbeat. `E8` one faulting watcher 500s the whole Ping. `H17` the SSE stream is killed every 100s by `HttpClient.Timeout`.
+
+**28. DAV & JMAP request correctness** — `H1` `H2` `H3` `H10` `H20` `H21` `H22` `H26` `H27` `H28` `H29` `H31`
+> Not cosmetic despite sitting low in the original grouping: `H1` the DAV probe disables TLS validation unconditionally, `H2` percent-decoded hrefs fetch the wrong resource, `H3` `If-Match` silently dropped → lost update. Extract the shared `BackendHttpClientFactory` here.
+
+**29. Silent failure & diagnostics** — `E9` `E10` `E11` `E16` `E24` `E34` `C11` `K2` `K3` `K4` `K5` `H12`
+> `E9` is worst — its failure mode is *the loss of the diagnostic channel itself*. Adopt one policy: log the first occurrence and every Nth after, to `SelfLog` where the logger is suspect.
+
+**30. Timezone & date handling** — `W15` `W16` `D5` `D12` `D24` `D33` `H30`
+> `W15` `EasDateTime` shifts `DateTimeKind.Unspecified` by the machine offset — invisible in UTC CI, wrong in production. `D12` recurring events drift an hour across DST.
+
+**31. Hosting & startup correctness** — `E1` `E12` `E13` `E17` `E19` `E20` `E22` `E25`
+> `E1` request bodies are dropped on HTTP/2 (the body test assumes HTTP/1.1 framing while Kestrel negotiates h2). `E12` `KeepAliveTimeout` doesn't do what its comment claims.
+
+## Phase 5 — Protocol conformance
+*Mostly small independent fixes; each item is a quick pass.*
+
+**32. Sync command conformance** — `F1` `F4` `F5` `F6` `F7` `F8` `F9` `F12` `F22`
+> `F4` echoes the *rejected* sync key with Status 3, causing the resync loop. `F6` `MIMESupport` is read nowhere and Type-4 is force-downgraded, so S/MIME can't work on-device.
+
+**33. Folder & provision conformance** — `F25` `F26` `F27`
+> No FolderSync replay generation; every folder-op failure collapses to "system folder"; `FolderCreate` ignores the requested `Type`.
+
+**34. Search, find, recipients & settings** — `F19` `F20` `F32` `F33` `F34` `F35` `F36` `F37` `F38` `F41` `F42` `F45` `F47` `F48` `A15` `A16`
+> `F36` `Total` reports page size so search stops after page 1. `F47` `ReadOnly` doesn't block arming an out-of-office auto-reply. `A15` "no data" outranks "busy" in free/busy merging.
+
+## Phase 6 — Performance
+
+**35. Server request hot path** — `E4` `E5` `E6` `E18` `E31` `E35` `F13` `F14` `F15` `F28` `F40` `F43`
+> `E4` every request constructs all 20 handlers and discards 19. Biggest single allocation win for a polling fleet.
+
+**36. Backend round trips** — `D3` `D14` `D19` `D32` `H13` `H14` `H15` `H24` `H25`
+> `D3` every mail fetch pulls the full message and decodes every attachment just to read its length — while holding the per-user IMAP gate.
+
+**37. Core & CLI startup** — `B7` `B28` `L35` `L41`
+> `L35` every CLI command builds a parallel DI container and EF model beside the warm one. Fixing it is also what makes the CLI stop feeling like a foreign body in Server.
+
+**38. Incremental sync** — `H8` `H9` `H11` `H16`
+> ⚠️ **Design item, few edits.** Neither backend uses `/changes` or `sync-collection`; every sync is a full enumeration. Decide and write it down — it's the root of items 36's cost.
+
+## Phase 7 — Tests
+*One suite per item. Each converts a class of bug from "found by review" to "found by CI".*
+
+**39. Endpoint authorization tests** — `C19`
+> Enumerate `EndpointDataSource`; assert every `/admin/api` route carries `AdminPolicy`, every `/user/api` carries `UserPolicy`, and the anonymous set is exactly the known four. Also assert no CORS — the CSRF design silently depends on it.
+
+**40. AuthThrottle & metrics tests** — `K31`
+> The two files with mutable shared state and locks have no tests at all. Inject `TimeProvider` (`K32`) as part of this.
+
+**41. WBXML hardening & code-page tests** — `W12` `W13` `W14`
+> Depth/width/fuzz cases, plus a table-validation test — a duplicate tag name currently fails as `TypeInitializationException` on the *first WBXML request the gateway ever serves*.
+
+**42. JSCalendar/JSContact round-trip suite**
+> Property-based EAS → JSCalendar/JSContact → EAS over recurrence, all-day, floating times, cleared fields. Would have caught `H4` `H5` `H6` `H23` mechanically.
+
+**43. CLI error-path tests** — `L33`
+> Blocked until errors route through the injected console instead of raw `Console.Error` — do that here; it also removes most of `L25`'s process-global redirection.
+
+**44. Architecture & migration guardrails** — `S5` `S6`
+> Assert `IGatewayPlugin`'s assembly references only Protocol + Microsoft.Extensions + framework. Assert the Sqlite/Npgsql migration sets agree on their ordered name lists.
+
+**45. Per-backend test project**
+> Core.Tests currently hosts the backend tests. Split them out.
+
+## Phase 8 — Cleanup
+*By area. Safe to reorder or skip; nothing else depends on these.*
+
+**46. Core state & backend nits** — `A20` `A23` `A25` `A26` `A27` `A29` `A30` `A31` `A32` `S9`
+> `S9` — ten-plus copies of the same three-line `VSTHRD103` pragma and comment (`SyncStateService` alone has five). Hoist to one file-level suppression, or an `.editorconfig` entry carrying the rationale once.
+**47. Core accounts & settings nits** — `B20` `B27` `B29` `B30` `B31` `B32`
+**48. WebUi nits** — `C12` `C13`
+**49. Backend behaviour nits** — `D8` `D10` `D11` `D13` `D18` `D20` `D21` `D25` `D26` `D29` `D30` `D31` `D34` `D35` `D-nits`
+**50. Server pipeline nits** — `E29` `E30` `E32` `E33`
+**51. EAS handler nits** — `F39` `F44`
+**52. TLS & certificate handling** — `K6` `K7` `K8` `K10` `K11` `K13` `K15` `K16` `K17` `K18`
+> `K6` a 20-year self-signed cert violates Apple's 825-day limit — iOS is the flagship client, so a user who explicitly trusts it can still be refused.
+
+**53. Crypto & throttle correctness** — `K19` `K20` `K21` `K22` `K23` `K24` `K25` `K27` `K28` `K29` `K30` `K32` `K51` `K52` `K55`
+> `K19` ambiguous AAD delimiter, `K22` unbounded PBKDF2 iteration count from stored data.
+
+**54. Contracts & shared-helper nits** — `K12` `K34` `K35` `K36` `K48` `K50` `K63` `K65` `K66` `K68` `K70`
+**55. CLI nits** — `L28` `L31` `L32` `L34` `L37` `L38` `L39` `L40` `L44` `L45` `L46` `L47` `L48`
+> `L28` a `[` in a certificate subject crashes `eas tls`. `L31` mixed-case logins report "not blocked" when they are. `L32` `purge user` leaves shared-calendar grants behind.
+
+**56. Protocol & WBXML nits** — `W9` `W10` `W11` `W18` `W19` `W20` `W21`
+
+---
+
+## If you only do part of this
+
+Items **1–14** are the ones that matter for a system anyone else runs: data loss, process death, and privilege. Items **15–20** pay for themselves immediately in every later item. Everything from 21 on is quality-of-implementation — real, but survivable if left.
 
 ---
 ---
@@ -398,9 +368,9 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 ## Area H — Backends: JMAP / DAV (31)
 
 > **⚠️ Sequencing — read before starting any JMAP converter work.**
-> **`H7` must be resolved and tested first; it gates `H4`, `H5` and `H6`.** The patch-vs-replace semantics of JMAP `update` determine the *shape* of the fix for all three, and the codebase currently contains contradictory evidence for both readings. Settle it against the Stalwart 0.16 test backend, record the answer, then proceed. Full rationale and the safe-under-both-readings fallback are in **Block 1**.
+> **`H7` must be resolved and tested first; it gates `H4`, `H5` and `H6`.** The patch-vs-replace semantics of JMAP `update` determine the *shape* of the fix for all three, and the codebase currently contains contradictory evidence for both readings. Settle it against the Stalwart 0.16 test backend, record the answer, then proceed. Full rationale and the safe-under-both-readings fallback are in **item 5**.
 >
-> Related: **five of the seven High findings in this area** (`H4` `H5` `H6` `H7` `H23`) live in `JsCalendarConverter.cs` and `JsContactConverter.cs`, and they share a signature — a member is written in one shape and read in another, or a mapping is lossy in a way that round-trips *stably* after the first pass, so nothing downstream notices. A property-based round-trip suite (EAS → JSCalendar/JSContact → EAS) would have caught `H4`, `H5`, `H6` and `H23` mechanically; see Block 17.
+> Related: **five of the seven High findings in this area** (`H4` `H5` `H6` `H7` `H23`) live in `JsCalendarConverter.cs` and `JsContactConverter.cs`, and they share a signature — a member is written in one shape and read in another, or a mapping is lossy in a way that round-trips *stably* after the first pass, so nothing downstream notices. A property-based round-trip suite (EAS → JSCalendar/JSContact → EAS) would have caught `H4`, `H5`, `H6` and `H23` mechanically; see item 42.
 
 `H1` **High** DAV readiness probe hardcodes `RemoteCertificateValidationCallback => true`, overriding the operator's TLS settings; the JMAP probe does it correctly — `Dav/DavReadiness.cs:12`.
 `H2` **High** Percent-decoded hrefs are re-resolved as URIs, so a resource whose name contains `#`, `?` or `%` resolves to the wrong path (verified empirically on .NET 10) — `Dav/WebDavClient.cs:306`.
@@ -469,12 +439,12 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 **`L-verdict`** — do **not** split the CLI out of `ActiveSync.Server`. A clean split is blocked in three places (`ServeCommand` → `RunServerAsync`; `/cli` needs the command tree in-process for the warm-start benefit that is its whole reason to exist; `CliServices`/`CliVerbs` depend on `Server.Setup`), and extracting would mean duplicating that setup or hoisting a fourth assembly — real churn for a boundary that buys nothing. Instead: fix `L35`, and do two in-assembly cleanups — unify the three command base hierarchies (`DatabaseCommand`, `SettingsCommandBase`, and two bare `AsyncCommand`s that hand-roll the same bootstrap), and split `InspectCommands.cs` (346 lines, 5 commands) and `UserCommands.cs` (379 lines, 9 commands), whose density is actively hiding `L31` and `L41`.
 
 ## Area S — cross-cutting structural (my own pass)
-`S1` **High** `Backends.Common` (packed, plugin-facing) references all of `ActiveSync.Core` for a single `WireLog.Payload` call; the seven `using ActiveSync.Core.Backend;` directives are dead. Verified: Core/Backend declares exactly 7 types, no extension methods, none referenced in Backends.Common. See Block 14.
+`S1` **High** `Backends.Common` (packed, plugin-facing) references all of `ActiveSync.Core` for a single `WireLog.Payload` call; the seven `using ActiveSync.Core.Backend;` directives are dead. Verified: Core/Backend declares exactly 7 types, no extension methods, none referenced in Backends.Common. See item 15.
 `S2` **Med** `ActiveSync.Crypto` declares `ActiveSync.Core.Security` / `ActiveSync.Core.Options` namespaces (= `K49`).
 `S3` **Med** Two independent write paths to the same tables (Core services vs WebUi direct EF) (= `C18`).
 `S4` **Low** `MergedFreeBusy` and `CollectionDiff` are pure protocol logic with no EF/Core-state dependency — they belong in `ActiveSync.Protocol` where they'd also be easier to fuzz.
 `S5` **Med** No architecture test enforcing any of the above; the plugin boundary is currently enforced by a csproj comment.
 `S6` **Low** Nothing enforces the Sqlite/Npgsql migration sets stay in lockstep (1:1 across all 15 today). Add a CI check on the ordered migration-name lists.
-`S7` **Med** Four independent secret-redaction implementations: `ConfigCommands.Mask`, `StartupSummary.Redact`, `BackendsEndpoints.SecretMask`, `MailKitWireLogger.Redact` — each with a different notion of what to hide. See Block 4.
+`S7` **Med** Four independent secret-redaction implementations: `ConfigCommands.Mask`, `StartupSummary.Redact`, `BackendsEndpoints.SecretMask`, `MailKitWireLogger.Redact` — each with a different notion of what to hide. See item 13.
 `S8` **Nit** `Backends.Common` spans three namespaces across 19 files (`ActiveSync.Backends`, `.Common`, `.Converters`); `ServerCertificateValidator.cs:5` is the odd one out.
 `S9` **Nit** Ten+ copies of the same three-line `#pragma warning disable VSTHRD103` + identical explanatory comment (`SyncStateService` alone has five). Hoist to one file-level suppression with the comment once, or an `.editorconfig` entry with the rationale.
