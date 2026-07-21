@@ -141,4 +141,44 @@ public class EasRequestParametersTests
 	{
 		Assert.Null(EasRequestParameters.CanonicalCommand(input));
 	}
+
+	[Fact]
+	public void Base64Query_UnknownVersionByte_IsRejected()
+	{
+		// W17: 255 decoded arithmetically as "25.5", which satisfies every >= V160 / >= V161
+		// gate -- an unauthenticated caller unlocked 16.x behaviour it never negotiated.
+		MemoryStream ms = new();
+		ms.WriteByte(255);
+		ms.WriteByte(0); // Sync
+		ms.Write(BitConverter.GetBytes((ushort)0));
+		ms.WriteByte(0); // no device id
+		ms.WriteByte(0); // no policy key
+		ms.WriteByte(0); // no device type
+
+		Assert.Throws<FormatException>(
+			() => EasRequestParameters.FromBase64(Convert.ToBase64String(ms.ToArray())));
+	}
+
+	[Theory]
+	[InlineData(25, "2.5")]
+	[InlineData(120, "12.0")]
+	[InlineData(121, "12.1")]
+	[InlineData(140, "14.0")]
+	[InlineData(141, "14.1")]
+	[InlineData(160, "16.0")]
+	[InlineData(161, "16.1")]
+	public void Base64Query_DefinedVersionBytes_AreAccepted(byte versionByte, string expected)
+	{
+		MemoryStream ms = new();
+		ms.WriteByte(versionByte);
+		ms.WriteByte(0); // Sync
+		ms.Write(BitConverter.GetBytes((ushort)0));
+		ms.WriteByte(0);
+		ms.WriteByte(0);
+		ms.WriteByte(0);
+
+		EasRequestParameters p = EasRequestParameters.FromBase64(Convert.ToBase64String(ms.ToArray()));
+
+		Assert.Equal(expected, p.ProtocolVersion);
+	}
 }

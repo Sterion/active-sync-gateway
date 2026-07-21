@@ -261,7 +261,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **6. Delete windowing & SoftDelete** [LIVE] — ~~`F2`~~ ~~`F3`~~ ~~`A21`~~ **COMPLETE**
 > Deletes bypass `WindowSize` entirely (50k `<Delete>` elements in one response), and items aging out of the filter window are hard-deleted instead of soft-deleted. `CollectionDiff` + `SyncHandler`.
 
-**7. Unauthenticated resource limits** — ~~`K1`~~ ~~`E2`~~ ~~`K26`~~ ~~`E21`~~ ~~`K33`~~ `W17`
+**7. Unauthenticated resource limits** — ~~`K1`~~ ~~`E2`~~ ~~`K26`~~ ~~`E21`~~ ~~`K33`~~ ~~`W17`~~ **COMPLETE**
 > Unauthenticated callers control Prometheus label values (`K1`/`E2`), grow the throttle table without bound with an O(n) scan per failure (`K26`), and unlock 16.x behaviour via an unvalidated version byte (`W17`).
 
 ## Phase 2 — Security
@@ -581,7 +581,7 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 `W12`–`W14` Code pages: verified token-by-token against MS-ASWBXML for pages 0,1,2,4,5,7,8,9,12,14,15,16,17,18,20,25 — all deliberate gaps correct. Missing Tasks `0x21 CompressedRTF`; empty `AirNotify` page gives a confusing error (`W12`); a duplicate tag name anywhere fails as `TypeInitializationException` on the **first WBXML request the gateway ever serves** — add a table-validation test (`W13`); tables are hand-maintained tuples with version applicability only in comments (`W14`).
 `W15` **High** `EasDateTime.ToLong/ToCompact` shift `DateTimeKind.Unspecified` values by the server's UTC offset — silent timezone-dependent corruption that looks fine in UTC CI — `EasDateTime.cs:9`.
 `W16` **Med** `EasDateTime.Parse` throws `FormatException` on client-supplied garbage and falls back to a culture-sensitive loose parse — `EasDateTime.cs:20`.
-`W17` **Med** Base64 query version byte unvalidated — a byte of 255 yields "25.5", satisfying every `>= V160`/`V161` gate, so a client unlocks 16.x behaviour it never negotiated. The command code immediately below *is* range-checked — `Http/EasRequestParameters.cs:103`.
+~~`W17`~~ **FIXED** Base64 query version byte unvalidated — a byte of 255 yielded "25.5", satisfying every `>= V160`/`V161` gate — `Http/EasRequestParameters.cs`. The byte is now matched against `ProtocolVersionBytes` (`25, 120, 121, 140, 141, 160, 161`) and an unknown one throws `FormatException`, which `EasEndpoint` already turns into a 400. **Deliberately a set, not a range check:** a range would still admit 130 ("13.0"), a version that does not exist. **Deliberately wider than the advertised set:** 2.5 and 12.0 are parsed but no longer advertised (see the `ProtocolVersions` comment in `EasEndpoint`), and rejecting a version an older client may still send at the parse layer would answer 400 where the gateway currently answers something more useful — advertisement is the place to say no. Red-first via `Base64Query_UnknownVersionByte_IsRejected`; the seven `Base64Query_DefinedVersionBytes_AreAccepted` cases passed before the change too and exist to prove the fix admits everything real.
 `W18` **Med** `ToBase64` truncates length prefixes >255 bytes (`LongId`, `AttachmentName` are realistically long) — `Http/EasRequestParameters.cs:191,205`.
 `W19`–`W21` Low/Nit: raw `FormatException`/overflow on a malformed `ProtocolVersion` (`W19`); `EasVersion.Parse` uses the **current culture** for integer parsing while the rest of the layer is careful to use invariant (`W20`); `EasFolderType` missing 18/19, `EasClass` missing `SMS` (`W21`).
 

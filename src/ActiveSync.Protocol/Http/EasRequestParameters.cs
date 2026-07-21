@@ -50,6 +50,16 @@ public sealed record EasRequestParameters
 			: Array.Find(CommandCodes, known => known.Equals(command, StringComparison.OrdinalIgnoreCase));
 	}
 
+	/// <summary>
+	///   The protocol version bytes MS-ASHTTP defines (major × 10 + minor), oldest first. The byte
+	///   is unauthenticated client input and the parsed version gates 16.x behaviour, so it is
+	///   matched against this set rather than decoded arithmetically: 255 used to yield "25.5",
+	///   which cleared every <c>&gt;= V160</c> / <c>&gt;= V161</c> check in the handlers. The
+	///   command code immediately below has always been range-checked; this closes the same hole
+	///   one field earlier. 2.5 and 12.0 are parsed but no longer advertised (see EasEndpoint).
+	/// </summary>
+	private static readonly byte[] ProtocolVersionBytes = [25, 120, 121, 140, 141, 160, 161];
+
 	public required string Command { get; init; }
 	public string ProtocolVersion { get; init; } = "14.1";
 	public string DeviceId { get; init; } = "";
@@ -114,6 +124,8 @@ public sealed record EasRequestParameters
 		}
 
 		byte versionByte = Next();
+		if (Array.IndexOf(ProtocolVersionBytes, versionByte) < 0)
+			throw new FormatException($"Unknown EAS protocol version byte {versionByte}.");
 		string version = $"{versionByte / 10}.{versionByte % 10}";
 
 		byte commandCode = Next();
