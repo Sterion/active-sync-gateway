@@ -105,6 +105,19 @@ public sealed class ItemOperationsHandler(
 			string[]? parts = DelimitedKey.Decode(longId, 2);
 			if (parts is null)
 				return Failure("2");
+			// The LongId is client-supplied and names a backend key directly, so the store's
+			// own OwnsBackendKey() is only a shape test — it says "imap:..." is mine, not
+			// "this folder is yours". The per-user folder registry is what says that, and it
+			// is the same gate CollectionId Fetch goes through.
+			List<UserFolder> registry = await context.State.GetFoldersAsync(context.Device.UserName, ct);
+			if (!registry.Any(f => string.Equals(f.BackendKey, parts[0], StringComparison.Ordinal)))
+			{
+				logger.LogWarning("ItemOperations Fetch refused: LongId names folder {BackendKey}, " +
+				                  "which is not in {User}'s registry",
+					LogText.Clean(parts[0], 128), context.Device.UserName);
+				return Failure("6");
+			}
+
 			IContentStore? searchStore = context.Session.GetStoreForBackendKey(parts[0]);
 			if (searchStore is null)
 				return Failure("6");

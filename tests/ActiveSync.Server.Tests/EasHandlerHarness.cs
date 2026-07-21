@@ -129,6 +129,7 @@ public sealed class EasHandlerHarness : IDisposable
 	/// <summary>Records the mutations a handler asked for, so a test can assert none happened.</summary>
 	public sealed class RecordingStore : IContentStore
 	{
+		public List<string> Fetched { get; } = [];
 		public List<string> Moved { get; } = [];
 		public List<string> DeletedFolders { get; } = [];
 		public List<string> RenamedFolders { get; } = [];
@@ -155,6 +156,7 @@ public sealed class EasHandlerHarness : IDisposable
 		public Task<BackendItem?> GetItemAsync(
 			string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct)
 		{
+			Fetched.Add($"{folderBackendKey}/{itemKey}");
 			return Task.FromResult<BackendItem?>(
 				new BackendItem([new XElement(EasNamespaces.AirSync + "Subject", itemKey)]));
 		}
