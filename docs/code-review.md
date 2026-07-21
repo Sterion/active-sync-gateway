@@ -36,11 +36,34 @@ fix(imap): scope EXPUNGE to the deleted UID (D1)
 
 Small commits are the point — they make the work resumable and each finding independently revertible. Do not batch a whole item into one commit.
 
-**3. Mark the finding in this document in the same commit** — `~~D1~~ **FIXED** (abc1234)`, or `~~D1~~ **N/A** — <one line why>`.
+**3. Mark the finding in this document in the same commit** 🔌 — `~~D1~~ **FIXED** (abc1234)`, or `~~D1~~ **N/A** — <one line why>`.
 
 **4. If you moved or renamed code other findings reference, fix their `file:line` anchors.** You are the only one who will know where it went. If it invalidates a whole item, add a row to the re-verify table below.
 
-**5. Build and test before each commit.** `dotnet build ActiveSync.slnx` is ~16s and the baseline is **0 warnings** — keep it there. Run the relevant test project; see [`testing.md`](testing.md) for the live-backend suites where a finding needs real server verification.
+**5. Build and test before each commit.** `dotnet build ActiveSync.slnx` is ~16s and the baseline is **0 warnings** 🔌 — keep it there. Run the relevant test project. Items marked ð additionally require live-backend verification — see below.
+
+### 🔌 Items requiring live-backend verification
+
+Items marked 🔌 change behaviour against a real IMAP/JMAP/DAV server. Unit tests cannot confirm these.
+
+**Stalwart and Axigen run on dedicated host ports** (stalwart `10143/10587/10190/10232`, axigen `20143/20587/20232`), so they coexist and stay warm between runs. Use the fast runner, which starts them only if not already healthy:
+
+```powershell
+./scripts/test-fast.ps1                      # Windows — reuses warm stacks
+./scripts/test-fast.ps1 -Filter <expr>       # narrow to the relevant tests
+```
+
+```bash
+scripts/test-fast.sh                         # Linux / devcontainer  (-f <expr>)
+```
+
+> **⚠️ A green run is not proof.** The integration suite **skips automatically when no backend is reachable**, so `dotnet test` is always green whether or not anything was verified. For a 🔌 item you must confirm from the output that the integration tests **actually executed**. If they skipped, bring the stack up and re-run — do **not** strike the finding through on a skipped suite.
+>
+> Do not drive stalwart/axigen through `test-backends` while `test-fast` is using them — the two runners use different port sets and compose will recreate the containers on switch.
+
+**🔌 items:** 1 · 3 · 4 · 5 · 6 · 26 · 27 · 28 · 30 · 32 · 33 · 34 · 36 · 38 · 42
+
+Everything else is verifiable with the unit suite alone, so the stacks can come down after item 6 if you want them off — items 26 onward are the next time they're needed.
 
 **6. If you run low on context, stop at a commit boundary** and report exactly which findings are done and which are untouched. Do not start a finding you cannot finish and verify. Because of steps 2–3, stopping early costs nothing — the next session resumes from this document.
 
@@ -98,22 +121,22 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 ## Phase 1 — Stop the bleeding
 *Data loss, corruption and process death. All Critical/High.*
 
-**1. IMAP mailbox safety** — `D1` `D2` `D17`
+**1. IMAP mailbox safety** 🔌 — `D1` `D2` `D17`
 > Two Criticals. `D1` a folder-wide `EXPUNGE` destroys other clients' `\Deleted` mail on every EAS delete; `D2` no UIDVALIDITY tracking anywhere, so after a restore or migration operations hit the wrong messages. Needs a real IMAP server to verify. **Best first item** — small, self-contained, highest value.
 
 **2. WBXML decoder & encoder hardening** — `W1` `W2` `W3` `W4` `W5` `W6` `W7` `W8`
 > `W1` (no depth/element cap → OOM from one request) and `W2` (unbounded recursion → uncatchable `StackOverflowException`) are ~15 lines between them and take down every user's sync. Add the hardening tests with the fix.
 
-**3. Contact, vCard & iTIP integrity** — `D4` `D6` `D7` `D22` `D23`
+**3. Contact, vCard & iTIP integrity** 🔌 — `D4` `D6` `D7` `D22` `D23`
 > `D4` a ghosted contact Change wipes name, emails, address, photo, note. `D6`/`D7` are injection (vCard line, iCalendar CRLF). All in `ContactConverter` + `ImipMailBuilder`.
 
-**4. Draft & MIME building** — `D15` `D16`
+**4. Draft & MIME building** 🔌 — `D15` `D16`
 > `DraftMessageBuilder` only. Unnamed-attachment delete removes all unnamed attachments; attachments lose content type and the HTML alternative is dropped on merge.
 
-**5. JMAP converter semantics** — `H7` **then** `H4` `H5` `H6` `H23`
+**5. JMAP converter semantics** 🔌 — `H7` **then** `H4` `H5` `H6` `H23`
 > ⚠️ **`H7` first, verified against the live Stalwart backend, before touching the other four.** It decides patch-vs-replace, which changes the *shape* of the other fixes. Full rationale and the safe-under-both-readings fallback are in the Area H sequencing note. Adding the round-trip suite (item 45) alongside is worth it.
 
-**6. Delete windowing & SoftDelete** — `F2` `F3` `A21`
+**6. Delete windowing & SoftDelete** 🔌 — `F2` `F3` `A21`
 > Deletes bypass `WindowSize` entirely (50k `<Delete>` elements in one response), and items aging out of the filter window are hard-deleted instead of soft-deleted. `CollectionDiff` + `SyncHandler`.
 
 **7. Unauthenticated resource limits** — `K1` `E2` `K26` `E21` `K33` `W17`
@@ -180,19 +203,19 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **25. Account resolution & storage casing** — `B2` `B3` `B6` `B8` `B13` `B15` `B16` `B17` `B21` `B23`
 > `B2` case-sensitive in SQL, case-insensitive in memory → duplicate rows, nondeterministic winner across restarts. `B3` an invalid row degrades to credential pass-through **and un-disables** the account.
 
-**26. Send/submit ordering & idempotency** — `F10` `F29` `F30` `F31` `D9` `H18` `L36`
+**26. Send/submit ordering & idempotency** 🔌 — `F10` `F29` `F30` `F31` `D9` `H18` `L36`
 > One rule everywhere: close the `try` around the submit only; record the replay marker *before* the irreversible step; everything after is best-effort and swallowed. Otherwise the client resends and recipients get duplicates.
 
-**27. Long-poll & push reliability** — `E7` `E8` `F11` `F16` `F17` `F18` `H17` `H19`
+**27. Long-poll & push reliability** 🔌 — `E7` `E8` `F11` `F16` `F17` `F18` `H17` `H19`
 > `E7` a watcher completing non-positively is dropped for the rest of the heartbeat. `E8` one faulting watcher 500s the whole Ping. `H17` the SSE stream is killed every 100s by `HttpClient.Timeout`.
 
-**28. DAV & JMAP request correctness** — `H1` `H2` `H3` `H10` `H20` `H21` `H22` `H26` `H27` `H28` `H29` `H31`
+**28. DAV & JMAP request correctness** 🔌 — `H1` `H2` `H3` `H10` `H20` `H21` `H22` `H26` `H27` `H28` `H29` `H31`
 > Not cosmetic despite sitting low in the original grouping: `H1` the DAV probe disables TLS validation unconditionally, `H2` percent-decoded hrefs fetch the wrong resource, `H3` `If-Match` silently dropped → lost update. Extract the shared `BackendHttpClientFactory` here.
 
 **29. Silent failure & diagnostics** — `E9` `E10` `E11` `E16` `E24` `E34` `C11` `K2` `K3` `K4` `K5` `H12`
 > `E9` is worst — its failure mode is *the loss of the diagnostic channel itself*. Adopt one policy: log the first occurrence and every Nth after, to `SelfLog` where the logger is suspect.
 
-**30. Timezone & date handling** — `W15` `W16` `D5` `D12` `D24` `D33` `H30`
+**30. Timezone & date handling** 🔌 — `W15` `W16` `D5` `D12` `D24` `D33` `H30`
 > `W15` `EasDateTime` shifts `DateTimeKind.Unspecified` by the machine offset — invisible in UTC CI, wrong in production. `D12` recurring events drift an hour across DST.
 
 **31. Hosting & startup correctness** — `E1` `E12` `E13` `E17` `E19` `E20` `E22` `E25`
@@ -201,13 +224,13 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 ## Phase 5 — Protocol conformance
 *Mostly small independent fixes; each item is a quick pass.*
 
-**32. Sync command conformance** — `F1` `F4` `F5` `F6` `F7` `F8` `F9` `F12` `F22`
+**32. Sync command conformance** 🔌 — `F1` `F4` `F5` `F6` `F7` `F8` `F9` `F12` `F22`
 > `F4` echoes the *rejected* sync key with Status 3, causing the resync loop. `F6` `MIMESupport` is read nowhere and Type-4 is force-downgraded, so S/MIME can't work on-device.
 
-**33. Folder & provision conformance** — `F25` `F26` `F27`
+**33. Folder & provision conformance** 🔌 — `F25` `F26` `F27`
 > No FolderSync replay generation; every folder-op failure collapses to "system folder"; `FolderCreate` ignores the requested `Type`.
 
-**34. Search, find, recipients & settings** — `F19` `F20` `F32` `F33` `F34` `F35` `F36` `F37` `F38` `F41` `F42` `F45` `F47` `F48` `A15` `A16`
+**34. Search, find, recipients & settings** 🔌 — `F19` `F20` `F32` `F33` `F34` `F35` `F36` `F37` `F38` `F41` `F42` `F45` `F47` `F48` `A15` `A16`
 > `F36` `Total` reports page size so search stops after page 1. `F47` `ReadOnly` doesn't block arming an out-of-office auto-reply. `A15` "no data" outranks "busy" in free/busy merging.
 
 ## Phase 6 — Performance
@@ -215,13 +238,13 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **35. Server request hot path** — `E4` `E5` `E6` `E18` `E31` `E35` `F13` `F14` `F15` `F28` `F40` `F43`
 > `E4` every request constructs all 20 handlers and discards 19. Biggest single allocation win for a polling fleet.
 
-**36. Backend round trips** — `D3` `D14` `D19` `D32` `H13` `H14` `H15` `H24` `H25`
+**36. Backend round trips** 🔌 — `D3` `D14` `D19` `D32` `H13` `H14` `H15` `H24` `H25`
 > `D3` every mail fetch pulls the full message and decodes every attachment just to read its length — while holding the per-user IMAP gate.
 
 **37. Core & CLI startup** — `B7` `B28` `L35` `L41`
 > `L35` every CLI command builds a parallel DI container and EF model beside the warm one. Fixing it is also what makes the CLI stop feeling like a foreign body in Server.
 
-**38. Incremental sync** — `H8` `H9` `H11` `H16`
+**38. Incremental sync** 🔌 — `H8` `H9` `H11` `H16`
 > ⚠️ **Design item, few edits.** Neither backend uses `/changes` or `sync-collection`; every sync is a full enumeration. Decide and write it down — it's the root of items 36's cost.
 
 ## Phase 7 — Tests
@@ -236,7 +259,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **41. WBXML hardening & code-page tests** — `W12` `W13` `W14`
 > Depth/width/fuzz cases, plus a table-validation test — a duplicate tag name currently fails as `TypeInitializationException` on the *first WBXML request the gateway ever serves*.
 
-**42. JSCalendar/JSContact round-trip suite**
+**42. JSCalendar/JSContact round-trip suite** 🔌
 > Property-based EAS → JSCalendar/JSContact → EAS over recurrence, all-day, floating times, cleared fields. Would have caught `H4` `H5` `H6` `H23` mechanically.
 
 **43. CLI error-path tests** — `L33`
