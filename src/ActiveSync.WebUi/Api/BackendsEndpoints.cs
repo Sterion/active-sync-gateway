@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Settings;
 using Microsoft.AspNetCore.Builder;
@@ -22,7 +23,7 @@ namespace ActiveSync.WebUi.Api;
 internal static class BackendsEndpoints
 {
 	private const string SectionPrefix = "ActiveSync:Backends";
-	private const string SecretMask = "***";
+	private const string SecretMask = SecretRedaction.Mask;
 
 	internal sealed record FieldDto(
 		string Name, string Label, string Type, bool Required, string? Default,
@@ -341,8 +342,10 @@ internal static class BackendsEndpoints
 
 	private static bool IsSecret(string leaf, HashSet<string> declared)
 	{
+		// The provider's own schema (fields it typed Secret), plus the shared name heuristic that
+		// also covers password/token/apikey/clientsecret leaves a schema-less plugin never declares.
 		return declared.Contains(BackendConfigValidation.ListRoot(leaf)) ||
-		       leaf.EndsWith("Password", StringComparison.OrdinalIgnoreCase);
+		       SecretRedaction.IsSecretName(leaf);
 	}
 
 	/// <summary>

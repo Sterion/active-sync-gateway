@@ -58,7 +58,7 @@ internal abstract class SettingsCommandBase<TSettings>(IAnsiConsole terminal) : 
 
 	/// <summary>Masks a secret-flagged key's value; unset values stay readable.</summary>
 	protected static string Mask(SettingKeys.SettingKey? definition, string value)
-		=> definition is { Secret: true } && value != "(unset)" ? "***" : value;
+		=> definition is { Secret: true } && value != "(unset)" ? SecretRedaction.Mask : value;
 
 	// Markup for the source/tier so they pop when the terminal supports colour (and render as the
 	// plain word otherwise). These are fixed tokens, so the markup is safe to embed unescaped.
