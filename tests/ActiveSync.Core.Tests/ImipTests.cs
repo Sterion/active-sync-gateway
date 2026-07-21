@@ -137,35 +137,22 @@ public class ImipTests
 	}
 
 	[Fact]
-	public void BuildCancel_UsesCrlf_NotThePlatformLineEnding()
+	public void FromApplicationData_SerializesWithCrlf_NotThePlatformLineEnding()
 	{
-		// D7 — RFC 5545 §3.1 mandates CRLF. Ical.Net's serializer emits Environment.NewLine, which
-		// is bare LF on the Linux containers this ships in — so the output is normalized to CRLF in
-		// IcalHelpers.Serialize. This REPRODUCES on Linux (unfixed code emits LF and this fails) and
-		// PASSES on Windows either way (native CRLF), so CI on ubuntu-latest is the proof, not the
-		// local Windows run. The earlier "Ical.Net always emits CRLF" assumption was wrong — that is
-		// exactly the bug.
-		string body = Assert.IsType<TextPart>(ImipMailBuilder.BuildCancel(
-			"uid-2", 1, "alice@example.com", [("bob@example.com", null)], null, "Cancelled: X").Body).Text!;
+		// D37 — Ical.Net's serializer emits Environment.NewLine: bare LF on the Linux containers
+		// this ships in, while RFC 5545 §3.1 mandates CRLF. IcalHelpers.Serialize normalizes it, so
+		// every iCalendar the gateway PUTs to a CalDAV backend — the raw-string DAV path, no MimeKit
+		// — is compliant. This REPRODUCES on Linux (unfixed code leaves bare LF, this fails) and
+		// cannot fail on Windows, where Environment.NewLine is already CRLF; CI on ubuntu-latest is
+		// the proof. NOTE: the iTIP *mail* path is a separate concern — MimeKit re-encodes the body
+		// to CRLF on the wire regardless of platform, so it is not what this guards (and asserting
+		// on TextPart.Text there is wrong: that getter returns platform-native LF on Linux).
+		string ics = CalendarConverter.FromApplicationData(
+			Meeting("Planning", new DateTime(2026, 8, 4, 10, 0, 0, DateTimeKind.Utc), "bob@example.com"),
+			Guid.NewGuid().ToString(), null, null, "alice@example.com");
 
-		Assert.DoesNotContain("\n", body.Replace("\r\n", ""));
-	}
-
-	[Fact]
-	public void BuildRequest_UsesCrlf_NotThePlatformLineEnding()
-	{
-		// D7 — BuildRequest has the same Ical.Net-serializes-to-LF-on-Linux exposure as BuildCancel
-		// but had no test, so every real invitation shipped bare LF from a Linux container. Same
-		// platform-conditional reproducer: red on Linux without the IcalHelpers.Serialize
-		// normalization, green everywhere with it.
-		string uid = Guid.NewGuid().ToString();
-		XElement data = Meeting("Planning", new DateTime(2026, 8, 4, 10, 0, 0, DateTimeKind.Utc),
-			"bob@example.com");
-		string ics = CalendarConverter.FromApplicationData(data, uid, null, null, "alice@example.com");
-		string body = Assert.IsType<TextPart>(ImipMailBuilder.BuildRequest(
-			ics, "alice@example.com", [("bob@example.com", "Bob")], "Invitation: Planning").Body).Text!;
-
-		Assert.DoesNotContain("\n", body.Replace("\r\n", ""));
+		Assert.Contains("\r\n", ics);
+		Assert.DoesNotContain("\n", ics.Replace("\r\n", ""));
 	}
 
 	[Fact]
@@ -181,8 +168,9 @@ public class ImipTests
 
 		// The property is structural, not textual: the crafted text may legitimately appear
 		// escaped INSIDE the UID value (Ical.Net writes it as a literal \n), but it must never
-		// become a line of its own.
-		string[] lines = body.Replace("\r\n ", "").Split("\r\n");
+		// become a line of its own. Injection-resistance is independent of line-ending style, so
+		// normalize first — TextPart.Text returns LF on Linux, CRLF on Windows.
+		string[] lines = body.ReplaceLineEndings("\n").Replace("\n ", "").Split('\n');
 		Assert.Equal("ATTENDEE:mailto:bob@example.com", Assert.Single(lines, l => l.StartsWith("ATTENDEE:")));
 		Assert.Equal("METHOD:CANCEL", Assert.Single(lines, l => l.StartsWith("METHOD:")));
 		Assert.DoesNotContain(lines, l => l.StartsWith("X-INJECTED"));
