@@ -23,6 +23,23 @@ Same role as [Z-Push](https://github.com/Z-Hub/Z-Push), but implemented from the
 open specifications (MS-ASHTTP, MS-ASWBXML, MS-ASCMD, MS-ASAIRS, MS-ASEMAIL, MS-ASCAL,
 MS-ASCNTC, MS-ASTZ) in modern async C#.
 
+## Documentation
+
+This README is the overview and getting-started guide. The reference material lives in
+[`docs/`](docs):
+
+- **[Backend capability matrix](docs/backends.md)** — what each provider (`imap`, `jmap`,
+  `caldav`, `carddav`, `sieve`, `local`) can and can't express, per role.
+- **[Configuration & option reference](docs/configuration.md)** — every `ActiveSync:*`
+  setting: default, meaning and live-vs-restart tier.
+- **[Operator CLI (`eas`)](docs/cli.md)** — inspection, user & device management, global
+  settings, secret helpers.
+- **[Web interfaces (`/admin` + `/user`)](docs/webui.md)** — the browser admin console and
+  self-service portal: bootstrap, OIDC, and the security model.
+- **[Writing a backend plugin](docs/plugins.md)** — ship a provider out-of-repo.
+- **[Testing & backend stacks](docs/testing.md)** — the integration suite, the CI pipeline
+  and how to run each backend.
+
 ## Features
 
 **Protocol**
@@ -119,7 +136,7 @@ MS-ASCNTC, MS-ASTZ) in modern async C#.
   database — unique per deployment, identical across restarts and replicas, fingerprint in
   the startup banner. Mounting real certificates switches it off automatically.
 - The entire admin surface ships inside the image as the **`eas` CLI** — inspection, user
-  management, blocking, purging, secret sealing (see [Operator CLI](#operator-cli-eas)).
+  management, blocking, purging, secret sealing (see [Operator CLI](docs/cli.md)).
 - **SQLite** (zero-config default) or **PostgreSQL** (accepts `postgresql://` URIs, e.g.
   straight from a CloudNativePG secret); EF Core migrations apply automatically at startup.
 - Stateless apart from the shared database: **multiple replicas behind any load balancer
@@ -131,7 +148,7 @@ MS-ASCNTC, MS-ASTZ) in modern async C#.
 
 **Quality**
 
-- ~330 automated tests, including an integration suite that hosts the gateway in-process
+- ~500 automated tests, including an integration suite that hosts the gateway in-process
   and drives it with a real WBXML-speaking mini-EAS client against **live backends**
   (Stalwart; docker-mailserver + Radicale; Cyrus IMAP; Baikal + docker-mailserver; Apache James;
   and Axigen in trial mode).
@@ -192,145 +209,12 @@ curl -i -X OPTIONS http://localhost:5080/Microsoft-Server-ActiveSync
 
 ## Backend capability matrix
 
-Each role is filled by a **provider** (chosen in [Configuration](#configuration) below). The
-providers differ in what they can express — a protocol either carries a feature or it
-doesn't, and some mappings are lossy. These tables are the at-a-glance strengths/weaknesses
-of each backend technology, so you can pick per role with eyes open.
-
-Legend: ✅ full · ⚠️ partial (see note) · ❌ not supported · — not applicable (handled
-elsewhere by design).
-
-**Which providers fill which role:**
-
-| Role | Providers | Falls back to |
-|------|-----------|---------------|
-| Mail store | `imap`, `jmap` | — (required) |
-| Mail submit | `smtp`, `jmap` | — (required) |
-| Calendar | `caldav`, `jmap`, `local` | `local` |
-| Tasks | `caldav`, `local` | `local` |
-| Contacts | `carddav`, `jmap`, `local` | `local` |
-| Notes | `local` | `local` (only option) |
-| Out-of-office | `sieve`, `jmap` | — (off if unset) |
-
-**Push vs poll** (how fast a Ping/Sync sees a server-side change): mail has real push —
-IMAP **IDLE** or JMAP **EventSource** (both with a polling backstop). CalDAV/CardDAV and
-JMAP calendar/contacts are **poll-only** at `Eas:DavPollSeconds`. `local` stores wake
-instantly via an in-process notifier. Below, ✅ push = near-instant, ⚠️ poll = poll-latency.
-
-### Mail — `imap`+`smtp` vs `jmap`
-
-Both are feature-complete for mail; the differences are mechanism, not coverage.
-
-| Feature | IMAP + SMTP | JMAP | Note |
-|---------|:-----------:|:----:|------|
-| Sync messages & folders | ✅ | ✅ | |
-| Full body + attachments | ✅ | ✅ | JMAP re-downloads the whole message to extract one attachment |
-| Send / SmartReply / SmartForward | ✅ | ✅ | |
-| Save to Sent · Drafts sync | ✅ | ✅ | |
-| Read / answered flags | ✅ | ✅ | |
-| Categories | ⚠️ | ✅ | IMAP needs server custom-keyword support (`PERMANENTFLAGS \*`), else silently dropped |
-| Move between folders | ✅ | ✅ | IMAP needs UIDPLUS (re-IDs the item); JMAP keeps a stable id |
-| Folder create / rename / delete | ✅ | ✅ | |
-| Soft (Trash) + permanent delete | ✅ | ✅ | |
-| Server-side search | ✅ | ✅ | |
-| Empty folder | ✅ | ✅ | |
-| Push for Ping/Sync | ✅ IDLE | ✅ EventSource | both fall back to polling |
-
-- **IMAP+SMTP** — broadest server compatibility, sub-second IDLE push, fine-grained flag
-  revisions. Two protocols/connections with separate auth; one SMTP connect per send.
-- **JMAP** — one session/auth serves store + submit + push + OOF; stable ids (moves keep
-  their key); batched requests. Push signal is coarse (any state change) and the attachment
-  fetch pulls the full message rather than the part's own blob.
-
-### Contacts — `carddav` vs `jmap` vs `local`
-
-| Feature | CardDAV | JMAP | Local | Note |
-|---------|:-------:|:----:|:-----:|------|
-| CRUD | ✅ | ✅ | ✅ | |
-| Move between address books | ❌ | ✅ | ❌ | only JMAP has stable cross-book ids |
-| Contact photo | ✅ | ❌ | ✅ | JMAP maps no photo and **drops an existing one on edit** |
-| Multiple address books | ⚠️ | ⚠️ | ❌ | DAV/JMAP list many but can't create/rename/delete; `local` is one fixed folder |
-| GAL search (Search / ResolveRecipients) | ✅ | ✅ | ✅ | CardDAV does an N+1 GET per query |
-| GAL photos | ✅ | ❌ | ✅ | |
-| Web page / URL, car phone | ✅ | ❌ | ✅ | JMAP JSContact bridge doesn't map these |
-| Anniversary | ❌ | ❌ | ❌ | only birthday is mapped, on all three |
-| Preserve fields EAS can't express, on edit | ✅ | ⚠️ | ✅ | JMAP preserves unknowns except the photo |
-| Push for Ping/Sync | ⚠️ poll | ⚠️ poll | ✅ instant | |
-
-- **CardDAV** — real multi-address-book server interop, full photo + GAL-photo round-trip,
-  robust against href-rewriting servers. Poll-latency change detection; GAL is N+1.
-- **JMAP** — clean CRUD with cross-book move; **but no contact photos at all**, and loses
-  web-page/URL + car-phone. Poll-only (the EventSource watcher is wired to mail, not
-  contacts).
-- **Local** — no external server, encrypted at rest, instant push, full field + photo
-  coverage. Single address book only; data lives solely in the gateway DB.
-
-### Calendar — `caldav` vs `jmap` vs `local`
-
-| Feature | CalDAV | JMAP | Local | Note |
-|---------|:------:|:----:|:-----:|------|
-| Event CRUD | ✅ | ✅ | ✅ | |
-| Move between calendars | ❌ | ✅ | ❌ | |
-| Recurrence (RRULE) | ✅ | ⚠️ | ✅ | JMAP bridge maps only basic freq/interval/count/until/byDay |
-| Recurrence exceptions / overrides | ⚠️ | ❌ | ⚠️ | CalDAV/local persist deletions; modified occurrences are read-only. JMAP drops all overrides |
-| Inbound meeting requests | ✅ | ✅ | ✅ | |
-| Meeting response (accept/tentative/decline) | ✅ | ✅ | ✅ | iTIP REPLY is sent by the gateway regardless of backend |
-| Outbound iMIP invitations | ✅ | — | ✅ | CalDAV auto-probes RFC 6638 (server may schedule); JMAP server always schedules itself; `local` gateway always sends |
-| Free/busy (Availability) | ✅ | ❌ | ⚠️ | CalDAV self + other principals; `local` self only |
-| Reminders / alarms | ✅ | ❌ | ✅ | |
-| Timezones | ✅ | ✅ | ✅ | |
-| Inline event attachments (16.x) | ✅ | ❌ | ✅ | |
-| Shared read-only calendars | ✅ | ❌ | ❌ | JMAP declares the capability but doesn't enforce it (writes not reverted) |
-| Multiple calendars | ✅ | ✅ | ❌ | `local` is one fixed calendar |
-| Push for Ping/Sync | ⚠️ poll | ⚠️ poll | ✅ instant | |
-
-- **CalDAV** — the most complete calendar backend: full recurrence, reminders, attachments,
-  free/busy (self + others), genuine read-only shared calendars, RFC 6638 double-invite
-  avoidance. Client-sent *modified* occurrence overrides are dropped (deletions persist).
-- **JMAP** — clean CRUD with event move and native server scheduling, but a **lossy
-  JSCalendar bridge**: no recurrence overrides, reminders, attachments, or free/busy; partial
-  RRULE; read-only-shared is a non-enforced stub. Best paired with CalDAV for calendar if you
-  need those.
-- **Local** — full recurrence/reminders/attachments (shares CalDAV's converter), encrypted,
-  instant push, always sends invitations. One calendar only; free/busy limited to self.
-
-### Tasks — `caldav` (VTODO) vs `local`
-
-Field coverage is identical (both use the same converter); they differ only in storage and
-push.
-
-| Feature | CalDAV | Local |
-|---------|:------:|:-----:|
-| CRUD · subject / body / importance / completion | ✅ | ✅ |
-| Start & due dates | ✅ | ✅ |
-| Recurrence | ✅ | ✅ |
-| Reminders | ✅ | ✅ |
-| Multiple task folders | ❌ | ❌ |
-| Push for Ping/Sync | ⚠️ poll | ✅ instant |
-
-Tasks over CalDAV need the explicit `Tasks` role (a VTODO collection on the calendar
-server); otherwise they're local.
-
-### Notes — `local` only
-
-Notes have no standard mail/DAV/JMAP representation, so they are **always** served by the
-`local` store: CRUD, body, categories and last-modified, encrypted at rest, one fixed
-folder, visible only to the user's own ActiveSync devices.
-
-### Out-of-office — `sieve` vs `jmap`
-
-| Feature | ManageSieve | JMAP VacationResponse |
-|---------|:-----------:|:---------------------:|
-| Enable / disable | ✅ | ✅ |
-| Time-bounded window | ⚠️ day-granularity | ✅ exact instant |
-| HTML body | ❌ (plain; markup sent as-is) | ✅ |
-| Distinct reply per audience | ❌ | ❌ |
-| Restore prior server state on disable | ✅ | — (native singleton) |
-
-EAS's three audiences (internal / external-known / external-unknown) are collapsed to one
-reply by the **gateway** before either backend is called — a protocol-model limitation, not
-a backend shortfall. `sieve` composes with a user's pre-existing Sieve rules (it restores
-whatever was active); `jmap` gives real HTML and precise start/end times.
+Each role is filled by a **provider** (`imap`, `jmap`, `smtp`, `caldav`, `carddav`, `sieve`
+or `local`, plus any plugin). Providers differ in what they can express — a protocol either
+carries a feature or it doesn't, and some mappings are lossy. The full per-provider
+comparison for every role (mail, contacts, calendar, tasks, notes, out-of-office), including
+push-vs-poll latency and every partial/unsupported cell, is in
+**[docs/backends.md](docs/backends.md)**.
 
 ## Configuration
 
@@ -346,7 +230,7 @@ whatever was active); `jmap` gives real HTML and precise start/end times.
 > carries only the two **bootstrap** sections — `Database` and `Encryption`, which are needed to
 > open and decrypt the database itself and are the only settings that cannot live in it. Everything
 > shown below is a **code default or example**; set the real values with the
-> [`eas config`](#operator-cli-eas) commands (or `appsettings.json`/env as defaults).
+> [`eas config`](docs/cli.md#global-settings) commands (or `appsettings.json`/env as defaults).
 
 One backend set serves all users; each user authenticates with their own credentials
 (HTTP Basic, validated by the MailStore provider's login probe and passed through to all
@@ -408,7 +292,7 @@ file instead, edit `src/ActiveSync.Server/appsettings.json`:
   `postgresql://user:password@host:5432/database` URI — e.g. straight from a
   CloudNativePG secret — which implies `Postgres` by itself).
 - **An `Encryption` key is mandatory** — locally-stored content is encrypted at rest (see
-  the `Encryption` option table below). Startup fails without a key unless
+  the `Encryption` section of [docs/configuration.md](docs/configuration.md)). Startup fails without a key unless
   `Encryption.AllowPlaintext=true` is set explicitly (dev/test only).
 - **Backend TLS**: every network provider (`imap`, `jmap`, `smtp`, `caldav`, `carddav`,
   `sieve`) supports two certificate knobs in its role section. `"CaCertificatePath": "/path/to/ca.pem"`
@@ -443,210 +327,13 @@ skipped (never silently degraded), so watch the startup log on first boot after 
 
 ### Full option reference
 
-Everything lives under the `ActiveSync` configuration section. Any option can also be set
-via environment variables using `__` as the separator, e.g.
-`ActiveSync__Backends__MailStore__Host=imap.example.com` (that is what the Docker examples
-use).
-
-**Root**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `ReadOnly` | `false` | Pure-mirror mode: every client write is suppressed (see [Read-only mode](#read-only-mode)). |
-| `PublicUrl` | `null` | Public base URL of the gateway (e.g. `https://eas.example.com`), advertised by Autodiscover. When unset, the advertised URL is derived from the request's `Host` / `X-Forwarded-Proto` / `X-Forwarded-Host` headers — set this behind a reverse proxy so it never depends on client-supplied headers. |
-| `Users` | `null` | Optional per-user overrides keyed by gateway login (see [Per-user overrides](#per-user-overrides)). Undeclared logins are plain pass-through. |
-| `RequireDeclaredUsers` | `false` | Allowlist switch: only logins with a `Users` entry (config or database) may authenticate — anyone else gets 401 without a backend probe. An empty entry (`{}`) is a valid grant. |
-| `UsersFile` | `null` | Path to a JSON file merged into configuration at startup (full shape: `{ "ActiveSync": { "Users": { ... } } }`) — the natural fit for a mounted Kubernetes Secret/ConfigMap. Changes require a restart. |
-
-**`Backends:MailStore` (required, provider `imap` or `jmap`)**
-
-The `imap` settings are below; for `jmap` see [the JMAP subsection](#backends-provider-jmap).
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `Provider` | — | `imap` (settings below) or `jmap`. **Required.** |
-| `Host` | — | IMAP server host. **Required** — startup fails without it. |
-| `Port` | `993` | IMAP port. |
-| `UseSsl` | `true` | Implicit TLS on connect (used when `Security` is unset). |
-| `Security` | `null` | Explicit transport security: `None` \| `SslOnConnect` \| `StartTls` \| `StartTlsWhenAvailable` \| `Auto`. When unset, derived from `UseSsl`/`Port`. `None` also skips opportunistic STARTTLS (needed for plaintext test servers advertising STARTTLS with self-signed certs). |
-| `AllowInvalidCertificates` | `false` | Accept any TLS certificate (lab use; wins over `CaCertificatePath`). |
-| `CaCertificatePath` | `null` | PEM file with CA certificates trusted in addition to the system store (private PKI). Validated at startup. |
-| `PathSeparator` | `null` | IMAP folder path separator override; autodetected when unset. |
-
-**`Backends:MailSubmit` (required, provider `smtp` or `jmap`)**
-
-The `smtp` settings are below; for `jmap` see [the JMAP subsection](#backends-provider-jmap).
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `Provider` | — | `smtp` (settings below) or `jmap`. **Required.** |
-| `Host` | — | SMTP server host. **Required.** |
-| `Port` | `465` | SMTP port. |
-| `UseSsl` | `true` | Implicit TLS on connect (used when `Security` is unset). |
-| `Security` | `null` | Same values/semantics as MailStore's `Security`. |
-| `AllowInvalidCertificates` | `false` | As above. |
-| `CaCertificatePath` | `null` | As above. |
-| `ForceFrom` | `false` | Rewrite the `From` header of outgoing mail to the authenticated user before submission (display name is kept). Off by default because most SMTP servers already enforce sender alignment for authenticated submissions — enable it when yours does not. |
-
-<a id="backends-provider-jmap"></a>
-**`Backends:*` (provider `jmap`)** — one HTTP session for mail, OOF, contacts and calendar
-
-The `jmap` provider (RFC 8620/8621, e.g. Stalwart) can fill **MailStore**, **MailSubmit**,
-**Oof**, **Contacts** and **Calendar** — assign it to each role you want it to serve and
-repeat the same `BaseUrl`; a single JMAP session then backs them all (one auth, EventSource
-push for mail). Tasks and Notes have no JMAP standard — keep them on `caldav`/`local`. The
-option set is the same in every role section:
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `Provider` | — | `jmap`. **Required.** |
-| `BaseUrl` | — | Absolute http(s) base URL of the JMAP server (e.g. `https://mail.example.com`). **Required.** The session resource is discovered at `{BaseUrl}/.well-known/jmap`; the server's advertised api/download/upload URLs are re-anchored onto this authority (scheme/host/port), so a reverse proxy or container-network address still works. |
-| `AllowInvalidCertificates` | `false` | Accept any TLS certificate (lab use; wins over `CaCertificatePath`). |
-| `CaCertificatePath` | `null` | PEM file with CA certificates trusted in addition to the system store (private PKI). Validated at startup. |
-
-```jsonc
-"MailStore":  { "Provider": "jmap", "BaseUrl": "https://mail.example.com" },
-"MailSubmit": { "Provider": "jmap", "BaseUrl": "https://mail.example.com" },
-"Oof":        { "Provider": "jmap", "BaseUrl": "https://mail.example.com" },
-"Contacts":   { "Provider": "jmap", "BaseUrl": "https://mail.example.com" },
-"Calendar":   { "Provider": "jmap", "BaseUrl": "https://mail.example.com" }
-```
-
-What each role covers (and where it's lossy vs CalDAV/CardDAV — no photos, no recurrence
-overrides, etc.) is in the [Backend capability matrix](#backend-capability-matrix). JMAP
-calendars/contacts need a current server (Stalwart 0.16+); the 0.13 line advertised only
-mail/OOF over JMAP. Mixing is fine — e.g. mail on `jmap`, calendar/contacts on `caldav`/`carddav`.
-
-**`Backends:Calendar` / `Backends:Tasks` / `Backends:Contacts` (provider `caldav`/`carddav`, or `jmap` for Calendar/Contacts)**
-
-Omit a role (or leave it on the `local` provider) and that content class is served from the
-gateway database (local storage) instead. `Calendar`/`Tasks` use `caldav`, `Contacts` uses
-`carddav` — or `Calendar`/`Contacts` can use `jmap` ([above](#backends-provider-jmap); `Tasks`
-cannot). When `Tasks` shares the `caldav` provider with `Calendar` it inherits the Calendar
-section as its base, so it usually sets only `Provider` (and maybe `TaskFolder`). The settings
-below are the `caldav`/`carddav` ones.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `Provider` | — | `caldav` (Calendar/Tasks) or `carddav` (Contacts); Calendar/Contacts may also be `jmap`. |
-| `BaseUrl` | — | Absolute http(s) URL of the DAV server. Required (Tasks may inherit it from Calendar). |
-| `HomeSetPath` | `null` | Home-set path template; `{user}` and `{localpart}` are substituted (Radicale/Baikal style: `"/{user}/"`). Unset → RFC 6764 discovery via `.well-known` + `current-user-principal`. |
-| `TaskFolder` | `"Tasks"` | *(caldav only)* Name of the VTODO (tasks) collection in the calendar home set; the collection with this display name or path segment becomes the ActiveSync Tasks folder (Axigen ships one named "Tasks"). Recurring tasks sync (regenerating "n days after completion" tasks have no iCalendar equivalent and keep their fixed schedule). |
-| `CalendarAttachments` | `"Auto"` | *(caldav only)* Event attachments for EAS 16.x clients: `Auto` (enabled, 1 MiB per attachment), `On` (enabled, 16 MiB) or `Off`. Attachments are stored **inline** in the event (base64 `ATTACH` property), so they work against any CalDAV server — the cap protects the DAV server from bloated items. Per-user overridable. |
-| `SharedCollections` | unset | *(caldav only)* Extra collection hrefs synced as additional calendar folders for every user: absolute paths (`"/dav/cal/team/"`) or same-host URLs, suffix `\|ro` for gateway-enforced read-only (client edits are silently reverted). Collections the server refuses (403/404) are skipped with a warning. Per-user overridable (a user's list **replaces** the global one); per-user runtime grants via `eas share`. |
-| `SendInvitations` | `"Auto"` | *(caldav only)* iMIP invitation mails when the user organizes a meeting: `Auto` (send unless the server advertises `calendar-auto-schedule` or a schedule outbox — a scheduling server invites on its own, and double invites are worse than none), `On` (always) or `Off` (never). The local calendar store always sends (nothing else can). Per-user overridable. |
-| `AllowInvalidCertificates` | `false` | As above. |
-| `CaCertificatePath` | `null` | As above. |
-
-**`Backends:Oof` (optional, provider `sieve` or `jmap`)** (out-of-office)
-
-Out-of-office can be served two ways. With `jmap` ([above](#backends-provider-jmap)) it maps
-to JMAP `VacationResponse` (HTML body + exact start/end times) — just add the `Oof` role with
-the same `BaseUrl`. The `sieve` provider (settings below) manages a ManageSieve vacation
-script instead. Assign the `Oof` role to the `sieve` provider and the phone's out-of-office settings page
-works: Settings→Oof Set uploads a gateway-owned sieve script named `eas-gateway` (RFC 5230
-`vacation`, wrapped in a `currentdate` window for scheduled Oof) and makes it the active
-script; disabling restores the previously active script. The state database is the source
-of truth for what the phone sees — the script is derived output, never parsed back. One
-reply body is used for all three EAS audiences (internal/external-known/external-unknown),
-and the auto-reply is sent as plain text. Note that sieve has a single active script: while
-Oof is enabled, the user's own filter script (if any) is inactive until Oof is disabled
-again. Omit the role and Settings→Oof behaves as the historical stub (accepted, ignored).
-Credentials default to the user's effective MailStore login; a per-user
-`Users:<login>:Backends:Oof` override exists with the same fields.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `Provider` | — | `sieve`. Presence of the role is the on switch (no separate `Enabled` flag). |
-| `Host` | — | ManageSieve server. **Required** — unlike the old `Sieve` section, there is no "defaults to the IMAP host" fallback (providers cannot see each other's sections). |
-| `Port` | `4190` | The standard ManageSieve port. |
-| `UseTls` | `true` | Require STARTTLS before authenticating (ManageSieve has no implicit-TLS port). `false` = plaintext, test stacks only. |
-| `AllowInvalidCertificates` | `false` | As above. |
-| `CaCertificatePath` | `null` | As above. |
-
-**`Database`**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `Provider` | `"Sqlite"` | `Sqlite` or `Postgres`. A `postgresql://` connection string implies `Postgres` automatically, so the provider can be left unset in that case. |
-| `ConnectionString` | `"Data Source=activesync.db"` | Provider connection string. Postgres accepts the Npgsql keyword form (`"Host=db;Database=activesync;Username=...;Password=..."`) **or** a libpq-style URI (`postgresql://user:password@host:5432/database?sslmode=require`) — a [CloudNativePG](https://cloudnative-pg.io/) app secret's `uri`/`fqdn-uri` value works verbatim (the `jdbc-uri` variants work too; the `jdbc:` prefix is stripped). Passwords are redacted in the startup banner. |
-
-**`Encryption` (local content at rest)**
-
-Content stored in the gateway database (Notes always; Contacts/Calendar/Tasks when no DAV
-backend is configured) is encrypted with AES-256-GCM. A key is **mandatory** — startup
-fails without one unless `AllowPlaintext` is set explicitly. **The key can be any string**:
-a base64 value decoding to exactly 32 bytes is used as the raw 256-bit key, anything else
-is treated as a passphrase and stretched to 256 bits with PBKDF2-SHA256. For maximum
-entropy generate a raw key with `openssl rand -base64 32` (PowerShell:
-`[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))`);
-passphrases shorter than 12 characters work but are called out in the startup banner.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `Key` | `null` | Master key, inline — a raw base64 32-byte key or any passphrase. Mutually exclusive with `KeyFile`. |
-| `KeyFile` | `null` | Path to a file containing the key (same raw-or-passphrase interpretation) — the right choice with docker secrets (`/run/secrets/...`). |
-| `AllowPlaintext` | `false` | Explicitly store local content unencrypted (dev/test only; shouted in the startup banner). Ignored when a key is configured. |
-
-Losing the key makes the stored local content unrecoverable (drop the database and let
-devices re-upload); key rotation is not supported yet.
-
-**`Eas` (protocol tuning)**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `MinHeartbeatSeconds` | `60` | Lower bound for Ping/Sync heartbeats (must be ≥ 1). |
-| `MaxHeartbeatSeconds` | `1770` | Upper bound for Ping/Sync heartbeats (EAS allows up to 3540). |
-| `DavPollSeconds` | `60` | ctag/sync-token poll interval for DAV collections during waits. |
-| `DefaultWindowSize` | `100` | Items per Sync response when the client sends no `WindowSize`. |
-| `MaxWindowSize` | `512` | Hard cap on the client-requested window size. |
-| `SessionIdleMinutes` | `15` | Idle backend sessions (and with them the user's shared IDLE watchers) are evicted after this long. |
-| `UseImapIdle` | `true` | Persistent per-(user, folder) IMAP IDLE watcher for the priority pinged folder (sub-second push). Degrades to STATUS polling when disabled or unsupported by the server. |
-| `WatchdogSeconds` | `60` | Interval of the exact pending-change re-check that backstops the IDLE/STATUS watchers during waits. `0` disables the periodic ticks (the check at Ping start always runs); minimum otherwise 15. |
-
-**`Auth` (authentication hardening)**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `MaxFailures` | `20` | Failed Basic-auth attempts allowed per (client address, username) within `FailureWindowSeconds`; past the limit those requests get `429` (with `Retry-After`) until the window expires, without touching the IMAP backend. A successful login clears only that account's counter — never another user's on the same address. A looser per-address ceiling (5× this value) also bounds username-rotation floods from one address. `0` disables the throttle. |
-| `FailureWindowSeconds` | `300` | Length of the failure-counting window. |
-| `NegativeCacheSeconds` | `15` | A rejected (user, password) pair is remembered this long, so repeats are refused without an IMAP login round-trip (the gateway cannot be used to hammer the mail server). `0` disables. |
-| `SuccessCacheMinutes` | `5` | A successful (user, password) pair is trusted this long without re-verifying against IMAP. Note the flip side: a password revoked on the mail server keeps working against the gateway for at most this long. `0` disables (every request performs an IMAP login). |
-| `UsersRefreshSeconds` | `1` | How often the merged user set is re-checked against the database (one primary-key point-read, only when a request arrives). `0` checks on every request; negative disables live pickup (database edits then need a restart). |
-
-Failed logins are logged at Warning with the client-supplied username, so fail2ban-style
-tooling can match them; when the gateway runs behind a reverse proxy, all clients share the
-proxy's address from the throttle's point of view — keep `MaxFailures` generous (a valid
-login resets the counter, so legitimate users recover immediately).
-
-**`SelfSignedTls`** (built-in HTTPS endpoint)
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `Enabled` | `true` | Serve HTTPS on `Port` with a self-signed certificate generated on first serve and persisted in the state database (see [HTTPS](#https-self-signed-by-default-or-bring-your-own-certificate)). Skipped automatically when configuration declares a Kestrel HTTPS endpoint. |
-| `Port` | `5443` | Listen port of the self-signed HTTPS endpoint. |
-
-**`Policy`** (device security policies — see [Device security policies](#device-security-policies))
-
-Option names match the MS-ASPROV `EASProvisionDoc` elements 1:1, so Microsoft's
-documentation applies directly. Unset numeric options are omitted from the policy
-document (the device default applies).
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `Enabled` | `false` | Master switch. Off: Provision hands out an empty policy and nothing is enforced. On: the policy below is issued and required on every request. |
-| `DevicePasswordEnabled` | `false` | Require a device lock PIN/password. |
-| `AlphanumericDevicePasswordRequired` | `false` | Require letters *and* digits/symbols in the device password. |
-| `AllowSimpleDevicePassword` | `true` | Allow simple PINs like `1234`. |
-| `MinDevicePasswordLength` | unset | Minimum password length (1–16). |
-| `MinDevicePasswordComplexCharacters` | unset | Minimum character classes — upper/lower/digit/symbol (1–4). |
-| `MaxInactivityTimeDeviceLock` | unset | Seconds of inactivity before the device locks (1–9999). |
-| `MaxDevicePasswordFailedAttempts` | unset | Wrong-password attempts before the device wipes **itself** locally (4–16). |
-| `DevicePasswordExpiration` | unset | Days before the password must be changed (`0` = never). |
-| `DevicePasswordHistory` | unset | Number of previous passwords the device must refuse to reuse. |
-| `RequireDeviceEncryption` | `false` | Require device storage encryption. |
-| `MaxAttachmentSize` | unset | Maximum attachment size in bytes the client may download. |
-| `PasswordRecoveryEnabled` | `false` | Let the device escrow its recovery password with the gateway — readable via `eas device password <user> <deviceId>`, stored sealed with the Encryption master key. |
+Every option lives under the `ActiveSync` section and can be set via `appsettings.json`,
+environment variables (`__` separator, e.g. `ActiveSync__Backends__MailStore__Host=...`) or
+the database (`eas config set`, which wins). The **complete reference — every key, its
+default, and whether it applies live or on restart — is in
+[docs/configuration.md](docs/configuration.md)**, grouped by section (Root, the per-provider
+Backends settings, Database, Encryption, Eas, Auth, Log, SelfSignedTls, Policy, Metrics,
+WebUi, Cli, Plugins).
 
 ### Per-user overrides
 
@@ -750,7 +437,7 @@ Rules worth knowing:
   ConfigMap): `echo -n 'imap-password' | ActiveSync.Server protect`. Gateway password
   hashes: `echo -n 'phone-password' | ActiveSync.Server hash-password`. In a running
   container the same verbs are available as the `eas` command — see
-  [Operator CLI](#operator-cli-eas).
+  [Operator CLI](docs/cli.md).
 - **Allowlist**: `"RequireDeclaredUsers": true` rejects any login without a `Users` entry
   before touching a backend. An empty entry (`"dora@example.com": {}`) grants access with
   zero overrides.
@@ -846,9 +533,9 @@ replica serves the same certificate, so a device only has to trust it once — t
 fingerprint is printed in the startup banner for comparison against what the phone shows.
 Nine and iOS Mail offer a one-tap "trust anyway"; **some clients — notably Gmail — refuse
 untrusted certificates entirely**, so real certificates (below) or a reverse proxy remain
-the production path. Tune with `SelfSignedTls:Enabled` / `SelfSignedTls:Port` (see the
-option reference); should the certificate ever need replacing, delete the
-`ServerCertificates` row and restart.
+the production path. Tune with `SelfSignedTls:Enabled` / `SelfSignedTls:Port` (see
+[docs/configuration.md](docs/configuration.md)); should the certificate ever need replacing,
+delete the `ServerCertificates` row and restart.
 
 **Real certificates.** Add a Kestrel HTTPS endpoint via environment variables — the
 self-signed endpoint then switches off automatically and the mounted files are served
@@ -997,134 +684,15 @@ dotnet ef migrations add <Name> --context NpgsqlSyncDbContext \
 
 ## Operator CLI (`eas`)
 
-The Docker image puts an `eas` command on the PATH, so every command runs with a single
-line inside any deployed container (`kubectl exec <pod> -- eas users`, `docker exec
-<container> eas devices`). Outside a container the same commands run as
-`dotnet ActiveSync.Server.dll <command>` with the configuration available via env vars or
-appsettings.json in the working directory.
+The Docker image puts an `eas` command on the PATH, so the whole admin surface is one line
+inside any container (`kubectl exec <pod> -- eas users`, `docker exec <c> eas block <user>`).
+It is a **slim forwarding client**: it POSTs the command to the running gateway's `/cli`
+endpoint (sealed with the `ActiveSync:Encryption` master key) so it returns in a fraction of
+a second, falling back to in-process execution when no gateway is running. Outside a
+container the same verbs run as `dotnet ActiveSync.Server.dll <command>`.
 
-Inside the image, `eas` is a **slim forwarding client**: instead of cold-starting the whole
-gateway for each command, it POSTs the command line to the already-running gateway's `/cli`
-endpoint and prints the result, so a command returns in a fraction of a second (handy when
-firing several in a row). The request is **sealed with the `ActiveSync:Encryption` master key**,
-so only a caller that holds the key (i.e. is really inside the gateway) is served. If no gateway
-is running (e.g. repairing an unconfigured one with `config set`) it transparently falls back to
-running the command in process. `serve` and `protect` always run locally; `EAS_NO_FORWARD=1`
-forces every command local. See [How `eas` forwards](#how-eas-forwards) below.
-
-**Server**
-
-| Command | What it does |
-| --- | --- |
-| *(none)* | Show the banner for the config that WOULD run — including the declared users — and exit; nothing starts. |
-| `serve` | Start the gateway (accepts `--ActiveSync:Section:Key=value` overrides). |
-| `healthcheck` | Probe the running gateway's `/healthz`; exit 0 when healthy (backs the container `HEALTHCHECK`). |
-| `help` | List all commands (`eas <command> --help` shows per-command arguments). |
-
-**Inspection**
-
-| Command | What it does |
-| --- | --- |
-| `users` | List every user — declared accounts (origin, mail, admin, gateway pw, overrides) joined with state usage (devices, last-seen, folder/item counts, blocks). |
-| `devices [user]` | List device registrations with last-seen and block state. |
-| `folders <user>` | List a user's folder registry. |
-| `items <user> [collection]` | List local item metadata (never decrypts). |
-| `show <user> <collection> <uid>` | Decrypt and print one local item (needs the Encryption key). |
-| `logs [--since 1h] [--level Warning] [--user <u>] [-n 100]` | Show recent logs persisted to the database (Information+; every replica on a shared database). |
-| `device password <user> <deviceId>` | Print a device's escrowed recovery password (see [Device security policies](#device-security-policies)). |
-| `device wipe <user> <deviceId> [--cancel]` | Arm a **16.1 account-only wipe**: the device removes this account (never a factory reset) and the partnership is auto-blocked after the acknowledgment. Warns when the device last spoke <16.1 — use `block` for those. |
-
-**User management** (see [Database-declared users](#database-declared-users-eas-user-))
-
-| Command | What it does |
-| --- | --- |
-| `user show <login>` | The effective entry for one login, secrets masked. (`eas users` lists them all.) |
-| `user add <login>` | Declare a user in the database (an empty entry is an allowlist grant; copies a same-login config entry as the starting point). |
-| `user remove <login>` | Delete the database entry — a same-login config entry becomes active again. |
-| `user disable <login>` · `user enable <login>` | Turn an account off/on. A disabled account refuses **every** login — all devices, EAS and web — with 403 after valid credentials, until re-enabled (a persistent property of the account, distinct from an ad-hoc `block`). |
-| `user set <login> <key> <value>` | Set one field by path (`MailAddress`, `Admin` — grants the web admin UI, `Enabled` — `false` disables the account, `Backends:Calendar:Enabled`, `Backends:MailStore:Settings:Host`, ...); password keys are hashed/sealed automatically. |
-| `user unset <login> <key>` | Clear one field (an emptied entry remains an allowlist grant). |
-| `user password <login>` | Set the gateway password from stdin (stored as a pbkdf2$ hash). |
-| `user secret <login> <key>` | Set a backend password (`Backends:MailStore:Password`, ...) from stdin (stored sealed, enc:v1:). |
-
-**Global settings** — stored in the database; the database wins over appsettings/env, which win
-over the built-in defaults. Applies live within ~1s (a background change-stamp poll), except a few
-listener settings that apply on restart. The two bootstrap sections (`Database`, `Encryption`) are
-env/file only — they are needed to open and decrypt the database that stores everything else.
-
-| Command | What it does |
-| --- | --- |
-| `config list` | Every setting with its effective value and source (default / config / db). |
-| `config get <key>` | One setting's effective value and source (e.g. `config get ActiveSync:ReadOnly`). |
-| `config set <key> <value>` | Store a setting (e.g. `config set ActiveSync:Eas:MaxHeartbeatSeconds 1800`); validated by type/range; live in ~1s (listener settings say "restart"). |
-| `config unset <key>` | Clear a database setting — falls back to the config file, then the code default. |
-
-**Access control & cleanup**
-
-| Command | What it does |
-| --- | --- |
-| `block <user> [deviceId]` | Refuse logins with **403** — the whole user, or one device. |
-| `unblock <user> [deviceId]` | Remove a login block. |
-| `share add <user> <collectionHref> [--read-only]` | Grant an extra CalDAV collection to a user as a shared calendar folder (`--read-only` = client edits silently reverted by the gateway). Applies at the next backend-session build (idle recycle or restart). |
-| `share remove <user> <collectionHref>` | Remove a grant — the folder disappears at the next session build. |
-| `share list [user]` | List shared-calendar grants. |
-| `purge user <user>` | Delete ALL of a user's state (asks for confirmation, or `--yes`). |
-| `purge device <user> <deviceId>` | Delete one device registration (it re-syncs from scratch). |
-
-**Secret helpers**
-
-| Command | What it does |
-| --- | --- |
-| `protect` | Seal a secret from stdin with the Encryption key (`enc:v1:...`), e.g. for a users file. |
-| `hash-password` | Hash a gateway password from stdin (`pbkdf2$...`). |
-
-```bash
-# Seal a backend password with the Encryption master key (-> enc:v1:... for the users file).
-# The running pod already has the key via its env/config, so no extra flags are needed.
-echo -n 'imap-password' | kubectl exec -i <pod> -- eas protect
-
-# Hash a gateway password (-> pbkdf2$... for a Users entry's Password field).
-echo -n 'phone-password' | docker exec -i <container> eas hash-password
-
-# Who is syncing, and when were they last seen?
-kubectl exec <pod> -- eas users
-
-# Lock out a lost phone (or a whole account) without touching the mail server.
-kubectl exec <pod> -- eas block user@example.com ABCDEF123456
-```
-
-Secrets travel via **stdin** (never argv, so they stay out of shell history and `ps`).
-The database commands read the same configuration as `serve`, so inside a running pod they
-just work; blocking answers the device's next request with HTTP 403 (no credential
-re-prompt loop), and `purge` is the reset lever when a device should re-sync from scratch.
-
-### How `eas` forwards
-
-The `eas` binary in the image is a tiny client that forwards each command over HTTP to the
-running gateway on its normal port and prints back stdout/stderr and the exit code. This
-avoids a cold start of the full app per command; secret-setting verbs (`user password`,
-`user secret`, …) forward too.
-
-- **Auth is proof of the master key.** The client AES-256-GCM **seals** the request (args, stdin
-  and a timestamp) with the `ActiveSync:Encryption` key it reads from the same config the server
-  uses; the gateway opens it with the same key. That key is injected only into the gateway
-  container — **not** a co-located Kubernetes sidecar or a `--network host` peer, which share the
-  loopback interface but not the container's environment/secrets. So a valid envelope proves the
-  caller is a real key holder (the trust set that can already decrypt everything at rest), which a
-  bare loopback check can't: in a shared network namespace a sidecar's `127.0.0.1` reaches the
-  gateway. The timestamp bounds replay of a sniffed ciphertext, and the payload is encrypted on
-  the wire. Loopback is kept as a cheap pre-filter (and no forwarded-headers middleware exists, so
-  the peer address is the real one); requests that fail either check get a 404.
-- **Dev/test without a key** (`ActiveSync:Encryption:AllowPlaintext=true`): there is no key to
-  seal with, so `/cli` falls back to loopback-only — acceptable for the same reason that mode runs
-  content unencrypted.
-- **Disable it** with `eas config set ActiveSync:Cli:Enabled false` (live) — `eas` then falls
-  back to running every command in process.
-- **`serve` and `protect` never forward** (they take arbitrary `--Section:Key=value` overrides);
-  `EAS_NO_FORWARD=1` forces all commands to run in process. If the gateway isn't reachable, any
-  command falls back to in-process execution automatically.
-- The forwarding client ships **only in the container image**; the download zips run the full
-  app directly as before.
+The full command reference — inspection, user & device management, global settings, access
+control, secret helpers, and how forwarding works — is in **[docs/cli.md](docs/cli.md)**.
 
 ## Web interfaces (`/admin` and `/user`)
 
@@ -1157,130 +725,14 @@ DataProtection key-ring in the state database, sealed with the Encryption master
 
 ## Testing
 
-Two layers:
+~500 automated tests in two layers: **unit tests** (run anywhere, no docker) and an
+**integration suite** that hosts the gateway in-process and drives it with a real
+WBXML-speaking mini-EAS client against live backends (Stalwart, docker-mailserver + Radicale,
+Cyrus, Baikal, Apache James, Axigen) — skipping automatically when no stack is reachable.
+`scripts/test-fast` is the recommended per-change check (stalwart + axigen in parallel).
 
-- **Unit tests** (`Category!=Integration`) run anywhere, no docker needed.
-- **Integration tests** (`tests/ActiveSync.Integration.Tests`) host the gateway in-process
-  and drive it with a real mini EAS client speaking 14.1 or 16.1 (WBXML, base64 query,
-  Provision handshake)
-  against **real backends** — including the flagship scenario where user1 sends a mail
-  through the gateway and user2 receives it on a second EAS client. They **skip
-  automatically** when no backend stack is reachable, so `dotnet test` is always safe.
-
-An opt-in third layer (`--filter Category=AxigenLive`) runs the 16.x/GAL/free-busy
-scenarios against a real Axigen server. It skips unless `AS_TEST_AXIGEN_HOST`,
-`AS_TEST_AXIGEN_USER` and `AS_TEST_AXIGEN_PASSWORD` are all set; point it only at a
-dedicated throwaway mailbox — the tests create and delete real items.
-
-### Backend stacks
-
-All stacks publish the same ports (IMAP 143, SMTP 587, DAV 5232) and users
-(`user1@example.com` / `user2@example.com`, password `pass`); the Stalwart stack also
-publishes ManageSieve 4190 and serves the full JMAP surface (mail + calendars + contacts +
-vacation) on the DAV port:
-
-```bash
-# Default: Stalwart 0.16 all-in-one — mail with real delivery, CalDAV/CardDAV, ManageSieve,
-# and JMAP. A small custom image (pinned server + stalwart-cli, see docker/backends/stalwart/
-# Dockerfile) self-provisions on first boot: its entrypoint uses stalwart-cli to bootstrap and
-# then declaratively `apply` the users, plaintext listeners and relaxed test policy against the
-# server's own management API. No mounted config, no separate provisioner — just build + up.
-docker compose -f docker/backends/stalwart/docker-compose.yml up -d --build --wait
-
-# Second backend (also runs in CI): docker-mailserver (Postfix+Dovecot) + Radicale. A
-# one-shot in the compose provisions each user's default calendar + address book (Radicale
-# ships none). --wait blocks until healthy AND provisioned.
-docker compose -f docker/backends/mailserver/docker-compose.yml up -d --wait
-AS_TEST_STACK=mailserver dotnet test --filter Category=Integration
-
-# Cyrus IMAP — an independent C server: IMAP + CalDAV/CardDAV + JMAP + ManageSieve (mail
-# submits over JMAP; LMTP-only for delivery). Home-sets live under /dav/…/user/{user}/.
-docker compose -f docker/backends/cyrus/docker-compose.yml up -d --build --wait
-
-# Baikal (sabre/dav) for CalDAV/CardDAV + docker-mailserver as the mail companion. A
-# self-provisioning custom image bakes the config + a seeded SQLite DB, so DAV works on first
-# boot with no installer. Home-sets live under /dav.php/…/{user}/.
-docker compose -f docker/backends/baikal/docker-compose.yml up -d --build --wait
-
-# Axigen full groupware (IMAP/SMTP + CalDAV/CardDAV) via its built-in 3-day trial/demo mode.
-# A self-provisioning custom image creates the domain/users and opens the listeners on first
-# boot. Trial mode is EVALUATION ONLY (running it in CI is an accepted trade-off).
-# Home-sets live under /Calendar/ and /Contacts/.
-docker compose -f docker/backends/axigen/docker-compose.yml up -d --build --wait
-
-# Apache James (memory) — a second, independent Java IMAP + SMTP submission implementation
-# (no CalDAV/CardDAV/JMAP/Sieve). Run this leg with AS_TEST_DAV_URL=none so calendar/contacts
-# fall back to the gateway's local stores and the DAV tests skip.
-docker compose -f docker/backends/james/docker-compose.yml up -d --build --wait
-# AS_TEST_STACK=james AS_TEST_DAV_URL=none dotnet test --filter Category=Integration
-```
-
-**Fast per-change check (recommended).** `scripts/test-fast` runs the suite against **stalwart +
-axigen in parallel** and leaves both stacks running for the next change (they start only if not
-already healthy, and are reused when warm). To coexist, these two stacks use **dedicated host
-ports** (stalwart `10143/10587/10190/10232`, axigen `20143/20587/20232`) via the compose
-`${STALWART_*}` / `${AXIGEN_*}` overrides — the canonical set (`143/587/5232/4190`) stays free, so
-you can leave them up and still run an on-demand backend (e.g. baikal) without a port clash:
-
-```powershell
-./scripts/test-fast.ps1                 # Windows  (-Filter <expr>, -Down to tear down)
-scripts/test-fast.sh                    # Linux / devcontainer  (-f <expr>, -d to tear down)
-```
-
-Or run the suite against **every** stack in turn with one command (brings each up, tests,
-tears down, prints a per-backend summary — sequential, since these use the canonical ports):
-
-```powershell
-./scripts/test-backends.ps1            # Windows
-scripts/test-backends.sh               # Linux / devcontainer
-```
-
-Don't drive stalwart/axigen through both runners at the same time — `test-fast` uses dedicated
-ports and `test-backends` uses canonical ones, so compose would recreate the container on switch.
-
-### Where tests run
-
-- **Visual Studio (Windows host)**: bring a stack up, run tests from Test Explorer —
-  localhost defaults just work. Breakpoints hit gateway code (it runs in-process).
-- **VS Code devcontainer**: "Reopen in Container" — the `.devcontainer` compose brings the
-  Stalwart stack up alongside the workspace with env preset.
-- **GitHub Actions**: `.github/workflows/build.yaml` (push + dispatch) is a three-stage
-  pipeline that compiles the solution exactly once:
-  - **`test`** — the Dockerfile `test` stage builds everything and runs the unit tests,
-    exporting every layer to a `type=gha` build cache.
-  - **`integration`** — a matrix leg per backend (`stalwart`, `mailserver`, `cyrus`, `baikal`,
-    `james`, `axigen`) runs in parallel. Each loads the cached test image, brings its backend + a
-    throwaway Postgres up, and runs the integration suite **from that image**
-    (`dotnet test --no-build`). Tests for capabilities a backend lacks (JMAP/Sieve on
-    docker-mailserver, CalDAV free-busy on Radicale, SMTP submission / password-enforcement on
-    the Cyrus test image, JMAP/Sieve on the Baikal DAV stack, all of CalDAV/CardDAV + JMAP + Sieve
-    on the mail-only James stack) skip cleanly. Legs push nothing. (The `cyrus` leg is currently
-    disabled — under investigation — so it never runs; its compose/config remain in the tree.)
-    The **`axigen`** leg runs Axigen's evaluation-only trial mode on every trigger (an accepted
-    trade-off) and gates `publish` like the other legs.
-  - **`publish`** — only when **every** backend leg is green: the multi-arch runtime image,
-    the NuGet packages and the release zips are built from the warm cache and pushed.
-
-  Adding a backend = one more matrix entry + its `docker/backends/<name>/docker-compose.yml`.
-
-  Local reproduction — run the whole matrix sequentially:
-
-  ```powershell
-  ./scripts/test-backends.ps1        # or scripts/test-backends.sh
-  ```
-
-- **Image builds**: the Dockerfile has a `test` stage, so every `docker build` runs the
-  unit test suite (integration tests need sibling containers and are CI-compose only).
-
-### Cutting a release
-
-Actions → **Create Release** → enter the version (`1.0.7` or `v1.0.7`) and an optional
-headline. The workflow validates the version, generates release notes from the commit
-subjects since the previous release, pushes the tag, creates the release and dispatches
-the tag build. The tag build then pushes the versioned docker image and attaches
-the download zips to the release once the full test suite is green — so the release page
-is complete a few minutes after dispatch. Manual tagging still works: a tag pushed by
-hand gets a minimal auto-created release with the same assets.
+The backend stacks, the fast/all-stacks runners, the CI pipeline and the release process are
+documented in **[docs/testing.md](docs/testing.md)**.
 
 ## Architecture
 

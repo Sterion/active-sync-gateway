@@ -8,9 +8,10 @@ from the file tree.
 
 A **.NET 10** service that speaks **Microsoft Exchange ActiveSync (EAS) 16.1** to mail
 clients (iOS Mail, Android, Outlook) and translates every operation to standard backends
-hosted elsewhere: **IMAP** (mail), **SMTP** (send), **CalDAV** (calendar), **CardDAV**
-(contacts). Functionally equivalent to Z-Push (PHP), implemented from Microsoft's open
-specifications.
+hosted elsewhere: **IMAP**/**SMTP** or **JMAP** (mail + send), **CalDAV**/**CardDAV** or
+**JMAP** (calendar/contacts), **ManageSieve** or **JMAP** VacationResponse (out-of-office),
+with a **local** gateway-DB fallback for calendar/contacts/tasks (and always for notes).
+Functionally equivalent to Z-Push (PHP), implemented from Microsoft's open specifications.
 
 **Deliberately out of scope** (do not add without explicit request): full-device
 RemoteWipe (never add a code path that can factory-reset a phone — the 16.1 account-only
@@ -190,6 +191,12 @@ live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
   (blame preservation), so you will see both — match the file you are editing, and use
   tabs+CRLF for brand-new files.
 - Nullable reference types are enabled everywhere; the build must stay at **0 warnings**.
+- **Docs live in `docs/`; README is the overview.** User-facing reference is split out:
+  `docs/configuration.md` (the option catalogue — keep in sync with `SettingKeys` +
+  `ActiveSyncOptions`/provider option classes), `docs/cli.md` (the `eas` verbs — keep in sync
+  with `CliApp.Configure`), `docs/backends.md` (capability matrix), `docs/testing.md`,
+  `docs/webui.md`, `docs/plugins.md`. When you add or change an option, a CLI verb, or a
+  backend, update the matching doc — the README stubs just link to these.
 - Long-poll code (Ping, Sync with Wait) must never block a thread: use `Task.WhenAny`
   over pollers plus `Task.Delay`, and always cancel losers via a linked
   `CancellationTokenSource`.
@@ -326,9 +333,12 @@ TProvider>`), and the connection string is resolved **lazily** from `IOptions` i
 `AddDbContext` callback — reading it eagerly from `builder.Configuration` misses
 `WebApplicationFactory` overrides and silently shares one DB across tests. When you change an
 entity, add a migration for **both** contexts (see README) — never hand-edit the model
-snapshot. Entities: `Device`, `UserFolder`, `DeviceFolder`, `CollectionState`, `DavItem`,
-`LocalItem` (the local contacts/calendar/tasks/notes store; added by the `AddLocalItems`
-migration). `LocalItem.Content` is **AES-256-GCM ciphertext at rest** (`"v1:" + base64`,
+snapshot. Entities, by purpose: **sync state** — `Device`, `UserFolder`, `DeviceFolder`,
+`CollectionState`, `DavItem`; **local user data** — `LocalItem` (contacts/calendar/tasks/notes;
+`AddLocalItems` migration); **accounts & access** — `AccountEntry` + `AccountsStamp`,
+`LoginBlock`, `SharedCalendarGrant`, `OofSetting`; **settings & ops** — `GlobalSetting` +
+`SettingsStamp`, `LogEntry`, `ServerCertificate`, `DataProtectionKeyEntry`.
+`LocalItem.Content` is **AES-256-GCM ciphertext at rest** (`"v1:" + base64`,
 sealed by `LocalContentProtector` with user+collection as AAD) — never read or write the
 column except through the local stores, which decrypt/encrypt at their seams.
 JSON blobs (snapshots, cached options, ping params, cached sync requests) use

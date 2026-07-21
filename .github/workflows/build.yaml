@@ -5,6 +5,22 @@ on:
       - main
     tags:
       - '**'
+    # Build-irrelevant files don't trigger the pipeline on a main push. paths-ignore skips a
+    # run only when EVERY changed file matches, so a mixed code+docs commit still builds.
+    # Releases are unaffected: release.yaml drives this workflow via workflow_dispatch, which
+    # paths-ignore never gates. NOT applied to pull_request on purpose — a docs-only PR must
+    # still get its status check (a skipped required check can block the merge).
+    paths-ignore:
+      - '**/*.md'
+      - 'README.md'
+      - 'AGENTS.md'
+      - 'docs/**'
+      - 'scripts/**'
+      - '.devcontainer/**'
+      - '.gitignore'
+      - 'renovate.json5'
+      - 'StartLocal.cmd'
+      - 'start-local.sh'
   pull_request:
     branches:
       - main
