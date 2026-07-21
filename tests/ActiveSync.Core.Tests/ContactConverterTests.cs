@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using ActiveSync.Backends.Converters;
+using ActiveSync.Contracts;
 using ActiveSync.Protocol.Wbxml;
 
 namespace ActiveSync.Core.Tests;
@@ -79,6 +80,15 @@ public class ContactConverterTests
 		Assert.Contains("N:Start;Fresh", created);
 		Assert.DoesNotContain("X-SPOUSE", created);
 		Assert.DoesNotContain("EMAIL", created);
+	}
+
+	[Fact]
+	public void Read_UnparsableCard_ReturnsNull_LikeEverySiblingConverter()
+	{
+		// D22 — CalendarConverter/TasksConverter/NotesConverter all return null so
+		// LocalStoreBase skips the item. Throwing here fails the ENTIRE Sync response,
+		// leaving the folder permanently unsyncable over one corrupt card.
+		Assert.Null(ContactConverter.ToApplicationData("this is not a vCard", BodyPreference.PlainText));
 	}
 
 	[Fact]

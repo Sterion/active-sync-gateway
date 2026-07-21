@@ -26,10 +26,15 @@ public static class ContactConverter
 		return id?.Value?.String ?? id?.Value?.Guid?.ToString() ?? id?.Value?.Uri?.ToString();
 	}
 
-	public static List<XElement> ToApplicationData(string vcf, BodyPreference bodyPreference)
+	/// <summary>
+	///   Returns null for an empty or unparsable card, matching every sibling converter —
+	///   the store base classes read that as "skip this item", so one corrupt card costs one
+	///   contact instead of the whole Sync response.
+	/// </summary>
+	public static List<XElement>? ToApplicationData(string vcf, BodyPreference bodyPreference)
 	{
-		VCard vcard = Vcf.Parse(vcf).FirstOrDefault()
-		              ?? throw new BackendException("Empty or unparsable vCard.");
+		if (Vcf.Parse(vcf).FirstOrDefault() is not { } vcard)
+			return null;
 
 		List<XElement> data = new();
 
