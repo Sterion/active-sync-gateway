@@ -15,6 +15,12 @@ public static class WbxmlEncoder
 	private const byte StrI = 0x03;
 	private const byte Opaque = 0xC3;
 
+	// WriteElement recurses once per level, and a StackOverflowException cannot be caught —
+	// it kills the process rather than failing the one response. Mirror the decoder's ceiling
+	// so an over-deep document is a WbxmlException instead. Nothing legal comes close: a
+	// document decoded from the wire is already capped at this depth.
+	private const int MaxDepth = 256;
+
 	public static byte[] Encode(XDocument document)
 	{
 		if (document.Root is null)
@@ -27,7 +33,7 @@ public static class WbxmlEncoder
 		output.WriteByte(0x00); // string table length: 0
 
 		int currentPage = 0;
-		WriteElement(output, document.Root, ref currentPage);
+		WriteElement(output, document.Root, ref currentPage, 1);
 		return output.ToArray();
 	}
 
@@ -37,8 +43,11 @@ public static class WbxmlEncoder
 		await destination.WriteAsync(bytes, ct).ConfigureAwait(false);
 	}
 
-	private static void WriteElement(MemoryStream output, XElement element, ref int currentPage)
+	private static void WriteElement(MemoryStream output, XElement element, ref int currentPage, int depth)
 	{
+		if (depth > MaxDepth)
+			throw new WbxmlException($"Document nests deeper than {MaxDepth} elements.");
+
 		WbxmlCodePages.CodePage page = WbxmlCodePages.ForNamespace(element.Name.Namespace)
 		                               ?? throw new WbxmlException(
 			                               $"No WBXML code page for namespace '{element.Name.Namespace}'.");
@@ -74,7 +83,7 @@ public static class WbxmlEncoder
 		else if (childElements.Count > 0)
 		{
 			foreach (XElement child in childElements)
-				WriteElement(output, child, ref currentPage);
+				WriteElement(output, child, ref currentPage, depth + 1);
 		}
 		else
 		{
