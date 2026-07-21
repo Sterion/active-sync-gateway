@@ -14,7 +14,8 @@ using ActiveSync.Crypto;
 // The request is SEALED with the ActiveSync:Encryption master key (read from the same config the
 // server uses): possessing the key is the real auth — a co-located Kubernetes sidecar or host-network
 // peer that shares loopback but NOT the key can't call /cli. Falls back to a plain body only when no
-// key is configured (AllowPlaintext dev/test), where the server also relies on loopback alone.
+// key is configured (AllowPlaintext dev/test), where the server also relies on loopback alone. The
+// RESPONSE is sealed the same way whenever a key exists — command output carries secrets too.
 
 string[] arguments = args;
 bool forceLocal = Environment.GetEnvironmentVariable("EAS_NO_FORWARD") == "1";
@@ -58,6 +59,21 @@ try
 		CliResponse? result = await response.Content.ReadFromJsonAsync<CliResponse>();
 		if (result is not null)
 		{
+			// A sealed result is the keyed path: open it with the same key we sealed the request
+			// with. The command has already RUN, so a failure to open must not fall through to the
+			// local re-execution below — that would repeat a mutating verb.
+			if (result.Sealed is not null)
+			{
+				if (key is null || !LocalCliResult.TryOpen(result.Sealed, key, out LocalCliResult? opened) || opened is null)
+				{
+					Console.Error.WriteLine(
+						"eas: the gateway's response could not be decrypted (the master key changed mid-command?). " +
+						"The command may have already run — do not simply retry it.");
+					return 1;
+				}
+				result = new CliResponse(opened.ExitCode, opened.Stdout, opened.Stderr, null);
+			}
+
 			if (result.Stdout.Length > 0)
 				Console.Out.Write(result.Stdout);
 			if (result.Stderr.Length > 0)
@@ -160,4 +176,4 @@ static int RunLocal(string[] arguments, string? stdin)
 
 internal sealed record CliRequest(string[]? Args, string? Stdin, string? Sealed, bool Color, int Width);
 
-internal sealed record CliResponse(int ExitCode, string Stdout, string Stderr);
+internal sealed record CliResponse(int ExitCode, string Stdout, string Stderr, string? Sealed);

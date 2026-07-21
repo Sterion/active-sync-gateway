@@ -128,6 +128,11 @@ avoids a cold start of the full app per command; secret-setting verbs (`user pas
   gateway. The timestamp bounds replay of a sniffed ciphertext, and the payload is encrypted on
   the wire. Loopback is kept as a cheap pre-filter (and no forwarded-headers middleware exists, so
   the peer address is the real one); requests that fail either check get a 404.
+- **The response is sealed too.** Command output is as sensitive as command input (`eas device
+  password` prints a live credential), so whenever a key is configured the gateway seals
+  stdout/stderr/exit-code with it and the client opens it — nothing readable crosses loopback in
+  either direction. If the client can't open a sealed response it reports that and exits 1 rather
+  than falling back to a local re-run: the command has already executed.
 - **Dev/test without a key** (`ActiveSync:Encryption:AllowPlaintext=true`): there is no key to
   seal with, so `/cli` falls back to loopback-only — acceptable for the same reason that mode runs
   content unencrypted. That fallback is gated on the **explicit flag**, not on the key being

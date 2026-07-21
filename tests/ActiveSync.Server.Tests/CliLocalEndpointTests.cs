@@ -219,6 +219,35 @@ public sealed class CliLocalEndpointTests : IDisposable
 	}
 
 	[Fact]
+	public void ProtectResponse_SealsOutputWhenKeyed_AndLeavesItPlainOtherwise()
+	{
+		// L23: `eas device password` prints a live credential. Requests are sealed but responses
+		// were not, so the secret travelled loopback in the clear. Seal the response with the same
+		// key whenever one is configured; the plaintext fields must be empty on the wire.
+		byte[] key = NewKey();
+		LocalCliEndpoint.CliResponse plain = new(3, "device-password: hunter2", "a warning");
+
+		LocalCliEndpoint.CliResponse sealedResponse = LocalCliEndpoint.ProtectResponse(plain, key);
+		Assert.Equal("", sealedResponse.Stdout);
+		Assert.Equal("", sealedResponse.Stderr);
+		Assert.Equal(0, sealedResponse.ExitCode);
+		Assert.NotNull(sealedResponse.Sealed);
+		Assert.DoesNotContain("hunter2", sealedResponse.Sealed);
+
+		Assert.True(LocalCliResult.TryOpen(sealedResponse.Sealed, key, out LocalCliResult? opened));
+		Assert.Equal(3, opened!.ExitCode);
+		Assert.Equal("device-password: hunter2", opened.Stdout);
+		Assert.Equal("a warning", opened.Stderr);
+		// A different key opens nothing.
+		Assert.False(LocalCliResult.TryOpen(sealedResponse.Sealed, NewKey(), out _));
+
+		// AllowPlaintext dev/test: no key to seal with, so the response stays plain.
+		LocalCliEndpoint.CliResponse unkeyed = LocalCliEndpoint.ProtectResponse(plain, key: null);
+		Assert.Equal("device-password: hunter2", unkeyed.Stdout);
+		Assert.Null(unkeyed.Sealed);
+	}
+
+	[Fact]
 	public void Authorize_KeyConfigured_IgnoresAllowPlaintext()
 	{
 		// A key wins over the flag: a plaintext body is still refused, so a stray AllowPlaintext in

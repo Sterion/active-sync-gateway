@@ -51,3 +51,43 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 		return true;
 	}
 }
+
+/// <summary>
+///   The response half of the <c>/cli</c> exchange. Requests are sealed because they carry secrets;
+///   so do plenty of responses (<c>eas device password</c> prints a live credential, <c>eas user
+///   secret</c> echoes what it stored), so whenever a master key is configured the gateway seals the
+///   captured stdout/stderr/exit-code with it and the client opens it. No timestamp: a response is
+///   only ever produced for a caller that already proved key possession, so there is nothing a
+///   replay of it can reach.
+/// </summary>
+public sealed record LocalCliResult(int ExitCode, string Stdout, string Stderr)
+{
+	private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+	/// <summary>AES-256-GCM seals the result with the master key (reuses the <c>enc:v1:</c> format).</summary>
+	public string Seal(byte[] key) => SecretValue.Seal(JsonSerializer.Serialize(this, Json), key);
+
+	/// <summary>
+	///   Opens a sealed result. Returns false — never throws — on any malformed, absent or
+	///   unauthenticated input (a wrong key included).
+	/// </summary>
+	public static bool TryOpen(string? sealedValue, byte[] key, out LocalCliResult? result)
+	{
+		result = null;
+		if (string.IsNullOrEmpty(sealedValue))
+			return false;
+		if (!SecretValue.TryUnseal(sealedValue, key, out string? json, out _) || json is null)
+			return false;
+
+		try
+		{
+			result = JsonSerializer.Deserialize<LocalCliResult>(json, Json);
+		}
+		catch (JsonException)
+		{
+			return false;
+		}
+
+		return result is not null;
+	}
+}

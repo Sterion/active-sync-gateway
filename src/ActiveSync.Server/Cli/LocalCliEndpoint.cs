@@ -39,7 +39,12 @@ internal static class LocalCliEndpoint
 	// and at worst these only affect cosmetics of a legitimate caller's own output.
 	internal sealed record CliRequest(string[]? Args, string? Stdin, string? Sealed, bool Color = false, int Width = 0);
 
-	internal sealed record CliResponse(int ExitCode, string Stdout, string Stderr);
+	/// <summary>
+	///   The forwarded command's result. When a master key is configured the payload rides in
+	///   <see cref="Sealed" /> (see <see cref="ProtectResponse" />) and the plaintext fields are
+	///   empty; in AllowPlaintext dev/test the plaintext fields carry it and <c>Sealed</c> is null.
+	/// </summary>
+	internal sealed record CliResponse(int ExitCode, string Stdout, string Stderr, string? Sealed = null);
 
 	internal static void Map(WebApplication app)
 	{
@@ -77,7 +82,7 @@ internal static class LocalCliEndpoint
 
 			CliResponse response = await ExecuteAsync(args, stdin, context.RequestAborted,
 				request?.Color ?? false, request?.Width ?? 0);
-			return Results.Json(response);
+			return Results.Json(ProtectResponse(response, key));
 		});
 	}
 
@@ -121,6 +126,18 @@ internal static class LocalCliEndpoint
 		stdin = envelope.Stdin ?? "";
 		return true;
 	}
+
+	/// <summary>
+	///   Seals a captured result for the wire when a master key is configured. Command output is as
+	///   sensitive as command input — <c>eas device password</c> discloses a live credential — and
+	///   only a key holder could have got this far, so the same key protects the way back. With no
+	///   key (AllowPlaintext dev/test) there is nothing to seal with and the result stays plain.
+	/// </summary>
+	internal static CliResponse ProtectResponse(CliResponse response, byte[]? key) =>
+		key is null
+			? response
+			: new CliResponse(0, "", "",
+				new LocalCliResult(response.ExitCode, response.Stdout, response.Stderr).Seal(key));
 
 	/// <summary>
 	///   Runs one CLI command line in-process and returns its captured output + exit code. Refuses
