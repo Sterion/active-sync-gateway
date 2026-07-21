@@ -332,6 +332,49 @@ public sealed class CliLocalEndpointTests : IDisposable
 			["config", "set", "ActiveSync:Encryption:Key", "--force"]));
 	}
 
+	[Fact]
+	public void Registrar_BreaksDependencyCycles_InsteadOfKillingTheGateway()
+	{
+		// L26: the Spectre DI bridge resolved constructor parameters recursively with no cycle
+		// detection, so one command type whose graph loops back on itself takes the whole gateway
+		// process down with an uncatchable StackOverflowException. A cycle must resolve to null.
+		StringWriter sw = new();
+		IAnsiConsole console = AnsiConsole.Create(new AnsiConsoleSettings { Out = new AnsiConsoleOutput(sw) });
+		LocalCliEndpoint.CapturingRegistrar registrar = new(console);
+
+		SelfReferencing? direct = (SelfReferencing?)registrar.Resolve(typeof(SelfReferencing));
+		Assert.NotNull(direct);
+		Assert.Null(direct.Inner);
+
+		MutualA? mutual = (MutualA?)registrar.Resolve(typeof(MutualA));
+		Assert.NotNull(mutual);
+		Assert.Null(mutual.B!.A);
+
+		// Non-cyclic graphs still build, and the console is still injected.
+		Assert.Same(console, registrar.Resolve(typeof(IAnsiConsole)));
+		Assert.Same(console, ((NeedsConsole?)registrar.Resolve(typeof(NeedsConsole)))!.Console);
+	}
+
+	private sealed class SelfReferencing(SelfReferencing? inner)
+	{
+		public SelfReferencing? Inner { get; } = inner;
+	}
+
+	private sealed class MutualA(MutualB? b)
+	{
+		public MutualB? B { get; } = b;
+	}
+
+	private sealed class MutualB(MutualA? a)
+	{
+		public MutualA? A { get; } = a;
+	}
+
+	private sealed class NeedsConsole(IAnsiConsole console)
+	{
+		public IAnsiConsole Console { get; } = console;
+	}
+
 	private sealed class RecordingLogger : ILogger
 	{
 		public List<string> Messages { get; } = [];

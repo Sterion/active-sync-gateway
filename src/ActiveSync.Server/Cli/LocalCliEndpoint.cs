@@ -352,7 +352,7 @@ internal static class LocalCliEndpoint
 	///   parameters). Used instead of Spectre's default registrar, which caches the console in a
 	///   process-static — fatal when successive forwarded commands each need their own buffer.
 	/// </summary>
-	private sealed class CapturingRegistrar(IAnsiConsole console) : ITypeRegistrar, ITypeResolver
+	internal sealed class CapturingRegistrar(IAnsiConsole console) : ITypeRegistrar, ITypeResolver
 	{
 		private readonly Dictionary<Type, object> _instances = new() { [typeof(IAnsiConsole)] = console };
 		private readonly Dictionary<Type, Type> _registrations = [];
@@ -366,7 +366,16 @@ internal static class LocalCliEndpoint
 
 		public ITypeResolver Build() => this;
 
-		public object? Resolve(Type? type)
+		public object? Resolve(Type? type) => Resolve(type, []);
+
+		/// <summary>
+		///   <paramref name="resolving" /> is the chain of types currently under construction. A
+		///   parameter that reappears in it is a dependency cycle, and the recursion below has no
+		///   other way out: a <see cref="StackOverflowException" /> cannot be caught, so one looping
+		///   command graph would take the whole gateway process down. Hand back null and let the
+		///   constructor decide what a missing dependency means.
+		/// </summary>
+		private object? Resolve(Type? type, HashSet<Type> resolving)
 		{
 			if (type is null)
 				return null;
@@ -388,8 +397,17 @@ internal static class LocalCliEndpoint
 				.FirstOrDefault();
 			if (ctor is null)
 				return null;
-			object?[] args = [.. ctor.GetParameters().Select(p => Resolve(p.ParameterType))];
-			return ctor.Invoke(args);
+			if (!resolving.Add(target))
+				return null;
+			try
+			{
+				object?[] args = [.. ctor.GetParameters().Select(p => Resolve(p.ParameterType, resolving))];
+				return ctor.Invoke(args);
+			}
+			finally
+			{
+				resolving.Remove(target);
+			}
 		}
 	}
 }
