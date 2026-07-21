@@ -1,6 +1,6 @@
 # Code review — implementation results
 
-Running record of [`code-review.md`](code-review.md) items as they are completed.
+Running record of [`review-items.md`](review-items.md) items as they are completed.
 
 **Written by the orchestrating session, not by the worker.** Each entry pairs the worker's own
 report with the orchestrator's *independent* verification — the two are separate on purpose. A

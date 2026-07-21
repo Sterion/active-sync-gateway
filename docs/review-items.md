@@ -1,316 +1,136 @@
-# ActiveSync Gateway — full source review
+# ActiveSync Gateway — source review findings
 
-Scope: all production code under `src/` (~42k lines, 14 projects). Tests, docs and CI read for context only.
-Method: nine parallel deep-read passes (one per subsystem) plus a cross-cutting structural pass.
-Baseline: solution builds clean, **0 warnings**. No `async void`, no empty catches, no sync-over-async, no TODO/FIXME debt. Every analyzer suppression carries a correct justifying comment. This is a well-disciplined codebase — the findings below are mostly about asymmetry (a rule applied in one place and not its siblings), boundaries, and untrusted-input limits, not hygiene.
+> **Execution protocol: [`review-fix.md`](review-fix.md) — read it first.**
+> This file holds only project data: the findings, the work queue, the commands, the invariants.
+> Nothing here describes *how* to work; that lives in `review-fix.md` and does not change.
+> Results of completed items are recorded in [`review-results.md`](review-results.md).
 
-**258 findings.** 3 Critical, 34 High, 96 Medium, 89 Low, 36 Nit.
+**Scope:** all production code under `src/` — ~42k lines, 14 projects. Tests, docs and CI read for
+context only. (~11k of Core is EF migration scaffolding, reviewed for hygiene and lockstep rather
+than line by line.)
+
+**Method:** nine parallel subsystem passes plus a cross-cutting structural pass.
+
+**Baseline commit:** `ce6259c` — every `file:line` below is exact as of this commit. Line numbers
+drift as items land; locate by symbol. See "Locating a finding after code has moved" in
+`review-fix.md`.
+
+**Baseline health at `ce6259c`:** build 0 warnings · 543 unit tests green · 124 integration tests
+passed, 0 skipped.
+
+**Totals:** 365 findings — 3 Critical, 34 High, 96 Medium, 89 Low, 36 Nit · 56 work items.
 
 ---
 
-## How to use this document
+## Invariants
 
-Findings have stable IDs (`D1`, `K56`, `F23`…). Part 1 is a **flat work queue of 56 numbered items, each sized for one session**, in the order to run them. Part 2 is the **full finding list** by area. Unabridged detail for areas A–D is in [`code-review-detail.md`](code-review-detail.md).
+These never change as work progresses — striking a finding through does not remove it. Any drift
+means an edit went wrong. See "Integrity check" in `review-fix.md`.
 
-### Starting a session
+| Invariant | Value |
+|---|---|
+| Work items | **56** |
+| Items marked [LIVE] | **15** |
+| Findings assigned | **365** |
+| Findings unique | **365** |
+| Duplicate assignments | **0** |
+| Encoding-damage matches | **0** |
 
-> Read `docs/code-review.md`. Implement **items 1–7**. Follow the working protocol in that document, including the [LIVE] live-backend rule.
-
-That is the whole prompt. Items are self-contained and pre-sized — there is nothing to choose. Work them in numerical order unless you have a reason not to.
-
-Naming the [LIVE] rule explicitly is worth the extra clause: its failure mode is a *silent* one (a skipped suite reports green), so it is the instruction most likely to be satisfied without being followed.
-
-**Items are sizing units, not prompt units — batch them freely.** Ask for a range or a whole phase; get through what you can and stop cleanly at a commit boundary (protocol step 7). Over-asking is safe by design: every finished finding is already committed and struck through, so the next session resumes exactly where you stopped. A phase per prompt is a reasonable default.
-
-Two caveats worth respecting:
-- **Quality decays with context.** A session six items deep is worse at the seventh than a fresh one. Prefer 3–5 items per run over 15.
-- **Give these their own run:** item 5 (needs live-server verification mid-item) and item 20 (decompositions — must start from a clean tree).
-
-**Before any run that includes a [LIVE] item, establish a green baseline first:**
-
-```powershell
-./scripts/stalwart-up.ps1      # canonical ports; reuses a warm container
-dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration
+```sh
+sed -n '/^# WORK QUEUE/,/^# FINDINGS/p' docs/review-items.md > /tmp/q
+echo "items=$(grep -cE '^\*\*[0-9]+\. ' /tmp/q) live=$(grep -cE '^\*\*[0-9]+\..*\[LIVE\]' /tmp/q)"
+grep -E '^\*\*[0-9]+\. ' /tmp/q | grep -o '`[ABCDEFHKLSW][0-9]\+`' | tr -d '`' | sort > /tmp/f
+echo "assigned=$(wc -l </tmp/f) unique=$(sort -u /tmp/f|wc -l) dupes=$(uniq -d /tmp/f|wc -l)"
+grep -c $'\xc3\xa2\xc2\x80\|\xc3\xb0\xc2\x9f' docs/review-items.md
 ```
 
-Expect `Passed: 124, Skipped: 0`.
+---
 
-This is not redundant with step 5, and the reason matters: a non-[LIVE] item runs **unit tests only**, but plenty of them touch code the integration suite exercises — item 20 splits `SyncHandler`, item 21 changes session lifetime, item 22 rewrites `SyncStateService`. Any of those can break integration, pass their own unit tests, and commit clean. The breakage then sits undetected until the next [LIVE] item, which may be many commits later.
+## Orientation documents
 
-The baseline is what catches that, and it is also what tells you whether a failure came from your change or from something already broken. Three minutes here beats bisecting ten commits later — and it runs while you do other things.
+Read before touching the areas they cover — see "Orient before you start" in `review-fix.md`. These
+carry constraints the code does not state and a reasonable change will violate silently.
 
-Expect `Passed: 124, Skipped: 0`. Anything else means the environment, not your change.
-
-### Orchestrated mode — one subagent per item (recommended for a long run)
-
-A master session works the queue by spawning a **fresh subagent per item** and verifying each result
-before moving on. The master's context grows only by the coordination overhead, so quality does not
-decay across a long run the way it does in one continuous session — and unlike `/loop`, which
-accumulates context across iterations, this genuinely gives each item a clean slate.
-
-> Read `docs/code-review.md`. Work **items 5 through 14** as an orchestrator.
->
-> For each item in order: spawn **one subagent** told to implement that item following the working
-> protocol in this document. Run them **strictly sequentially** — never two at once; they would
-> collide in git and in this file.
->
-> When a subagent returns, **verify independently — do not trust its report**:
-> - run the integrity check from "Editing this document safely" (expect 56 / 15 / 365 / 365 / 0)
-> - confirm `git log` shows one commit per finding with the ID in the subject
-> - confirm the Part 1 cursor advanced, i.e. resume now returns the *next* item
-> - confirm the build is still 0 warnings, and for a [LIVE] item that integration tests **ran**
->   (`Passed: 124+, Skipped: 0`) rather than skipped
->
-> Then append an entry to `docs/code-review-results.md` in the established format, recording your
-> verification results and anything the subagent flagged. If a check fails, **stop and report** —
-> do not continue to the next item.
->
-> Bring Stalwart up first (`./scripts/stalwart-up.ps1`) if any item in the range is [LIVE].
-
-**"Verify, don't trust" is load-bearing, not boilerplate.** Item 1's subagent fixed, tested and
-committed all three findings correctly, and reported success truthfully — but marked them in Part 2
-only, so the cursor never advanced and the next session would have redone the item. Every check it
-ran passed. The check it did not run was the one that mattered. A master that reads the summary and
-moves on inherits exactly that class of failure.
-
-**The orchestrator never edits `src/` or `tests/`.** It coordinates, verifies and records — that is the whole role, and it is deliberately narrow. When a check fails, it has exactly three moves:
-
-1. **Establish whether the failure is real and whose it is** — bisect against the previous item's commit rather than reasoning about it. Cheap, and it converts an argument into a fact.
-2. **Spawn a repair subagent** with a tightly scoped brief (the failing tests, the suspected cause, "`src/` must stay untouched unless the finding itself was wrong"). A fresh context does the work; the orchestrator verifies the result the same way it verifies any item.
-3. **Stop and report** if the repair is not obviously in scope — a design decision, a behaviour change nobody signed up for, or anything touching a finding's correctness.
-
-It must not fix things itself. The orchestrator is the participant with the most accumulated context and the least room to think, and its value comes entirely from being an independent check on the workers. An orchestrator that starts authoring code is both the author and the reviewer, which is exactly the property the split exists to prevent.
-
-**Cap the orchestrator at ~8 items, then start a fresh one.** Subagents get a clean context per item;
-the orchestrator does not — it accumulates every worker report, verification dump and test summary.
-A run through items 5–11 reached **1.5M tokens over four hours**, and judgment degrades well before
-any hard limit. There is no handover cost: the Part 1 cursor is the state, so a new orchestrator
-picks up exactly where the last one stopped.
-
-**Keep the worker brief short — point at the document, do not restate it.** The prompt should name
-the item, the findings still outstanding on its Part 1 line, and anything genuinely not in the
-document (a resumed item, a stash, an environment quirk). Everything else the worker reads here.
-
-Resist the urge to paste finding text into the prompt. It looks like a saving and is not: reading
-this document is a fraction of a fresh context, while restating it costs two things that matter. The
-orchestrator's own context degrades across a run, so its summaries get worse exactly as the run goes
-on — a tired session briefing a fresh one, which is backwards. And this document is *live*: findings
-gain notes as items land (`D2`'s forced re-sync, `H7`'s settled semantics), and a worker reading a
-paste from an hour ago cannot see them.
-
-**Interrupt at any point.** Whatever is committed and struck through stays done, and the same prompt resumes from there — this document is the cursor, so nothing needs to survive between sessions.
-
-> **Do not use `/loop` for this queue.** It accumulates context across iterations rather than starting each one clean, so a long run degrades exactly the way a single over-long session does — without the visibility. Orchestrated mode above is the replacement, and it is what the results log is written for.
-
-### Standing context for any session
-
-- **Breaking changes are acceptable.** This is not deployed anywhere outside testing, and the published packages have no external consumers. Item 17 in particular is an intentional breaking Contracts change — take it.
-- **Do not push.** Commit freely; pushing is a human decision.
-- **The build baseline is 0 warnings.** Treat a new warning as a failure.
-
-### Orient before you start
-
-**Read [`AGENTS.md`](../AGENTS.md) for the areas you are about to touch, before you touch them.** Its "Solution layout and dependency rule" section is the authority on which assembly may reference which; "Protocol layer invariants" is a hard gate on anything under `src/ActiveSync.Protocol/`; there are per-layer sections for the backends, server and web UI. [`README.md`](../README.md) is worth a skim when entering an area you have not worked in.
-
-These are not background reading. They carry constraints the code does not state and a reasonable change will violate silently — the dependency direction, "every code-page table change needs a round-trip test", the OPAQUE marker attribute every producer and consumer relies on, decisions already taken and their reasons.
-
-**Structural items make this mandatory.** Items 15–20 move types between assemblies, change the published plugin contract, and split large types — that work *is* the architecture document, executed. Doing it without reading it is guessing.
-
-If `AGENTS.md` contradicts a finding, **stop and report it**. One of the two is wrong, and that is a decision for a human.
-
-### Working protocol — follow this for every item
-
-**1. Work findings in the order listed.** Where an item carries a sequencing constraint (item 5 / `H7`), honour it.
-
-**2. Commit after each finding, or each tight cluster of related findings.** Put the ID in the subject:
-
-```
-fix(imap): scope EXPUNGE to the deleted UID (D1)
-```
-
-Small commits are the point — they make the work resumable and each finding independently revertible. Do not batch a whole item into one commit.
-
-**3. Mark the finding in this document in the same commit — in PART 1, on the item's own line.** That line is the cursor: the next session resolves where to resume by finding the lowest-numbered Part 1 item with un-struck findings. A finding marked only in Part 2 leaves the cursor untouched, and the item gets done twice.
-
-```
-**1. IMAP mailbox safety** [LIVE] — ~~`D1`~~ ~~`D2`~~ ~~`D17`~~ **COMPLETE**
-```
-
-Use `~~`D1`~~ **N/A** — <one line why>` for a finding that no longer applies. Two rules:
-
-- **Keep the backticks inside the strikethrough.** The integrity check finds findings by `` `ID` ``, so dropping them makes a finding invisible to verification.
-- **No commit hash.** It cannot be written in the same commit it names — amending to add it changes the hash it just recorded. The commit subject already carries the ID, so `git log --grep='(D1)'` locates it exactly.
-
-Annotating the Part 2 entry as well is welcome — that is the right home for anything a future reader needs (a breaking-change note, a caveat about what a test does and does not prove). It is a supplement to the Part 1 mark, never a substitute.
-
-**4. If you moved or renamed code other findings reference, fix their `file:line` anchors.** You are the only one who will know where it went. If it invalidates a whole item, add a row to the re-verify table below.
-
-**5. Build before each commit; test at two different scopes.** The build is ~16s and the baseline is **0 warnings** — run `dotnet build ActiveSync.slnx` every time and keep it there.
-
-Testing splits deliberately, because commits are per finding and full suites are not:
-
-| When | What | Cost |
+| Document | Read before touching | Contains |
 |---|---|---|
-| **Before each commit** | only the test(s) for *this finding*, via `--filter` | ~5 s |
-| **Once, before the item's last commit** | full unit suite, plus integration if [LIVE] or per the rule below | ~1–4 min |
+| [`AGENTS.md`](../AGENTS.md) | **any structural work** (items 15–20) | Solution layout and the dependency rule; per-layer invariants; coding conventions; decisions already taken and why |
+| [`README.md`](../README.md) | first item in an unfamiliar area | what the project is, how the pieces fit |
+| [`docs/testing.md`](testing.md) | any [LIVE] item | backend stacks, how the suites skip, which runner to use |
+| [`docs/plugins.md`](plugins.md) | items 15–17 | the published plugin contract |
 
-Do **not** run a full suite per finding. With one commit per finding that is the same suite re-run a dozen times in an item, and it is where item time disappears — see "Test economy" below for the numbers.
+**Hard gates:**
 
-**6. Write the failing test first, then fix.** Red-green, in this order:
+- `AGENTS.md` § *Protocol layer invariants* — **read before touching `src/ActiveSync.Protocol/`.**
+  Code-page tables are transcribed from MS-ASWBXML: never guess, and **every table change needs a
+  round-trip test**. The OPAQUE marker attribute is a convention every producer and consumer relies on.
+- `AGENTS.md` § *Solution layout and dependency rule* — the authority on which assembly may reference
+  which. Items 15–20 are this section executed.
 
-1. Write the reproducer against the **unmodified** code and run it. Watch it fail, with the symptom the finding describes.
-2. Only then apply the fix.
-3. Re-run — it should pass, and the rest of the suite with it.
+If an orientation document contradicts a finding, **stop and report it**. One of the two is wrong,
+and that is a human decision.
 
-A test that passes both with and without the fix documents behaviour but proves nothing, and a finding struck through on the strength of it is a false record. Writing it first makes that impossible to miss: a reproducer that goes green before you have fixed anything is telling you it does not reproduce the defect.
+---
 
-**Do not write the fix first and verify by reverting it.** Item 2 shows both ways that fails: two `W1` reproducers were written after the fix and passed without it (unclosed nesting threw "unclosed elements remain" before ever reaching the cap), and `W4` could not be reverted at all — the fix had changed the signature, so the revert did not compile and the proof had to be simulated by neutering the bound in place. Test-first has neither problem.
+## Project commands
 
-When a finding genuinely cannot be reproduced — a race with no deterministic trigger, or a symptom the test backend does not exhibit — keep the test as coverage and **label it as such** in both the test comment and the Part 2 note, then strike the finding through on the strength of the *fix*, not the test. Do not leave a coverage test looking like proof. Worked examples: `D17` (Stalwart drains the pending `EXISTS`, so the stale-count symptom never bites) and `W5` (an allocation count is not observable from a round trip).
-
-### [LIVE] Items requiring live-backend verification
-
-Items marked [LIVE] change behaviour against a real IMAP/JMAP/DAV server. Unit tests cannot confirm these.
-
-Bring Stalwart up on the **canonical** ports once, then test normally — no environment setup, no wrapper:
+**Build** — baseline is **0 warnings**; treat any new one as a failure:
 
 ```powershell
-./scripts/stalwart-up.ps1                    # Windows  (-Build to rebuild, -Down to stop)
-dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration
+dotnet build ActiveSync.slnx
 ```
 
-```bash
-scripts/stalwart-up.sh                       # Linux / devcontainer  (-b, -d)
-```
-
-`stalwart-up` reuses a warm container (it does not pass `--build`), so it costs seconds after the first run, and it verifies all four canonical ports are actually published before handing back. Leave the stack up across items — only `-Down` when you are finished with the [LIVE] items.
-
-Reference numbers for a green tree: **124 tests, 124 passed, 0 skipped, ~2.5 min.** If your run reports far fewer, or a large Skipped count, the backend is not reachable — see below.
-
-`scripts/test-fast` also exists and additionally covers Axigen, but it rebuilds and recreates both stacks on every invocation and requires `AS_TEST_*` overrides. It is the right tool for a pre-merge check across backends, not for iterating. **Do not alternate between the two** — they drive the same compose project on different port sets, so each switch recreates the container.
-
-> **NOTE — a skipped suite exits 0 and looks exactly like a passing one.**
->
-> Every integration test is a `[BackendFact]`, which xunit turns into a **skip** when `TestBackend`'s IMAP probe fails. A run where nothing is reachable therefore reports **green** having verified nothing — the single easiest way to strike a Critical through unverified.
->
-> This is not hypothetical. If the stack is on the dedicated ports (because `test-fast` last touched it), or a shell still has `STALWART_*` exported, the canonical ports are closed and a plain `dotnet test` skips everything. `stalwart-up` exists partly to make that state impossible: it clears those variables and fails loudly if the four ports are not published.
->
-> **A green run is not proof.** For a [LIVE] item, read the **passed/skipped counts**, not the exit code. Against a green tree you should see `Passed: 124, Skipped: 0`. If passed is 0, or skipped is large, fix the environment and re-run. Do **not** strike a finding through on a skipped suite.
-
-**[LIVE] items:** 1 · 3 · 4 · 5 · 6 · 26 · 27 · 28 · 30 · 32 · 33 · 34 · 36 · 38 · 42
-
-**But [LIVE] is a floor, not the whole rule.** Run the integration suite for *any* item that lands an EF migration, changes authentication or cookie policy, or alters the HTTP pipeline — marked or not. Item 8 (not [LIVE]) is why: its `C2` cookie-policy fix broke **23 integration tests** while every unit suite stayed green. The worker was correct to run unit tests only; the orchestrator ran integration anyway on the strength of the migration and caught it. Undetected, it would have surfaced at item 26 — eighteen items later, with eighteen items to bisect.
-
-### Test economy — do not run full suites per finding
-
-The full integration suite is ~3 minutes and the full unit suite ~1 minute. Running both for the red *and* the green of every finding is where item time disappears: an 8-finding item costs **over an hour of pure test execution** for perhaps twenty minutes of work, and run fourteen checks nothing run two didn't.
-
-**Per finding (red-green), run only the test you just wrote:**
+**Single test** — run per finding for red-green (seconds):
 
 ```powershell
 dotnet test tests/ActiveSync.Core.Tests --filter "FullyQualifiedName~YourNewTestName"
 dotnet test tests/ActiveSync.Integration.Tests --filter "FullyQualifiedName~YourNewTestName"
 ```
 
-Seconds, not minutes. It is the only test whose red-then-green transition you are proving.
-
-**Once per item, before the final commit,** run the full suites and report their counts:
+**Unit suite** — run once per item, before the last commit (~25 s):
 
 ```powershell
-dotnet build ActiveSync.slnx                                                    # expect 0 warnings
-dotnet test ActiveSync.slnx --filter "Category!=Integration"                    # full unit suite
-dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration    # if [LIVE] or per the rule above
+dotnet test ActiveSync.slnx --filter "Category!=Integration"
 ```
 
-Regression protection comes from that final run, not from repeating it per finding. This is roughly a **12× reduction** in test time with no loss of coverage.
+Baseline at `ce6259c` was 543 passed, 0 skipped; it grows as items add tests. The last verified
+figure is in the most recent [`review-results.md`](review-results.md) entry.
 
-**7. If you run low on context, stop at a commit boundary** and report exactly which findings are done and which are untouched. Do not start a finding you cannot finish and verify. Because of steps 2–3, stopping early costs nothing — the next session resumes from this document.
+**Live suite** — required for [LIVE] items, **and** for any item landing an EF migration, changing
+auth or cookie policy, or altering the HTTP pipeline:
 
-**8. Stay inside the item.** If you spot something outside it, note it at the bottom of Part 2 as a new finding rather than fixing it inline.
-
-**9. When a test fails, first establish whose failure it is.** Do not start fixing until you know:
-
-```sh
-git stash -u && dotnet test <the failing suite>; git stash pop
+```powershell
+./scripts/stalwart-up.ps1      # canonical ports; reuses a warm container, ~15 s
+dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration
 ```
 
-- **Green without your change → yours.** Fix it. It is inside your item, you have full context on what you just did, and you are the freshest participant in the system. This includes a test harness that your change legitimately broke — but if you touch `tests/` infrastructure, say so explicitly in your report, prove `src/` is untouched with a diffstat, and add a guard test so the accommodation cannot become a blind spot for the very finding you just fixed.
-- **Red without your change → not yours.** Stop. Commit nothing further, report the failure with both counts, and say plainly that it predates your work. Do not fix it, and do not work around it.
+Baseline at `ce6259c` was 124 passed, **0 skipped**, ~2.5 min; it grows as items add live tests.
 
-Never disable, skip or weaken a test to get green. If a test genuinely encodes obsolete behaviour that your finding changes, rewrite it and call that out as a behaviour change in your report and the Part 2 note.
+**Environment gotchas:**
 
-### Running items in parallel
+- **A skipped suite exits 0 and looks exactly like a passing one.** Every integration test is a
+  `[BackendFact]` that xunit turns into a *skip* when the IMAP probe fails. Read the passed/skipped
+  counts, never the exit code.
+- `stalwart-up` puts Stalwart on the **canonical** ports (143/587/4190/5232), which are
+  `TestBackend`'s built-in defaults — so no `AS_TEST_*` setup is needed. It clears any `STALWART_*`
+  left exported by `test-fast` and fails loudly if a port is unpublished.
+- `scripts/test-fast` also covers Axigen but rebuilds and recreates both stacks every run and needs
+  `AS_TEST_*` overrides. **Do not alternate between the two** — same compose project, different port
+  sets, so each switch recreates the container.
 
-Don't, by default — items are ordered partly because they overlap. Several touch the same files from different angles (`SyncHandler.cs` appears in items 6, 32 and 20; `SyncStateService.cs` in 22, 23 and 20).
+---
 
-If you do want two at once, these are close to file-disjoint: **2** (Protocol/WBXML) · **8–9** (WebUi) · **28** (Jmap/Dav). **Item 20** (decompositions) must run alone on a clean tree.
+## Standing context
 
-### NOTE — Locating a finding after code has moved
+- **Breaking changes are acceptable.** Not deployed anywhere outside testing, and the published
+  packages have no external consumers. Item 17 in particular is an intentional breaking Contracts
+  change — take it.
+- **Do not push.** Commit freely; pushing is a human decision.
+- **The build baseline is 0 warnings.** Treat a new warning as a failure.
+- **Do not touch `review-results.md`** — the orchestrator owns it.
 
-**Every `file:line` in this document is exact as of commit `ce6259c`** (the last commit touching `src/` before the review; everything after is docs-only). **Line numbers are a hint, not an address.** They drift as soon as one item lands, and two items invalidate them wholesale:
+---
 
-- **Item 15–17** move types between assemblies. After them, findings referencing `WireLog`, `TransientRetry`, `BackendConfigField`, `IBackendSession`, `MergedFreeBusy`, `CollectionDiff` and the `ActiveSync.Crypto` types point at the **wrong project**, not just the wrong line.
-- **Item 20** splits `SyncHandler.cs` (826 lines) into six partials. Every `SyncHandler.cs:NNN` reference — items 6, 26, 32 and 35 all have them — lands in a file that no longer holds that code.
-
-**Locate by symbol, not by line.** Each finding names the enclosing type and member, and most quote the offending expression. Grep for that first; use the line number only to disambiguate between several hits in one file.
-
-**Before editing, confirm the defect is still there.** An earlier item may have already fixed, moved or obsoleted it:
-
-| If you already did | Re-verify before starting |
-|---|---|
-| items 15–17 (assembly moves) | anything referencing Core↔Contracts↔Crypto types |
-| item 20 (decompositions) | items 6, 26, 32, 35 |
-| item 21 (session lease) | `A2` `A11` `A12` `A24` `D27` `D28` |
-| items 22–23 (state layer) | `A1` `A3` `A4` `A9` `A10` `A18` `A19` |
-| item 13 (unified redaction) | `L29` `L30` `E15` `C5` `B5` |
-
-The baseline is pinned so git can trace where something went:
-
-```sh
-git show ce6259c:src/ActiveSync.Server/Eas/Handlers/SyncHandler.cs | sed -n '780,830p'   # what the review saw
-git log -L 780,830:src/ActiveSync.Server/Eas/Handlers/SyncHandler.cs --oneline           # how it changed since
-git diff ce6259c..HEAD -- src/ActiveSync.Core/Backend/                                   # everything that moved in an area
-```
-
-### Editing this document safely
-
-You will edit this file on every item, so know the two traps — both have already corrupted it once.
-
-**Do not use `perl -i -pe` on this file.** It double-encodes UTF-8: every `—` becomes `Ã¢Â€Â"` mojibake on any line it rewrites. Use the Edit tool (encoding-safe). `sed` is fine for byte-level surgery.
-
-**Do not pattern-match `^\*\*(\d+)\. ` across the whole file.** The working-protocol steps above use the *identical* format to queue items, so a global match hits `**3. Mark the finding…**` as well as `**3. Contact, vCard & iTIP integrity**`. Anchor to the queue first:
-
-```sh
-sed -n '/^# PART 1/,/^# PART 2/p' docs/code-review.md
-```
-
-**Verify after any scripted edit** — run from the repo root:
-
-```sh
-# structure: expect 56 items, 15 [LIVE]
-sed -n '/^# PART 1/,/^# PART 2/p' docs/code-review.md > /tmp/p1
-echo "items=$(grep -cE '^\*\*[0-9]+\. ' /tmp/p1) live=$(grep -cE '^\*\*[0-9]+\..*\[LIVE\]' /tmp/p1)"
-
-# findings: expect 365 assigned, 0 duplicates (count holds — strikethrough keeps the ID)
-grep -E '^\*\*[0-9]+\. ' /tmp/p1 | grep -o '`[ABCDEFHKLSW][0-9]\+`' | tr -d '`' | sort > /tmp/v
-echo "assigned=$(wc -l < /tmp/v) unique=$(sort -u /tmp/v | wc -l) dupes=$(uniq -d /tmp/v | wc -l)"
-
-# encoding: expect 0 on both — double-encoded UTF-8, and any stray emoji
-grep -c $'\xc3\xa2\xc2\x80\|\xc3\xb0\xc2\x9f' docs/code-review.md
-grep -c $'\xf0\x9f\|\xe2\x9a\xa0' docs/code-review.md
-```
-
-All five numbers are invariant for the life of this document — striking a finding through does not remove it, so the counts never legitimately change. Any drift means an edit went wrong.
-
-### Keeping this document current
-
-Protocol steps 3 and 4 cover the mechanics. Why they matter:
-
-**Never delete a finding — strike it through.** IDs are referenced by other items, by the re-verify table, and by any session started before the fix landed. A deleted ID turns those into dangling references; a struck-through one stays readable.
-
-**Updating the doc is part of the work, not paperwork.** It is what makes an item resumable and what stops the next session chasing an anchor into a file that no longer holds the code.
-
-# PART 1 — WORK QUEUE
+# WORK QUEUE
 
 **56 items, each sized for one session, in the order to run them.** Say *"Implement item 12"* — no sub-choices, no sizing decisions. Phase headings are context only; the numbering is a straight line.
 
@@ -502,9 +322,9 @@ Items **1–14** are the ones that matter for a system anyone else runs: data lo
 ---
 ---
 
-# PART 2 — FULL FINDING LIST
+# FINDINGS
 
-*(Areas A–D are recorded in full detail in [`code-review-detail.md`](code-review-detail.md); summarized here for completeness. Areas E–W are given in full below.)*
+*(Areas A–D are recorded in full detail in [`review-items-detail.md`](review-items-detail.md); summarized here for completeness. Areas E–W are given in full below.)*
 
 ## Area A — Core: State / Sync / Backend (35)
 `A1` **High** Folder-registry retry detaches the entire change tracker, dropping the tracked `Device.FolderSyncKey++` while the client is acked with the incremented value — `State/SyncStateService.cs:176`. Detach only `Entries<UserFolder>()`, or use a dedicated context.
