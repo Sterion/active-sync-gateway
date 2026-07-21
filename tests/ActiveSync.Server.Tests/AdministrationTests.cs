@@ -35,6 +35,29 @@ public sealed class AdministrationTests
 		Assert.Contains("not a valid", error);
 	}
 
+	// L43 — the gateway-vs-backend password distinction is an explicit flag now, not inferred from
+	// whether the field key contains a ':'. This guards that the flag matches the old heuristic's
+	// (correct) answers, so callers can rely on it instead of string-sniffing.
+	[Fact]
+	public void FieldPath_MarksOnlyTheGatewayPasswordAsGatewayPassword()
+	{
+		AccountFieldPaths.FieldPath gateway = AccountFieldPaths.Find("Password")!;
+		Assert.True(gateway.IsSecret);
+		Assert.True(gateway.IsGatewayPassword);
+
+		foreach (string backendKey in AccountFieldPaths.BackendSecretKeys)
+		{
+			AccountFieldPaths.FieldPath backend = AccountFieldPaths.Find(backendKey)!;
+			Assert.True(backend.IsSecret);
+			Assert.False(backend.IsGatewayPassword);
+		}
+
+		// A non-secret field is neither.
+		AccountFieldPaths.FieldPath mail = AccountFieldPaths.Find("MailAddress")!;
+		Assert.False(mail.IsSecret);
+		Assert.False(mail.IsGatewayPassword);
+	}
+
 	[Fact]
 	public void AdminFlag_JsonRoundTrip_AndLegacyRowsDeserializeAsUnset()
 	{

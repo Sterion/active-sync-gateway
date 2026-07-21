@@ -247,8 +247,7 @@ internal sealed class UserSetCommand(IAnsiConsole terminal) : UserCommandBase<Us
 	private static async Task<string?> PrepareSecretAsync(
 		AccountFieldPaths.FieldPath field, string raw, ActiveSyncOptions options)
 	{
-		bool isGatewayPassword = !field.Key.Contains(':');
-		AccountSecretPolicy.SecretResult result = isGatewayPassword
+		AccountSecretPolicy.SecretResult result = field.IsGatewayPassword
 			? AccountSecretPolicy.PrepareGatewayPassword(raw)
 			: AccountSecretPolicy.PrepareBackendPassword(raw, options.Encryption, field.Key);
 		if (result.Error is not null)
@@ -346,7 +345,7 @@ internal sealed class UserSecretCommand(IAnsiConsole terminal)
 		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
 		AccountFieldPaths.FieldPath? field = AccountFieldPaths.Find(settings.Key);
-		if (field is null || !field.IsSecret || !field.Key.Contains(':'))
+		if (field is null || !field.IsSecret || field.IsGatewayPassword)
 		{
 			await Console.Error.WriteLineAsync(
 				$"'{settings.Key}' is not a backend password field. " +

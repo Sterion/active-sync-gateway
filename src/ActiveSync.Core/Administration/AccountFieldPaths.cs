@@ -18,7 +18,15 @@ internal static class AccountFieldPaths
 		string Key,
 		Type ValueType,
 		bool IsSecret,
-		Action<AccountOptions, object?> Set);
+		Action<AccountOptions, object?> Set)
+	{
+		/// <summary>
+		///   True only for the gateway login password (hashed via pbkdf2); false for the per-role
+		///   backend passwords (sealed via enc:v1:) and for non-secret fields. An explicit flag so
+		///   callers stop inferring "gateway vs backend" from the absence of a ':' in the key (L43).
+		/// </summary>
+		public bool IsGatewayPassword { get; init; }
+	}
 
 	internal static IReadOnlyCollection<string> Keys { get; } =
 	[
@@ -40,7 +48,7 @@ internal static class AccountFieldPaths
 				(account, value) => account.MailAddress = (string?)value);
 		if (key.Equals("Password", StringComparison.OrdinalIgnoreCase))
 			return new FieldPath("Password", typeof(string), true,
-				(account, value) => account.Password = (string?)value);
+				(account, value) => account.Password = (string?)value) { IsGatewayPassword = true };
 		if (key.Equals("Admin", StringComparison.OrdinalIgnoreCase))
 			return new FieldPath("Admin", typeof(bool?), false,
 				(account, value) => account.Admin = (bool?)value);
