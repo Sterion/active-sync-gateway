@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using ActiveSync.Contracts;
 using ActiveSync.Protocol.Wbxml;
 using MimeKit;
 using MimeKit.Text;
@@ -94,22 +95,24 @@ public static class DraftMessageBuilder
 		XElement? attachmentsElement = applicationData.Element(ASB + "Attachments");
 		List<MimeEntity> result = new();
 
-		// Carried-over existing attachments, minus explicit deletes (matched by file name in
-		// the FileReference tail — our mail FileReferences end in the attachment index, but
-		// draft clients send back what we gave them; missing matches simply keep everything).
-		HashSet<string> deletedNames = attachmentsElement?
+		// Carried-over existing attachments, minus explicit deletes. Every FileReference we mint
+		// is DelimitedKey(folderKey, itemKey, attachmentIndex), and that index counts into
+		// MimeMessage.Attachments — the same order this loop walks — so match on the index.
+		// Matching on the file-name tail instead treated an attachment with NO name (inline
+		// images, message/rfc822 parts) as a suffix of every reference, so one unrelated
+		// <Delete> dropped all of them. A reference we did not mint keeps everything.
+		HashSet<int> deletedIndexes = attachmentsElement?
 			.Elements(ASB + "Delete")
-			.Select(d => d.Element(ASB + "FileReference")?.Value ?? "")
-			.Where(v => v.Length > 0)
-			.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+			.Select(d => ParseAttachmentIndex(d.Element(ASB + "FileReference")?.Value ?? ""))
+			.Where(i => i >= 0)
+			.ToHashSet() ?? [];
 		if (existing is not null)
+		{
+			int index = 0;
 			foreach (MimeEntity entity in existing.Attachments)
-			{
-				string name = entity.ContentDisposition?.FileName
-				              ?? (entity as MimePart)?.FileName ?? "";
-				if (!deletedNames.Any(d => d.EndsWith(name, StringComparison.OrdinalIgnoreCase)))
+				if (!deletedIndexes.Contains(index++))
 					result.Add(entity);
-			}
+		}
 
 		if (attachmentsElement is null)
 			return result;
@@ -144,5 +147,16 @@ public static class DraftMessageBuilder
 		}
 
 		return result;
+	}
+
+	/// <summary>
+	///   The trailing attachment index of a mail FileReference — the shape both mail backends
+	///   mint via <c>DelimitedKey.Encode(folderKey, itemKey, index)</c>. Returns -1 for anything
+	///   else, which the caller reads as "matches nothing" rather than guessing at a target.
+	/// </summary>
+	private static int ParseAttachmentIndex(string fileReference)
+	{
+		string[]? parts = DelimitedKey.Decode(fileReference, 3);
+		return parts is not null && int.TryParse(parts[2], out int index) ? index : -1;
 	}
 }

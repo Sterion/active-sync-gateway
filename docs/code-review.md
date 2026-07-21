@@ -241,7 +241,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **3. Contact, vCard & iTIP integrity** [LIVE] — ~~`D4`~~ ~~`D6`~~ ~~`D7`~~ ~~`D22`~~ ~~`D23`~~ **COMPLETE**
 > `D4` a ghosted contact Change wipes name, emails, address, photo, note. `D6`/`D7` are injection (vCard line, iCalendar CRLF). All in `ContactConverter` + `ImipMailBuilder`.
 
-**4. Draft & MIME building** [LIVE] — `D15` `D16`
+**4. Draft & MIME building** [LIVE] — ~~`D15`~~ `D16`
 > `DraftMessageBuilder` only. Unnamed-attachment delete removes all unnamed attachments; attachments lose content type and the HTML alternative is dropped on merge.
 
 **5. JMAP converter semantics** [LIVE] — `H7` **then** `H4` `H5` `H6` `H23`
