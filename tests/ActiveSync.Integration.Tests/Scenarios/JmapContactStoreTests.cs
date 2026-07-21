@@ -125,6 +125,37 @@ public sealed class JmapContactStoreTests
 		}
 	}
 
+	/// <summary>
+	///   H6 — the birthday was written into <c>anniversaries/b/date/utc</c> and read back out of
+	///   <c>anniversaries/b/date/date</c>, so it never survived a round trip. Live, because the
+	///   unit test cannot show that the server also stores and returns the member.
+	/// </summary>
+	[JmapGroupwareFact]
+	public async Task Contact_Birthday_RoundTripsThroughTheServer()
+	{
+		JmapContactStore store = Store();
+		string folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].BackendKey;
+
+		string surname = $"Bday{Guid.NewGuid():N}"[..11];
+		(string itemKey, _) = await store.CreateItemAsync(folderKey, new XElement("ApplicationData",
+			new XElement(C + "FirstName", "Ada"),
+			new XElement(C + "LastName", surname),
+			new XElement(C + "Birthday", "1815-12-10T00:00:00.000Z")), CancellationToken.None);
+
+		try
+		{
+			BackendItem? item =
+				await store.GetItemAsync(folderKey, itemKey, BodyPreference.PlainText, CancellationToken.None);
+			string? birthday = item!.ApplicationData.FirstOrDefault(e => e.Name.LocalName == "Birthday")?.Value;
+			Assert.NotNull(birthday);
+			Assert.StartsWith("1815-12-10", birthday);
+		}
+		finally
+		{
+			await store.DeleteItemAsync(folderKey, itemKey, CancellationToken.None);
+		}
+	}
+
 	[JmapGroupwareFact]
 	public async Task GalSearch_FindsCreatedContact()
 	{

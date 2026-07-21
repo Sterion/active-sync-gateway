@@ -72,6 +72,43 @@ public class JsContactConverterTests
 		Assert.Equal("preserve-me", rebuilt.GetProperty("x-custom").GetString());
 	}
 
+	// H6 — the birthday was written into anniversaries/b/date/utc and read back out of
+	// anniversaries/b/date/date, a member nothing ever wrote, so it silently never appeared again.
+	[Fact]
+	public void Birthday_SurvivesTheRoundTrip()
+	{
+		XElement app = new("ApplicationData",
+			new XElement(C + "FirstName", "Ada"),
+			new XElement(C + "LastName", "Lovelace"),
+			new XElement(C + "Birthday", "1815-12-10T00:00:00.000Z"));
+
+		Dictionary<string, object?> card = JsContactConverter.FromApplicationData(app, null);
+		List<XElement> back =
+			JsContactConverter.ToApplicationData(JsonSerializer.SerializeToElement(card), BodyPreference.PlainText);
+
+		string? birthday = back.FirstOrDefault(e => e.Name.LocalName == "Birthday")?.Value;
+		Assert.NotNull(birthday);
+		Assert.StartsWith("1815-12-10", birthday);
+	}
+
+	// Both JSContact date shapes must be readable: RFC 9553 allows a PartialDate as well as a
+	// Timestamp, and a server may hand back either.
+	[Theory]
+	[InlineData("""{ "@type": "Timestamp", "utc": "1815-12-10T00:00:00Z" }""")]
+	[InlineData("""{ "@type": "PartialDate", "year": 1815, "month": 12, "day": 10 }""")]
+	public void Birthday_IsReadFromEitherDateShape(string dateJson)
+	{
+		string cardJson = $$"""
+		{ "@type": "Card", "version": "1.0", "kind": "individual",
+		  "anniversaries": { "b": { "@type": "Anniversary", "kind": "birth", "date": {{dateJson}} } } }
+		""";
+		List<XElement> data =
+			JsContactConverter.ToApplicationData(JsonDocument.Parse(cardJson).RootElement, BodyPreference.PlainText);
+		string? birthday = data.FirstOrDefault(e => e.Name.LocalName == "Birthday")?.Value;
+		Assert.NotNull(birthday);
+		Assert.StartsWith("1815-12-10", birthday);
+	}
+
 	[Fact]
 	public void RoundTrip_EasToJsContactToEas_PreservesFields()
 	{

@@ -132,10 +132,8 @@ public static class JsContactConverter
 
 		foreach (JsonElement anniversary in Values(card, "anniversaries"))
 			if (Str(anniversary, "kind") == "birth" &&
-			    anniversary.TryGetProperty("date", out JsonElement date) && Str(date, "date") is { } bday &&
-			    DateTime.TryParse(bday, System.Globalization.CultureInfo.InvariantCulture,
-				    System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
-				    out DateTime parsed))
+			    anniversary.TryGetProperty("date", out JsonElement date) &&
+			    AnniversaryDate(date) is { } parsed)
 				data.Add(new XElement(Contacts + "Birthday", EasDateTime.ToLong(parsed)));
 
 		string? note = Values(card, "notes").Select(n => Str(n, "note")).FirstOrDefault(n => !string.IsNullOrEmpty(n));
@@ -259,6 +257,7 @@ public static class JsContactConverter
 			{
 				["b"] = new Dictionary<string, object?>
 				{
+					["@type"] = "Anniversary",
 					["kind"] = "birth",
 					["date"] = new Dictionary<string, object?>
 					{
@@ -320,7 +319,45 @@ public static class JsContactConverter
 		};
 	}
 
+	/// <summary>
+	///   Reads an RFC 9553 <c>Anniversary.date</c>, which is either a <c>Timestamp</c> (a
+	///   <c>utc</c> date-time string) or a <c>PartialDate</c> (year/month/day numbers, no zone).
+	///   The old reader looked for a <c>date</c> *string* member, which is neither shape and which
+	///   nothing on the write side ever produced — so a birthday round-tripped to nothing at all.
+	///   A bare <c>date</c> string is still accepted, since it costs one line and some servers
+	///   have shipped it.
+	/// </summary>
+	private static DateTime? AnniversaryDate(JsonElement date)
+	{
+		if (date.ValueKind != JsonValueKind.Object)
+			return null;
+
+		foreach (string member in (string[])["utc", "date", "local"])
+			if (Str(date, member) is { } text &&
+			    DateTime.TryParse(text, System.Globalization.CultureInfo.InvariantCulture,
+				    System.Globalization.DateTimeStyles.AssumeUniversal |
+				    System.Globalization.DateTimeStyles.AdjustToUniversal, out DateTime parsed))
+				return parsed;
+
+		// PartialDate: a missing year or month makes the date unusable as an EAS Birthday (which
+		// is a full timestamp), so all three are required rather than guessed at.
+		if (Int(date, "year") is { } year && Int(date, "month") is { } month && Int(date, "day") is { } day &&
+		    year is >= 1 and <= 9999 && month is >= 1 and <= 12 && day >= 1 &&
+		    day <= DateTime.DaysInMonth(year, month))
+			return new DateTime(year, month, day, 0, 0, 0, DateTimeKind.Utc);
+
+		return null;
+	}
+
 	// ---------- JSON helpers ----------
+
+	private static int? Int(JsonElement element, string property)
+	{
+		return element.TryGetProperty(property, out JsonElement v) && v.ValueKind == JsonValueKind.Number &&
+		       v.TryGetInt32(out int i)
+			? i
+			: null;
+	}
 
 	private static IEnumerable<JsonElement> Values(JsonElement card, string property)
 	{
