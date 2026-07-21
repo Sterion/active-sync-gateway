@@ -1,3 +1,4 @@
+using System.Text;
 using System.Xml.Linq;
 using ActiveSync.Backends.Converters;
 using ActiveSync.Contracts;
@@ -168,6 +169,31 @@ public class ContactConverterTests
 			new XElement(Contacts + "Picture", "not base64 at all!!")), "c-11", null);
 
 		Assert.DoesNotContain("PHOTO", card);
+	}
+
+	[Fact]
+	public void Folding_CountsOctets_AndNeverSplitsASurrogatePair()
+	{
+		// D23 — RFC 6350 §3.2 specifies 75 OCTETS. Folding at 75 CHARS produces over-long
+		// lines for any non-ASCII, and `sb.Append(line, 0, width)` could cut between the two
+		// halves of a surrogate pair, leaving an unpaired surrogate that corrupts the UTF-8
+		// encoding of the stored card. Emoji are 2 UTF-16 units / 4 UTF-8 octets, so a run of
+		// them straddles the boundary at both.
+		string note = string.Concat(Enumerable.Repeat("😀", 60));
+		string card = ContactConverter.FromApplicationData(AppData(
+			new XElement(AirSyncBase + "Body", new XElement(AirSyncBase + "Data", note))), "c-12", null);
+
+		foreach (string line in card.Split("\r\n"))
+		{
+			Assert.True(Encoding.UTF8.GetByteCount(line) <= 75,
+				$"line is {Encoding.UTF8.GetByteCount(line)} octets: {line}");
+			// An unpaired surrogate does not survive a UTF-8 round trip (it encodes to '?').
+			Assert.Equal(line, Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(line)));
+		}
+
+		// Unfolding must give the note back byte-for-byte — no dropped or mangled code points.
+		string unfolded = card.Replace("\r\n ", "");
+		Assert.Contains($"NOTE:{note}", unfolded);
 	}
 
 	[Fact]

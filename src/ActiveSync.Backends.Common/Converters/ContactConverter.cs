@@ -432,21 +432,48 @@ public static class ContactConverter
 		AppendFolded(sb, $"{property}:{(preEscaped ? value : Escape(value))}");
 	}
 
+	/// <summary>
+	///   Folds at 75 OCTETS per RFC 6350 §3.2 — not 75 chars, which over-runs the limit for any
+	///   non-ASCII content — and only ever on a code-point boundary, so a surrogate pair (an
+	///   emoji in a note) is never split into an unpaired half that corrupts the card's UTF-8.
+	///   Continuation lines carry a leading space, which counts toward their 75.
+	/// </summary>
 	private static void AppendFolded(StringBuilder sb, string line)
 	{
 		const int width = 75;
-		if (line.Length <= width)
+		int start = 0;
+		bool first = true;
+		do
 		{
-			sb.Append(line).Append("\r\n");
-			return;
+			int take = TakeUtf8(line, start, first ? width : width - 1);
+			if (!first)
+				sb.Append(' ');
+			sb.Append(line, start, take).Append("\r\n");
+			start += take;
+			first = false;
+		} while (start < line.Length);
+	}
+
+	/// <summary>
+	///   The number of UTF-16 units from <paramref name="start" /> whose UTF-8 encoding fits in
+	///   <paramref name="maxBytes" />, counting whole code points only. Always advances by at
+	///   least one code point so folding cannot loop.
+	/// </summary>
+	private static int TakeUtf8(string line, int start, int maxBytes)
+	{
+		int bytes = 0;
+		int i = start;
+		while (i < line.Length)
+		{
+			bool pair = char.IsHighSurrogate(line[i]) && i + 1 < line.Length && char.IsLowSurrogate(line[i + 1]);
+			int cost = pair ? 4 : line[i] < 0x80 ? 1 : line[i] < 0x800 ? 2 : 3;
+			if (bytes + cost > maxBytes && i > start)
+				break;
+			bytes += cost;
+			i += pair ? 2 : 1;
 		}
 
-		sb.Append(line, 0, width).Append("\r\n");
-		for (int i = width; i < line.Length; i += width - 1)
-		{
-			int len = Math.Min(width - 1, line.Length - i);
-			sb.Append(' ').Append(line, i, len).Append("\r\n");
-		}
+		return i - start;
 	}
 
 	private static string Escape(string? value)
