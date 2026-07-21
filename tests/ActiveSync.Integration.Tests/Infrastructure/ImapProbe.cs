@@ -77,6 +77,22 @@ internal static class ImapProbe
 		await imap.DisconnectAsync(true);
 	}
 
+	/// <summary>
+	///   Marks a message <c>\Deleted</c> without expunging — what every other IMAP client does
+	///   between "user pressed delete" and "user emptied the folder". Nothing the gateway does to
+	///   an unrelated message may remove it.
+	/// </summary>
+	public static async Task SetDeletedAsync(string user, string folder, string subject)
+	{
+		using ImapClient imap = await ConnectAsync(user);
+		IMailFolder mailFolder = await imap.GetFolderAsync(folder);
+		await mailFolder.OpenAsync(FolderAccess.ReadWrite);
+		IList<UniqueId> uids = await mailFolder.SearchAsync(SearchQuery.SubjectContains(subject));
+		Assert.NotEmpty(uids);
+		await mailFolder.AddFlagsAsync(uids, MessageFlags.Deleted, true);
+		await imap.DisconnectAsync(true);
+	}
+
 	public static async Task<int> CountMessagesAsync(string user, string folder, string subject)
 	{
 		using ImapClient imap = await ConnectAsync(user);

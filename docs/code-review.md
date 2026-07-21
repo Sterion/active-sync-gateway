@@ -441,7 +441,7 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 **Note:** the CSRF design (`X-EAS-WebUi` + `SameSite=Strict`) is sound *specifically because* there is no `AddCors` anywhere in `src/`. Adding CORS for any reason silently removes the primary CSRF defense — worth a comment on the filter and an assertion in the test suite.
 
 ## Area D — Backends: Common / Imap / Smtp / Local / Sieve (35 + nits)
-`D1` **CRITICAL** `ExpungeAsync()` with no UID set destroys other clients' `\Deleted` messages — `Imap/ImapMailBackend.cs:204,312`.
+~~`D1`~~ **FIXED** **CRITICAL** `ExpungeAsync()` with no UID set destroys other clients' `\Deleted` messages — `Imap/ImapMailBackend.cs:204,312`.
 `D2` **CRITICAL** No UIDVALIDITY tracking anywhere in the repo → stale keys address the wrong messages after a restore/migration — `Imap/ImapSession.cs`, `ImapMailBackend.cs:581`.
 `D3` **High** Every mail fetch downloads the full message; `EstimateSize` decodes every attachment to a MemoryStream just to read `.Length`, while holding the session gate — `Imap/ImapMailBackend.cs:136`, `Common/Converters/MailConverter.cs:290`.
 `D4` **High** Contact update wipes every managed vCard property absent from the payload (ghosting) — `Common/Converters/ContactConverter.cs:149`.

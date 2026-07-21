@@ -111,6 +111,47 @@ public class MailFlowTests(GatewayFixture gateway)
 			$"'{subject}' leaving INBOX");
 	}
 
+	/// <summary>
+	///   A permanent EAS delete must remove exactly the requested message. It used to issue a
+	///   folder-wide EXPUNGE, which permanently destroys every <c>\Deleted</c> message in the
+	///   mailbox — including the ones another client marked and has not expunged yet (D1).
+	/// </summary>
+	[BackendFact]
+	public async Task PermanentDelete_RemovesOnlyThatMessage_LeavingAnotherClientsDeletedMail()
+	{
+		EasTestClient clientB = gateway.CreateEasClient(TestBackend.User2);
+		await clientB.HandshakeAsync();
+		string inboxB = clientB.FolderOfType(EasFolderType.Inbox).ServerId;
+		await clientB.InitialSyncAsync(inboxB);
+		await clientB.PullAllAsync(inboxB);
+
+		string keep = $"keep-{Guid.NewGuid():N}";
+		string drop = $"drop-{Guid.NewGuid():N}";
+		await MailSeeder.SeedMailAsync(TestBackend.User1, TestBackend.User2, keep);
+		await MailSeeder.SeedMailAsync(TestBackend.User1, TestBackend.User2, drop);
+
+		SyncItem dropItem = await WaitUntil.ResultAsync(async () =>
+			{
+				SyncResult pull = await clientB.PullAllAsync(inboxB);
+				return pull.Adds.FirstOrDefault(a =>
+					a.ApplicationData.Element(Email + "Subject")?.Value == drop);
+			}, $"delivery of '{drop}'");
+		await WaitUntil.TrueAsync(
+			() => ImapProbe.MessageExistsAsync(TestBackend.User2, "INBOX", keep), $"delivery of '{keep}'");
+
+		// Another client (webmail, desktop MUA) has a delete pending on an unrelated message.
+		await ImapProbe.SetDeletedAsync(TestBackend.User2, "INBOX", keep);
+
+		// DeletesAsMoves=0 takes the expunge path rather than the move-to-Trash default.
+		Assert.Equal("1", (await clientB.DeleteItemAsync(inboxB, dropItem.ServerId, false)).Status);
+
+		await WaitUntil.TrueAsync(
+			async () => !await ImapProbe.MessageExistsAsync(TestBackend.User2, "INBOX", drop),
+			$"'{drop}' leaving INBOX");
+		Assert.True(await ImapProbe.MessageExistsAsync(TestBackend.User2, "INBOX", keep),
+			$"'{keep}' was destroyed by an unrelated delete — the expunge was not scoped to one UID");
+	}
+
 	[BackendFact]
 	public async Task Categories_RoundTripAsImapKeywords_AndGhostedChangeLeavesThem()
 	{

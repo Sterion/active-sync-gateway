@@ -202,7 +202,7 @@ public sealed partial class ImapMailBackend(
 				MimeMessage merged = DraftMessageBuilder.Build(applicationData, original, mailAddress);
 				await folder.AppendAsync(merged, MessageFlags.Draft, ct).ConfigureAwait(false);
 				await folder.AddFlagsAsync(uid, MessageFlags.Deleted, true, ct).ConfigureAwait(false);
-				await folder.ExpungeAsync(ct).ConfigureAwait(false);
+				await ExpungeUidAsync(folder, uid, ct).ConfigureAwait(false);
 				return RevisionOf(MessageFlags.None);
 			}
 
@@ -310,11 +310,25 @@ public sealed partial class ImapMailBackend(
 			else
 			{
 				await folder.AddFlagsAsync(uid, MessageFlags.Deleted, true, ct).ConfigureAwait(false);
-				await folder.ExpungeAsync(ct).ConfigureAwait(false);
+				await ExpungeUidAsync(folder, uid, ct).ConfigureAwait(false);
 			}
 
 			return true;
 		}, ct);
+	}
+
+	/// <summary>
+	///   Removes exactly one message. A bare EXPUNGE permanently removes EVERY message in the
+	///   folder carrying <c>\Deleted</c> — including ones another client (webmail, a desktop MUA,
+	///   a second EAS device mid-operation) marked but has not expunged yet — so an ordinary EAS
+	///   delete would silently destroy unrelated mail. MailKit issues <c>UID EXPUNGE</c> when the
+	///   server advertises UIDPLUS and otherwise emulates the scoping by unflagging the other
+	///   <c>\Deleted</c> messages around the expunge and restoring them afterwards.
+	///   <see cref="EmptyFolderAsync" /> is the one path where removing everything is the request.
+	/// </summary>
+	private static Task ExpungeUidAsync(IMailFolder folder, UniqueId uid, CancellationToken ct)
+	{
+		return folder.ExpungeAsync([uid], ct);
 	}
 
 	public Task<string> MoveItemAsync(
