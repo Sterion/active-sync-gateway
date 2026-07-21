@@ -74,9 +74,15 @@ public static class AutodiscoverEndpoint
 			    http, sessionFactory, authThrottle, clientKey, credentials, logger, ct))
 			return;
 
-		// Autodiscover carries no device id, so only user-level operator blocks apply here.
-		if (await state.IsLoginBlockedAsync(credentials.UserName, null, ct))
+		// Same refusals as the EAS endpoint, and for the same reason: a disabled account
+		// (eas user disable) must not be handed a service document just because it came in
+		// through the other door. Autodiscover carries no device id, so the operator block
+		// is necessarily the user-level one — the device-scoped variant applies only on EAS.
+		bool disabled = resolver.IsLoginDisabled(credentials.UserName);
+		if (disabled || await state.IsLoginBlockedAsync(credentials.UserName, null, ct))
 		{
+			logger.LogWarning("Refused {State} Autodiscover login {User}",
+				disabled ? "disabled" : "blocked", LogText.Clean(credentials.UserName, 128));
 			http.Response.StatusCode = StatusCodes.Status403Forbidden;
 			return;
 		}

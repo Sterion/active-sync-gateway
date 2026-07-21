@@ -1,4 +1,7 @@
 using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Xml.Linq;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
@@ -153,6 +156,51 @@ public class DbAccountTests(GatewayFixture gateway)
 		// Re-enabling restores access on the next request (no restart).
 		await store.UpsertAsync(TestBackend.User1, new AccountOptions(), CancellationToken.None);
 		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
+	}
+
+	[BackendFact]
+	public async Task DisabledAccount_IsAlsoRefusedByAutodiscover()
+	{
+		// E14: Autodiscover shared the EAS auth prologue but only checked operator BLOCKS,
+		// so `eas user disable` refused every device on /Microsoft-Server-ActiveSync while
+		// Autodiscover kept handing the same account a service document.
+		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
+			new Dictionary<string, string?> { ["ActiveSync:Auth:UsersRefreshSeconds"] = "0" });
+		AccountStore store = factory.Services.GetRequiredService<AccountStore>();
+		using HttpClient http = factory.CreateClient(
+			new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+		await store.UpsertAsync(TestBackend.User1, new AccountOptions(), CancellationToken.None);
+		using (HttpResponseMessage enabled = await http.SendAsync(AutodiscoverRequest()))
+			Assert.Equal(HttpStatusCode.OK, enabled.StatusCode);
+
+		await store.UpsertAsync(
+			TestBackend.User1, new AccountOptions { Enabled = false }, CancellationToken.None);
+		using (HttpResponseMessage disabled = await http.SendAsync(AutodiscoverRequest()))
+			Assert.Equal(HttpStatusCode.Forbidden, disabled.StatusCode);
+
+		// Re-enabling restores it on the next request, like the EAS path.
+		await store.UpsertAsync(TestBackend.User1, new AccountOptions(), CancellationToken.None);
+		using (HttpResponseMessage restored = await http.SendAsync(AutodiscoverRequest()))
+			Assert.Equal(HttpStatusCode.OK, restored.StatusCode);
+	}
+
+	private static HttpRequestMessage AutodiscoverRequest()
+	{
+		const string ns = "http://schemas.microsoft.com/exchange/autodiscover/mobilesync/requestschema/2006";
+		XDocument body = new(
+			new XElement(XName.Get("Autodiscover", ns),
+				new XElement(XName.Get("Request", ns),
+					new XElement(XName.Get("EMailAddress", ns), TestBackend.User1),
+					new XElement(XName.Get("AcceptableResponseSchema", ns),
+						"http://schemas.microsoft.com/exchange/autodiscover/mobilesync/responseschema/2006"))));
+		HttpRequestMessage request = new(HttpMethod.Post, "/autodiscover/autodiscover.xml")
+		{
+			Content = new StringContent(body.ToString(), Encoding.UTF8, "text/xml")
+		};
+		request.Headers.Authorization = new AuthenticationHeaderValue("Basic",
+			Convert.ToBase64String(Encoding.UTF8.GetBytes($"{TestBackend.User1}:{TestBackend.Password}")));
+		return request;
 	}
 
 	[BackendFact]
