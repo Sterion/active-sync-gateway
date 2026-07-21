@@ -290,8 +290,36 @@ public sealed partial class SyncHandler(
 				context.Device.UserName, store.EasClass, "server_to_client", "add", diff.Adds.Count);
 			Core.Observability.GatewayMetrics.RecordSyncItems(
 				context.Device.UserName, store.EasClass, "server_to_client", "change", diff.Changes.Count);
+
+			// MS-ASCMD: an item that merely slid out of the FilterType window is still on the
+			// server and must be reported as SoftDelete; Delete means "gone for good". The two
+			// are indistinguishable from the filtered revision map alone, so ask the store once
+			// for the unfiltered map — and only when a *filtered* collection actually produced
+			// deletes, so unfiltered classes (contacts/tasks/notes, FilterType 0) pay nothing.
+			HashSet<string> agedOut = new(StringComparer.Ordinal);
+			if (diff.Deletes.Count > 0 && filter.SinceUtc is not null)
+				try
+				{
+					IReadOnlyDictionary<string, string> unfiltered =
+						await store.GetItemRevisionsAsync(folder.BackendKey, ContentFilter.All, ct);
+					foreach (string deletedKey in diff.Deletes)
+						if (unfiltered.ContainsKey(deletedKey))
+							agedOut.Add(deletedKey);
+				}
+				catch (Exception ex) when (ex is not OperationCanceledException)
+				{
+					// Fall back to a hard Delete: reporting a real deletion as SoftDelete would
+					// strand the item on the device forever, which is the worse of the two.
+					logger.LogWarning(ex,
+						"Unfiltered revision listing failed for {CollectionId}; reporting {Count} " +
+						"window departures as hard deletes", collectionId, diff.Deletes.Count);
+				}
+
 			Core.Observability.GatewayMetrics.RecordSyncItems(
-				context.Device.UserName, store.EasClass, "server_to_client", "delete", diff.Deletes.Count);
+				context.Device.UserName, store.EasClass, "server_to_client", "delete",
+				diff.Deletes.Count - agedOut.Count);
+			Core.Observability.GatewayMetrics.RecordSyncItems(
+				context.Device.UserName, store.EasClass, "server_to_client", "soft_delete", agedOut.Count);
 
 			foreach (ItemChange add in diff.Adds)
 			{
@@ -314,7 +342,7 @@ public sealed partial class SyncHandler(
 			foreach (string deletedKey in diff.Deletes)
 			{
 				string serverId = await folders.ComposeServerIdAsync(folder, store, deletedKey, ct);
-				serverCommands.Add(new XElement(AS + "Delete",
+				serverCommands.Add(new XElement(AS + (agedOut.Contains(deletedKey) ? "SoftDelete" : "Delete"),
 					new XElement(AS + "ServerId", serverId)));
 			}
 		}
@@ -322,7 +350,7 @@ public sealed partial class SyncHandler(
 		// One activity line per collection round; idle polls (all counts zero) stay silent.
 		int sentAdds = serverCommands.Count(c => c.Name.LocalName == "Add");
 		int sentChanges = serverCommands.Count(c => c.Name.LocalName == "Change");
-		int sentDeletes = serverCommands.Count(c => c.Name.LocalName == "Delete");
+		int sentDeletes = serverCommands.Count(c => c.Name.LocalName is "Delete" or "SoftDelete");
 		if (clientAdds + clientChanges + clientDeletes + sentAdds + sentChanges + sentDeletes > 0)
 			logger.LogInformation(
 				"Sync \"{Folder}\" for {User}: client {ClientAdds} add/{ClientChanges} change/{ClientDeletes} delete, " +

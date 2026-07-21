@@ -197,4 +197,77 @@ public class SyncBehaviorTests(GatewayFixture gateway)
 		byte[] legacyBytes = await clientB.GetAttachmentAsync(fileReference!);
 		Assert.Equal(payload, Encoding.UTF8.GetString(legacyBytes));
 	}
+
+	/// <summary>
+	///   F3: an item that slides out of the FilterType window is still on the server, so
+	///   MS-ASCMD requires <c>SoftDelete</c> — <c>Delete</c> tells the client the item is gone
+	///   for good. Reproduced without waiting for real time to pass by appending a message with
+	///   a 30-day-old INTERNALDATE (what the gateway's <c>SEARCH SINCE</c> filters on), syncing
+	///   it in unfiltered, then re-syncing the collection with a 1-week filter.
+	/// </summary>
+	[BackendFact]
+	public async Task ItemLeavingTheFilterWindow_IsSoftDeleted_NotDeleted()
+	{
+		string folderName = $"filterwin-{Guid.NewGuid():N}";
+		await ImapProbe.CreateFolderAsync(TestBackend.User2, folderName);
+		string oldSubject = $"aged-{Guid.NewGuid():N}";
+		string freshSubject = $"fresh-{Guid.NewGuid():N}";
+		await ImapProbe.AppendAsync(
+			TestBackend.User2, folderName, oldSubject, DateTimeOffset.UtcNow.AddDays(-30));
+		await ImapProbe.AppendAsync(TestBackend.User2, folderName, freshSubject);
+
+		EasTestClient client = gateway.CreateEasClient(TestBackend.User2);
+		await client.HandshakeAsync();
+		EasFolder folder = (await client.FolderSyncAsync()).Single(f => f.DisplayName == folderName);
+		await client.InitialSyncAsync(folder.ServerId);
+
+		// FilterType 0: both messages enter the device snapshot.
+		SyncResult initial = await client.PullAllAsync(folder.ServerId);
+		string agedId = initial.Adds
+			.Single(a => a.ApplicationData.Element(Email + "Subject")?.Value == oldSubject).ServerId;
+		Assert.Contains(initial.Adds,
+			a => a.ApplicationData.Element(Email + "Subject")?.Value == freshSubject);
+
+		// FilterType 3 = last 7 days: the 30-day-old message is now outside the window.
+		SyncResult narrowed = await client.SyncAsync(folder.ServerId, filterType: 3);
+
+		Assert.Contains(agedId, narrowed.SoftDeleted);
+		Assert.DoesNotContain(agedId, narrowed.Deletes);
+		Assert.Empty(narrowed.Deletes);
+
+		// The message really is still on the server — that is what makes Delete wrong here.
+		Assert.True(await ImapProbe.MessageExistsAsync(TestBackend.User2, folderName, oldSubject));
+
+		await ImapProbe.DeleteFolderAsync(TestBackend.User2, folderName);
+	}
+
+	/// <summary>
+	///   The other half of F3: a message actually removed from the backend must still be a hard
+	///   <c>Delete</c>, even on a filtered collection where the SoftDelete lookup runs.
+	/// </summary>
+	[BackendFact]
+	public async Task ItemRemovedFromTheBackend_IsHardDeleted_EvenOnAFilteredCollection()
+	{
+		string folderName = $"filterdel-{Guid.NewGuid():N}";
+		await ImapProbe.CreateFolderAsync(TestBackend.User2, folderName);
+		string doomed = $"doomed-{Guid.NewGuid():N}";
+		await ImapProbe.AppendAsync(TestBackend.User2, folderName, doomed);
+
+		EasTestClient client = gateway.CreateEasClient(TestBackend.User2);
+		await client.HandshakeAsync();
+		EasFolder folder = (await client.FolderSyncAsync()).Single(f => f.DisplayName == folderName);
+		await client.InitialSyncAsync(folder.ServerId);
+		SyncResult initial = await client.PullAllAsync(folder.ServerId);
+		string doomedId = initial.Adds
+			.Single(a => a.ApplicationData.Element(Email + "Subject")?.Value == doomed).ServerId;
+
+		// Removed behind the gateway's back, so the device still has it in its snapshot.
+		await ImapProbe.RemoveAsync(TestBackend.User2, folderName, doomed);
+
+		SyncResult filtered = await client.SyncAsync(folder.ServerId, filterType: 3);
+		Assert.Contains(doomedId, filtered.Deletes);
+		Assert.Empty(filtered.SoftDeleted);
+
+		await ImapProbe.DeleteFolderAsync(TestBackend.User2, folderName);
+	}
 }

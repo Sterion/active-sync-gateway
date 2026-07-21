@@ -19,9 +19,13 @@ public sealed record SyncResult(
 	List<SyncItem> Changes,
 	List<string> Deletes,
 	List<XElement> Responses,
-	bool MoreAvailable)
+	bool MoreAvailable,
+	List<string>? SoftDeletes = null)
 {
 	public static readonly SyncResult NoChanges = new(true, null, null, [], [], [], [], false);
+
+	/// <summary>Server→client `SoftDelete` ids (item left the FilterType window).</summary>
+	public List<string> SoftDeleted => SoftDeletes ?? [];
 }
 
 /// <summary>
@@ -229,13 +233,14 @@ public sealed class EasTestClient(HttpClient http, string user, string password,
 
 	public async Task<SyncResult> SyncAsync(
 		string collectionId, XElement? commands = null, int? heartbeatSeconds = null, int windowSize = 100,
-		bool deletesAsMoves = true)
+		bool deletesAsMoves = true, int filterType = 0)
 	{
 		if (!SyncKeys.ContainsKey(collectionId))
 			await InitialSyncAsync(collectionId);
 
 		XDocument request = BuildSyncRequest(
-			collectionId, SyncKeys[collectionId], commands, heartbeatSeconds, windowSize, deletesAsMoves);
+			collectionId, SyncKeys[collectionId], commands, heartbeatSeconds, windowSize, deletesAsMoves,
+			filterType);
 		XDocument? response = await PostAsync("Sync", request);
 		return ParseSyncResponse(collectionId, response);
 	}
@@ -295,7 +300,7 @@ public sealed class EasTestClient(HttpClient http, string user, string password,
 
 	private static XDocument BuildSyncRequest(
 		string collectionId, string syncKey, XElement? commands, int? heartbeatSeconds, int? windowSize,
-		bool deletesAsMoves = true)
+		bool deletesAsMoves = true, int filterType = 0)
 	{
 		XElement collection = new(AS + "Collection",
 			new XElement(AS + "SyncKey", syncKey),
@@ -307,7 +312,7 @@ public sealed class EasTestClient(HttpClient http, string user, string password,
 			if (windowSize is { } w)
 				collection.Add(new XElement(AS + "WindowSize", w.ToString()));
 			collection.Add(new XElement(AS + "Options",
-				new XElement(AS + "FilterType", "0"),
+				new XElement(AS + "FilterType", filterType.ToString()),
 				new XElement(ASB + "BodyPreference",
 					new XElement(ASB + "Type", "1"),
 					new XElement(ASB + "TruncationSize", "20000"))));
@@ -351,7 +356,9 @@ public sealed class EasTestClient(HttpClient http, string user, string password,
 			commands?.Elements(AS + "Delete")
 				.Select(e => e.Element(AS + "ServerId")!.Value).ToList() ?? [],
 			collection.Element(AS + "Responses")?.Elements().ToList() ?? [],
-			collection.Element(AS + "MoreAvailable") is not null);
+			collection.Element(AS + "MoreAvailable") is not null,
+			commands?.Elements(AS + "SoftDelete")
+				.Select(e => e.Element(AS + "ServerId")!.Value).ToList() ?? []);
 	}
 
 	private static XElement GetCollection(XDocument? response)

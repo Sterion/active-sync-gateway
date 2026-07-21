@@ -94,6 +94,19 @@ internal static class ImapProbe
 		await imap.DisconnectAsync(true);
 	}
 
+	/// <summary>Marks a message <c>\Deleted</c> and expunges it — a real out-of-band removal.</summary>
+	public static async Task RemoveAsync(string user, string folder, string subject)
+	{
+		using ImapClient imap = await ConnectAsync(user);
+		IMailFolder mailFolder = await imap.GetFolderAsync(folder);
+		await mailFolder.OpenAsync(FolderAccess.ReadWrite);
+		IList<UniqueId> uids = await mailFolder.SearchAsync(SearchQuery.SubjectContains(subject));
+		Assert.NotEmpty(uids);
+		await mailFolder.AddFlagsAsync(uids, MessageFlags.Deleted, true);
+		await mailFolder.ExpungeAsync(uids);
+		await imap.DisconnectAsync(true);
+	}
+
 	/// <summary>Creates a top-level folder and returns its UIDVALIDITY.</summary>
 	public static async Task<uint> CreateFolderAsync(string user, string name)
 	{
@@ -115,8 +128,14 @@ internal static class ImapProbe
 		await imap.DisconnectAsync(true);
 	}
 
-	/// <summary>Appends a trivial message to a folder and returns the UID the server assigned.</summary>
-	public static async Task<uint> AppendAsync(string user, string folder, string subject)
+	/// <summary>
+	///   Appends a trivial message to a folder and returns the UID the server assigned.
+	///   <paramref name="internalDate" /> sets IMAP INTERNALDATE, which is what the gateway's
+	///   FilterType window searches on (<c>SEARCH SINCE</c>) — pass a past date to place a
+	///   message outside a sliding window without waiting for real time to pass.
+	/// </summary>
+	public static async Task<uint> AppendAsync(
+		string user, string folder, string subject, DateTimeOffset? internalDate = null)
 	{
 		using ImapClient imap = await ConnectAsync(user);
 		IMailFolder mailFolder = await imap.GetFolderAsync(folder);
@@ -125,8 +144,11 @@ internal static class ImapProbe
 		message.From.Add(MailboxAddress.Parse(user));
 		message.To.Add(MailboxAddress.Parse(user));
 		message.Subject = subject;
+		message.Date = internalDate ?? DateTimeOffset.UtcNow;
 		message.Body = new TextPart("plain") { Text = "body" };
-		UniqueId? uid = await mailFolder.AppendAsync(message);
+		UniqueId? uid = internalDate is { } stamp
+			? await mailFolder.AppendAsync(message, MessageFlags.None, stamp)
+			: await mailFolder.AppendAsync(message);
 		await imap.DisconnectAsync(true);
 		Assert.NotNull(uid);
 		return uid.Value.Id;
