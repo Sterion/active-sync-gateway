@@ -209,7 +209,8 @@ public static class WebUiServiceCollectionExtensions
 		logger.LogInformation("OIDC sign-in for {Login}{Admin}", verdict.Login, verdict.IsAdmin ? " (admin)" : "");
 
 		// The session principal is OURS (login + admin bit) — IdP claims never leak into it.
-		List<Claim> claims = [new Claim(ClaimTypes.Name, verdict.Login!)];
+		List<Claim> claims =
+			[new Claim(ClaimTypes.Name, verdict.Login!), SessionValidation.SessionStart(DateTimeOffset.UtcNow)];
 		if (verdict.IsAdmin)
 			claims.Add(new Claim(WebUiAuth.AdminClaim, "true"));
 		// Live revalidation re-derives admin from the account flag; record when the IdP claim

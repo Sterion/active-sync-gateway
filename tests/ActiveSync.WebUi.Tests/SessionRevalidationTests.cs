@@ -44,7 +44,8 @@ public sealed class SessionRevalidationTests : IDisposable
 	/// <summary>Signs a principal the way the login endpoint does, then runs the cookie's validation hook.</summary>
 	private async Task<CookieValidatePrincipalContext> ValidateAsync(
 		Dictionary<string, AccountOptions>? users, string login, bool admin,
-		bool blocked = false, params (string Type, string Value)[] extraClaims)
+		bool blocked = false, DateTime? revokedAtUtc = null,
+		params (string Type, string Value)[] extraClaims)
 	{
 		WebApplicationBuilder builder = WebApplication.CreateBuilder();
 		builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -83,6 +84,13 @@ public sealed class SessionRevalidationTests : IDisposable
 			db.LoginBlocks.Add(new LoginBlock { UserName = login, CreatedUtc = DateTime.UtcNow });
 #pragma warning restore VSTHRD103
 			await db.SaveChangesAsync(CancellationToken.None);
+		}
+
+		if (revokedAtUtc is { } revoked)
+		{
+			await using SyncDbContext db = factory.CreateDbContext();
+			await new SyncStateService(db)
+				.RevokeSessionsBeforeAsync(login, revoked, CancellationToken.None);
 		}
 
 		using IServiceScope scope = services.CreateScope();
@@ -166,7 +174,7 @@ public sealed class SessionRevalidationTests : IDisposable
 		string stamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
 		CookieValidatePrincipalContext context = await ValidateAsync(
 			Users(("alice", new AccountOptions { Admin = true, Enabled = false })), "alice", admin: true,
-			blocked: false, (SessionValidation.ValidatedAtClaim, stamp));
+			blocked: false, revokedAtUtc: null, (SessionValidation.ValidatedAtClaim, stamp));
 		Assert.NotNull(context.Principal);
 		Assert.False(context.ShouldRenew);
 
@@ -175,7 +183,7 @@ public sealed class SessionRevalidationTests : IDisposable
 			.AddSeconds(-1).ToUnixTimeSeconds().ToString();
 		CookieValidatePrincipalContext expired = await ValidateAsync(
 			Users(("alice", new AccountOptions { Admin = true, Enabled = false })), "alice", admin: true,
-			blocked: false, (SessionValidation.ValidatedAtClaim, stale));
+			blocked: false, revokedAtUtc: null, (SessionValidation.ValidatedAtClaim, stale));
 		Assert.Null(expired.Principal);
 	}
 
@@ -187,11 +195,45 @@ public sealed class SessionRevalidationTests : IDisposable
 		// every OIDC admin within a minute of signing in.
 		CookieValidatePrincipalContext context = await ValidateAsync(
 			Users(("alice", new AccountOptions())), "alice", admin: true, blocked: false,
+			revokedAtUtc: null,
 			(SessionValidation.AdminSourceClaim, SessionValidation.OidcAdminSource));
 		Assert.NotNull(context.Principal);
 		Assert.True(context.Principal!.HasClaim(WebUiAuth.AdminClaim, "true"));
 		Assert.True(context.Principal.HasClaim(
 			SessionValidation.AdminSourceClaim, SessionValidation.OidcAdminSource));
+	}
+
+	[Fact]
+	public async Task RevokedSession_IsRefused_EvenThoughTheAccountIsHealthy()
+	{
+		// Signing out deletes the browser's copy of the cookie; a copy taken beforehand stays
+		// cryptographically valid for the rest of the 12 hours unless the server records a
+		// cut-off. The account itself is untouched here — this is purely the logout half.
+		DateTimeOffset started = DateTimeOffset.UtcNow.AddMinutes(-10);
+		CookieValidatePrincipalContext revoked = await ValidateAsync(
+			Users(("alice", new AccountOptions { Admin = true })), "alice", admin: true,
+			blocked: false, revokedAtUtc: DateTime.UtcNow.AddMinutes(-5),
+			(SessionValidation.SessionStartClaim, started.ToUnixTimeSeconds().ToString()));
+		Assert.Null(revoked.Principal);
+
+		// A session started AFTER the cut-off — signing back in — is unaffected.
+		CookieValidatePrincipalContext fresh = await ValidateAsync(
+			Users(("alice", new AccountOptions { Admin = true })), "alice", admin: true,
+			blocked: false, revokedAtUtc: DateTime.UtcNow.AddMinutes(-5),
+			(SessionValidation.SessionStartClaim, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()));
+		Assert.NotNull(fresh.Principal);
+	}
+
+	[Fact]
+	public async Task SessionStart_SurvivesRevalidation()
+	{
+		// The re-minted principal has to carry the start stamp forward, or a revocation would
+		// stop biting the moment the session was renewed.
+		string started = DateTimeOffset.UtcNow.AddMinutes(-10).ToUnixTimeSeconds().ToString();
+		CookieValidatePrincipalContext context = await ValidateAsync(
+			Users(("alice", new AccountOptions { Admin = true })), "alice", admin: true,
+			blocked: false, revokedAtUtc: null, (SessionValidation.SessionStartClaim, started));
+		Assert.Equal(started, context.Principal?.FindFirst(SessionValidation.SessionStartClaim)?.Value);
 	}
 
 	private sealed class StaticOptionsMonitor(ActiveSyncOptions value) : IOptionsMonitor<ActiveSyncOptions>

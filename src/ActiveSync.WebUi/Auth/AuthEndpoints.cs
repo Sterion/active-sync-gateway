@@ -48,8 +48,14 @@ internal static class AuthEndpoints
 			.AllowAnonymous();
 
 		// Anonymous so sign-out always works — e.g. a non-admin cookie stuck on /admin.
-		api.MapPost("logout", async (HttpContext http) =>
+		api.MapPost("logout", async (HttpContext http, SyncStateService state, CancellationToken ct) =>
 		{
+			// Deleting the browser's cookie is only half of it: the ticket is self-contained and
+			// stays cryptographically valid until it expires, so a copy taken beforehand would
+			// keep working. Record a server-side cut-off for every session of this login that
+			// started before now — checked on the next revalidation.
+			if (http.User.Identity?.Name is { Length: > 0 } login)
+				await state.RevokeSessionsBeforeAsync(login, DateTime.UtcNow, ct);
 			await http.SignOutAsync(WebUiAuth.Scheme);
 			return Results.Ok();
 		}).AllowAnonymous();
@@ -138,7 +144,8 @@ internal static class AuthEndpoints
 			return Results.StatusCode(StatusCodes.Status403Forbidden);
 
 		throttle.RecordSuccess(userKey);
-		List<Claim> claims = [new Claim(ClaimTypes.Name, request.Username)];
+		List<Claim> claims =
+			[new Claim(ClaimTypes.Name, request.Username), SessionValidation.SessionStart(DateTimeOffset.UtcNow)];
 		if (isAdmin)
 			claims.Add(new Claim(WebUiAuth.AdminClaim, "true"));
 		await http.SignInAsync(WebUiAuth.Scheme,

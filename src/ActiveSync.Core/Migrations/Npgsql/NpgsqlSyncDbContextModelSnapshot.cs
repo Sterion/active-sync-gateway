@@ -529,6 +529,29 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.ToTable("UserFolders");
                 });
 
+            modelBuilder.Entity("ActiveSync.Core.State.WebSessionRevocation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("ValidAfterUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserName")
+                        .IsUnique();
+
+                    b.ToTable("WebSessionRevocations");
+                });
+
             modelBuilder.Entity("ActiveSync.Core.State.CollectionState", b =>
                 {
                     b.HasOne("ActiveSync.Core.State.Device", "Device")

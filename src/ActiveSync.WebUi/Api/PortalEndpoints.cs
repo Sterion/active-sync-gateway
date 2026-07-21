@@ -5,6 +5,9 @@ using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
+using ActiveSync.Core.State;
+using ActiveSync.WebUi.Auth;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -112,7 +115,8 @@ internal static class PortalEndpoints
 			PasswordChangeRequest request, ClaimsPrincipal principal, HttpContext http,
 			AccountStore store, AccountResolver resolver, IBackendSessionFactory sessionFactory,
 			AuthThrottle throttle, BackendRolesConfig roles, BackendProviderRegistry registry,
-			IOptionsMonitor<ActiveSyncOptions> options, ILoggerFactory loggerFactory, CancellationToken ct) =>
+			SyncStateService state, IOptionsMonitor<ActiveSyncOptions> options,
+			ILoggerFactory loggerFactory, CancellationToken ct) =>
 		{
 			string? login = principal.Identity?.Name;
 			if (login is null)
@@ -161,6 +165,11 @@ internal static class PortalEndpoints
 				return Results.BadRequest(new { error = string.Join(Environment.NewLine, failures) });
 			await store.UpsertAsync(login, entry, ct);
 			await resolver.EnsureFreshAsync(true, ct);
+			// A password change signs every OTHER session of this login out — including any
+			// session an attacker still holds a cookie for, which is the point of changing it.
+			// This browser is then re-signed-in so the user is not thrown out of their own act.
+			await state.RevokeSessionsBeforeAsync(login, DateTime.UtcNow, ct);
+			await http.SignInAsync(WebUiAuth.Scheme, ReissueSession(principal));
 			loggerFactory.CreateLogger("ActiveSync.WebUi.Portal")
 				.LogInformation("Portal password change for {User}", login);
 			return Results.Ok(new { login, passwordSet = true });
@@ -224,5 +233,23 @@ internal static class PortalEndpoints
 			await resolver.EnsureFreshAsync(true, ct);
 			return Results.Ok(new { login, role = role.ToString() });
 		});
+	}
+
+	/// <summary>
+	///   A fresh session for the caller, carrying the same capability claims but a new start
+	///   stamp — so a revocation that just invalidated every older session spares this one.
+	/// </summary>
+	private static ClaimsPrincipal ReissueSession(ClaimsPrincipal principal)
+	{
+		List<Claim> claims =
+		[
+			new Claim(ClaimTypes.Name, principal.Identity!.Name!),
+			SessionValidation.SessionStart(DateTimeOffset.UtcNow)
+		];
+		if (principal.HasClaim(WebUiAuth.AdminClaim, "true"))
+			claims.Add(new Claim(WebUiAuth.AdminClaim, "true"));
+		if (principal.HasClaim(SessionValidation.AdminSourceClaim, SessionValidation.OidcAdminSource))
+			claims.Add(new Claim(SessionValidation.AdminSourceClaim, SessionValidation.OidcAdminSource));
+		return new ClaimsPrincipal(new ClaimsIdentity(claims, WebUiAuth.Scheme));
 	}
 }

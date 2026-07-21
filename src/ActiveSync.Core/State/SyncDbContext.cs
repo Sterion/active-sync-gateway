@@ -27,6 +27,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	public DbSet<DataProtectionKeyEntry> DataProtectionKeys => Set<DataProtectionKeyEntry>();
 	public DbSet<OofSetting> OofSettings => Set<OofSetting>();
 	public DbSet<SharedCalendarGrant> SharedCalendarGrants => Set<SharedCalendarGrant>();
+	public DbSet<WebSessionRevocation> WebSessionRevocations => Set<WebSessionRevocation>();
 
 	protected override void OnModelCreating(ModelBuilder modelBuilder)
 	{
@@ -96,6 +97,10 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 
 		modelBuilder.Entity<SharedCalendarGrant>(e =>
 			e.HasIndex(g => new { g.UserName, g.CollectionHref }).IsUnique());
+
+		// One row per login; the unique index is what keeps the revocation a rewrite.
+		modelBuilder.Entity<WebSessionRevocation>(e =>
+			e.HasIndex(r => r.UserName).IsUnique());
 	}
 
 	// Re-stamp the concurrency token on every insert/update so a lost update (two writers

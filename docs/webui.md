@@ -118,6 +118,11 @@ eas config set ActiveSync:WebUi:Oidc:AutoProvision true                         
   IdP's claims never enter the session, so it cannot be re-derived — revoke it at the IdP), and
   the check **fails open** on a database fault so an outage does not log every operator out
   mid-incident (it retries on the very next request).
+- **Logout is server-side.** Signing out records a per-login cut-off (`WebSessionRevocations`),
+  so a copy of the cookie taken before the click stops working at its next revalidation rather
+  than staying valid for the rest of the 12 hours. A portal password change does the same to
+  every *other* session of that login and re-issues the current browser's. An admin-set or
+  CLI-set password does **not** yet stamp a cut-off.
 - CSRF: SameSite=Strict **plus** a required `X-EAS-WebUi: 1` header on every non-GET API
   call — a cross-site request can produce neither.
 - Strict CSP (`default-src 'self'` — no inline **scripts**; inline style attributes are

@@ -181,6 +181,21 @@ public class LoginBlock
 }
 
 /// <summary>
+///   Per-login cut-off for web sessions: any session STARTED before <see cref="ValidAfterUtc" />
+///   is refused at its next revalidation. The web cookie is a self-contained ticket, so signing
+///   out or changing a password cannot invalidate copies of it — deleting the browser's cookie
+///   leaves a stolen one cryptographically valid until it expires. This row is the server-side
+///   half that closes that: one row per login, rewritten (never appended) on logout and on a
+///   password change.
+/// </summary>
+public class WebSessionRevocation
+{
+	public int Id { get; set; }
+	public required string UserName { get; set; }
+	public DateTime ValidAfterUtc { get; set; }
+}
+
+/// <summary>
 ///   A CLI-managed grant exposing one extra CalDAV collection to one user as an additional
 ///   calendar folder (`eas share`). ReadOnly grants are enforced gateway-side (silent
 ///   revert, like ReadOnly mode) on top of whatever the DAV server itself allows.

@@ -62,6 +62,50 @@ public class SyncStateService(SyncDbContext db)
 		=> db.LoginBlocks
 			.AnyAsync(b => b.UserName == userName && (b.DeviceId == null || b.DeviceId == deviceId), ct);
 
+	/// <summary>
+	///   The cut-off for this login's web sessions: one started before it is no longer valid.
+	///   Null = nothing was ever revoked.
+	/// </summary>
+	public async Task<DateTime?> GetSessionsValidAfterAsync(string userName, CancellationToken ct)
+	{
+		WebSessionRevocation? row = await db.WebSessionRevocations
+			.AsNoTracking()
+			.FirstOrDefaultAsync(r => r.UserName == userName, ct)
+			.ConfigureAwait(false);
+		return row?.ValidAfterUtc;
+	}
+
+	/// <summary>
+	///   Invalidates every web session of this login that started before <paramref name="whenUtc" />
+	///   — the server-side half of signing out, since the cookie is a self-contained ticket that
+	///   stays cryptographically valid after the browser drops it. Monotonic: an earlier cut-off
+	///   never replaces a later one.
+	/// </summary>
+	public async Task RevokeSessionsBeforeAsync(string userName, DateTime whenUtc, CancellationToken ct)
+	{
+		WebSessionRevocation? row = await db.WebSessionRevocations
+			.FirstOrDefaultAsync(r => r.UserName == userName, ct)
+			.ConfigureAwait(false);
+		if (row is null)
+		{
+			// DbSet.Add is synchronous and local (no I/O) — see GetOrCreateDeviceAsync.
+#pragma warning disable VSTHRD103
+			db.WebSessionRevocations.Add(
+				new WebSessionRevocation { UserName = userName, ValidAfterUtc = whenUtc });
+#pragma warning restore VSTHRD103
+		}
+		else if (row.ValidAfterUtc < whenUtc)
+		{
+			row.ValidAfterUtc = whenUtc;
+		}
+		else
+		{
+			return;
+		}
+
+		await db.SaveChangesAsync(ct).ConfigureAwait(false);
+	}
+
 	public async Task<Device> GetOrCreateDeviceAsync(
 		string userName, string deviceId, string deviceType, CancellationToken ct,
 		string? protocolVersion = null)
