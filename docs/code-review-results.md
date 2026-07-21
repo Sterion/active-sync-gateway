@@ -149,6 +149,55 @@ sequencing constraint honoured (`H7` committed first) ✓
 - **Item 42 (JSCalendar/JSContact round-trip suite) would have caught `H4` `H5` `H6` `H23`
   mechanically**, as the doc predicted. What landed here are targeted reproducers, not that suite.
 
+## Item 6 — Delete windowing & SoftDelete [LIVE]
+
+**Findings:** `F2` `F3` `A21`
+**Commits:** `33179b2` (F2, A21) · `c0e4d1b` (F3)
+
+**Verification:** integrity 56/15/365/365/0 ✓ · cursor → item 7 ✓ · IDs in subjects ✓ · build
+**0 warnings** ✓ · integration re-run by the orchestrator: **134 passed, 0 skipped** against the 132/0
+post-item-5 baseline — 2 new live tests, no regression ✓ · both fixes red-first ✓
+
+**Notes:**
+- **`F3` costs an extra backend enumeration.** Aged-out and genuinely-deleted items are
+  indistinguishable from the filtered revision map, and `IContentStore` has no existence check, so the
+  fix adds one unfiltered `GetItemRevisionsAsync` — guarded on `filter.SinceUtc is not null &&
+  diff.Deletes.Count > 0`. **This compounds `D32`** (that call has no result cap): a filtered mail
+  collection with deletes now does a second unbounded enumeration per round. Capping in `D32` caps
+  this too. The better fix — a cheap `ItemsExistAsync` capability on the contract — is item 17's
+  territory, not this item's.
+- **`F3` falls back to a hard `Delete` if the unfiltered listing throws** (status quo ante, logged as a
+  warning). Reasoning: a real deletion mis-reported as `SoftDelete` strands the item on the device
+  permanently; the reverse is recoverable. Defensible either way.
+- **`CollectionChanges.Deletes` changed meaning** from "all deletes" to "deletes sent this round". The
+  only caller that depended on the old meaning, `GetItemEstimateHandler`, already passes
+  `int.MaxValue` as the window, so estimates are unaffected — but a future caller passing a real
+  window now gets a windowed count.
+- **`A20` is partially obsoleted but deliberately not struck.** Rewriting `Compute` removed the two
+  unreachable branches it names, as a side effect; the `Drain` extraction it also asks for was not
+  done. `A20` stays open in item 46, with a note on the `F2` Part 2 entry so item 46 doesn't chase a
+  defect that is half gone.
+- **Ordering and metrics judgment calls:** the window charges deletes → changes → adds (`A21` is
+  explicit that tombstones drain first, though an argument exists for adds-first since new mail is
+  what users notice); soft deletes got a new `soft_delete` metrics label rather than folding into
+  `delete`, which is additive but does mean the existing `delete` counter now excludes window
+  departures.
+- **`ItemRemovedFromTheBackend_IsHardDeleted_EvenOnAFilteredCollection` is a guard, not proof** —
+  labelled as such. It passes before and after; its job is to catch a fix that blanket-soft-deletes
+  everything on a filtered collection.
+- **Two new test levers worth reusing:** `EasTestClient` previously hardcoded `FilterType 0`, which is
+  why no existing integration test could reach the filtered path — it now takes a `filterType`
+  parameter (default 0, existing tests unchanged) and parses `SoftDelete`. And
+  `ImapProbe.AppendAsync` takes an optional INTERNALDATE, which makes window-departure testable in
+  seconds instead of requiring real elapsed days. **Item 30 (timezone & date handling) should use
+  it.**
+- The old `DeletesAreNotWindowed` test asserted the defect as intended behaviour — that is what `A21`
+  called out. It was replaced, not silently dropped.
+
 ---
 
-## Next: item 6 — Delete windowing & SoftDelete [LIVE]
+## Next: item 7 — Unauthenticated resource limits
+
+First non-[LIVE] item in the range; unit suite alone is sufficient. Items 7–14 are Phase 2 (Security).
+Note the intra-phase ordering constraint: **item 13 (unified redaction) must be done before item 14**
+— build the one redaction implementation, then apply it.
