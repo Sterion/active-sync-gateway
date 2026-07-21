@@ -87,10 +87,16 @@ A run through items 5–11 reached **1.5M tokens over four hours**, and judgment
 any hard limit. There is no handover cost: the Part 1 cursor is the state, so a new orchestrator
 picks up exactly where the last one stopped.
 
-**Give each worker its findings inline.** Do not tell a worker to read this document in full — it is
-long and growing, and every worker paying that cost is pure overhead. Paste the Part 2 text for its
-findings (and the relevant `code-review-detail.md` entries) directly into the prompt, and point it at
-"Working protocol" and "Editing this document safely" only.
+**Keep the worker brief short — point at the document, do not restate it.** The prompt should name
+the item, the findings still outstanding on its Part 1 line, and anything genuinely not in the
+document (a resumed item, a stash, an environment quirk). Everything else the worker reads here.
+
+Resist the urge to paste finding text into the prompt. It looks like a saving and is not: reading
+this document is a fraction of a fresh context, while restating it costs two things that matter. The
+orchestrator's own context degrades across a run, so its summaries get worse exactly as the run goes
+on — a tired session briefing a fresh one, which is backwards. And this document is *live*: findings
+gain notes as items land (`D2`'s forced re-sync, `H7`'s settled semantics), and a worker reading a
+paste from an hour ago cannot see them.
 
 **Interrupt at any point.** Whatever is committed and struck through stays done, and the same prompt resumes from there — this document is the cursor, so nothing needs to survive between sessions.
 
