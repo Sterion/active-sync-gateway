@@ -11,9 +11,15 @@ initTheme();
 bindThemeToggle(document.getElementById('theme-toggle'));
 
 const loginView = document.getElementById('login');
+const deniedView = document.getElementById('denied');
 const shell = document.getElementById('shell');
 
 document.addEventListener('eas:unauthorized', showLogin);
+
+document.getElementById('denied-signout').addEventListener('click', async () => {
+	await api('/admin/api/logout', { body: {} });
+	showLogin();
+});
 
 document.getElementById('login-form').addEventListener('submit', async event => {
 	event.preventDefault();
@@ -67,17 +73,30 @@ async function boot() {
 	try {
 		const session = await api('/admin/api/session');
 		showShell(session);
-	} catch {
-		showLogin();
+	} catch (e) {
+		// 403 = a valid session (e.g. signed in via SSO) that simply isn't an admin here — show a
+		// clear denial rather than silently bouncing back to the sign-in card. 401/other = no session.
+		if (e.status === 403)
+			showDenied();
+		else
+			showLogin();
 	}
 }
 
 function showLogin() {
 	shell.classList.add('hidden');
+	deniedView.classList.add('hidden');
 	loginView.classList.remove('hidden');
 }
 
+function showDenied() {
+	shell.classList.add('hidden');
+	loginView.classList.add('hidden');
+	deniedView.classList.remove('hidden');
+}
+
 function showShell(session) {
+	deniedView.classList.add('hidden');
 	document.getElementById('who').textContent = session.login ?? '';
 	loginView.classList.add('hidden');
 	shell.classList.remove('hidden');

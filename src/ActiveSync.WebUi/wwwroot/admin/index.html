@@ -28,6 +28,17 @@
 		</form>
 	</div>
 
+	<!-- Access-denied view: authenticated (e.g. via SSO) but without admin rights on this gateway. -->
+	<div id="denied" class="login-wrap hidden">
+		<div class="login-card">
+			<div class="brand"><span class="logo">AS</span> ActiveSync Admin</div>
+			<div class="notice error">You're signed in, but this account has no admin access on this gateway.</div>
+			<p>Ask an administrator to grant it — <code>eas user set &lt;login&gt; Admin true</code> — or map an
+				OIDC admin claim (<code>WebUi:Oidc:AdminClaim</code>), then sign in again.</p>
+			<button class="primary" type="button" id="denied-signout">Sign out</button>
+		</div>
+	</div>
+
 	<!-- App shell -->
 	<div id="shell" class="shell hidden">
 		<nav class="sidebar">

@@ -94,6 +94,31 @@ public sealed class CliLocalEndpointTests : IDisposable
 	}
 
 	[Fact]
+	public async Task RendersHelpAndErrors_OnEveryInvocation_NotJustTheFirst()
+	{
+		// Spectre renders --help, a bare branch's USAGE and unknown-command errors through
+		// Settings.Console, which otherwise falls back to a process-static it caches on FIRST use —
+		// so in the long-lived gateway every /cli help/error after the first came back empty. Run a
+		// normal command first to prime that cache, THEN assert the help/error paths still produce
+		// output (the endpoint pins Settings.Console per request to defeat the cache).
+		await LocalCliEndpoint.ExecuteAsync(["config", "list"], "", CancellationToken.None);
+
+		LocalCliEndpoint.CliResponse help = await LocalCliEndpoint.ExecuteAsync(
+			["--help"], "", CancellationToken.None);
+		Assert.Equal(0, help.ExitCode);
+		Assert.Contains("USAGE", help.Stdout);
+
+		LocalCliEndpoint.CliResponse branchHelp = await LocalCliEndpoint.ExecuteAsync(
+			["config", "--help"], "", CancellationToken.None);
+		Assert.Contains("config", branchHelp.Stdout);
+
+		LocalCliEndpoint.CliResponse unknown = await LocalCliEndpoint.ExecuteAsync(
+			["cli"], "", CancellationToken.None);
+		Assert.NotEqual(0, unknown.ExitCode);
+		Assert.NotEqual("", unknown.Stdout + unknown.Stderr);
+	}
+
+	[Fact]
 	public void ColorRendering_ForcesAnsiEscapes_ToTheCapturedBuffer()
 	{
 		// The /cli buffer is a StringWriter, not a terminal. Prove that forcing Ansi+colour makes

@@ -148,7 +148,16 @@ internal static class LocalCliEndpoint
 			AnsiConsole.Console = captured;
 
 			CommandApp<BannerCommand> cli = new(new CapturingRegistrar(captured));
-			cli.Configure(CliApp.Configure);
+			cli.Configure(config =>
+			{
+				CliApp.Configure(config);
+				// Command bodies get the captured console via the registrar, but Spectre renders help
+				// (--help/-h), USAGE on a bare branch and parse errors (unknown command) through
+				// Settings.Console, falling back to a process-static AnsiConsole.Console it caches on
+				// FIRST use. In the long-lived gateway that cache pins the very first /cli command's
+				// (now-dead) buffer, so every later help/error came back empty. Pin it explicitly.
+				config.Settings.Console = captured;
+			});
 			int exitCode = await cli.RunAsync(args);
 			return new CliResponse(exitCode, outWriter.ToString(), errorWriter.ToString());
 		}
