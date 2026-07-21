@@ -73,6 +73,14 @@ only, so the cursor never advanced and the next session would have redone the it
 ran passed. The check it did not run was the one that mattered. A master that reads the summary and
 moves on inherits exactly that class of failure.
 
+**The orchestrator never edits `src/` or `tests/`.** It coordinates, verifies and records — that is the whole role, and it is deliberately narrow. When a check fails, it has exactly three moves:
+
+1. **Establish whether the failure is real and whose it is** — bisect against the previous item's commit rather than reasoning about it. Cheap, and it converts an argument into a fact.
+2. **Spawn a repair subagent** with a tightly scoped brief (the failing tests, the suspected cause, "`src/` must stay untouched unless the finding itself was wrong"). A fresh context does the work; the orchestrator verifies the result the same way it verifies any item.
+3. **Stop and report** if the repair is not obviously in scope — a design decision, a behaviour change nobody signed up for, or anything touching a finding's correctness.
+
+It must not fix things itself. The orchestrator is the participant with the most accumulated context and the least room to think, and its value comes entirely from being an independent check on the workers. An orchestrator that starts authoring code is both the author and the reviewer, which is exactly the property the split exists to prevent.
+
 **Cap the orchestrator at ~8 items, then start a fresh one.** Subagents get a clean context per item;
 the orchestrator does not — it accumulates every worker report, verification dump and test summary.
 A run through items 5–11 reached **1.5M tokens over four hours**, and judgment degrades well before
@@ -203,6 +211,17 @@ Regression protection comes from that final run, not from repeating it per findi
 **7. If you run low on context, stop at a commit boundary** and report exactly which findings are done and which are untouched. Do not start a finding you cannot finish and verify. Because of steps 2–3, stopping early costs nothing — the next session resumes from this document.
 
 **8. Stay inside the item.** If you spot something outside it, note it at the bottom of Part 2 as a new finding rather than fixing it inline.
+
+**9. When a test fails, first establish whose failure it is.** Do not start fixing until you know:
+
+```sh
+git stash -u && dotnet test <the failing suite>; git stash pop
+```
+
+- **Green without your change → yours.** Fix it. It is inside your item, you have full context on what you just did, and you are the freshest participant in the system. This includes a test harness that your change legitimately broke — but if you touch `tests/` infrastructure, say so explicitly in your report, prove `src/` is untouched with a diffstat, and add a guard test so the accommodation cannot become a blind spot for the very finding you just fixed.
+- **Red without your change → not yours.** Stop. Commit nothing further, report the failure with both counts, and say plainly that it predates your work. Do not fix it, and do not work around it.
+
+Never disable, skip or weaken a test to get green. If a test genuinely encodes obsolete behaviour that your finding changes, rewrite it and call that out as a behaviour change in your report and the Part 2 note.
 
 ### Running items in parallel
 
