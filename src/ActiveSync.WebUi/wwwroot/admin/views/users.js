@@ -62,8 +62,9 @@ export async function render(container) {
 		return h('button', {
 			onclick: async () => {
 				try {
-					await api(`/admin/api/users/${encodeURIComponent(u.login)}/${u.enabled === false ? 'enable' : 'disable'}`, { body: {} });
-					toast(u.enabled === false ? `Enabled ${u.login}.` : `Disabled ${u.login} — every login now refused (403).`, 'ok');
+					const result = await api(`/admin/api/users/${encodeURIComponent(u.login)}/${u.enabled === false ? 'enable' : 'disable'}`, { body: {} });
+					if (result.warning) toast(result.warning, 'error');
+					else toast(u.enabled === false ? `Enabled ${u.login}.` : `Disabled ${u.login} — every login now refused (403).`, 'ok');
 					refresh(container);
 				} catch (e) {
 					toast(e.body?.error ?? 'Change failed.', 'error');
@@ -133,7 +134,10 @@ export async function render(container) {
 				if (value) backends[r.role] = value;
 			}
 			try {
-				await api(`/admin/api/users/${encodeURIComponent(name)}`, {
+				// { user, warning }: the warning is present only when you just edited your own
+				// account into a lower privilege level. Removing the LAST admin is a 409 and
+				// lands in the catch below.
+				const result = await api(`/admin/api/users/${encodeURIComponent(name)}`, {
 					method: 'PUT',
 					body: {
 						mailAddress: mail.value.trim() || null,
@@ -143,7 +147,8 @@ export async function render(container) {
 						backends: Object.keys(backends).length ? backends : null,
 					},
 				});
-				toast(`Saved ${name}. A running gateway applies this within ~1 s.`, 'ok');
+				if (result.warning) toast(result.warning, 'error');
+				else toast(`Saved ${name}. A running gateway applies this within ~1 s.`, 'ok');
 				refresh(container);
 			} catch (e) {
 				toast(e.body?.error ?? 'Saving failed.', 'error');

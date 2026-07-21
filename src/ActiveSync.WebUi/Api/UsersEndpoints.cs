@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Administration;
 using ActiveSync.Contracts;
@@ -59,11 +60,14 @@ internal static class UsersEndpoints
 		});
 
 		api.MapPut("users/{login}", async (
-			string login, UserUpdateRequest request, AccountStore store, AccountResolver resolver,
-			BackendRolesConfig roles, BackendProviderRegistry registry,
+			string login, UserUpdateRequest request, ClaimsPrincipal principal, AccountStore store,
+			AccountResolver resolver, BackendRolesConfig roles, BackendProviderRegistry registry,
 			IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
 		{
 			ActiveSyncOptions current = options.CurrentValue;
+			if (await LastAdminProblemAsync(
+				    resolver, login, request.Admin == true && request.Enabled != false, ct) is { } conflict)
+				return conflict;
 			// Password sentinels merge against the entry a CLI edit would start from (the DB
 			// row, else a clone of the config entry) so "keep" preserves the stored secret.
 			AccountOptions starting = await AccountEditing.LoadStartingEntryAsync(store, current, login, ct);
@@ -123,14 +127,25 @@ internal static class UsersEndpoints
 
 			await store.UpsertAsync(login, entry, ct);
 			await resolver.EnsureFreshAsync(true, ct);
-			return Results.Ok(ToDto(login, new MergedAccount(
-				entry, true, current.Users?.ContainsKey(login) == true)));
+			return Results.Ok(new
+			{
+				user = ToDto(login, new MergedAccount(entry, true, current.Users?.ContainsKey(login) == true)),
+				warning = SelfEditWarning(principal, login, request.Admin == true, request.Enabled != false)
+			});
 		});
 
 		api.MapDelete("users/{login}", async (
 			string login, AccountStore store, AccountResolver resolver,
 			IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
 		{
+			// Deleting the row can drop the last admin flag outright when no config entry sits
+			// beneath it — the account itself goes away.
+			ActiveSyncOptions configured = options.CurrentValue;
+			bool staysAdmin = configured.Users?.TryGetValue(login, out AccountOptions? fallback) == true &&
+			                  fallback!.Admin == true && fallback.Enabled != false;
+			if (await LastAdminProblemAsync(resolver, login, staysAdmin, ct) is { } conflict)
+				return conflict;
+
 			bool removed = await store.DeleteAsync(login, ct);
 			if (!removed)
 				return Results.NotFound();
@@ -145,32 +160,78 @@ internal static class UsersEndpoints
 
 		// Quick disable/enable (parallel to devices block/unblock) — flips the account master
 		// switch without a full-replacement PUT, so it can't clobber other fields.
-		api.MapPost("users/{login}/disable", (string login, AccountStore store, AccountResolver resolver,
-				BackendRolesConfig roles, BackendProviderRegistry registry,
+		api.MapPost("users/{login}/disable", (string login, ClaimsPrincipal principal, AccountStore store,
+				AccountResolver resolver, BackendRolesConfig roles, BackendProviderRegistry registry,
 				IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
-			SetEnabledAsync(login, enable: false, store, resolver, roles, registry, options, ct));
+			SetEnabledAsync(login, false, principal, store, resolver, roles, registry, options, ct));
 
-		api.MapPost("users/{login}/enable", (string login, AccountStore store, AccountResolver resolver,
-				BackendRolesConfig roles, BackendProviderRegistry registry,
+		api.MapPost("users/{login}/enable", (string login, ClaimsPrincipal principal, AccountStore store,
+				AccountResolver resolver, BackendRolesConfig roles, BackendProviderRegistry registry,
 				IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
-			SetEnabledAsync(login, enable: true, store, resolver, roles, registry, options, ct));
+			SetEnabledAsync(login, true, principal, store, resolver, roles, registry, options, ct));
+	}
+
+	/// <summary>
+	///   A 409 when the write would leave the gateway with no enabled admin, otherwise null.
+	///   <paramref name="staysAdmin" /> is what the target account will be AFTER the write.
+	///   Recovery from zero admins is CLI-only — a legitimate escape hatch, but not one to walk
+	///   into from a form with no warning.
+	/// </summary>
+	private static async Task<IResult?> LastAdminProblemAsync(
+		AccountResolver resolver, string login, bool staysAdmin, CancellationToken ct)
+	{
+		if (staysAdmin)
+			return null;
+		await resolver.EnsureFreshAsync(false, ct);
+		bool anotherRemains = resolver.MergedUsers.Any(pair =>
+			!pair.Key.Equals(login, StringComparison.OrdinalIgnoreCase) &&
+			pair.Value.Options.Admin == true &&
+			pair.Value.Options.Enabled != false);
+		return anotherRemains
+			? null
+			: Results.Conflict(new
+			{
+				error = $"'{login}' is the only enabled administrator — this would leave the web " +
+				        "interface with no way in. Grant admin to another account first (or use " +
+				        "the `eas user` CLI, which is the recovery path)."
+			});
+	}
+
+	/// <summary>A note, not a refusal, when an admin edits their own account into a corner.</summary>
+	private static string? SelfEditWarning(
+		ClaimsPrincipal principal, string login, bool staysAdmin, bool staysEnabled)
+	{
+		if (!string.Equals(principal.Identity?.Name, login, StringComparison.OrdinalIgnoreCase))
+			return null;
+		if (!staysEnabled)
+			return "You disabled your own account — this session ends within a minute.";
+		return staysAdmin
+			? null
+			: "You removed your own administrator rights — this session drops to the user portal " +
+			  "within a minute.";
 	}
 
 	/// <summary>Loads the entry a CLI edit would start from, flips its Enabled flag, validates and saves.</summary>
 	private static async Task<IResult> SetEnabledAsync(
-		string login, bool enable, AccountStore store, AccountResolver resolver,
+		string login, bool enable, ClaimsPrincipal principal, AccountStore store, AccountResolver resolver,
 		BackendRolesConfig roles, BackendProviderRegistry registry,
 		IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct)
 	{
 		ActiveSyncOptions current = options.CurrentValue;
 		AccountOptions entry = await AccountEditing.LoadStartingEntryAsync(store, current, login, ct);
+		if (await LastAdminProblemAsync(resolver, login, enable && entry.Admin == true, ct) is { } conflict)
+			return conflict;
 		entry.Enabled = enable ? null : false;
 		List<string> failures = AccountResolver.ValidateEntry(current, roles, registry, login, entry);
 		if (failures.Count > 0)
 			return Results.BadRequest(new { error = string.Join(Environment.NewLine, failures) });
 		await store.UpsertAsync(login, entry, ct);
 		await resolver.EnsureFreshAsync(true, ct);
-		return Results.Ok(ToDto(login, new MergedAccount(entry, true, current.Users?.ContainsKey(login) == true)));
+		return Results.Ok(new
+		{
+			user = ToDto(login, new MergedAccount(entry, true, current.Users?.ContainsKey(login) == true)),
+			warning = SelfEditWarning(principal, login, entry.Admin == true, enable)
+		});
 	}
 
 	/// <summary>null = keep the stored value, "" = clear, anything else = run the secret policy.</summary>
