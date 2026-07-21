@@ -122,8 +122,29 @@ public static class PluginLoader
 			throw new InvalidOperationException($"Failed to load plugin assembly '{entryDll}': {ex.Message}", ex);
 		}
 
-		List<Type> pluginTypes = assembly.GetTypes()
-			.Where(t => typeof(IGatewayPlugin).IsAssignableFrom(t) && t is { IsAbstract: false, IsInterface: false })
+		// GetTypes() throws as soon as ANY type's base type or interface cannot be resolved — an
+		// everyday consequence of a mis-packaged plugin, not an exotic one. Left uncaught it kills
+		// startup with a reflection exception that names no plugin; wrap it like every other
+		// failure here so the operator learns which directory to look in.
+		Type[] types;
+		try
+		{
+			types = assembly.GetTypes();
+		}
+		catch (ReflectionTypeLoadException ex)
+		{
+			string reason = ex.LoaderExceptions.FirstOrDefault(e => e is not null)?.Message ?? ex.Message;
+			throw new InvalidOperationException(
+				$"Plugin assembly '{Path.GetFileName(entryDll)}' could not be inspected — one or more of " +
+				$"its types failed to load: {reason}", ex);
+		}
+
+		// IsPublic is the filter the "no public IGatewayPlugin implementation" message below has
+		// always promised. Without it a plugin's non-public entry point was instantiated and handed
+		// the host's service collection, so what the assembly chose to expose meant nothing.
+		List<Type> pluginTypes = types
+			.Where(t => t.IsPublic && typeof(IGatewayPlugin).IsAssignableFrom(t)
+			                       && t is { IsAbstract: false, IsInterface: false })
 			.ToList();
 		if (pluginTypes.Count == 0)
 			throw new InvalidOperationException(

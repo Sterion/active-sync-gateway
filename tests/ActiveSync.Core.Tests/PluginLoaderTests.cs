@@ -102,7 +102,7 @@ public sealed class PluginLoaderTests : IDisposable
 		string pluginDir = StagePlugin("ActiveSync.TestPlugin");
 		string helper = Path.Combine(pluginDir, "PrivateHelper.dll");
 		File.Copy(StagedPluginDll, helper);
-		PatchContractReferenceMajor(helper, 99);
+		PatchContractReferenceVersion(helper, 99);
 
 		ServiceCollection services = new();
 		services.AddLogging();
@@ -117,13 +117,50 @@ public sealed class PluginLoaderTests : IDisposable
 	public void ContractMajorMismatch_InTheEntryAssembly_FailsFast()
 	{
 		string pluginDir = StagePlugin("ActiveSync.TestPlugin");
-		PatchContractReferenceMajor(Path.Combine(pluginDir, "ActiveSync.TestPlugin.dll"), 99);
+		PatchContractReferenceVersion(Path.Combine(pluginDir, "ActiveSync.TestPlugin.dll"), 99);
 
 		ServiceCollection services = new();
 		services.AddLogging();
 		InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
 			PluginLoader.LoadInto(services, ConfigFor(_root), NullLogger.Instance));
 		Assert.Contains("major", ex.Message, StringComparison.OrdinalIgnoreCase);
+	}
+
+	/// <summary>
+	///   K40 — <c>GetTypes()</c> on an untrusted assembly throws <see cref="ReflectionTypeLoadException" />
+	///   whenever a type's base type or interface cannot be resolved, which is an ordinary consequence
+	///   of a mis-packaged plugin. That escaped the loader raw, so startup died with a reflection
+	///   exception naming nothing instead of the loader's own "which plugin, and why" message.
+	///   Renaming the contract reference to an assembly that does not exist reproduces it: the
+	///   file loads, and only resolving <c>IGatewayPlugin</c> fails.
+	/// </summary>
+	[Fact]
+	public void AssemblyWhoseTypesCannotLoad_FailsFast_NamingThePlugin()
+	{
+		string pluginDir = StagePlugin("ActiveSync.TestPlugin");
+		PatchContractReferenceName(Path.Combine(pluginDir, "ActiveSync.TestPlugin.dll"));
+
+		ServiceCollection services = new();
+		services.AddLogging();
+		InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+			PluginLoader.LoadInto(services, ConfigFor(_root), NullLogger.Instance));
+		Assert.Contains("ActiveSync.TestPlugin.dll", ex.Message, StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	///   K40 — the loader's "contains no public IGatewayPlugin implementation" message promised a
+	///   filter the code did not apply: a non-public entry point was instantiated and given the
+	///   host's <see cref="IServiceCollection" /> just like a public one.
+	/// </summary>
+	[Fact]
+	public void NonPublicPluginType_IsNotLoaded()
+	{
+		StagePlugin("ActiveSync.TestPlugin");
+
+		BackendProviderRegistry registry = LoadAndBuildRegistry(ConfigFor(_root));
+
+		Assert.Equal("testplugin", registry.GetFor("testplugin", BackendRole.Notes).Name);
+		Assert.DoesNotContain(registry.All, p => p.Name == "internal-testplugin");
 	}
 
 	/// <summary>Copies the fixture plugin into a correctly-named subdirectory and returns it.</summary>
@@ -136,12 +173,12 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
-	///   Rewrites the assembly's AssemblyRef row for ActiveSync.Contracts to claim another major
+	///   Rewrites the assembly's AssemblyRef row for ActiveSync.Contracts to claim another
 	///   version — the metadata a plugin built against a different contract would carry. Patching
-	///   the two version bytes in place is what lets these tests exist at all: producing the same
+	///   the version bytes in place is what lets these tests exist at all: producing the same
 	///   file honestly would mean shipping a second contract assembly to compile against.
 	/// </summary>
-	private static void PatchContractReferenceMajor(string assemblyPath, ushort major)
+	private static void PatchContractReferenceVersion(string assemblyPath, ushort major, ushort minor = 0)
 	{
 		byte[] image = File.ReadAllBytes(assemblyPath);
 		int offset;
@@ -157,7 +194,35 @@ public sealed class PluginLoaderTests : IDisposable
 			         + (MetadataTokens.GetRowNumber(handle) - 1) * metadata.GetTableRowSize(TableIndex.AssemblyRef);
 		}
 
+		// AssemblyRef row: MajorVersion, MinorVersion, BuildNumber, RevisionNumber (4 x ushort).
 		BinaryPrimitives.WriteUInt16LittleEndian(image.AsSpan(offset), major);
+		BinaryPrimitives.WriteUInt16LittleEndian(image.AsSpan(offset + 2), minor);
+		File.WriteAllBytes(assemblyPath, image);
+	}
+
+	/// <summary>
+	///   Rewrites the last character of the ActiveSync.Contracts reference name in the string heap
+	///   (same length, so nothing downstream shifts) — the assembly then references a contract that
+	///   cannot be found, which is what a mis-packaged plugin looks like to the loader.
+	/// </summary>
+	private static void PatchContractReferenceName(string assemblyPath)
+	{
+		byte[] image = File.ReadAllBytes(assemblyPath);
+		int offset;
+		using (MemoryStream stream = new(image, false))
+		using (PEReader pe = new(stream))
+		{
+			MetadataReader metadata = pe.GetMetadataReader();
+			AssemblyReference reference = metadata.AssemblyReferences
+				.Select(handle => metadata.GetAssemblyReference(handle))
+				.First(r => metadata.GetString(r.Name) == "ActiveSync.Contracts");
+			offset = pe.PEHeaders.MetadataStartOffset
+			         + metadata.GetHeapMetadataOffset(HeapIndex.String)
+			         + MetadataTokens.GetHeapOffset(reference.Name)
+			         + "ActiveSync.Contracts".Length - 1;
+		}
+
+		image[offset] = (byte)'z';
 		File.WriteAllBytes(assemblyPath, image);
 	}
 
