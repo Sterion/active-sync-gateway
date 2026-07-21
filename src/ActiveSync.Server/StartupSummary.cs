@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
@@ -188,7 +189,7 @@ public static partial class StartupSummary
 		foreach ((string key, string? value) in
 		         (roleOverride.Settings ?? []).OrderBy(s => s.Key, StringComparer.OrdinalIgnoreCase))
 			if (value is not null)
-				fields.Add($"{key}={value}");
+				fields.Add($"{key}={SecretRedaction.MaskIfSecret(key, value)}");
 		return string.Join(" ", fields);
 	}
 

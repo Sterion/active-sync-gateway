@@ -47,6 +47,38 @@ public class StartupSummaryRedactionTests
 	}
 
 	[Fact]
+	public void DescribeUser_MasksSecretNamedRoleSettings()
+	{
+		// E15: the per-role Settings loop printed every setting verbatim; only Password was masked,
+		// so an ApiKey/Token in a role override leaked in full into the banner (and the DB log sink).
+		AccountOptions options = new()
+		{
+			Backends = new Dictionary<string, BackendRoleOverride>
+			{
+				["Calendar"] = new()
+				{
+					Provider = "carddav",
+					Settings = new Dictionary<string, string?>
+					{
+						["ApiKey"] = "banner-api-secret",
+						["OAuthToken"] = "banner-token-secret",
+						["BaseUrl"] = "https://dav.example.com",
+					},
+				},
+			},
+		};
+
+		string line = StartupSummary.DescribeUser(new MergedAccount(options, false, false));
+
+		Assert.DoesNotContain("banner-api-secret", line);
+		Assert.DoesNotContain("banner-token-secret", line);
+		Assert.Contains("ApiKey=***", line);
+		Assert.Contains("OAuthToken=***", line);
+		// Non-secret settings still render for diagnostics.
+		Assert.Contains("BaseUrl=https://dav.example.com", line);
+	}
+
+	[Fact]
 	public void DescribeUser_HashedPassword_AndGrantEntry()
 	{
 		string hashed = ActiveSync.Core.Security.GatewayPasswordHasher.Hash("secret1");
