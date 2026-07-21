@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.WebUi.Api;
 
@@ -148,7 +150,8 @@ internal static class BackendsEndpoints
 
 		api.MapPost("backends/{role}/test", async (
 			string role, RoleWriteRequest request, BackendProviderRegistry registry,
-			GlobalSettingStore store, IConfiguration config, CancellationToken ct) =>
+			GlobalSettingStore store, IConfiguration config, ClaimsPrincipal principal,
+			ILoggerFactory loggerFactory, CancellationToken ct) =>
 		{
 			if (!Enum.TryParse(role, true, out BackendRole parsed))
 				return Results.BadRequest(new { error = $"'{role}' is not a backend role" });
@@ -183,12 +186,32 @@ internal static class BackendsEndpoints
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
 			{
-				return Results.Ok(new
-				{
-					supported = true, reachable = false, detail = ex.GetBaseException().Message
-				});
+				// A closed outcome set, deliberately coarse. The raw exception text distinguishes
+				// refused from timed-out from DNS-failure from TLS-mismatch, which turns an
+				// admin-only convenience into a precise scanner of whatever network the gateway
+				// sits on — and admin here is not always root-equivalent. The full exception goes
+				// to the log, attributed to the operator who asked for it.
+				loggerFactory.CreateLogger("ActiveSync.WebUi.Backends").LogWarning(ex,
+					"Backend probe of the {Role} role ({Provider}) requested by {User} failed",
+					parsed, providerName, principal.Identity?.Name ?? "(unknown)");
+				return Results.Ok(new { supported = true, reachable = false, detail = Outcome(ex) });
 			}
 		});
+	}
+
+	/// <summary>
+	///   The one sentence a failed probe is allowed to say. Every network-level failure collapses
+	///   to the same answer on purpose — telling refused from timed-out from name-not-found is
+	///   the whole value of a scanner. The timeout is separated only because it is the gateway's
+	///   own 5 s cap and says nothing about the target.
+	/// </summary>
+	private static string Outcome(Exception ex)
+	{
+		return ex.GetBaseException() switch
+		{
+			OperationCanceledException or TimeoutException => "The server did not answer in time.",
+			_ => "The server could not be reached."
+		};
 	}
 
 	/// <summary>The provider for a name, or null with the message explaining why not.</summary>
