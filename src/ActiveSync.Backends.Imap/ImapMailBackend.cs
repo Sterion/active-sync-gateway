@@ -14,8 +14,8 @@ namespace ActiveSync.Backends.Imap;
 
 /// <summary>
 ///   Email content store + mail-store side-operations over IMAP (submission lives in
-///   <c>SmtpSubmitBackend</c>). Item keys are IMAP UIDs (per folder); revisions encode
-///   the sync-relevant flags.
+///   <c>SmtpSubmitBackend</c>). Item keys are UIDVALIDITY-qualified IMAP UIDs (per folder,
+///   see <see cref="ToItemKey" />); revisions encode the sync-relevant flags.
 /// </summary>
 public sealed partial class ImapMailBackend(
 	ImapSession session,
@@ -111,7 +111,7 @@ public sealed partial class ImapMailBackend(
 				.ConfigureAwait(false);
 			Dictionary<string, string> map = new(summaries.Count, StringComparer.Ordinal);
 			foreach (IMessageSummary summary in summaries)
-				map[summary.UniqueId.Id.ToString()] =
+				map[ToItemKey(folder, summary.UniqueId)] =
 					RevisionOf(summary.Flags ?? MessageFlags.None, summary.Keywords);
 			return map;
 		}, ct);
@@ -124,7 +124,7 @@ public sealed partial class ImapMailBackend(
 		{
 			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadOnly, ct)
 				.ConfigureAwait(false);
-			UniqueId uid = ParseUid(itemKey);
+			UniqueId uid = ParseUid(folder, itemKey);
 			IList<IMessageSummary> summaries = await folder
 				.FetchAsync([uid], MessageSummaryItems.UniqueId | MessageSummaryItems.Flags, ct)
 				.ConfigureAwait(false);
@@ -170,7 +170,7 @@ public sealed partial class ImapMailBackend(
 			UniqueId? uid = await folder.AppendAsync(draft, MessageFlags.Draft, ct).ConfigureAwait(false);
 			if (uid is null)
 				throw new BackendException("The IMAP server did not report a UID for the appended draft.");
-			return (uid.Value.Id.ToString(), RevisionOf(MessageFlags.None));
+			return (ToItemKey(folder, uid.Value), RevisionOf(MessageFlags.None));
 		}, ct, idempotent: false); // APPEND: a replay would duplicate the draft
 	}
 
@@ -181,7 +181,7 @@ public sealed partial class ImapMailBackend(
 		{
 			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadWrite, ct)
 				.ConfigureAwait(false);
-			UniqueId uid = ParseUid(itemKey);
+			UniqueId uid = ParseUid(folder, itemKey);
 
 			// EAS 16.x draft edit: content-bearing changes in the Drafts folder rewrite the
 			// message (append merged draft, expunge the old one). The old UID vanishes and
@@ -296,7 +296,7 @@ public sealed partial class ImapMailBackend(
 		{
 			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadWrite, ct)
 				.ConfigureAwait(false);
-			UniqueId uid = ParseUid(itemKey);
+			UniqueId uid = ParseUid(folder, itemKey);
 			// DeletesAsMoves=0 (permanent), or already in Trash, or no Trash folder → expunge;
 			// otherwise the default move-to-Trash.
 			IMailFolder? trash = permanent
@@ -340,10 +340,20 @@ public sealed partial class ImapMailBackend(
 				.ConfigureAwait(false);
 			IMailFolder destination = await client.GetFolderAsync(
 				ImapSession.FromBackendKey(destinationFolderBackendKey), ct).ConfigureAwait(false);
-			UniqueId uid = ParseUid(itemKey);
+			UniqueId uid = ParseUid(source, itemKey);
 			UniqueId? newUid = await source.MoveToAsync(uid, destination, ct).ConfigureAwait(false);
-			return newUid?.Id.ToString()
-			       ?? throw new BackendException("IMAP server did not report the moved message's new UID (no UIDPLUS).");
+			if (newUid is null)
+				throw new BackendException("IMAP server did not report the moved message's new UID (no UIDPLUS).");
+			// The COPYUID response carries the destination's UIDVALIDITY, so the new key needs no
+			// extra round trip; STATUS covers a server that answers without one.
+			uint validity = newUid.Value.Validity;
+			if (validity == 0)
+			{
+				await destination.StatusAsync(StatusItems.UidValidity, ct).ConfigureAwait(false);
+				validity = destination.UidValidity;
+			}
+
+			return $"{validity}:{newUid.Value.Id}";
 		}, ct);
 	}
 
@@ -410,7 +420,7 @@ public sealed partial class ImapMailBackend(
 				.ConfigureAwait(false);
 			try
 			{
-				MimeMessage message = await folder.GetMessageAsync(ParseUid(itemKey), ct).ConfigureAwait(false);
+				MimeMessage message = await folder.GetMessageAsync(ParseUid(folder, itemKey), ct).ConfigureAwait(false);
 				using MemoryStream ms = new();
 				await message.WriteToAsync(ms, ct).ConfigureAwait(false);
 				return ms.ToArray();
@@ -443,7 +453,7 @@ public sealed partial class ImapMailBackend(
 			MimeMessage message;
 			try
 			{
-				message = await folder.GetMessageAsync(ParseUid(itemKey), ct).ConfigureAwait(false);
+				message = await folder.GetMessageAsync(ParseUid(folder, itemKey), ct).ConfigureAwait(false);
 			}
 			catch (MessageNotFoundException)
 			{
@@ -465,7 +475,7 @@ public sealed partial class ImapMailBackend(
 		{
 			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadWrite, ct)
 				.ConfigureAwait(false);
-			UniqueId uid = ParseUid(itemKey);
+			UniqueId uid = ParseUid(folder, itemKey);
 			if (forwarded)
 				try
 				{
@@ -502,7 +512,7 @@ public sealed partial class ImapMailBackend(
 			return uids
 				.OrderByDescending(u => u.Id)
 				.Take(maxResults)
-				.Select(u => (folderKey, u.Id.ToString()))
+				.Select(u => (folderKey, ToItemKey(folder, u)))
 				.ToList();
 		}, ct);
 	}
@@ -596,13 +606,39 @@ public sealed partial class ImapMailBackend(
 	}
 
 	/// <summary>
-	///   Item keys are client-echoed strings; a non-numeric (or zero) key means the item
-	///   cannot exist, reported the same way as a vanished item instead of crashing.
+	///   Builds an item key as "&lt;uidvalidity&gt;:&lt;uid&gt;". A UID alone is NOT a stable
+	///   identifier: RFC 3501 lets a server reset UIDVALIDITY (mailbox recreated, restored from
+	///   backup, migrated, index rebuilt), after which the same number names a different message
+	///   — so a client's stored "delete 4711" would mutate whatever now holds UID 4711, with no
+	///   error. Qualifying the key makes every key from the previous generation unresolvable,
+	///   which the snapshot diff turns into Delete+Add and the client into a clean re-sync.
 	/// </summary>
-	private static UniqueId ParseUid(string itemKey)
+	private static string ToItemKey(IMailFolder folder, UniqueId uid)
 	{
-		return uint.TryParse(itemKey, out uint value) && value > 0
-			? new UniqueId(value)
+		return $"{folder.UidValidity}:{uid.Id}";
+	}
+
+	/// <summary>
+	///   Item keys are client-echoed strings; a malformed one — or one from an earlier
+	///   UIDVALIDITY generation of this folder — means the item cannot exist, and is reported the
+	///   same way as a vanished item rather than crashing or addressing an unrelated message.
+	/// </summary>
+	private static UniqueId ParseUid(IMailFolder folder, string itemKey)
+	{
+		string uidPart = itemKey;
+		int separator = itemKey.IndexOf(':');
+		if (separator >= 0)
+		{
+			if (!uint.TryParse(itemKey[..separator], out uint validity) || validity != folder.UidValidity)
+				throw new BackendItemNotFoundException(
+					$"Mail item key '{itemKey}' belongs to an earlier UIDVALIDITY generation of \"{folder.FullName}\".");
+			uidPart = itemKey[(separator + 1)..];
+		}
+
+		// Keys stored before UIDVALIDITY was carried have no generation prefix. They are honoured
+		// for the single sync it takes the diff to reissue them in the qualified form.
+		return uint.TryParse(uidPart, out uint value) && value > 0
+			? new UniqueId(folder.UidValidity, value)
 			: throw new BackendItemNotFoundException($"'{itemKey}' is not a valid mail item key.");
 	}
 

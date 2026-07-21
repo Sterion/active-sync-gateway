@@ -442,7 +442,7 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 
 ## Area D — Backends: Common / Imap / Smtp / Local / Sieve (35 + nits)
 ~~`D1`~~ **FIXED** **CRITICAL** `ExpungeAsync()` with no UID set destroys other clients' `\Deleted` messages — `Imap/ImapMailBackend.cs:204,312`.
-`D2` **CRITICAL** No UIDVALIDITY tracking anywhere in the repo → stale keys address the wrong messages after a restore/migration — `Imap/ImapSession.cs`, `ImapMailBackend.cs:581`.
+~~`D2`~~ **FIXED** **CRITICAL** No UIDVALIDITY tracking anywhere in the repo → stale keys address the wrong messages after a restore/migration — `Imap/ImapSession.cs`, `ImapMailBackend.cs:581`. Mail item keys are now `<uidvalidity>:<uid>` (`ToItemKey`/`ParseUid`), and UIDVALIDITY leads the `SnapshotStatusAsync` fingerprint. **Breaking:** one full re-sync of IMAP mail folders on upgrade, as pre-existing bare-UID keys are reissued.
 `D3` **High** Every mail fetch downloads the full message; `EstimateSize` decodes every attachment to a MemoryStream just to read `.Length`, while holding the session gate — `Imap/ImapMailBackend.cs:136`, `Common/Converters/MailConverter.cs:290`.
 `D4` **High** Contact update wipes every managed vCard property absent from the payload (ghosting) — `Common/Converters/ContactConverter.cs:149`.
 `D5` **High** Meeting-request times ignore `TZID` and are treated as UTC; no line unfolding — `Common/Converters/MailConverter.cs:211,277`.

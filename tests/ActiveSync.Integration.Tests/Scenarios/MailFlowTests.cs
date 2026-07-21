@@ -153,6 +153,48 @@ public class MailFlowTests(GatewayFixture gateway)
 	}
 
 	/// <summary>
+	///   A raw IMAP UID is not a stable identifier: RFC 3501 lets a server reset UIDVALIDITY
+	///   (mailbox recreated, restored from backup, migrated) and reuse the same numbers for
+	///   different messages. A client holding an item id from before the reset must not be able
+	///   to mutate whatever now occupies that UID (D2). Reproduced here by deleting and
+	///   recreating a folder, which is exactly what a restore looks like from the outside.
+	/// </summary>
+	[BackendFact]
+	public async Task ItemIdFromAnEarlierUidValidity_DoesNotDeleteTheMessageThatReusedTheUid()
+	{
+		string folderName = $"uidval-{Guid.NewGuid():N}";
+		uint firstValidity = await ImapProbe.CreateFolderAsync(TestBackend.User2, folderName);
+		string gen1 = $"gen1-{Guid.NewGuid():N}";
+		uint gen1Uid = await ImapProbe.AppendAsync(TestBackend.User2, folderName, gen1);
+
+		EasTestClient clientB = gateway.CreateEasClient(TestBackend.User2);
+		await clientB.HandshakeAsync();
+		EasFolder folder = (await clientB.FolderSyncAsync()).Single(f => f.DisplayName == folderName);
+		await clientB.InitialSyncAsync(folder.ServerId);
+		SyncItem item = (await clientB.PullAllAsync(folder.ServerId)).Adds
+			.Single(a => a.ApplicationData.Element(Email + "Subject")?.Value == gen1);
+		string staleServerId = item.ServerId;
+
+		// The id the client now holds must name the generation it was issued in.
+		Assert.Equal($"{folder.ServerId}:{firstValidity}:{gen1Uid}", staleServerId);
+
+		// Recreate the folder: new UIDVALIDITY, and the next message reuses the old UID.
+		await ImapProbe.DeleteFolderAsync(TestBackend.User2, folderName);
+		uint secondValidity = await ImapProbe.CreateFolderAsync(TestBackend.User2, folderName);
+		Assert.NotEqual(firstValidity, secondValidity);
+		string gen2 = $"gen2-{Guid.NewGuid():N}";
+		Assert.Equal(gen1Uid, await ImapProbe.AppendAsync(TestBackend.User2, folderName, gen2));
+
+		// The client, unaware of any of this, deletes what it still thinks is its message.
+		await clientB.DeleteItemAsync(folder.ServerId, staleServerId);
+
+		Assert.True(await ImapProbe.MessageExistsAsync(TestBackend.User2, folderName, gen2),
+			$"'{gen2}' was destroyed by an item id from a previous UIDVALIDITY generation");
+
+		await ImapProbe.DeleteFolderAsync(TestBackend.User2, folderName);
+	}
+
+	/// <summary>
 	///   Baseline coverage for ItemOperations EmptyFolderContents, which had none. It clears mail
 	///   delivered after the gateway last synced the folder, i.e. without the client having seen
 	///   it. NOTE: this does NOT reproduce D17 — Stalwart's untagged EXISTS is drained by the

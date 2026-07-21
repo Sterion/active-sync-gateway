@@ -2,6 +2,7 @@ using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Search;
 using MailKit.Security;
+using MimeKit;
 
 namespace ActiveSync.Integration.Tests.Infrastructure;
 
@@ -91,6 +92,44 @@ internal static class ImapProbe
 		Assert.NotEmpty(uids);
 		await mailFolder.AddFlagsAsync(uids, MessageFlags.Deleted, true);
 		await imap.DisconnectAsync(true);
+	}
+
+	/// <summary>Creates a top-level folder and returns its UIDVALIDITY.</summary>
+	public static async Task<uint> CreateFolderAsync(string user, string name)
+	{
+		using ImapClient imap = await ConnectAsync(user);
+		IMailFolder personal = imap.GetFolder(imap.PersonalNamespaces[0]);
+		IMailFolder? created = await personal.CreateAsync(name, true);
+		Assert.NotNull(created);
+		await created.OpenAsync(FolderAccess.ReadOnly);
+		uint validity = created.UidValidity;
+		await imap.DisconnectAsync(true);
+		return validity;
+	}
+
+	public static async Task DeleteFolderAsync(string user, string name)
+	{
+		using ImapClient imap = await ConnectAsync(user);
+		IMailFolder folder = await imap.GetFolderAsync(name);
+		await folder.DeleteAsync();
+		await imap.DisconnectAsync(true);
+	}
+
+	/// <summary>Appends a trivial message to a folder and returns the UID the server assigned.</summary>
+	public static async Task<uint> AppendAsync(string user, string folder, string subject)
+	{
+		using ImapClient imap = await ConnectAsync(user);
+		IMailFolder mailFolder = await imap.GetFolderAsync(folder);
+		await mailFolder.OpenAsync(FolderAccess.ReadWrite);
+		MimeMessage message = new();
+		message.From.Add(MailboxAddress.Parse(user));
+		message.To.Add(MailboxAddress.Parse(user));
+		message.Subject = subject;
+		message.Body = new TextPart("plain") { Text = "body" };
+		UniqueId? uid = await mailFolder.AppendAsync(message);
+		await imap.DisconnectAsync(true);
+		Assert.NotNull(uid);
+		return uid.Value.Id;
 	}
 
 	public static async Task<int> CountMessagesAsync(string user, string folder, string subject)

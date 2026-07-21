@@ -91,7 +91,7 @@ public sealed partial class ImapMailBackend
 			{
 				foreach (string key in changed)
 					logger.LogInformation(
-						"IMAP STATUS: \"{Folder}\" changed for {User} (count:uidnext:unread {Baseline} -> {Current})",
+						"IMAP STATUS: \"{Folder}\" changed for {User} (uidvalidity:count:uidnext:unread {Baseline} -> {Current})",
 						ImapSession.FromBackendKey(key), session.UserName,
 						baseline.GetValueOrDefault(key, "?"), current.GetValueOrDefault(key, "?"));
 				return changed;
@@ -113,9 +113,13 @@ public sealed partial class ImapMailBackend
 				try
 				{
 					IMailFolder folder = await client.GetFolderAsync(ImapSession.FromBackendKey(key), ct).ConfigureAwait(false);
+					// UIDVALIDITY leads the fingerprint so a reset (mailbox recreated, restored,
+					// migrated) always reads as a change even when count/uidnext/unread happen to
+					// land identically — that is the moment every stored item key goes stale.
 					await folder.StatusAsync(
-						StatusItems.Count | StatusItems.UidNext | StatusItems.Unread, ct).ConfigureAwait(false);
-					map[key] = $"{folder.Count}:{folder.UidNext}:{folder.Unread}";
+						StatusItems.Count | StatusItems.UidNext | StatusItems.Unread | StatusItems.UidValidity, ct)
+						.ConfigureAwait(false);
+					map[key] = $"{folder.UidValidity}:{folder.Count}:{folder.UidNext}:{folder.Unread}";
 				}
 				catch (Exception ex) when (ex is FolderNotFoundException)
 				{
