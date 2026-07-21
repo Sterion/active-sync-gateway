@@ -189,6 +189,25 @@ public sealed class CliConfigTests : IDisposable
 	}
 
 	[Fact]
+	public void Set_SecretKey_DoesNotEchoTheValue()
+	{
+		// L29: `config set` confirmed with "Set <key> = <value>", echoing the plaintext secret
+		// even though get/list mask it. The confirmation must mask secret values too.
+		(int exit, _, string setOut) = Run("config", "set", "ActiveSync:WebUi:Oidc:ClientSecret", "super-secret");
+		Assert.Equal(0, exit);
+		Assert.DoesNotContain("super-secret", setOut);
+		Assert.Contains("***", setOut);
+
+		// A backend secret leaf masks in the echo too.
+		(_, _, string backendOut) = Run("config", "set", "ActiveSync:Backends:MailStore:ApiKey", "backend-api-secret");
+		Assert.DoesNotContain("backend-api-secret", backendOut);
+
+		// A non-secret key still echoes its value for confirmation.
+		(_, _, string plainOut) = Run("config", "set", "ActiveSync:Eas:MaxHeartbeatSeconds", "1200");
+		Assert.Contains("1200", plainOut);
+	}
+
+	[Fact]
 	public void Set_BackendKey_IsAcceptedAndRestartTierNoted()
 	{
 		// Open-ended backend settings are accepted (validated on the server by the provider).

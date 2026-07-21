@@ -193,7 +193,7 @@ internal sealed class ConfigSetCommand(IAnsiConsole terminal) : SettingsCommandB
 		}
 
 		await store.UpsertAsync(definition.Key, settings.Value, cancellationToken);
-		Terminal.WriteLine($"Set {definition.Key} = {settings.Value}. {PickupNote(definition.Restart)}");
+		Terminal.WriteLine($"Set {definition.Key} = {Mask(definition, settings.Value)}. {PickupNote(definition.Restart)}");
 		return 0;
 	}
 }
