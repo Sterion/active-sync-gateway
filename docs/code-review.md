@@ -26,21 +26,14 @@ Two caveats worth respecting:
 - **Quality decays with context.** A session six items deep is worse at the seventh than a fresh one. Prefer 3–5 items per run over 15.
 - **Give these their own run:** item 5 (needs live-server verification mid-item) and item 20 (decompositions — must start from a clean tree).
 
-**You do not need a baseline test run.** Protocol step 5 requires tests to pass before each commit, so a completed item leaves the tree green and the next one inherits it. The tree was verified green at `ce6259c` (124 passed, 0 skipped) — re-proving it each run just costs ~3 minutes.
-
-For a [LIVE] item you only need the backend up, which is seconds:
+**Before any run that includes a [LIVE] item**, establish a green baseline first — otherwise the first failure is ambiguous between "my change broke it" and "it was already red":
 
 ```powershell
 ./scripts/stalwart-up.ps1      # canonical ports; reuses a warm container
+dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration
 ```
 
-**If a test fails in a way that looks unrelated to your change**, don't assume you caused it — the container is long-lived and tests mutate real mailboxes, so state can drift. Check before chasing it:
-
-```sh
-git stash && dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration; git stash pop
-```
-
-Still red on a clean tree means the environment. Recreate the stack with `./scripts/stalwart-up.ps1 -Down` then `./scripts/stalwart-up.ps1`, and say so in your report rather than working around it.
+Expect `Passed: 124, Skipped: 0`. Anything else means the environment, not your change.
 
 ### Running the queue hands-off
 
