@@ -120,6 +120,47 @@ public sealed class CliLocalEndpointTests : IDisposable
 	}
 
 	[Fact]
+	public async Task ForwardedCommand_DoesNotSwallowConcurrentGatewayLogOutput()
+	{
+		// L25: capturing output swapped the PROCESS-GLOBAL Console.Out/Error, so for the duration of
+		// every forwarded command all gateway log output — from every concurrent request — was
+		// captured into that command's stdout and vanished from the container log. The console
+		// logger writes from a thread that exists before the command starts; simulate exactly that
+		// and prove its output still reaches the real console and never enters the response.
+		TextWriter originalOut = Console.Out;
+		StringWriter containerLog = new();
+		using ManualResetEventSlim stop = new();
+		Thread gatewayLogger = new(() =>
+		{
+			while (!stop.IsSet)
+			{
+				Console.Out.Write("[gateway-log]");
+				Thread.Sleep(0);
+			}
+		})
+		{ IsBackground = true };
+
+		LocalCliEndpoint.CliResponse response;
+		try
+		{
+			Console.SetOut(containerLog);
+			gatewayLogger.Start();
+			response = await LocalCliEndpoint.ExecuteAsync(["config", "list"], "", CancellationToken.None);
+		}
+		finally
+		{
+			stop.Set();
+			gatewayLogger.Join(TimeSpan.FromSeconds(5));
+			Console.SetOut(originalOut);
+		}
+
+		Assert.DoesNotContain("[gateway-log]", response.Stdout);
+		Assert.Contains("[gateway-log]", containerLog.ToString());
+		// The command's own output is still captured — the routing is per async flow, not a no-op.
+		Assert.Contains("ActiveSync:", response.Stdout);
+	}
+
+	[Fact]
 	public void ColorRendering_ForcesAnsiEscapes_ToTheCapturedBuffer()
 	{
 		// The /cli buffer is a StringWriter, not a terminal. Prove that forcing Ansi+colour makes

@@ -245,6 +245,12 @@ internal static class LocalCliEndpoint
 	///   Commands emit through both the injected <see cref="IAnsiConsole" /> (default
 	///   <see cref="AnsiConsole.Console" />) and the raw process-global <see cref="Console" />, so
 	///   both are redirected under the lock and restored in <c>finally</c>.
+	///
+	///   <para>The <see cref="Console" /> swap is process-global, so it is routed by async flow
+	///   (<see cref="ScopedConsoleWriter" />) rather than swallowing everything: only writes made
+	///   inside this command's flow land in its buffer. Gateway log output — written from threads
+	///   that predate the command — keeps reaching the real console instead of being captured into
+	///   an admin's stdout and lost from the container log.</para>
 	/// </summary>
 	private static async Task<CliResponse> RunCapturedAsync(
 		string[] args, string stdin, CancellationToken ct, bool color, int width)
@@ -256,11 +262,17 @@ internal static class LocalCliEndpoint
 		IAnsiConsole originalAnsi = AnsiConsole.Console;
 		StringWriter outWriter = new();
 		StringWriter errorWriter = new();
+		ScopedConsoleWriter outRouter = new(originalOut);
+		ScopedConsoleWriter errorRouter = new(originalError);
 		try
 		{
-			Console.SetOut(outWriter);
-			Console.SetError(errorWriter);
+			Console.SetOut(outRouter);
+			Console.SetError(errorRouter);
 			Console.SetIn(new StringReader(stdin));
+			// A command may fan out to its own tasks (which DO inherit the flow), so the buffers are
+			// written through synchronized wrappers; their contents are read back after the run.
+			outRouter.Capture(TextWriter.Synchronized(outWriter));
+			errorRouter.Capture(TextWriter.Synchronized(errorWriter));
 			// Render with ANSI colour only when the CALLER's terminal wants it (a TTY, NO_COLOR
 			// unset) — the client detects that and sends the hint, so piped/redirected output stays
 			// plain. Pin the profile width to the caller's terminal (or a wide default) so tables
@@ -302,6 +314,36 @@ internal static class LocalCliEndpoint
 			AnsiConsole.Console = originalAnsi;
 			Gate.Release();
 		}
+	}
+
+	/// <summary>
+	///   A <see cref="Console" /> stand-in that routes each write by ASYNC FLOW: writes made inside a
+	///   forwarded command (which has called <see cref="Capture" />) go to that command's buffer;
+	///   every other write — the logging providers' threads, other requests in flight — goes to the
+	///   real console it replaced. Without this, redirecting the process-global console for the
+	///   duration of a command captured the whole gateway's log output into one admin's stdout and
+	///   deleted it from the container log.
+	/// </summary>
+	private sealed class ScopedConsoleWriter(TextWriter fallback) : TextWriter
+	{
+		private readonly AsyncLocal<TextWriter?> _scoped = new();
+
+		public override System.Text.Encoding Encoding => fallback.Encoding;
+
+		private TextWriter Target => _scoped.Value ?? fallback;
+
+		/// <summary>Routes writes from the CURRENT async flow (and the flows it starts) to <paramref name="buffer" />.</summary>
+		public void Capture(TextWriter buffer) => _scoped.Value = buffer;
+
+		public override void Write(char value) => Target.Write(value);
+
+		public override void Write(string? value) => Target.Write(value);
+
+		public override void Write(char[] buffer, int index, int count) => Target.Write(buffer, index, count);
+
+		public override void WriteLine(string? value) => Target.WriteLine(value);
+
+		public override void Flush() => Target.Flush();
 	}
 
 	/// <summary>
