@@ -20,7 +20,7 @@ That is the whole prompt. Items are self-contained and pre-sized — there is no
 
 Naming the [LIVE] rule explicitly is worth the extra clause: its failure mode is a *silent* one (a skipped suite reports green), so it is the instruction most likely to be satisfied without being followed.
 
-**Items are sizing units, not prompt units — batch them freely.** Ask for a range or a whole phase; get through what you can and stop cleanly at a commit boundary (protocol step 6). Over-asking is safe by design: every finished finding is already committed and struck through, so the next session resumes exactly where you stopped. A phase per prompt is a reasonable default.
+**Items are sizing units, not prompt units — batch them freely.** Ask for a range or a whole phase; get through what you can and stop cleanly at a commit boundary (protocol step 7). Over-asking is safe by design: every finished finding is already committed and struck through, so the next session resumes exactly where you stopped. A phase per prompt is a reasonable default.
 
 Two caveats worth respecting:
 - **Quality decays with context.** A session six items deep is worse at the seventh than a fresh one. Prefer 3–5 items per run over 15.
@@ -84,18 +84,26 @@ fix(imap): scope EXPUNGE to the deleted UID (D1)
 
 Small commits are the point — they make the work resumable and each finding independently revertible. Do not batch a whole item into one commit.
 
-**3. Mark the finding in this document in the same commit.** Keep the backticks inside the strikethrough, exactly:
+**3. Mark the finding in this document in the same commit — in PART 1, on the item's own line.** That line is the cursor: the next session resolves where to resume by finding the lowest-numbered Part 1 item with un-struck findings. A finding marked only in Part 2 leaves the cursor untouched, and the item gets done twice.
 
 ```
-~~`D1`~~ **FIXED** (abc1234)
-~~`D1`~~ **N/A** — <one line why>
+**1. IMAP mailbox safety** [LIVE] — ~~`D1`~~ ~~`D2`~~ ~~`D17`~~ **COMPLETE**
 ```
 
-The backticks are load-bearing — the integrity check below finds findings by `` `ID` ``, so dropping them makes a finding invisible to verification.
+Use `~~`D1`~~ **N/A** — <one line why>` for a finding that no longer applies. Two rules:
+
+- **Keep the backticks inside the strikethrough.** The integrity check finds findings by `` `ID` ``, so dropping them makes a finding invisible to verification.
+- **No commit hash.** It cannot be written in the same commit it names — amending to add it changes the hash it just recorded. The commit subject already carries the ID, so `git log --grep='(D1)'` locates it exactly.
+
+Annotating the Part 2 entry as well is welcome — that is the right home for anything a future reader needs (a breaking-change note, a caveat about what a test does and does not prove). It is a supplement to the Part 1 mark, never a substitute.
 
 **4. If you moved or renamed code other findings reference, fix their `file:line` anchors.** You are the only one who will know where it went. If it invalidates a whole item, add a row to the re-verify table below.
 
 **5. Build and test before each commit.** `dotnet build ActiveSync.slnx` is ~16s and the baseline is **0 warnings** — keep it there. Run the relevant test project. Items marked `[LIVE]` additionally require live-backend verification — see below.
+
+**6. Prove the regression test actually catches the defect.** Write the test, then *temporarily revert the fix* and confirm the test fails. A test that passes both with and without the fix documents behaviour but proves nothing — and a finding struck through on the strength of it is a false record.
+
+If it passes without the fix, you have two honest options: make it a real reproducer, or keep it as coverage and **label it as such** in both the test comment and the Part 2 note. Do not leave it looking like proof. (Item 1 hit exactly this: `D17`'s test passes against the old code because Stalwart drains the pending `EXISTS` anyway. The fix is still correct — UIDs rather than sequence numbers, matching every sibling call — but the test is baseline coverage, not evidence, and says so.)
 
 ### [LIVE] Items requiring live-backend verification
 
@@ -130,9 +138,9 @@ Reference numbers for a green tree: **124 tests, 124 passed, 0 skipped, ~2.5 min
 
 Everything else is verifiable with the unit suite alone, so the stacks can come down after item 6 if you want them off — items 26 onward are the next time they're needed.
 
-**6. If you run low on context, stop at a commit boundary** and report exactly which findings are done and which are untouched. Do not start a finding you cannot finish and verify. Because of steps 2–3, stopping early costs nothing — the next session resumes from this document.
+**7. If you run low on context, stop at a commit boundary** and report exactly which findings are done and which are untouched. Do not start a finding you cannot finish and verify. Because of steps 2–3, stopping early costs nothing — the next session resumes from this document.
 
-**7. Stay inside the item.** If you spot something outside it, note it at the bottom of Part 2 as a new finding rather than fixing it inline.
+**8. Stay inside the item.** If you spot something outside it, note it at the bottom of Part 2 as a new finding rather than fixing it inline.
 
 ### Running items in parallel
 
@@ -216,7 +224,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 ## Phase 1 — Stop the bleeding
 *Data loss, corruption and process death. All Critical/High.*
 
-**1. IMAP mailbox safety** [LIVE] — `D1` `D2` `D17`
+**1. IMAP mailbox safety** [LIVE] — ~~`D1`~~ ~~`D2`~~ ~~`D17`~~ **COMPLETE**
 > Two Criticals. `D1` a folder-wide `EXPUNGE` destroys other clients' `\Deleted` mail on every EAS delete; `D2` no UIDVALIDITY tracking anywhere, so after a restore or migration operations hit the wrong messages. Needs a real IMAP server to verify. **Best first item** — small, self-contained, highest value.
 
 **2. WBXML decoder & encoder hardening** — `W1` `W2` `W3` `W4` `W5` `W6` `W7` `W8`
@@ -279,7 +287,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 > Move `MergedFreeBusy`/`CollectionDiff` to Protocol; consolidate `Backends.Common`'s three namespaces.
 
 **20. Decompositions** — `F-decomp` `A33` `E27` `E28`
-> NOTE — **Run alone.** `SyncHandler` (826 lines → 6 partials + 2 extracted types), `SyncStateService` (535, 6 responsibilities), `ProgramServer.RunServerAsync` (245), and the duplicated auth prologue. Invalidates line anchors wholesale — update them per protocol step 5.
+> NOTE — **Run alone.** `SyncHandler` (826 lines → 6 partials + 2 extracted types), `SyncStateService` (535, 6 responsibilities), `ProgramServer.RunServerAsync` (245), and the duplicated auth prologue. Invalidates line anchors wholesale — update them per protocol step 4.
 
 ## Phase 4 — Correctness
 
