@@ -46,7 +46,7 @@ catch
 byte[]? key = LoadKey();
 CliRequest request = key is null
 	? new CliRequest(arguments, stdin, null, color, width)
-	: new CliRequest(null, null, new LocalCliEnvelope(
+	: new CliRequest(null, null, LocalCliEnvelope.Create(
 		arguments, stdin, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()).Seal(key), color, width);
 
 string baseUrl = ResolveBaseUrl();

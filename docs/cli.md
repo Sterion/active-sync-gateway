@@ -125,8 +125,10 @@ avoids a cold start of the full app per command; secret-setting verbs (`user pas
   loopback interface but not the container's environment/secrets. So a valid envelope proves the
   caller is a real key holder (the trust set that can already decrypt everything at rest), which a
   bare loopback check can't: in a shared network namespace a sidecar's `127.0.0.1` reaches the
-  gateway. The timestamp bounds replay of a sniffed ciphertext, and the payload is encrypted on
-  the wire. Loopback is kept as a cheap pre-filter (and no forwarded-headers middleware exists, so
+  gateway. The timestamp bounds replay of a sniffed ciphertext in time (60s back, 5s of forward
+  clock skew) and a per-request **nonce** bounds it in count — the gateway remembers the nonces it
+  has executed for the length of that window, so an envelope runs exactly once and a captured
+  `purge user --yes` cannot be re-fired. The payload is encrypted on the wire. Loopback is kept as a cheap pre-filter (and no forwarded-headers middleware exists, so
   the peer address is the real one); requests that fail either check get a 404.
 - **The response is sealed too.** Command output is as sensitive as command input (`eas device
   password` prints a live credential), so whenever a key is configured the gateway seals

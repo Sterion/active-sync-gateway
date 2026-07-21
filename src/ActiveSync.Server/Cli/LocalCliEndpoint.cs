@@ -34,6 +34,41 @@ internal static class LocalCliEndpoint
 	/// <summary>How far a sealed request's timestamp may be from now before it's treated as a replay.</summary>
 	internal const long AuthWindowMs = 60_000;
 
+	/// <summary>
+	///   Remembers the nonces of envelopes already executed, so one envelope runs exactly once. The
+	///   timestamp window bounds a captured envelope in time; this bounds it in count, which is what
+	///   matters for a destructive verb (<c>purge user --yes</c> replayed is a second purge).
+	///
+	///   <para>Only a caller that already proved key possession can add an entry, and every entry is
+	///   pruned once it falls outside the window it was admitted under, so the table stays the size
+	///   of one window's worth of legitimate admin traffic.</para>
+	/// </summary>
+	internal sealed class ReplayCache(long retentionMs)
+	{
+		private readonly Dictionary<string, long> _seen = new(StringComparer.Ordinal);
+		private readonly Lock _gate = new();
+
+		/// <summary>
+		///   Claims <paramref name="nonce" /> for this execution: true the first time it is seen,
+		///   false for every repeat while the nonce is still within the replay window.
+		/// </summary>
+		public bool TryClaim(string nonce, long nowUnixMs)
+		{
+			lock (_gate)
+			{
+				// An envelope older than the window is rejected before it gets here, so anything
+				// that has aged out can never be presented again and its entry is dead weight.
+				foreach (string expired in _seen.Where(e => nowUnixMs - e.Value > retentionMs).Select(e => e.Key).ToList())
+					_seen.Remove(expired);
+
+				if (_seen.ContainsKey(nonce))
+					return false;
+				_seen[nonce] = nowUnixMs;
+				return true;
+			}
+		}
+	}
+
 	// Color/Width are rendering hints from the caller's terminal (not secret, so they ride outside
 	// the sealed envelope). Color adds ANSI escapes to the output; Width wraps tables to the
 	// caller's terminal. A tampering sidecar still can't get a response (it can't seal a request),
@@ -72,6 +107,7 @@ internal static class LocalCliEndpoint
 		}
 
 		ILogger logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(LocalCliEndpoint));
+		ReplayCache replay = new(AuthWindowMs);
 
 		app.MapPost("/cli", async (HttpContext context, IOptionsMonitor<ActiveSyncOptions> options, CliRequest? request) =>
 		{
@@ -85,12 +121,12 @@ internal static class LocalCliEndpoint
 				return Results.NotFound();
 			}
 			if (!TryAuthorize(request, key, allowPlaintext, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-				    out string[] args, out string stdin))
+				    replay, out string[] args, out string stdin))
 			{
 				AuditRefusal(logger, context.Connection.RemoteIpAddress,
 					key is null
 						? "no master key is configured and AllowPlaintext is not set"
-						: "no request sealed with the master key was presented");
+						: "no fresh, unused request sealed with the master key was presented");
 				return Results.NotFound();
 			}
 
@@ -115,7 +151,8 @@ internal static class LocalCliEndpoint
 	///   loopback gate alone; a key that simply failed to load authenticates nobody.
 	/// </summary>
 	internal static bool TryAuthorize(
-		CliRequest? request, byte[]? key, bool allowPlaintext, long nowUnixMs, out string[] args, out string stdin)
+		CliRequest? request, byte[]? key, bool allowPlaintext, long nowUnixMs, ReplayCache replay,
+		out string[] args, out string stdin)
 	{
 		if (key is null && !allowPlaintext)
 		{
@@ -132,7 +169,8 @@ internal static class LocalCliEndpoint
 		}
 
 		if (!LocalCliEnvelope.TryOpen(request?.Sealed, key, nowUnixMs, AuthWindowMs, out LocalCliEnvelope? envelope)
-			|| envelope is null)
+			|| envelope is null
+			|| !replay.TryClaim(envelope.Nonce, nowUnixMs))
 		{
 			args = [];
 			stdin = "";

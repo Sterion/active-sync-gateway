@@ -198,10 +198,10 @@ public sealed class CliLocalEndpointTests : IDisposable
 	{
 		byte[] key = NewKey();
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-		string sealed_ = new LocalCliEnvelope(["users", "--all"], "pw", now).Seal(key);
+		string sealed_ = LocalCliEnvelope.Create(["users", "--all"], "pw", now).Seal(key);
 
 		Assert.True(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(null, null, sealed_), key, allowPlaintext: false, now, out string[] args, out string stdin));
+			new LocalCliEndpoint.CliRequest(null, null, sealed_), key, allowPlaintext: false, now, new LocalCliEndpoint.ReplayCache(LocalCliEndpoint.AuthWindowMs), out string[] args, out string stdin));
 		Assert.Equal(["users", "--all"], args);
 		Assert.Equal("pw", stdin);
 	}
@@ -211,17 +211,17 @@ public sealed class CliLocalEndpointTests : IDisposable
 	{
 		byte[] key = NewKey();
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-		string sealedWithOther = new LocalCliEnvelope(["users"], null, now).Seal(NewKey());
+		string sealedWithOther = LocalCliEnvelope.Create(["users"], null, now).Seal(NewKey());
 
 		// Sealed by a DIFFERENT key (a sidecar guessing) — rejected.
 		Assert.False(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(null, null, sealedWithOther), key, allowPlaintext: false, now, out _, out _));
+			new LocalCliEndpoint.CliRequest(null, null, sealedWithOther), key, allowPlaintext: false, now, new LocalCliEndpoint.ReplayCache(LocalCliEndpoint.AuthWindowMs), out _, out _));
 		// No envelope at all — rejected.
 		Assert.False(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(null, null, null), key, allowPlaintext: false, now, out _, out _));
+			new LocalCliEndpoint.CliRequest(null, null, null), key, allowPlaintext: false, now, new LocalCliEndpoint.ReplayCache(LocalCliEndpoint.AuthWindowMs), out _, out _));
 		// A plaintext body is ignored when a key is configured — rejected.
 		Assert.False(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(["users"], null, null), key, allowPlaintext: false, now, out _, out _));
+			new LocalCliEndpoint.CliRequest(["users"], null, null), key, allowPlaintext: false, now, new LocalCliEndpoint.ReplayCache(LocalCliEndpoint.AuthWindowMs), out _, out _));
 	}
 
 	[Fact]
@@ -229,10 +229,10 @@ public sealed class CliLocalEndpointTests : IDisposable
 	{
 		byte[] key = NewKey();
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-		string stale = new LocalCliEnvelope(["users"], null, now - LocalCliEndpoint.AuthWindowMs - 5_000).Seal(key);
+		string stale = LocalCliEnvelope.Create(["users"], null, now - LocalCliEndpoint.AuthWindowMs - 5_000).Seal(key);
 
 		Assert.False(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(null, null, stale), key, allowPlaintext: false, now, out _, out _));
+			new LocalCliEndpoint.CliRequest(null, null, stale), key, allowPlaintext: false, now, new LocalCliEndpoint.ReplayCache(LocalCliEndpoint.AuthWindowMs), out _, out _));
 	}
 
 	[Fact]
@@ -244,7 +244,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 		// Only an explicit ActiveSync:Encryption:AllowPlaintext may open that door.
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		Assert.False(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(["users"], "in", null), key: null, allowPlaintext: false, now,
+			new LocalCliEndpoint.CliRequest(["users"], "in", null), key: null, allowPlaintext: false, now, new LocalCliEndpoint.ReplayCache(LocalCliEndpoint.AuthWindowMs),
 			out _, out _));
 	}
 
@@ -254,10 +254,67 @@ public sealed class CliLocalEndpointTests : IDisposable
 		// AllowPlaintext dev/test: nothing to prove, so the plain body passes (loopback still gates).
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		Assert.True(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(["users"], "in", null), key: null, allowPlaintext: true, now,
+			new LocalCliEndpoint.CliRequest(["users"], "in", null), key: null, allowPlaintext: true, now, new LocalCliEndpoint.ReplayCache(LocalCliEndpoint.AuthWindowMs),
 			out string[] args, out string stdin));
 		Assert.Equal(["users"], args);
 		Assert.Equal("in", stdin);
+	}
+
+	[Fact]
+	public void Authorize_RefusesTheSecondUseOfAnEnvelope_WithinTheWindow()
+	{
+		// L27: replay was bounded by time but not identity, so a captured envelope re-executed a
+		// destructive verb for as long as the window lasted. Each envelope carries a nonce and is
+		// good for exactly one execution.
+		byte[] key = NewKey();
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		string sealed_ = LocalCliEnvelope.Create(["purge", "user", "alice@example.com", "--yes"], null, now).Seal(key);
+		LocalCliEndpoint.CliRequest request = new(null, null, sealed_);
+		LocalCliEndpoint.ReplayCache replay = new(LocalCliEndpoint.AuthWindowMs);
+
+		Assert.True(LocalCliEndpoint.TryAuthorize(request, key, allowPlaintext: false, now, replay, out _, out _));
+		// Same bytes, same window, still inside the timestamp bound — refused on the nonce.
+		Assert.False(LocalCliEndpoint.TryAuthorize(request, key, allowPlaintext: false, now, replay, out _, out _));
+		Assert.False(LocalCliEndpoint.TryAuthorize(request, key, allowPlaintext: false, now + 30_000, replay, out _, out _));
+
+		// A fresh envelope for the same command is fine — it is a new nonce.
+		LocalCliEndpoint.CliRequest again = new(null, null,
+			LocalCliEnvelope.Create(["purge", "user", "alice@example.com", "--yes"], null, now).Seal(key));
+		Assert.True(LocalCliEndpoint.TryAuthorize(again, key, allowPlaintext: false, now, replay, out _, out _));
+	}
+
+	[Fact]
+	public void Envelope_RejectsAFutureTimestamp_SoTheWindowIsNotDoubled()
+	{
+		// K54: Math.Abs treated a timestamp 60s in the FUTURE as acceptable as one 60s in the past,
+		// so a captured envelope stayed replayable for 120s. Only a small clock skew is allowed
+		// forward.
+		byte[] key = NewKey();
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+		string future = LocalCliEnvelope.Create(["users"], null, now + LocalCliEndpoint.AuthWindowMs - 1_000).Seal(key);
+		Assert.False(LocalCliEnvelope.TryOpen(future, key, now, LocalCliEndpoint.AuthWindowMs, out _));
+
+		// A clock a couple of seconds ahead still works, and the backward bound is unchanged.
+		string skewed = LocalCliEnvelope.Create(["users"], null, now + 2_000).Seal(key);
+		Assert.True(LocalCliEnvelope.TryOpen(skewed, key, now, LocalCliEndpoint.AuthWindowMs, out _));
+		string recent = LocalCliEnvelope.Create(["users"], null, now - 30_000).Seal(key);
+		Assert.True(LocalCliEnvelope.TryOpen(recent, key, now, LocalCliEndpoint.AuthWindowMs, out _));
+	}
+
+	[Fact]
+	public void Envelope_MintsAFreshNonceEachTime_AndRejectsOneWithout()
+	{
+		byte[] key = NewKey();
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		Assert.NotEqual(
+			LocalCliEnvelope.Create(["users"], null, now).Nonce,
+			LocalCliEnvelope.Create(["users"], null, now).Nonce);
+
+		// An envelope minted without a nonce (an older client) can't be distinguished from a replay,
+		// so it is refused outright rather than trusted.
+		string nonceless = new LocalCliEnvelope(["users"], null, now, "").Seal(key);
+		Assert.False(LocalCliEnvelope.TryOpen(nonceless, key, now, LocalCliEndpoint.AuthWindowMs, out _));
 	}
 
 	[Fact]
@@ -395,6 +452,6 @@ public sealed class CliLocalEndpointTests : IDisposable
 		byte[] key = NewKey();
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		Assert.False(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(["users"], "in", null), key, allowPlaintext: true, now, out _, out _));
+			new LocalCliEndpoint.CliRequest(["users"], "in", null), key, allowPlaintext: true, now, new LocalCliEndpoint.ReplayCache(LocalCliEndpoint.AuthWindowMs), out _, out _));
 	}
 }
