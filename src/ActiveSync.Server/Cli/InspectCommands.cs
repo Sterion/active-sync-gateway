@@ -132,11 +132,13 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 			int ItemCount(string collection) =>
 				itemStats.FirstOrDefault(s => s.UserName == user && s.Collection == collection)?.Count ?? 0;
 			int deviceBlocks = blocks.Count(b => b.UserName == user && b.DeviceId is not null);
-			string blocked = blocks.Any(b => b.UserName == user && b.DeviceId is null)
-				? "yes"
-				: deviceBlocks > 0
-					? $"{deviceBlocks} device(s)"
-					: "-";
+			string blocked = declared?.Enabled == false
+				? "disabled"
+				: blocks.Any(b => b.UserName == user && b.DeviceId is null)
+					? "yes"
+					: deviceBlocks > 0
+						? $"{deviceBlocks} device(s)"
+						: "-";
 
 			AddRow(table, user, origin, declared?.MailAddress ?? "-",
 				declared?.Admin == true ? "yes" : "-", password,

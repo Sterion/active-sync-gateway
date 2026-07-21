@@ -35,7 +35,8 @@ export async function render(container) {
 
 function status(d) {
 	const badges = [];
-	if (d.userBlocked) badges.push(h('span', { class: 'badge danger' }, 'user blocked'));
+	if (d.userDisabled) badges.push(h('span', { class: 'badge danger' }, 'user disabled'));
+	else if (d.userBlocked) badges.push(h('span', { class: 'badge danger' }, 'user blocked'));
 	else if (d.blocked) badges.push(h('span', { class: 'badge danger' }, 'blocked'));
 	if (d.pendingAccountWipe) badges.push(h('span', { class: 'badge warn' }, 'wipe pending'));
 	if (badges.length === 0) badges.push(h('span', { class: 'badge ok' }, 'active'));

@@ -44,6 +44,10 @@ internal static class CliApp
 				.WithDescription("Declare a user in the database (copies a same-login config entry).");
 			user.AddCommand<UserRemoveCommand>("remove")
 				.WithDescription("Delete the database entry (a config entry becomes active again).");
+			user.AddCommand<UserDisableCommand>("disable")
+				.WithDescription("Disable an account — refuse every login (all devices, EAS + web) until re-enabled.");
+			user.AddCommand<UserEnableCommand>("enable")
+				.WithDescription("Re-enable a disabled account.");
 			user.AddCommand<UserSetCommand>("set")
 				.WithDescription("Set one field by config path (e.g. Backends:MailStore:Settings:Host); password keys are hashed/sealed.");
 			user.AddCommand<UserUnsetCommand>("unset")

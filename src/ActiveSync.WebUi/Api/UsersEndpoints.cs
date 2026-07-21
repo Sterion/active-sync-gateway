@@ -26,7 +26,7 @@ internal static class UsersEndpoints
 		Dictionary<string, string?>? Settings);
 
 	internal sealed record UserDto(
-		string Login, string Origin, string? MailAddress, bool Admin, bool PasswordSet,
+		string Login, string Origin, string? MailAddress, bool Admin, bool Enabled, bool PasswordSet,
 		string? PasswordFormat, Dictionary<string, RoleDto>? Backends);
 
 	internal sealed record RoleUpdate(
@@ -35,7 +35,7 @@ internal static class UsersEndpoints
 
 	/// <summary>Full-replacement update; only the password fields are sentinel-merged.</summary>
 	internal sealed record UserUpdateRequest(
-		string? MailAddress, bool? Admin, string? Password, Dictionary<string, RoleUpdate>? Backends);
+		string? MailAddress, bool? Admin, bool? Enabled, string? Password, Dictionary<string, RoleUpdate>? Backends);
 
 	internal static void Map(RouteGroupBuilder api)
 	{
@@ -70,7 +70,9 @@ internal static class UsersEndpoints
 			AccountOptions entry = new()
 			{
 				MailAddress = string.IsNullOrWhiteSpace(request.MailAddress) ? null : request.MailAddress.Trim(),
-				Admin = request.Admin == true ? true : null
+				Admin = request.Admin == true ? true : null,
+				// Store the disabled flag only when explicitly off; enabled is the default (no flag).
+				Enabled = request.Enabled == false ? false : null
 			};
 
 			string? gatewayPassword = MergeSecret(request.Password, starting.Password,
@@ -139,6 +141,35 @@ internal static class UsersEndpoints
 				configFallback = options.CurrentValue.Users?.ContainsKey(login) == true
 			});
 		});
+
+		// Quick disable/enable (parallel to devices block/unblock) — flips the account master
+		// switch without a full-replacement PUT, so it can't clobber other fields.
+		api.MapPost("users/{login}/disable", (string login, AccountStore store, AccountResolver resolver,
+				BackendRolesConfig roles, BackendProviderRegistry registry,
+				IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
+			SetEnabledAsync(login, enable: false, store, resolver, roles, registry, options, ct));
+
+		api.MapPost("users/{login}/enable", (string login, AccountStore store, AccountResolver resolver,
+				BackendRolesConfig roles, BackendProviderRegistry registry,
+				IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
+			SetEnabledAsync(login, enable: true, store, resolver, roles, registry, options, ct));
+	}
+
+	/// <summary>Loads the entry a CLI edit would start from, flips its Enabled flag, validates and saves.</summary>
+	private static async Task<IResult> SetEnabledAsync(
+		string login, bool enable, AccountStore store, AccountResolver resolver,
+		BackendRolesConfig roles, BackendProviderRegistry registry,
+		IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct)
+	{
+		ActiveSyncOptions current = options.CurrentValue;
+		AccountOptions entry = await AccountEditing.LoadStartingEntryAsync(store, current, login, ct);
+		entry.Enabled = enable ? null : false;
+		List<string> failures = AccountResolver.ValidateEntry(current, roles, registry, login, entry);
+		if (failures.Count > 0)
+			return Results.BadRequest(new { error = string.Join(Environment.NewLine, failures) });
+		await store.UpsertAsync(login, entry, ct);
+		await resolver.EnsureFreshAsync(true, ct);
+		return Results.Ok(ToDto(login, new MergedAccount(entry, true, current.Users?.ContainsKey(login) == true)));
 	}
 
 	/// <summary>null = keep the stored value, "" = clear, anything else = run the secret policy.</summary>
@@ -176,6 +207,7 @@ internal static class UsersEndpoints
 				: "config",
 			o.MailAddress,
 			o.Admin == true,
+			o.Enabled != false,
 			!string.IsNullOrEmpty(o.Password),
 			string.IsNullOrEmpty(o.Password) ? null :
 			GatewayPasswordHasher.IsHashed(o.Password) ? "pbkdf2" : "PLAINTEXT",

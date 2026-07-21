@@ -31,7 +31,9 @@ internal static class OidcLogin
 
 		bool claimAdmin = HasAdminClaim(ticket, oidc);
 		if (mergedUsers.TryGetValue(login, out MergedAccount? account))
-			return new Verdict(true, login, account.Options.Admin == true || claimAdmin, false, null);
+			return account.Options.Enabled == false
+				? new Verdict(false, login, false, false, "the account is disabled")
+				: new Verdict(true, login, account.Options.Admin == true || claimAdmin, false, null);
 
 		if (!oidc.AutoProvision)
 			return new Verdict(false, login, false, false,

@@ -21,7 +21,7 @@ internal static class AccountFieldPaths
 
 	internal static IReadOnlyCollection<string> Keys { get; } =
 	[
-		"MailAddress", "Password", "Admin",
+		"MailAddress", "Password", "Admin", "Enabled",
 		"Backends:<Role>:Provider", "Backends:<Role>:Enabled",
 		"Backends:<Role>:UserName", "Backends:<Role>:Password",
 		"Backends:<Role>:Settings:<Key>",
@@ -43,6 +43,9 @@ internal static class AccountFieldPaths
 		if (key.Equals("Admin", StringComparison.OrdinalIgnoreCase))
 			return new FieldPath("Admin", typeof(bool?), false,
 				(account, value) => account.Admin = (bool?)value);
+		if (key.Equals("Enabled", StringComparison.OrdinalIgnoreCase))
+			return new FieldPath("Enabled", typeof(bool?), false,
+				(account, value) => account.Enabled = (bool?)value);
 
 		string[] parts = key.Split(':');
 		if (parts.Length < 3 ||

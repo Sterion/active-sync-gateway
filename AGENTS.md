@@ -367,7 +367,11 @@ into an allowlist (undeclared logins get a local 401; an empty entry is a grant)
 `AutoProvisioned`-marked `AccountEntry` for a pass-through login on first sync, so it becomes
 listable/blockable and can use the portal (the portal's "declared only" gate then passes and
 probes the backend) — this is what unifies the "synced users" and "declared accounts" views.
-Inert under the allowlist (that 401s before auth). Backend
+Inert under the allowlist (that 401s before auth). A disabled account
+(`AccountOptions.Enabled == false`, set via `eas user disable`/the Users page) is refused with 403
+after valid auth on every device — enforced at `EasEndpoint`/`AuthEndpoints`/`OidcLogin` via
+`AccountResolver.IsLoginDisabled` (an in-memory snapshot read); it is the persistent-property
+counterpart to the ad-hoc `LoginBlock`. Backend
 passwords may be `enc:v1:` values sealed by `SecretValue` under the Encryption master key
 — CLI commands `protect` / `hash-password` (Spectre.Console.Cli app in
 `src/ActiveSync.Server/Cli/`; Program.cs is a thin dispatcher — bare invocation shows the

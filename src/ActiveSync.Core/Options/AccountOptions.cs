@@ -64,6 +64,15 @@ public sealed class AccountOptions
 	public bool? Admin { get; set; }
 
 	/// <summary>
+	///   Account master switch. <c>false</c> = DISABLED: every login for this account — all
+	///   devices, EAS and web — is refused with 403 after valid credentials, exactly as a
+	///   user-level block would, until it is re-enabled. <c>null</c>/<c>true</c> = enabled (the
+	///   default). This is a persistent property of the account, distinct from an ad-hoc
+	///   <c>eas block</c> (which stays for temporary or device-scoped refusals).
+	/// </summary>
+	public bool? Enabled { get; set; }
+
+	/// <summary>
 	///   True on a row the gateway created itself when a pass-through login first cleared its
 	///   MailStore probe (<see cref="ActiveSyncOptions.AutoProvisionUsers" />). It is a pure
 	///   provenance marker — the entry behaves exactly like a hand-added empty one (no gateway

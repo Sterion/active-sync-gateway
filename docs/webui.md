@@ -48,8 +48,10 @@ get — the local password rule first, else the mail-backend probe — plus the 
   against their backend exactly as the phone does. See the accounts section of the README.)
 - `/admin` additionally requires the account's **`Admin` flag**
   (`eas user set <login> Admin true`, or the checkbox in the admin users editor).
-- A user-level `eas block` applies to the web exactly like EAS (403 after valid
-  credentials). The CLI remains the un-lockable escape hatch.
+- A **disabled** account (`eas user disable`, or the Enabled toggle / Disable button on the
+  admin Users page) refuses the web exactly like EAS — 403 after valid credentials, every
+  device — until re-enabled. A user-level `eas block` does the same as an ad-hoc/temporary
+  measure. The CLI remains the un-lockable escape hatch.
 - The same brute-force throttle as EAS applies, under web-specific keys.
 
 **OIDC mode** (`Oidc:Authority` set): local web login is **disabled entirely** — the local
@@ -118,7 +120,8 @@ non-GET calls need the `X-EAS-WebUi` header. Login/logout/mode are anonymous.
 | `GET /admin/api/backends` · `PUT/DELETE /admin/api/backends/{role}` | Role assignment and settings as database overrides over the config file, per-leaf source. PUT stores only real deviations (a value equal to the config file or the provider default is removed instead); DELETE resets the role to the file. |
 | `POST /admin/api/backends/{role}/validate` · `/test` | Dry-run validation (per-field failures) and, where the provider implements `IReadinessSource`, a credential-less reachability probe. |
 | `GET /user/api/backends/meta` | Per role: the provider serving this caller and its field descriptions, so the portal renders named fields. Descriptions only — no configured values. |
-| `GET/PUT/DELETE /admin/api/users[/{login}]` | Declared users with provenance; PUT = full-replacement upsert with password sentinels (null = keep, `""` = clear, value = hash/seal), validated like the CLI. |
+| `GET/PUT/DELETE /admin/api/users[/{login}]` | Declared users with provenance; PUT = full-replacement upsert with password sentinels (null = keep, `""` = clear, value = hash/seal) plus the `enabled` flag, validated like the CLI. |
+| `POST /admin/api/users/{login}/disable·enable` | Flip the account master switch without a full-replacement PUT (parallel to devices block/unblock); a disabled account refuses every login (403). |
 | `GET/POST/DELETE /admin/api/shares` | Shared-calendar grants (`eas share`). |
 | `GET /admin/api/devices` · `POST .../block·unblock·wipe·purge` | Device management; wipe/purge require the target echoed back in `confirm`. |
 | `GET /admin/api/logs` | History (time window, newest first) or tail (`?after=<id>`, chronological — poll every ~2 s); filters: `level` (minimum), `user`, `machine`, `source`, `text`. |

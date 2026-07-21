@@ -104,6 +104,20 @@ public sealed class AccountStoreTests : IDisposable
 	}
 
 	[Fact]
+	public async Task IsLoginDisabled_TracksTheEnabledFlag_CaseInsensitively()
+	{
+		AccountResolver resolver = Resolver(BaseOptions());
+		await _store.UpsertAsync("off", new AccountOptions { Enabled = false }, CancellationToken.None);
+		await _store.UpsertAsync("on", new AccountOptions(), CancellationToken.None);
+		await resolver.EnsureFreshAsync(true, CancellationToken.None);
+
+		Assert.True(resolver.IsLoginDisabled("off"));
+		Assert.True(resolver.IsLoginDisabled("OFF"));
+		Assert.False(resolver.IsLoginDisabled("on"));
+		Assert.False(resolver.IsLoginDisabled("undeclared"));
+	}
+
+	[Fact]
 	public async Task StampChange_TriggersRefresh_AndRaisesSnapshotChanged()
 	{
 		AccountResolver resolver = Resolver(BaseOptions());

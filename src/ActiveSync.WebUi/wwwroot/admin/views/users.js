@@ -45,13 +45,31 @@ export async function render(container) {
 		renderInto(list, users.length === 0
 			? h('div', { class: 'notice' }, 'No declared users — every login is pure pass-through.')
 			: table([
-				{ label: 'Login', cell: u => h('a', { href: '#', onclick: e => { e.preventDefault(); openEditor(u); } }, u.login) },
+				{ label: 'Login', cell: u => h('span', {},
+					h('a', { href: '#', onclick: e => { e.preventDefault(); openEditor(u); } }, u.login),
+					u.enabled === false ? h('span', { class: 'badge danger', style: 'margin-left:8px' }, 'disabled') : null) },
 				{ label: 'Origin', cell: u => h('span', { class: u.origin === 'config' ? 'badge' : 'badge accent' }, u.origin) },
 				{ label: 'Mail', cell: u => u.mailAddress ?? '—' },
 				{ label: 'Password', cell: u => u.passwordSet ? `set (${u.passwordFormat})` : '—' },
 				{ label: 'Admin', cell: u => u.admin ? h('span', { class: 'badge ok' }, 'admin') : '—' },
 				{ label: 'Overrides', cell: u => u.backends ? Object.keys(u.backends).join(', ') : '—' },
+				{ label: 'Actions', cell: u => enableToggle(u) },
 			], users));
+	}
+
+	// Quick disable/enable, mirroring the devices page's block button.
+	function enableToggle(u) {
+		return h('button', {
+			onclick: async () => {
+				try {
+					await api(`/admin/api/users/${encodeURIComponent(u.login)}/${u.enabled === false ? 'enable' : 'disable'}`, { body: {} });
+					toast(u.enabled === false ? `Enabled ${u.login}.` : `Disabled ${u.login} — every login now refused (403).`, 'ok');
+					refresh(container);
+				} catch (e) {
+					toast(e.body?.error ?? 'Change failed.', 'error');
+				}
+			},
+		}, u.enabled === false ? 'Enable' : 'Disable');
 	}
 
 	function openEditor(user, prefillLogin = null) {
@@ -65,6 +83,7 @@ export async function render(container) {
 			placeholder: 'defaults to the login when it contains @', spellcheck: 'false',
 		});
 		const admin = h('input', { type: 'checkbox', style: 'width:auto', ...(user?.admin ? { checked: true } : {}) });
+		const enabled = h('input', { type: 'checkbox', style: 'width:auto', ...(user?.enabled === false ? {} : { checked: true }) });
 		const password = h('input', {
 			type: 'password', autocomplete: 'new-password',
 			placeholder: user?.passwordSet ? '••• set — leave empty to keep' : 'unset — uses the mail password',
@@ -93,6 +112,8 @@ export async function render(container) {
 				} }, 'Clear')),
 			h('label', { style: 'display:flex; align-items:center; gap:8px; margin-top:12px' },
 				admin, 'Web admin access (/admin)'),
+			h('label', { style: 'display:flex; align-items:center; gap:8px; margin-top:8px' },
+				enabled, 'Account enabled (uncheck to disable, refusing every login on all devices)'),
 			h('h2', { style: 'margin-top:18px' }, 'Backend role overrides'),
 			...roleEditors.map(r => r.element),
 			h('div', { style: 'display:flex; gap:8px; margin-top:14px' },
@@ -117,6 +138,7 @@ export async function render(container) {
 					body: {
 						mailAddress: mail.value.trim() || null,
 						admin: admin.checked,
+						enabled: enabled.checked,
 						password: clearPassword ? '' : (password.value || null),
 						backends: Object.keys(backends).length ? backends : null,
 					},

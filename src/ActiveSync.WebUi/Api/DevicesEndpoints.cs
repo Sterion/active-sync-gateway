@@ -1,3 +1,4 @@
+using ActiveSync.Core.Accounts;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using Microsoft.AspNetCore.Builder;
@@ -16,7 +17,7 @@ internal static class DevicesEndpoints
 {
 	internal sealed record DeviceDto(
 		string User, string DeviceId, string DeviceType, DateTime CreatedUtc, DateTime LastSeenUtc,
-		string? LastProtocolVersion, bool PendingAccountWipe, bool Blocked, bool UserBlocked);
+		string? LastProtocolVersion, bool PendingAccountWipe, bool Blocked, bool UserBlocked, bool UserDisabled);
 
 	internal sealed record BlockRequest(string? User, string? DeviceId);
 
@@ -26,8 +27,9 @@ internal static class DevicesEndpoints
 
 	internal static void Map(RouteGroupBuilder api)
 	{
-		api.MapGet("devices", async (string? user, SyncDbContext db, CancellationToken ct) =>
+		api.MapGet("devices", async (string? user, SyncDbContext db, AccountResolver resolver, CancellationToken ct) =>
 		{
+			await resolver.EnsureFreshAsync(false, ct);
 			List<LoginBlock> blocks = await db.LoginBlocks.AsNoTracking().ToListAsync(ct);
 			List<Device> devices = await db.Devices.AsNoTracking()
 				.Where(d => user == null || d.UserName == user)
@@ -37,7 +39,8 @@ internal static class DevicesEndpoints
 				d.UserName, d.DeviceId, d.DeviceType, d.CreatedUtc, d.LastSeenUtc,
 				d.LastProtocolVersion, d.PendingAccountWipe,
 				blocks.Any(b => b.UserName == d.UserName && (b.DeviceId == null || b.DeviceId == d.DeviceId)),
-				blocks.Any(b => b.UserName == d.UserName && b.DeviceId == null))).ToList());
+				blocks.Any(b => b.UserName == d.UserName && b.DeviceId == null),
+				resolver.IsLoginDisabled(d.UserName))).ToList());
 		});
 
 		api.MapPost("devices/block", async (BlockRequest request, SyncDbContext db, CancellationToken ct) =>

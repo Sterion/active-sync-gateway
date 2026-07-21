@@ -155,6 +155,43 @@ internal sealed class UserRemoveCommand(IAnsiConsole terminal) : UserCommandBase
 	}
 }
 
+internal sealed class UserDisableCommand(IAnsiConsole terminal) : UserCommandBase<UserDisableCommand.Settings>(terminal)
+{
+	public sealed class Settings : CommandSettings
+	{
+		[CommandArgument(0, "<login>")]
+		[Description("The gateway login to disable.")]
+		public required string Login { get; init; }
+	}
+
+	protected override async Task<int> RunAsync(
+		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+	{
+		AccountOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+		entry.Enabled = false;
+		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
+	}
+}
+
+internal sealed class UserEnableCommand(IAnsiConsole terminal) : UserCommandBase<UserEnableCommand.Settings>(terminal)
+{
+	public sealed class Settings : CommandSettings
+	{
+		[CommandArgument(0, "<login>")]
+		[Description("The gateway login to re-enable.")]
+		public required string Login { get; init; }
+	}
+
+	protected override async Task<int> RunAsync(
+		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+	{
+		// Enabled is the default, so re-enabling clears the flag rather than storing an explicit true.
+		AccountOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+		entry.Enabled = null;
+		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
+	}
+}
+
 internal sealed class UserSetCommand(IAnsiConsole terminal) : UserCommandBase<UserSetCommand.Settings>(terminal)
 {
 	public sealed class Settings : CommandSettings

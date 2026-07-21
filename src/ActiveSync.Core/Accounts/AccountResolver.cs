@@ -67,6 +67,16 @@ public sealed class AccountResolver
 	public IReadOnlyDictionary<string, MergedAccount> MergedUsers => _snapshot.Users;
 
 	/// <summary>
+	///   True when <paramref name="login" /> is a declared account explicitly disabled
+	///   (<see cref="AccountOptions.Enabled" /> == false) — a persistent refusal of every login,
+	///   enforced at the endpoint like a user-level block. Reads the current in-memory snapshot, so
+	///   it is cheap on the auth path; an undeclared/pass-through login has no row and is never
+	///   "disabled" (block it instead). Case-insensitive, matching config/database key semantics.
+	/// </summary>
+	public bool IsLoginDisabled(string login) =>
+		_snapshot.Users.TryGetValue(login, out MergedAccount? account) && account.Options.Enabled == false;
+
+	/// <summary>
 	///   Reloads database accounts when the change stamp moved. Cost when idle: one
 	///   primary-key point-read at most every UsersRefreshSeconds, on the calling request.
 	///   Failures keep the current snapshot (auth never goes down with the database).

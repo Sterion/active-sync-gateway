@@ -204,6 +204,27 @@ public sealed class CliUserTests : IDisposable
 	}
 
 	[Fact]
+	public void Disable_Enable_RoundTrip()
+	{
+		// Disabling a not-yet-declared login creates the row with the flag set.
+		(int disableExit, _, string disableOut) = Run(null, "user", "disable", "u9");
+		Assert.Equal(0, disableExit);
+		Assert.Contains("DISABLED", disableOut);
+
+		(int _, _, string showOut) = Run(null, "user", "show", "u9");
+		Assert.Contains("DISABLED", showOut);
+
+		// The merged overview flags it in the Blocked column.
+		(int usersExit, _, string usersOut) = Run(null, "users");
+		Assert.Equal(0, usersExit);
+		Assert.Contains("disabled", usersOut);
+
+		(int enableExit, _, string enableOut) = Run(null, "user", "enable", "u9");
+		Assert.Equal(0, enableExit);
+		Assert.DoesNotContain("DISABLED", enableOut);
+	}
+
+	[Fact]
 	public void Set_AdminFlag_RoundTrip()
 	{
 		(int setExit, _, string setOutput) = Run(null, "user", "set", "u7", "Admin", "true");

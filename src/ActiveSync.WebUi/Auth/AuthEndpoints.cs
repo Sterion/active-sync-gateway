@@ -127,9 +127,9 @@ internal static class AuthEndpoints
 			return Results.Unauthorized();
 		}
 
-		// A user-level login block disables the web exactly like EAS (403 after valid auth;
-		// the CLI remains the un-lockable escape hatch).
-		if (await state.IsLoginBlockedAsync(request.Username, null, ct))
+		// A disabled account or a user-level login block refuses the web exactly like EAS (403
+		// after valid auth; the CLI remains the un-lockable escape hatch).
+		if (account.Options.Enabled == false || await state.IsLoginBlockedAsync(request.Username, null, ct))
 			return Results.StatusCode(StatusCodes.Status403Forbidden);
 
 		bool isAdmin = account.Options.Admin == true;

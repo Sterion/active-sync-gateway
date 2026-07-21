@@ -54,6 +54,20 @@ public sealed class OidcLoginTests
 	}
 
 	[Fact]
+	public async Task DisabledAccount_IsRejected_EvenWithValidClaims()
+	{
+		Dictionary<string, MergedAccount> users = new(StringComparer.OrdinalIgnoreCase)
+		{
+			["alice"] = new MergedAccount(new AccountOptions { Admin = true, Enabled = false }, true, false),
+		};
+
+		OidcLogin.Verdict verdict = await OidcLogin.EvaluateAsync(
+			Ticket(("preferred_username", "alice")), Oidc(), users, NoProvision());
+		Assert.False(verdict.Allowed);
+		Assert.Contains("disabled", verdict.Reason);
+	}
+
+	[Fact]
 	public async Task DeclaredAccount_SignsIn_AdminFromFlagOrClaim()
 	{
 		Dictionary<string, MergedAccount> users = Users(("alice", true), ("bob", false));

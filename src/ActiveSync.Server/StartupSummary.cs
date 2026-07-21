@@ -155,6 +155,8 @@ public static partial class StartupSummary
 				: account.ShadowsConfig ? "[db, shadows config]" : "[db]"
 				: "[config]",
 		];
+		if (o.Enabled == false)
+			parts.Add("DISABLED");
 		if (!string.IsNullOrWhiteSpace(o.MailAddress))
 			parts.Add($"mail={o.MailAddress}");
 		if (!string.IsNullOrWhiteSpace(o.Password))

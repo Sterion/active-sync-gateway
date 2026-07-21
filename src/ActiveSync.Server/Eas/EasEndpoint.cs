@@ -54,6 +54,7 @@ public static class EasEndpoint
 		IOptionsSnapshot<ActiveSyncOptions> options,
 		BackendRolesProvider rolesProvider,
 		PassThroughProvisioner provisioner,
+		AccountResolver accountResolver,
 		ILoggerFactory loggerFactory)
 	{
 		ILogger logger = loggerFactory.CreateLogger("ActiveSync.Endpoint");
@@ -141,15 +142,19 @@ public static class EasEndpoint
 		// even a user they intend to block.
 		await provisioner.ProvisionIfEnabledAsync(credentials.UserName, ct);
 
-		// Operator blocks (eas block/unblock) are enforced after auth so only holders of valid
-		// credentials can observe them. 403, not 401 — a challenge would loop the client
-		// through credential prompts.
-		if (await state.IsLoginBlockedAsync(credentials.UserName, parameters.DeviceId, ct))
+		// A disabled account (eas user disable) refuses every device; operator blocks (eas
+		// block/unblock) are the ad-hoc/device-scoped variant. Both are enforced after auth so
+		// only holders of valid credentials can observe them. 403, not 401 — a challenge would
+		// loop the client through credential prompts.
+		bool disabled = accountResolver.IsLoginDisabled(credentials.UserName);
+		if (disabled || await state.IsLoginBlockedAsync(credentials.UserName, parameters.DeviceId, ct))
 		{
-			logger.LogWarning("Refused blocked EAS login {User} ({DeviceId})",
-				LogText.Clean(credentials.UserName, 128), parameters.DeviceId);
+			logger.LogWarning("Refused {State} EAS login {User} ({DeviceId})",
+				disabled ? "disabled" : "blocked", LogText.Clean(credentials.UserName, 128), parameters.DeviceId);
 			http.Response.StatusCode = StatusCodes.Status403Forbidden;
-			await http.Response.WriteAsync("This account or device is blocked on the gateway.", ct);
+			await http.Response.WriteAsync(disabled
+				? "This account is disabled on the gateway."
+				: "This account or device is blocked on the gateway.", ct);
 			return;
 		}
 

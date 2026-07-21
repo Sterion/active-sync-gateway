@@ -134,6 +134,28 @@ public class DbAccountTests(GatewayFixture gateway)
 	}
 
 	[BackendFact]
+	public async Task DisabledAccount_Refuses403_ThenReEnableRestores()
+	{
+		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
+			new Dictionary<string, string?> { ["ActiveSync:Auth:UsersRefreshSeconds"] = "0" });
+		AccountStore store = factory.Services.GetRequiredService<AccountStore>();
+
+		// An enabled (empty) declared account syncs normally.
+		await store.UpsertAsync(TestBackend.User1, new AccountOptions(), CancellationToken.None);
+		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
+
+		// Disable it: valid credentials now get 403 (not 401 — auth still succeeds) on every device.
+		await store.UpsertAsync(TestBackend.User1, new AccountOptions { Enabled = false }, CancellationToken.None);
+		using HttpResponseMessage refused = await CreateClient(factory, TestBackend.User1, TestBackend.Password)
+			.PostRawAsync("FolderSync", null);
+		Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+
+		// Re-enabling restores access on the next request (no restart).
+		await store.UpsertAsync(TestBackend.User1, new AccountOptions(), CancellationToken.None);
+		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
+	}
+
+	[BackendFact]
 	public async Task PasswordEdit_AppliesToTheNextRequest_WithoutRestart()
 	{
 		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
