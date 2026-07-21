@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
 using System.Runtime.Loader;
 using ActiveSync.Contracts;
 using Microsoft.Extensions.Configuration;
@@ -54,16 +56,60 @@ public static class PluginLoader
 				continue;
 			}
 
-			loaded += LoadPlugin(services, configuration, logger, entryDll, hostContractVersion);
+			VerifyContractVersions(pluginDir, hostContractVersion);
+			loaded += LoadPlugin(services, configuration, logger, entryDll);
 		}
 
 		if (loaded > 0)
 			logger.LogInformation("Loaded {Count} gateway plugin(s) from {Directory}", loaded, directory);
 	}
 
+	/// <summary>
+	///   Compatibility guard: the major version of ActiveSync.Contracts every assembly in the
+	///   plugin folder was built against must match the host — the backend contract is not
+	///   ABI-stable across majors. Read from METADATA, before anything is loaded, and over the
+	///   whole folder rather than the entry assembly alone: a plugin whose entry targets the right
+	///   major can still ship a private helper that does not, and a reference table only lists what
+	///   an assembly itself uses. Getting that wrong turns a comprehensible startup failure into a
+	///   TypeLoadException deep inside a sync.
+	/// </summary>
+	private static void VerifyContractVersions(string pluginDir, Version hostContractVersion)
+	{
+		string contractName = typeof(IGatewayPlugin).Assembly.GetName().Name!;
+		foreach (string dll in Directory.EnumerateFiles(pluginDir, "*.dll", SearchOption.AllDirectories)
+			         .OrderBy(d => d, StringComparer.Ordinal))
+		{
+			Version? builtAgainst;
+			try
+			{
+				using FileStream stream = File.OpenRead(dll);
+				using PEReader pe = new(stream);
+				if (!pe.HasMetadata)
+					continue;
+
+				MetadataReader metadata = pe.GetMetadataReader();
+				builtAgainst = metadata.AssemblyReferences
+					.Select(handle => metadata.GetAssemblyReference(handle))
+					.Where(reference => metadata.GetString(reference.Name) == contractName)
+					.Select(reference => reference.Version)
+					.FirstOrDefault();
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or IOException or UnauthorizedAccessException)
+			{
+				// Native library, resource-only file, or something unreadable: nothing to check
+				// here. A genuinely corrupt entry assembly still fails when it is loaded.
+				continue;
+			}
+
+			if (builtAgainst is not null && builtAgainst.Major != hostContractVersion.Major)
+				throw new InvalidOperationException(
+					$"Plugin assembly '{Path.GetFileName(dll)}' was built against {contractName} " +
+					$"{builtAgainst} but the host is {hostContractVersion}; major versions must match.");
+		}
+	}
+
 	private static int LoadPlugin(
-		IServiceCollection services, IConfiguration configuration, ILogger logger,
-		string entryDll, Version hostContractVersion)
+		IServiceCollection services, IConfiguration configuration, ILogger logger, string entryDll)
 	{
 		PluginLoadContext context = new(entryDll);
 		Assembly assembly;
@@ -75,16 +121,6 @@ public static class PluginLoader
 		{
 			throw new InvalidOperationException($"Failed to load plugin assembly '{entryDll}': {ex.Message}", ex);
 		}
-
-		// Compatibility guard: the major version of ActiveSync.Contracts the plugin was built
-		// against must match the host — the backend contract is not ABI-stable across majors.
-		string contractName = typeof(IGatewayPlugin).Assembly.GetName().Name!;
-		AssemblyName? contractRef = assembly.GetReferencedAssemblies()
-			.FirstOrDefault(a => a.Name == contractName);
-		if (contractRef?.Version is { } builtAgainst && builtAgainst.Major != hostContractVersion.Major)
-			throw new InvalidOperationException(
-				$"Plugin '{Path.GetFileName(entryDll)}' was built against {contractName} " +
-				$"{builtAgainst} but the host is {hostContractVersion}; major versions must match.");
 
 		List<Type> pluginTypes = assembly.GetTypes()
 			.Where(t => typeof(IGatewayPlugin).IsAssignableFrom(t) && t is { IsAbstract: false, IsInterface: false })
