@@ -11,7 +11,7 @@ namespace ActiveSync.Core.Accounts;
 ///   <see cref="ActiveSyncOptions.AutoProvisionUsers" /> is on, the first time an undeclared
 ///   login clears its MailStore probe the gateway writes a bare <see cref="AccountEntry" /> row
 ///   for it (no gateway password, <see cref="AccountOptions.AutoProvisioned" /> set), so the user
-///   turns into a first-class identity: visible in `eas user list`/the admin UI, blockable, and
+///   turns into a first-class identity: visible in `eas users`/the admin UI, blockable, and
 ///   able to use the self-service portal (which only lets DECLARED accounts in, then verifies the
 ///   password against the same backend). The row is a pure overlay with nothing overridden, so it
 ///   changes no authentication or resolution behaviour — auth still probes the backend exactly as

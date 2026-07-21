@@ -757,7 +757,7 @@ Rules worth knowing:
 - **Auto-provisioning**: `"AutoProvisionUsers": true` does the opposite — the first time a
   plain pass-through login clears its backend probe over EAS, the gateway writes an empty
   database entry for it (marked `[db, auto-provisioned]`). The user then shows up in
-  `eas user list`/the admin UI, can be blocked, and can sign in to the self-service portal
+  `eas users`/the admin UI, can be blocked, and can sign in to the self-service portal
   (verified against the same backend); auth itself is unchanged (the row has no gateway
   password, so it still probes). Off by default — it persists login identities that were
   previously ephemeral. Mutually exclusive with the allowlist in practice (that rejects the
@@ -1025,7 +1025,7 @@ forces every command local. See [How `eas` forwards](#how-eas-forwards) below.
 
 | Command | What it does |
 | --- | --- |
-| `users` | List users that have data: devices, last-seen, folder/item counts, blocks. |
+| `users` | List every user — declared accounts (origin, mail, admin, gateway pw, overrides) joined with state usage (devices, last-seen, folder/item counts, blocks). |
 | `devices [user]` | List device registrations with last-seen and block state. |
 | `folders <user>` | List a user's folder registry. |
 | `items <user> [collection]` | List local item metadata (never decrypts). |
@@ -1038,8 +1038,7 @@ forces every command local. See [How `eas` forwards](#how-eas-forwards) below.
 
 | Command | What it does |
 | --- | --- |
-| `user list` | All declared users (config + database) with origin, mail address and overrides. |
-| `user show <login>` | The effective entry for one login, secrets masked. |
+| `user show <login>` | The effective entry for one login, secrets masked. (`eas users` lists them all.) |
 | `user add <login>` | Declare a user in the database (an empty entry is an allowlist grant; copies a same-login config entry as the starting point). |
 | `user remove <login>` | Delete the database entry — a same-login config entry becomes active again. |
 | `user set <login> <key> <value>` | Set one field by path (`MailAddress`, `Admin` — grants the web admin UI, `Backends:Calendar:Enabled`, `Backends:MailStore:Settings:Host`, ...); password keys are hashed/sealed automatically. |

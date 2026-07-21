@@ -20,7 +20,7 @@ internal static class CliApp
 		config.AddCommand<HashPasswordCommand>("hash-password")
 			.WithDescription("Hash a gateway password from stdin (pbkdf2$...), for per-user overrides.");
 		config.AddCommand<UsersCommand>("users")
-			.WithDescription("List users that have data in the state database.");
+			.WithDescription("List every user: declared accounts (origin/mail/admin/overrides) joined with state usage (devices/items/blocks).");
 		config.AddCommand<DevicesCommand>("devices")
 			.WithDescription("List registered devices, optionally for one user.");
 		config.AddCommand<FoldersCommand>("folders")
@@ -37,9 +37,7 @@ internal static class CliApp
 			.WithDescription("Remove a login block set with 'block'.");
 		config.AddBranch("user", user =>
 		{
-			user.SetDescription("Manage database-declared users (they replace same-login config entries).");
-			user.AddCommand<UserListCommand>("list")
-				.WithDescription("List all declared users (config + database) with origin and overrides.");
+			user.SetDescription("Manage database-declared users (they replace same-login config entries; 'eas users' lists everyone).");
 			user.AddCommand<UserShowCommand>("show")
 				.WithDescription("Show the effective entry for one login (secrets masked).");
 			user.AddCommand<UserAddCommand>("add")

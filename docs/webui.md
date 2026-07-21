@@ -83,7 +83,7 @@ eas config set ActiveSync:WebUi:Oidc:AutoProvision true                         
   set, the claim must carry exactly that value; without it, any value grants).
 - **`AutoProvision`**: an unknown login is JIT-created as a plain database account
   (`MailAddress` from the `email` claim) and can then use the portal — it shows up in
-  `eas user list` like any declared user. A JIT account can only be admin **via the claim**
+  `eas users` like any declared user. A JIT account can only be admin **via the claim**
   until an admin grants the flag. With `AutoProvision` off, unknown logins are turned away.
 - The web session cookie carries only the gateway login + admin bit — IdP claims never
   leak into it. Logout is local (no RP-initiated IdP logout yet).

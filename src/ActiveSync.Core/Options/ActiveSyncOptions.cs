@@ -340,7 +340,7 @@ public sealed class ActiveSyncOptions
 	/// <summary>
 	///   Create a database account row for a pass-through login the first time it clears its
 	///   MailStore probe over EAS, so the user becomes visible and manageable — listed in
-	///   `eas user list`/the admin UI, blockable, and able to sign in to the self-service portal
+	///   `eas users`/the admin UI, blockable, and able to sign in to the self-service portal
 	///   (validated against the same backend). The row carries no gateway password, so auth is
 	///   unchanged (still a backend probe). Off by default: it persists login identities that
 	///   were previously ephemeral. Naturally exclusive with <see cref="RequireDeclaredUsers" />

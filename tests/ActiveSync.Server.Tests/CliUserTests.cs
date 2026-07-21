@@ -87,7 +87,8 @@ public sealed class CliUserTests : IDisposable
 		Assert.Equal(0, showExit);
 		Assert.Contains("[db]", showOutput);
 
-		(int listExit, _, string listOutput) = Run(null, "user", "list");
+		// The unified `eas users` overview lists declared accounts (config + database) too.
+		(int listExit, _, string listOutput) = Run(null, "users");
 		Assert.Equal(0, listExit);
 		Assert.Contains("newuser@x", listOutput);
 		Assert.Contains("confuser", listOutput);
@@ -209,7 +210,7 @@ public sealed class CliUserTests : IDisposable
 		Assert.Equal(0, setExit);
 		Assert.Contains("admin", setOutput);
 
-		(int listExit, _, string listOutput) = Run(null, "user", "list");
+		(int listExit, _, string listOutput) = Run(null, "users");
 		Assert.Equal(0, listExit);
 		Assert.Contains("yes", listOutput);
 

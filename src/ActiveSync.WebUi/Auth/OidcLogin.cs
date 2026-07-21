@@ -8,7 +8,7 @@ namespace ActiveSync.WebUi.Auth;
 ///   The OIDC ticket → gateway-account mapping, separated from the handler wiring so the
 ///   decision matrix is unit-testable. Rules: the configured login claim must map to a
 ///   DECLARED account — unless AutoProvision creates one (a plain database row, visible in
-///   `eas user list`, admin-editable like any other). Admin = the account flag OR the
+///   `eas users`, admin-editable like any other). Admin = the account flag OR the
 ///   configured admin claim; a just-provisioned account has no flag yet, so ONLY the claim
 ///   can grant it admin.
 /// </summary>

@@ -71,61 +71,6 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 	}
 }
 
-internal sealed class UserListCommand(IAnsiConsole terminal) : UserCommandBase<UserListCommand.Settings>(terminal)
-{
-	public sealed class Settings : CommandSettings;
-
-	protected override async Task<int> RunAsync(
-		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
-	{
-		List<(string UserName, AccountOptions Options, DateTime UpdatedUtc)> dbEntries =
-			await store.ListAsync(cancellationToken);
-		Dictionary<string, AccountOptions> configUsers =
-			options.Users ?? new Dictionary<string, AccountOptions>(StringComparer.OrdinalIgnoreCase);
-
-		SortedSet<string> logins = new(StringComparer.OrdinalIgnoreCase);
-		logins.UnionWith(configUsers.Keys);
-		logins.UnionWith(dbEntries.Select(e => e.UserName));
-		if (logins.Count == 0)
-		{
-			Terminal.WriteLine("No users are declared (config or database) — pure IMAP pass-through.");
-			return 0;
-		}
-
-		Table table = new Table().Border(TableBorder.Rounded);
-		table.AddColumns("Login", "Origin", "Mail", "Gateway pw", "Admin", "Overrides");
-		foreach (string login in logins)
-		{
-			bool inDb = dbEntries.Any(e => string.Equals(e.UserName, login, StringComparison.OrdinalIgnoreCase));
-			bool inConfig = configUsers.ContainsKey(login);
-			AccountOptions effective = inDb
-				? dbEntries.First(e => string.Equals(e.UserName, login, StringComparison.OrdinalIgnoreCase)).Options
-				: configUsers[login];
-			string origin = inDb
-				? effective.AutoProvisioned == true ? "db (auto)"
-				: inConfig ? "db (shadows config)" : "db"
-				: "config";
-			string password = string.IsNullOrWhiteSpace(effective.Password)
-				? "-"
-				: GatewayPasswordHasher.IsHashed(effective.Password) ? "***(pbkdf2)" : "***(PLAINTEXT)";
-			List<string> sections = [];
-			foreach ((string roleName, BackendRoleOverride roleOverride) in
-			         (effective.Backends ?? []).OrderBy(b => b.Key, StringComparer.OrdinalIgnoreCase))
-				sections.Add(roleOverride.Enabled == false
-					? $"{roleName.ToLowerInvariant()}=off"
-					: roleOverride.Provider is { } switched
-						? $"{roleName.ToLowerInvariant()}={switched}"
-						: roleName.ToLowerInvariant());
-			AddRow(table, login, origin, effective.MailAddress ?? "-", password,
-				effective.Admin == true ? "yes" : "-",
-				sections.Count > 0 ? string.Join(", ", sections) : "-");
-		}
-
-		Terminal.Write(table);
-		return 0;
-	}
-}
-
 internal sealed class UserShowCommand(IAnsiConsole terminal) : UserCommandBase<UserShowCommand.Settings>(terminal)
 {
 	public sealed class Settings : CommandSettings

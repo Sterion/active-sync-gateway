@@ -67,7 +67,7 @@ public sealed class AccountOptions
 	///   True on a row the gateway created itself when a pass-through login first cleared its
 	///   MailStore probe (<see cref="ActiveSyncOptions.AutoProvisionUsers" />). It is a pure
 	///   provenance marker — the entry behaves exactly like a hand-added empty one (no gateway
-	///   password, so auth still probes the backend) — surfaced by `eas user list`/the admin UI
+	///   password, so auth still probes the backend) — surfaced by `eas users`/the admin UI
 	///   so an operator can tell auto-created rows from ones they declared. Only ever set on
 	///   database rows; config entries never carry it.
 	/// </summary>

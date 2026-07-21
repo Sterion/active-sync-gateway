@@ -1,9 +1,13 @@
 using System.ComponentModel;
 using System.Globalization;
+using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -42,7 +46,13 @@ internal abstract class DatabaseCommand<TSettings>(IAnsiConsole terminal) : Asyn
 		=> table.AddRow(cells.Select(c => new Text(c)).ToArray());
 }
 
-/// <summary>Users are DISTINCT UserName values across Devices, UserFolders and LocalItems.</summary>
+/// <summary>
+///   The single user overview: every DECLARED account (config ⊕ database — origin, mail, admin,
+///   gateway password, per-role overrides) full-outer-joined with each login's STATE-database usage
+///   (devices, last seen, folders, local item counts, blocks) on login == user name. A login may
+///   appear declared-only (just provisioned, no sync yet), state-only (a pass-through user who has
+///   never been declared) or both. This is the merge of the former `eas users` and `eas user list`.
+/// </summary>
 internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<UsersCommand.Settings>(terminal)
 {
 	public sealed class Settings : CommandSettings;
@@ -50,6 +60,15 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 	protected override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, Settings settings, CancellationToken cancellationToken)
 	{
+		// Declared side: config overlay ⊕ database rows (the former `eas user list`).
+		AccountStore store = services.GetRequiredService<AccountStore>();
+		ActiveSyncOptions options = services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value;
+		List<(string UserName, AccountOptions Options, DateTime UpdatedUtc)> dbEntries =
+			await store.ListAsync(cancellationToken);
+		Dictionary<string, AccountOptions> configUsers =
+			options.Users ?? new Dictionary<string, AccountOptions>(StringComparer.OrdinalIgnoreCase);
+
+		// State side: usage aggregates grouped by login (the former `eas users`).
 		var deviceStats = await db.Devices
 			.GroupBy(d => d.UserName)
 			.Select(g => new { User = g.Key, Count = g.Count(), LastSeen = g.Max(d => d.LastSeenUtc) })
@@ -65,21 +84,49 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 			.ToListAsync(cancellationToken);
 		List<LoginBlock> blocks = await db.LoginBlocks.ToListAsync(cancellationToken);
 
+		// Full outer join: everyone declared OR seen in the state database.
 		SortedSet<string> users = new(StringComparer.OrdinalIgnoreCase);
+		users.UnionWith(configUsers.Keys);
+		users.UnionWith(dbEntries.Select(e => e.UserName));
 		users.UnionWith(deviceStats.Select(s => s.User));
 		users.UnionWith(folderStats.Select(s => s.User));
 		users.UnionWith(itemStats.Select(s => s.UserName));
 		users.UnionWith(blocks.Select(b => b.UserName));
 		if (users.Count == 0)
 		{
-			Terminal.WriteLine("No users have any data in the state database.");
+			Terminal.WriteLine("No users are declared or have any state.");
 			return 0;
 		}
 
 		Table table = new Table().Border(TableBorder.Rounded);
-		table.AddColumns("User", "Devices", "Last seen (UTC)", "Folders", "Contacts", "Calendar", "Tasks", "Notes", "Blocked");
+		table.AddColumns("User", "Origin", "Mail", "Admin", "Gateway pw", "Overrides",
+			"Devices", "Last seen (UTC)", "Folders", "Contacts", "Calendar", "Tasks", "Notes", "Blocked");
 		foreach (string user in users)
 		{
+			// Declared attributes — null when the login only has state (a pass-through user).
+			bool inDb = dbEntries.Any(e => string.Equals(e.UserName, user, StringComparison.OrdinalIgnoreCase));
+			bool inConfig = configUsers.ContainsKey(user);
+			AccountOptions? declared = inDb
+				? dbEntries.First(e => string.Equals(e.UserName, user, StringComparison.OrdinalIgnoreCase)).Options
+				: inConfig ? configUsers[user] : null;
+			string origin = declared is null
+				? "pass-through"
+				: inDb
+					? declared.AutoProvisioned == true ? "db (auto)" : inConfig ? "db (shadows config)" : "db"
+					: "config";
+			string password = string.IsNullOrWhiteSpace(declared?.Password)
+				? "-"
+				: GatewayPasswordHasher.IsHashed(declared.Password) ? "***(pbkdf2)" : "***(PLAINTEXT)";
+			List<string> overrides = [];
+			foreach ((string roleName, BackendRoleOverride roleOverride) in
+			         (declared?.Backends ?? []).OrderBy(b => b.Key, StringComparer.OrdinalIgnoreCase))
+				overrides.Add(roleOverride.Enabled == false
+					? $"{roleName.ToLowerInvariant()}=off"
+					: roleOverride.Provider is { } switched
+						? $"{roleName.ToLowerInvariant()}={switched}"
+						: roleName.ToLowerInvariant());
+
+			// State attributes.
 			var devices = deviceStats.FirstOrDefault(s => s.User == user);
 			int folders = folderStats.FirstOrDefault(s => s.User == user)?.Count ?? 0;
 			int ItemCount(string collection) =>
@@ -90,7 +137,10 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 				: deviceBlocks > 0
 					? $"{deviceBlocks} device(s)"
 					: "-";
-			AddRow(table, user,
+
+			AddRow(table, user, origin, declared?.MailAddress ?? "-",
+				declared?.Admin == true ? "yes" : "-", password,
+				overrides.Count > 0 ? string.Join(", ", overrides) : "-",
 				(devices?.Count ?? 0).ToString(),
 				devices is null ? "-" : Utc(devices.LastSeen),
 				folders.ToString(),
