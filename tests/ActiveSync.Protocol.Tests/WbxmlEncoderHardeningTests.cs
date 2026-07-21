@@ -35,6 +35,37 @@ public class WbxmlEncoderHardeningTests
 		Assert.Throws<WbxmlException>(() => WbxmlEncoder.Encode(Nested(300)));
 	}
 
+	[Theory]
+	[InlineData("not base64!!")]
+	[InlineData("YWJj=")] // valid alphabet, invalid padding
+	public void OpaqueElementWithMalformedBase64_IsAWbxmlException(string text)
+	{
+		// Convert.FromBase64String throws FormatException, which escapes as an uncontrolled
+		// 500 — and it throws partway through encoding, with the response half written.
+		XElement mime = new(EasNamespaces.ComposeMail + "Mime", text);
+		mime.SetAttributeValue(EasNamespaces.OpaqueAttribute, "1");
+		XDocument doc = new(new XElement(EasNamespaces.ComposeMail + "SendMail", mime));
+
+		Assert.Throws<WbxmlException>(() => WbxmlEncoder.Encode(doc));
+	}
+
+	[Fact]
+	public void OpaqueElementWithLargePayload_RoundTrips()
+	{
+		// Guards the pooled-buffer decode path against sizing bugs: the rented buffer is
+		// larger than the payload, so only the written count may reach the wire.
+		byte[] payload = new byte[200_000];
+		Random.Shared.NextBytes(payload);
+		XElement mime = new(EasNamespaces.ComposeMail + "Mime", Convert.ToBase64String(payload));
+		mime.SetAttributeValue(EasNamespaces.OpaqueAttribute, "1");
+		XDocument doc = new(new XElement(EasNamespaces.ComposeMail + "SendMail", mime));
+
+		XDocument result = WbxmlDecoder.Decode(WbxmlEncoder.Encode(doc));
+
+		Assert.Equal(payload, Convert.FromBase64String(
+			result.Root!.Element(EasNamespaces.ComposeMail + "Mime")!.Value));
+	}
+
 	[Fact]
 	public void DocumentAtTheDepthLimit_Encodes()
 	{

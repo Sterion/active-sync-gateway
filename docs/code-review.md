@@ -227,7 +227,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **1. IMAP mailbox safety** [LIVE] — ~~`D1`~~ ~~`D2`~~ ~~`D17`~~ **COMPLETE**
 > Two Criticals. `D1` a folder-wide `EXPUNGE` destroys other clients' `\Deleted` mail on every EAS delete; `D2` no UIDVALIDITY tracking anywhere, so after a restore or migration operations hit the wrong messages. Needs a real IMAP server to verify. **Best first item** — small, self-contained, highest value.
 
-**2. WBXML decoder & encoder hardening** — ~~`W1`~~ ~~`W2`~~ ~~`W3`~~ ~~`W4`~~ `W5` `W6` `W7` `W8`
+**2. WBXML decoder & encoder hardening** — ~~`W1`~~ ~~`W2`~~ ~~`W3`~~ ~~`W4`~~ ~~`W5`~~ ~~`W6`~~ `W7` `W8`
 > `W1` (no depth/element cap → OOM from one request) and `W2` (unbounded recursion → uncatchable `StackOverflowException`) are ~15 lines between them and take down every user's sync. Add the hardening tests with the fix.
 
 **3. Contact, vCard & iTIP integrity** [LIVE] — `D4` `D6` `D7` `D22` `D23`
@@ -541,6 +541,7 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 `W3` **Med** `ReadMultiByteUInt` accumulates 35 bits into a `uint` and silently overflows — `Wbxml/WbxmlDecoder.cs:197`.
 `W4` **Med** `DecodeAsync` copies an unbounded stream and truncates length to `int` — `Wbxml/WbxmlDecoder.cs:28`.
 `W5` **Med** OPAQUE data base64'd into a `string` — three full copies of every attachment, all LOH — `Wbxml/WbxmlDecoder.cs:76`, `WbxmlEncoder.cs:69`.
+> **Partially fixed.** The encoder's intermediate `byte[]` is gone — `WriteOpaque` decodes base64 into an `ArrayPool` buffer, removing one LOH allocation per attachment per request. **Two copies remain and are not fixable here**, because both are inherent to representing opaque data as base64 text on an `XText`: the decoder's `Convert.ToBase64String` (1.33× the payload), and `Encode`'s closing `ToArray()` over the whole response. Removing them means changing the representation so opaque payloads travel as `byte[]` out-of-band — a change across every producer and consumer of the marker attribute, not a WBXML-layer edit. The accompanying test is **coverage for the pooled path, not a reproducer**: an allocation count is not observable from a round trip, so nothing here fails against the old code.
 `W6` **Med** Malformed base64 escapes as `FormatException` rather than `WbxmlException`, mid-response-write — `Wbxml/WbxmlEncoder.cs:69`.
 `W7` **Med** Encoder silently drops text when an element has both text and children (and drops children when opaque) — `Wbxml/WbxmlEncoder.cs:67`.
 `W8` **Med** Encoder writes NUL characters into NUL-terminated inline strings, scrambling the document — `Wbxml/WbxmlEncoder.cs:81`.

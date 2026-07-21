@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using System.Xml.Linq;
 
@@ -75,10 +76,7 @@ public static class WbxmlEncoder
 
 		if (isOpaque)
 		{
-			byte[] bytes = string.IsNullOrEmpty(text) ? Array.Empty<byte>() : Convert.FromBase64String(text);
-			output.WriteByte(Opaque);
-			WriteMultiByteUInt(output, (uint)bytes.Length);
-			output.Write(bytes);
+			WriteOpaque(output, text);
 		}
 		else if (childElements.Count > 0)
 		{
@@ -94,6 +92,38 @@ public static class WbxmlEncoder
 		}
 
 		output.WriteByte(End);
+	}
+
+	/// <summary>Emits <paramref name="base64" /> as an OPAQUE run.</summary>
+	private static void WriteOpaque(MemoryStream output, string? base64)
+	{
+		if (string.IsNullOrEmpty(base64))
+		{
+			output.WriteByte(Opaque);
+			WriteMultiByteUInt(output, 0);
+			return;
+		}
+
+		// Decode into a pooled buffer rather than via Convert.FromBase64String: opaque runs
+		// carry attachment and MIME payloads of megabytes, and every intermediate byte[] that
+		// size is a large-object-heap allocation, per attachment, per request.
+		byte[] scratch = ArrayPool<byte>.Shared.Rent((base64.Length / 4 + 1) * 3);
+		try
+		{
+			// Malformed base64 has to surface as WbxmlException. Convert throws FormatException,
+			// which escapes as an uncontrolled 500 — and it does so from the middle of encoding,
+			// with part of the response already written.
+			if (!Convert.TryFromBase64Chars(base64, scratch, out int written))
+				throw new WbxmlException("Element marked opaque does not hold valid base64.");
+
+			output.WriteByte(Opaque);
+			WriteMultiByteUInt(output, (uint)written);
+			output.Write(scratch, 0, written);
+		}
+		finally
+		{
+			ArrayPool<byte>.Shared.Return(scratch);
+		}
 	}
 
 	private static void WriteMultiByteUInt(MemoryStream output, uint value)
