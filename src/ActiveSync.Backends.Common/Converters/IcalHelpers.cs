@@ -14,10 +14,17 @@ internal static class IcalHelpers
 		return Calendar.Load(ics) ?? new Calendar();
 	}
 
-	/// <summary>Serializes to iCalendar text, throwing if the library produces none.</summary>
+	/// <summary>
+	///   Serializes to iCalendar text with RFC 5545 §3.1 CRLF line endings, throwing if the
+	///   library produces none. Ical.Net's serializer emits <see cref="Environment.NewLine" /> —
+	///   CRLF on Windows but bare <c>LF</c> on the Linux containers this ships in — so the output is
+	///   normalized explicitly rather than trusting the platform. Every iCalendar this assembly
+	///   emits — DAV PUTs and iTIP mail alike — goes through here, so the guarantee holds once.
+	/// </summary>
 	public static string Serialize(Calendar calendar)
 	{
-		return new CalendarSerializer().SerializeToString(calendar)
-		       ?? throw new BackendException("iCalendar serialization produced no output.");
+		string ics = new CalendarSerializer().SerializeToString(calendar)
+		             ?? throw new BackendException("iCalendar serialization produced no output.");
+		return ics.ReplaceLineEndings("\r\n");
 	}
 }

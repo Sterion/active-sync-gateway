@@ -1,7 +1,6 @@
 using Ical.Net;
 using Ical.Net.CalendarComponents;
 using Ical.Net.DataTypes;
-using Ical.Net.Serialization;
 using MimeKit;
 
 namespace ActiveSync.Backends.Converters;
@@ -24,9 +23,7 @@ public static class ImipMailBuilder
 		// VALARMs are the organizer's personal reminders, never part of an invitation.
 		foreach (CalendarEvent evt in calendar.Events)
 			evt.Alarms.Clear();
-		string ics = new CalendarSerializer().SerializeToString(calendar)
-			?? throw new InvalidOperationException("Serializing the invitation produced no output.");
-		return Compose(organizer, recipients, subject, "REQUEST", ics);
+		return Compose(organizer, recipients, subject, "REQUEST", IcalHelpers.Serialize(calendar));
 	}
 
 	/// <summary>
@@ -56,9 +53,7 @@ public static class ImipMailBuilder
 
 		Calendar calendar = new() { Method = "CANCEL", ProductId = "-//ActiveSync Gateway//EN" };
 		calendar.Events.Add(evt);
-		string ics = new CalendarSerializer().SerializeToString(calendar)
-			?? throw new InvalidOperationException("Serializing the cancellation produced no output.");
-		return Compose(organizer, recipients, subject, "CANCEL", ics);
+		return Compose(organizer, recipients, subject, "CANCEL", IcalHelpers.Serialize(calendar));
 	}
 
 	/// <summary>

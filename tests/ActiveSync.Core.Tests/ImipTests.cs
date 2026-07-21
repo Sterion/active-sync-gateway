@@ -139,14 +139,31 @@ public class ImipTests
 	[Fact]
 	public void BuildCancel_UsesCrlf_NotThePlatformLineEnding()
 	{
-		// D7 — StringBuilder.AppendLine emits Environment.NewLine: bare LF on the Linux
-		// containers this ships in, while RFC 5545 mandates CRLF. Strict iTIP consumers
-		// reject the result. NOTE: this is COVERAGE, not a reproducer — on Windows
-		// Environment.NewLine is already CRLF, so it passes against the unfixed code too. It
-		// guards the Ical.Net serializer (which always emits CRLF) against a regression to
-		// hand-built AppendLine, which only bites on the Linux containers.
+		// D7 — RFC 5545 §3.1 mandates CRLF. Ical.Net's serializer emits Environment.NewLine, which
+		// is bare LF on the Linux containers this ships in — so the output is normalized to CRLF in
+		// IcalHelpers.Serialize. This REPRODUCES on Linux (unfixed code emits LF and this fails) and
+		// PASSES on Windows either way (native CRLF), so CI on ubuntu-latest is the proof, not the
+		// local Windows run. The earlier "Ical.Net always emits CRLF" assumption was wrong — that is
+		// exactly the bug.
 		string body = Assert.IsType<TextPart>(ImipMailBuilder.BuildCancel(
 			"uid-2", 1, "alice@example.com", [("bob@example.com", null)], null, "Cancelled: X").Body).Text!;
+
+		Assert.DoesNotContain("\n", body.Replace("\r\n", ""));
+	}
+
+	[Fact]
+	public void BuildRequest_UsesCrlf_NotThePlatformLineEnding()
+	{
+		// D7 — BuildRequest has the same Ical.Net-serializes-to-LF-on-Linux exposure as BuildCancel
+		// but had no test, so every real invitation shipped bare LF from a Linux container. Same
+		// platform-conditional reproducer: red on Linux without the IcalHelpers.Serialize
+		// normalization, green everywhere with it.
+		string uid = Guid.NewGuid().ToString();
+		XElement data = Meeting("Planning", new DateTime(2026, 8, 4, 10, 0, 0, DateTimeKind.Utc),
+			"bob@example.com");
+		string ics = CalendarConverter.FromApplicationData(data, uid, null, null, "alice@example.com");
+		string body = Assert.IsType<TextPart>(ImipMailBuilder.BuildRequest(
+			ics, "alice@example.com", [("bob@example.com", "Bob")], "Invitation: Planning").Body).Text!;
 
 		Assert.DoesNotContain("\n", body.Replace("\r\n", ""));
 	}

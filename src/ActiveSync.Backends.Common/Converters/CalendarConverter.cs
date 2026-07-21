@@ -684,7 +684,7 @@ public static class CalendarConverter
 
 		if (!updated)
 			return null;
-		return new CalendarSerializer().SerializeToString(calendar);
+		return IcalHelpers.Serialize(calendar);
 	}
 
 	private static bool MailboxEquals(string a, string b)
