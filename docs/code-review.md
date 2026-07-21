@@ -14,15 +14,23 @@ Findings have stable IDs (`D1`, `K56`, `F23`…). Part 1 is a **flat work queue 
 
 ### Starting a session
 
-> Read `docs/code-review.md`. Implement **items 1–7**. Follow the working protocol in that document.
+> Read `docs/code-review.md`. Implement **items 1–7**. Follow the working protocol in that document, including the [LIVE] live-backend rule.
 
 That is the whole prompt. Items are self-contained and pre-sized — there is nothing to choose. Work them in numerical order unless you have a reason not to.
+
+Naming the [LIVE] rule explicitly is worth the extra clause: its failure mode is a *silent* one (a skipped suite reports green), so it is the instruction most likely to be satisfied without being followed.
 
 **Items are sizing units, not prompt units — batch them freely.** Ask for a range or a whole phase; get through what you can and stop cleanly at a commit boundary (protocol step 6). Over-asking is safe by design: every finished finding is already committed and struck through, so the next session resumes exactly where you stopped. A phase per prompt is a reasonable default.
 
 Two caveats worth respecting:
 - **Quality decays with context.** A session six items deep is worse at the seventh than a fresh one. Prefer 3–5 items per run over 15.
 - **Give these their own run:** item 5 (needs live-server verification mid-item) and item 20 (decompositions — must start from a clean tree).
+
+**Before any run that includes a [LIVE] item**, establish a green baseline first — otherwise the first failure is ambiguous between "my change broke it" and "it was already red":
+
+```powershell
+./scripts/test-fast.ps1        # starts stalwart + axigen if cold, reuses if warm
+```
 
 ### Running the queue hands-off
 
