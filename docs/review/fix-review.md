@@ -46,7 +46,14 @@ and the next resumes there. Prefer 3–5 items per run; quality decays with cont
 For any long run. The master's context grows only by coordination overhead, so each item gets a clean
 slate.
 
-> Read `fix-review.md` and `review-items.md`. Work **items N through M** as an orchestrator.
+**The orchestrator reads the orientation documents too** (`AGENTS.md` and the ones `review-items.md`
+names). It does not write code, but it *decides* — what a repair subagent's brief says, whether a
+result is in scope, whether a finding contradicts the architecture — and every one of those decisions
+can go wrong without the architecture in front of it. It should know the dependency rule and the
+invariants as well as any worker does.
+
+> Read `fix-review.md`, `review-items.md`, and the orientation documents `review-items.md` names
+> (`AGENTS.md` first). Work **items N through M** as an orchestrator.
 >
 > For each item in order, spawn **one subagent** to implement it following the working protocol. Run
 > them **strictly sequentially** — never two at once; they collide in git and in `review-items.md`.
