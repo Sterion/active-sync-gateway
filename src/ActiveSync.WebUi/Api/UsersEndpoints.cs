@@ -91,9 +91,10 @@ internal static class UsersEndpoints
 				entry.Backends = new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase);
 				foreach ((string roleName, RoleUpdate role) in request.Backends)
 				{
-					string? storedRolePassword = starting.Backends?
+					BackendRoleOverride? startingRole = starting.Backends?
 						.FirstOrDefault(b => b.Key.Equals(roleName, StringComparison.OrdinalIgnoreCase))
-						.Value?.Password;
+						.Value;
+					string? storedRolePassword = startingRole?.Password;
 					string? rolePassword = MergeSecret(role.Password, storedRolePassword,
 						raw => AccountSecretPolicy.PrepareBackendPassword(
 							raw, current.Encryption, $"Backends:{roleName}:Password"),
@@ -107,9 +108,7 @@ internal static class UsersEndpoints
 						Provider = string.IsNullOrWhiteSpace(role.Provider) ? null : role.Provider,
 						UserName = string.IsNullOrWhiteSpace(role.UserName) ? null : role.UserName,
 						Password = rolePassword,
-						Settings = role.Settings is { Count: > 0 }
-							? new Dictionary<string, string?>(role.Settings, StringComparer.OrdinalIgnoreCase)
-							: null
+						Settings = EndpointHelpers.UnmaskSecretSettings(role.Settings, startingRole?.Settings)
 					};
 					// An all-empty override carries no information — drop it instead of storing noise.
 					if (@override is not
@@ -258,7 +257,7 @@ internal static class UsersEndpoints
 				b => new RoleDto(
 					b.Value.Enabled, b.Value.Provider, b.Value.UserName,
 					!string.IsNullOrEmpty(b.Value.Password),
-					b.Value.Settings is { Count: > 0 } ? b.Value.Settings : null),
+					EndpointHelpers.MaskSecretSettings(b.Value.Settings)),
 				StringComparer.OrdinalIgnoreCase)
 			: null;
 		return new UserDto(

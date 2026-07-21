@@ -54,7 +54,7 @@ internal static class PortalEndpoints
 						provider = b.Value.Provider,
 						userName = b.Value.UserName,
 						passwordSet = !string.IsNullOrEmpty(b.Value.Password),
-						settings = b.Value.Settings is { Count: > 0 } ? b.Value.Settings : null
+						settings = EndpointHelpers.MaskSecretSettings(b.Value.Settings)
 					},
 					StringComparer.OrdinalIgnoreCase)
 			});
@@ -231,12 +231,14 @@ internal static class PortalEndpoints
 			}
 
 			// Keep every stored key the caller may not touch, replace the editable ones wholesale
-			// (an omitted editable key still means "cleared", as it always did).
+			// (an omitted editable key still means "cleared", as it always did). A re-posted mask
+			// sentinel resolves back to the stored secret so masking on read (C5) can't clobber it.
+			Dictionary<string, string?>? storedSettings = @override.Settings;
 			Dictionary<string, string?> merged = new(StringComparer.OrdinalIgnoreCase);
-			foreach ((string key, string? value) in @override.Settings ?? [])
+			foreach ((string key, string? value) in storedSettings ?? [])
 				if (!editable.Contains(BackendConfigValidation.ListRoot(key)))
 					merged[key] = value;
-			foreach ((string key, string? value) in request.Settings ?? [])
+			foreach ((string key, string? value) in EndpointHelpers.UnmaskSecretSettings(request.Settings, storedSettings) ?? [])
 				merged[key] = value;
 			@override.Settings = merged.Count > 0 ? merged : null;
 

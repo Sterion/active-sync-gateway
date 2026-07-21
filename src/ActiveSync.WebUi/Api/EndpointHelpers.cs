@@ -1,4 +1,5 @@
 using ActiveSync.Contracts;
+using ActiveSync.Core.Administration;
 using Microsoft.AspNetCore.Http;
 
 namespace ActiveSync.WebUi.Api;
@@ -43,5 +44,49 @@ internal static class EndpointHelpers
 	internal static IResult BadRequest(string error, IEnumerable<BackendsEndpoints.FailureDto> failures)
 	{
 		return Results.BadRequest(new { error, failures });
+	}
+
+	/// <summary>
+	///   Copies a per-account role's free-form settings for return to a client, masking any
+	///   secret-named value the same way the global backends editor does (C5) — so an ApiKey/
+	///   Token/ClientSecret on a role override never leaves the server in the clear. Returns null
+	///   for an empty/absent map so the DTO shape is unchanged.
+	/// </summary>
+	internal static Dictionary<string, string?>? MaskSecretSettings(IReadOnlyDictionary<string, string?>? settings)
+	{
+		if (settings is not { Count: > 0 })
+			return null;
+		return settings.ToDictionary(
+			pair => pair.Key,
+			pair => SecretRedaction.MaskIfSecret(pair.Key, pair.Value),
+			StringComparer.OrdinalIgnoreCase);
+	}
+
+	/// <summary>
+	///   Resolves the mask sentinel a save receives back against the stored settings: an incoming
+	///   value equal to <see cref="SecretRedaction.Mask" /> means "unchanged", so it is replaced by
+	///   the value already stored (and dropped when there is nothing behind the mask). Without this,
+	///   masking on read (C5) would let a client that re-posts the form clobber a real secret with
+	///   "***" — the same sentinel contract the global backends editor uses.
+	/// </summary>
+	internal static Dictionary<string, string?>? UnmaskSecretSettings(
+		IReadOnlyDictionary<string, string?>? incoming, IReadOnlyDictionary<string, string?>? stored)
+	{
+		if (incoming is not { Count: > 0 })
+			return null;
+		Dictionary<string, string?> result = new(StringComparer.OrdinalIgnoreCase);
+		foreach ((string key, string? value) in incoming)
+		{
+			if (value == SecretRedaction.Mask)
+			{
+				if (stored is not null && stored.TryGetValue(key, out string? kept))
+					result[key] = kept; // keep the real secret behind the mask
+				continue; // a mask over nothing is a no-op, never stored literally
+			}
+
+			result[key] = value;
+		}
+
+		return result.Count > 0 ? result : null;
 	}
 }
