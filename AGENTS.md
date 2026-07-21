@@ -361,7 +361,12 @@ precedence per login: explicit gateway `Password` (`GatewayPasswordHasher`,
 pbkdf2$/plaintext, local verify) → configured MailStore `Password` (presented must equal
 it, timing-safe) → MailStore provider probe against the user's EFFECTIVE endpoint+username
 → undeclared = global probe. `RequireDeclaredUsers=true` turns `Users`
-into an allowlist (undeclared logins get a local 401; an empty entry is a grant). Backend
+into an allowlist (undeclared logins get a local 401; an empty entry is a grant).
+`AutoProvisionUsers=true` is the inverse: `PassThroughProvisioner` (called from `EasEndpoint`
+after a verified login, idempotent + best-effort) writes an empty `AutoProvisioned`-marked
+`AccountEntry` for a pass-through login on first sync, so it becomes listable/blockable and
+can use the portal (the portal's "declared only" gate then passes and probes the backend).
+Naturally exclusive with the allowlist (that 401s before auth). Backend
 passwords may be `enc:v1:` values sealed by `SecretValue` under the Encryption master key
 — CLI commands `protect` / `hash-password` (Spectre.Console.Cli app in
 `src/ActiveSync.Server/Cli/`; Program.cs is a thin dispatcher — bare invocation shows the

@@ -53,6 +53,7 @@ public static class EasEndpoint
 		AuthThrottle authThrottle,
 		IOptionsSnapshot<ActiveSyncOptions> options,
 		BackendRolesProvider rolesProvider,
+		PassThroughProvisioner provisioner,
 		ILoggerFactory loggerFactory)
 	{
 		ILogger logger = loggerFactory.CreateLogger("ActiveSync.Endpoint");
@@ -133,6 +134,12 @@ public static class EasEndpoint
 		if (!await EndpointAuth.AuthenticateAsync(
 			    http, sessionFactory, authThrottle, clientKey, credentials, logger, ct))
 			return;
+
+		// First successful sign-in of a pass-through login: turn it into a managed database
+		// account (opt-in, ActiveSync:AutoProvisionUsers). Idempotent and best-effort — it never
+		// fails the request. Runs before the block check so an operator can see (and block) even a
+		// user they intend to block.
+		await provisioner.ProvisionIfEnabledAsync(credentials.UserName, ct);
 
 		// Operator blocks (eas block/unblock) are enforced after auth so only holders of valid
 		// credentials can observe them. 403, not 401 — a challenge would loop the client

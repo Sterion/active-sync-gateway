@@ -150,7 +150,10 @@ public static partial class StartupSummary
 		AccountOptions o = account.Options;
 		List<string> parts =
 		[
-			account.FromDatabase ? account.ShadowsConfig ? "[db, shadows config]" : "[db]" : "[config]",
+			account.FromDatabase
+				? o.AutoProvisioned == true ? "[db, auto-provisioned]"
+				: account.ShadowsConfig ? "[db, shadows config]" : "[db]"
+				: "[config]",
 		];
 		if (!string.IsNullOrWhiteSpace(o.MailAddress))
 			parts.Add($"mail={o.MailAddress}");

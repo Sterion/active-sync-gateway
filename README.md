@@ -754,6 +754,16 @@ Rules worth knowing:
 - **Allowlist**: `"RequireDeclaredUsers": true` rejects any login without a `Users` entry
   before touching a backend. An empty entry (`"dora@example.com": {}`) grants access with
   zero overrides.
+- **Auto-provisioning**: `"AutoProvisionUsers": true` does the opposite — the first time a
+  plain pass-through login clears its backend probe over EAS, the gateway writes an empty
+  database entry for it (marked `[db, auto-provisioned]`). The user then shows up in
+  `eas user list`/the admin UI, can be blocked, and can sign in to the self-service portal
+  (verified against the same backend); auth itself is unchanged (the row has no gateway
+  password, so it still probes). Off by default — it persists login identities that were
+  previously ephemeral. Mutually exclusive with the allowlist in practice (that rejects the
+  login before it can authenticate). Deleting an auto-created row is not permanent while the
+  flag is on: the user's next sync re-creates it — `eas block` them, or turn the flag off,
+  to make removal stick.
 - **Identity is the gateway login.** Sync state, locally-stored items and their encryption
   are all keyed by it — keep logins stable (e.g. when introducing an entry for an existing
   user, keep the login they already sync with) or devices re-sync from scratch and locally

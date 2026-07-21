@@ -90,6 +90,45 @@ public class DbAccountTests(GatewayFixture gateway)
 	}
 
 	[BackendFact]
+	public async Task AutoProvisionUsers_CreatesAutoMarkedRow_OnFirstSuccessfulSync()
+	{
+		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
+			new Dictionary<string, string?>
+			{
+				["ActiveSync:AutoProvisionUsers"] = "true",
+				["ActiveSync:Auth:UsersRefreshSeconds"] = "0",
+			});
+		AccountStore store = factory.Services.GetRequiredService<AccountStore>();
+
+		// Pure pass-through to begin with: no declared row for this login.
+		Assert.Null(await store.GetAsync(TestBackend.User1, CancellationToken.None));
+
+		// A normal pass-through sync (credentials verified against the backend) provisions the user.
+		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
+
+		AccountOptions? row = await store.GetAsync(TestBackend.User1, CancellationToken.None);
+		Assert.NotNull(row);
+		Assert.True(row!.AutoProvisioned);
+		Assert.Null(row.Password); // no gateway password — auth still probes the backend
+
+		// A second sync must not create a duplicate; the login is now declared.
+		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
+		Assert.Single(await store.ListAsync(CancellationToken.None));
+	}
+
+	[BackendFact]
+	public async Task AutoProvisionUsers_Off_LeavesPassThroughUnpersisted()
+	{
+		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
+			new Dictionary<string, string?> { ["ActiveSync:Auth:UsersRefreshSeconds"] = "0" });
+		AccountStore store = factory.Services.GetRequiredService<AccountStore>();
+
+		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
+
+		Assert.Null(await store.GetAsync(TestBackend.User1, CancellationToken.None));
+	}
+
+	[BackendFact]
 	public async Task PasswordEdit_AppliesToTheNextRequest_WithoutRestart()
 	{
 		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(

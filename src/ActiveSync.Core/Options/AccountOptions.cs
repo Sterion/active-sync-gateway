@@ -63,6 +63,16 @@ public sealed class AccountOptions
 	/// </summary>
 	public bool? Admin { get; set; }
 
+	/// <summary>
+	///   True on a row the gateway created itself when a pass-through login first cleared its
+	///   MailStore probe (<see cref="ActiveSyncOptions.AutoProvisionUsers" />). It is a pure
+	///   provenance marker — the entry behaves exactly like a hand-added empty one (no gateway
+	///   password, so auth still probes the backend) — surfaced by `eas user list`/the admin UI
+	///   so an operator can tell auto-created rows from ones they declared. Only ever set on
+	///   database rows; config entries never carry it.
+	/// </summary>
+	public bool? AutoProvisioned { get; set; }
+
 	/// <summary>Per-role overrides, keyed by role name (MailStore, Calendar, Oof, ...).</summary>
 	public Dictionary<string, BackendRoleOverride>? Backends { get; set; }
 }

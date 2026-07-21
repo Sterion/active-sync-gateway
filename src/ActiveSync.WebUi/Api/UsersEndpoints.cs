@@ -170,7 +170,10 @@ internal static class UsersEndpoints
 			: null;
 		return new UserDto(
 			login,
-			account.FromDatabase ? account.ShadowsConfig ? "db (shadows config)" : "db" : "config",
+			account.FromDatabase
+				? o.AutoProvisioned == true ? "db (auto)"
+				: account.ShadowsConfig ? "db (shadows config)" : "db"
+				: "config",
 			o.MailAddress,
 			o.Admin == true,
 			!string.IsNullOrEmpty(o.Password),

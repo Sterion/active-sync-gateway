@@ -131,6 +131,7 @@ public partial class Program
 		builder.Services.AddScoped<FolderService>();
 		builder.Services.AddSingleton<AccountStore>();
 		builder.Services.AddSingleton<AccountResolver>();
+		builder.Services.AddSingleton<PassThroughProvisioner>();
 		builder.Services.AddSingleton<GlobalSettingStore>();
 		builder.Services.AddSingleton(settingsSource.Provider);
 		builder.Services.AddSingleton<SettingsRefresher>();

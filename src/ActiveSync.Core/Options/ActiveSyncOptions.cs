@@ -338,6 +338,19 @@ public sealed class ActiveSyncOptions
 	public bool RequireDeclaredUsers { get; set; }
 
 	/// <summary>
+	///   Create a database account row for a pass-through login the first time it clears its
+	///   MailStore probe over EAS, so the user becomes visible and manageable — listed in
+	///   `eas user list`/the admin UI, blockable, and able to sign in to the self-service portal
+	///   (validated against the same backend). The row carries no gateway password, so auth is
+	///   unchanged (still a backend probe). Off by default: it persists login identities that
+	///   were previously ephemeral. Naturally exclusive with <see cref="RequireDeclaredUsers" />
+	///   — that rejects undeclared logins before they authenticate, so nothing is ever
+	///   provisioned. Deleting an auto-created row is not permanent while this stays on: the
+	///   user's next sync re-creates it (block them, or turn this off, to make removal stick).
+	/// </summary>
+	public bool AutoProvisionUsers { get; set; }
+
+	/// <summary>
 	///   Optional path to a JSON file (mounted secret/configmap) merged into configuration at
 	///   startup. Full configuration shape: { "ActiveSync": { "Users": { ... } } }. Changes
 	///   require a restart (the account snapshot is built once at startup).

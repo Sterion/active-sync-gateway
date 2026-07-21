@@ -101,7 +101,10 @@ internal sealed class UserListCommand(IAnsiConsole terminal) : UserCommandBase<U
 			AccountOptions effective = inDb
 				? dbEntries.First(e => string.Equals(e.UserName, login, StringComparison.OrdinalIgnoreCase)).Options
 				: configUsers[login];
-			string origin = inDb ? inConfig ? "db (shadows config)" : "db" : "config";
+			string origin = inDb
+				? effective.AutoProvisioned == true ? "db (auto)"
+				: inConfig ? "db (shadows config)" : "db"
+				: "config";
 			string password = string.IsNullOrWhiteSpace(effective.Password)
 				? "-"
 				: GatewayPasswordHasher.IsHashed(effective.Password) ? "***(pbkdf2)" : "***(PLAINTEXT)";
