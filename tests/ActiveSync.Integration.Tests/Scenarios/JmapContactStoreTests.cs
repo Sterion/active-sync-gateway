@@ -81,6 +81,50 @@ public sealed class JmapContactStoreTests
 		Assert.DoesNotContain(itemKey, after.Keys);
 	}
 
+	/// <summary>
+	///   H7 — settles JMAP <c>*/set update</c> semantics against the live server: is the value a
+	///   PatchObject (RFC 8620 §5.3, absent member = untouched) or a full replacement (absent
+	///   member = cleared)? EAS sends the complete managed set on every Change, so a field the
+	///   client cleared arrives as an *absent* element. If update patches, the gateway must send
+	///   an explicit null for every managed member it did not write, or clearing never reaches
+	///   the server.
+	/// </summary>
+	[JmapGroupwareFact]
+	public async Task Update_OmittingAManagedField_ClearsItOnTheServer()
+	{
+		JmapContactStore store = Store();
+		string folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].BackendKey;
+
+		string surname = $"Clear{Guid.NewGuid():N}"[..12];
+		(string itemKey, _) = await store.CreateItemAsync(folderKey, new XElement("ApplicationData",
+			new XElement(C + "FirstName", "Ada"),
+			new XElement(C + "LastName", surname),
+			new XElement(C + "Email1Address", "ada@example.com"),
+			new XElement(C + "JobTitle", "Mathematician"),
+			new XElement(C + "MobilePhoneNumber", "+1-555-0100")), CancellationToken.None);
+
+		try
+		{
+			// The client cleared JobTitle and the mobile number: both arrive as absent elements.
+			await store.UpdateItemAsync(folderKey, itemKey, new XElement("ApplicationData",
+				new XElement(C + "FirstName", "Ada"),
+				new XElement(C + "LastName", surname),
+				new XElement(C + "Email1Address", "ada@example.com")), CancellationToken.None);
+
+			BackendItem? updated =
+				await store.GetItemAsync(folderKey, itemKey, BodyPreference.PlainText, CancellationToken.None);
+			Assert.NotNull(updated);
+			string? V(string local) => updated.ApplicationData.FirstOrDefault(e => e.Name.LocalName == local)?.Value;
+			Assert.Equal("ada@example.com", V("Email1Address"));
+			Assert.Null(V("JobTitle"));
+			Assert.Null(V("MobilePhoneNumber"));
+		}
+		finally
+		{
+			await store.DeleteItemAsync(folderKey, itemKey, CancellationToken.None);
+		}
+	}
+
 	[JmapGroupwareFact]
 	public async Task GalSearch_FindsCreatedContact()
 	{

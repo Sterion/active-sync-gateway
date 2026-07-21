@@ -30,6 +30,21 @@ public static class JsContactConverter
 		"anniversaries", "notes", "keywords", "media"
 	];
 
+	// JMAP `*/set update` values are PatchObjects (RFC 8620 §5.3) — a member absent from the patch
+	// is left untouched, it is not cleared. Verified against Stalwart 0.16: omitting "titles" from
+	// an update leaves the old job title in place. EAS Change payloads carry the complete managed
+	// set, so a field the client cleared arrives as an *absent* element; it therefore has to be
+	// sent as an explicit null or the clear never reaches the server. This is also correct under
+	// full-replace semantics, where an explicit null and an absent member mean the same thing.
+	//
+	// "media" is deliberately not in this set: the EAS Contacts view neither reads nor writes the
+	// photo, so nulling it on every edit would destroy a picture the client never saw.
+	private static readonly string[] ClearedOnUpdate =
+	[
+		"name", "nicknames", "organizations", "titles", "emails", "phones", "addresses",
+		"anniversaries", "notes", "keywords"
+	];
+
 	public static List<XElement> ToApplicationData(JsonElement card, BodyPreference bodyPreference)
 	{
 		List<XElement> data = new();
@@ -264,6 +279,14 @@ public static class JsContactConverter
 			.Elements(Contacts + "Category").Select(c => c.Value).Where(c => c.Length > 0).ToList();
 		if (categories is { Count: > 0 })
 			card["keywords"] = categories.ToDictionary(c => c, object? (_) => true);
+
+		// Update (not create): every managed member the payload did not populate is explicitly
+		// nulled, so clearing a field survives the PatchObject semantics of `ContactCard/set`.
+		// A create sends only what it has — a null there is a member the card never had.
+		if (existing is not null)
+			foreach (string member in ClearedOnUpdate)
+				if (!card.ContainsKey(member))
+					card[member] = null;
 
 		return card;
 	}

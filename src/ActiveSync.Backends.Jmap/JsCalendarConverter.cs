@@ -27,6 +27,23 @@ public static class JsCalendarConverter
 		"locations", "status", "freeBusyStatus", "privacy", "participants", "recurrenceRules", "replyTo"
 	];
 
+	// JMAP `*/set update` values are PatchObjects (RFC 8620 §5.3) — a member absent from the patch
+	// is left untouched, not cleared. Verified against Stalwart 0.16. EAS Change payloads carry the
+	// complete managed set, so a field the client cleared arrives as an *absent* element and has to
+	// be sent as an explicit null. Also correct under full-replace semantics, where an explicit
+	// null and an absent member mean the same thing.
+	//
+	// "@type"/"uid" are always written; "replyTo" is listed as managed but this bridge never
+	// produces it, so nulling it would drop the server's own iMIP reply address on every edit.
+	// The recurrence member is absent here on purpose: its name and shape are server-dependent
+	// (Stalwart 0.16 answers `"recurrenceRules": …` with invalidProperties in any form, verified),
+	// so clearing it is handled alongside whichever shape it is actually read and written in.
+	private static readonly string[] ClearedOnUpdate =
+	[
+		"title", "description", "start", "timeZone", "duration", "showWithoutTime",
+		"locations", "status", "freeBusyStatus", "privacy", "participants"
+	];
+
 	// Server-managed / read-only members: never echoed back in an update (invalidProperties).
 	private static readonly string[] ReadOnly =
 	[
@@ -182,6 +199,13 @@ public static class JsCalendarConverter
 
 		if (evt.RecurrenceRule is { } rp)
 			js["recurrenceRules"] = new object[] { FromRecurrenceRule(rp) };
+
+		// Update (not create): explicitly null every managed member the event did not produce, so
+		// clearing a location / recurrence / attendee list survives PatchObject update semantics.
+		if (existing is not null)
+			foreach (string member in ClearedOnUpdate)
+				if (!js.ContainsKey(member))
+					js[member] = null;
 
 		return js;
 	}

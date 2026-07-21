@@ -83,4 +83,48 @@ public sealed class JmapCalendarStoreTests
 			await store.GetItemRevisionsAsync(folderKey, ContentFilter.All, CancellationToken.None);
 		Assert.DoesNotContain(itemKey, after.Keys);
 	}
+
+	/// <summary>
+	///   H7 — the calendar half of the PatchObject question. Free → busy is the case that reaches
+	///   the JSCalendar layer as a *cleared* member: BusyStatus 2 makes the iCalendar TRANSP
+	///   OPAQUE, which the bridge expresses by omitting <c>freeBusyStatus</c> entirely. Under patch
+	///   semantics the server then keeps the old "free" forever unless an explicit null is sent.
+	///   (Most other fields cannot show this at the store layer: <c>CalendarConverter</c> merges
+	///   the payload onto the stored iCalendar, so an absent Location is restored before the
+	///   JSCalendar bridge ever sees it.)
+	/// </summary>
+	[JmapGroupwareFact]
+	public async Task Update_ClearingAManagedField_ReachesTheServer()
+	{
+		JmapCalendarStore store = Store();
+		string folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].BackendKey;
+
+		string subject = $"Clearing {Guid.NewGuid():N}"[..18];
+		(string itemKey, _) = await store.CreateItemAsync(folderKey, new XElement("ApplicationData",
+			new XElement(Cal + "Subject", subject),
+			new XElement(Cal + "StartTime", "20260722T100000Z"),
+			new XElement(Cal + "EndTime", "20260722T110000Z"),
+			new XElement(Cal + "BusyStatus", "0")), CancellationToken.None);
+
+		try
+		{
+			BackendItem? free =
+				await store.GetItemAsync(folderKey, itemKey, BodyPreference.PlainText, CancellationToken.None);
+			Assert.Equal("0", free!.ApplicationData.First(e => e.Name.LocalName == "BusyStatus").Value);
+
+			await store.UpdateItemAsync(folderKey, itemKey, new XElement("ApplicationData",
+				new XElement(Cal + "Subject", subject),
+				new XElement(Cal + "StartTime", "20260722T100000Z"),
+				new XElement(Cal + "EndTime", "20260722T110000Z"),
+				new XElement(Cal + "BusyStatus", "2")), CancellationToken.None);
+
+			BackendItem? busy =
+				await store.GetItemAsync(folderKey, itemKey, BodyPreference.PlainText, CancellationToken.None);
+			Assert.Equal("2", busy!.ApplicationData.First(e => e.Name.LocalName == "BusyStatus").Value);
+		}
+		finally
+		{
+			await store.DeleteItemAsync(folderKey, itemKey, CancellationToken.None);
+		}
+	}
 }
