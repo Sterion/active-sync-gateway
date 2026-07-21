@@ -325,12 +325,58 @@ used as intended; the `C2` fix stays at full strength. Integration is green agai
 
 ---
 
-## Next: item 9 — WebUi privilege & API hardening
+## Item 9 — WebUi privilege & API hardening
 
-Items 9–14 are Phase 2 (Security), none [LIVE]; Stalwart is not otherwise needed again until item 26.
-Note the intra-phase ordering constraint: **item 13 (unified redaction) must be done before item 14** —
-build the one redaction implementation, then apply it. The current green baseline is **integration 135
-passed / 0 skipped**, unit Core 401 · Server 115 · Protocol 63 · WebUi 26.
+**Findings:** `C1` `C9` `C10` `C15` `C16` `C17` `C20` `C21`
+**Commits:** `a4c05eb` (C1) · `1c2a109` (C9) · `dfe4c8e` (C10) · `b29e62c` (C15) · `1aeed28` (C16) ·
+`298c6ec` (C17) · `7984fcf` (C20) · `10dd5e1` (C21) · `4ee8753` (integration-test alignment)
+
+**Verification:** integrity 56/15/365/365/0 ✓ · cursor → item 10 ✓ · IDs in subjects ✓ · build
+**0 warnings** ✓ · unit **Core 401, WebUi 63 (was 26), Server 115, Protocol 63 — 0 failed, 0 skipped**
+✓ · integration **135 passed, 0 skipped** ✓ (run by the orchestrator despite this not being a [LIVE]
+item — item 8's lesson applied)
+
+**Notes:**
+- **Breaking API changes, all in-repo clients updated:** `GET /admin/api/devices` and `/shares` now
+  return `{ total, entries }`; `PUT /admin/api/users/{login}` and `disable`/`enable` return
+  `{ user, warning }`; `POST /admin/api/shares` gains `knownUser`; portal
+  `PUT /user/api/backends/{role}` refuses non-self-service keys.
+- **`C1` is a deliberate functional narrowing.** `SelfServiceEditable` defaults to **false**, so today
+  only caldav opts in four fields (`CalendarAttachments`, `SendInvitations`, `SharedCollections`,
+  `TaskFolder`). carddav/imap/jmap/smtp/sieve expose **none** — the portal's backend form for those
+  roles is now credentials-only. The alternative (denylisting connection-shaped fields) leaves every
+  future plugin unsafe by default, which is the whole point of the finding. `C1` also **refuses**
+  undescribed keys rather than silently dropping them as the review suggested — same safety, honest
+  answer.
+- **`C9` is coarser than the review asked for** — two outcomes, not five. The suggested
+  `unreachable`/`tls-error`/`auth-error`/`timeout` set is still four distinguishable answers about an
+  operator-chosen target, which is what makes a port scanner.
+- **`C15`'s LIKE half is not a real defect, and the suggested fix would have caused it.** EF maps
+  `string.Contains` to `instr`/`strpos`, verified against the generated SQL. Only the tail-floor half
+  was fixed and proven; the two wildcard tests are labelled coverage.
+- **`C16` deliberately does not 404/409 on unknown logins.** Pass-through auth means most users have no
+  declared entry and a pre-emptive block is legitimate; the response carries `knownUser` instead.
+- **`C21` skips `ProblemDetails` and the route constraint** — a route constraint would answer 404 for a
+  bad role, which is the wrong shape for "that isn't a role".
+- **⚠ The seven fix commits individually leave the integration suite red.** The alignment landed as a
+  separate final commit, `4ee8753`. **Bisecting across `a4c05eb`..`4ee8753` requires `4ee8753`
+  applied** — otherwise every probe in that range looks broken for the wrong reason.
+- **New `tests/ActiveSync.WebUi.Tests/WebUiHost.cs`** drives the real `MapWebUi` pipeline over a
+  TestServer — real cookie auth, real policies, real CSRF filter. It required
+  `Microsoft.AspNetCore.Mvc.Testing` and a `Backends.Dav` project reference. **Item 39 (`C19`) should
+  build on this rather than starting over.**
+- **`C22` was deliberately not touched** — no `C17` fix made a `RevokeSessionsBeforeAsync` call natural
+  (refusing a write is not the same as invalidating sessions). Its anchors are unmoved.
+
+---
+
+## Next: item 10 — EAS & server auth
+
+Items 10–14 are Phase 2 (Security), none [LIVE]; Stalwart is not otherwise needed again until item 26,
+but the orchestrator is running integration after every item from here — items 8 and 9 both changed
+behaviour the integration suite exercises. Ordering constraint still standing: **item 13 (unified
+redaction) before item 14**. Current green baseline: **integration 135 / 0 skipped**, unit Core 401 ·
+WebUi 63 · Server 115 · Protocol 63.
 
 **Process lesson for future runs:** "not [LIVE]" means the *worker* need not run integration. It does
 not mean the *orchestrator* shouldn't, and items 5–8 show why — a non-[LIVE] item with a schema or
