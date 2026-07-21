@@ -224,7 +224,7 @@ internal static class SettingKeys
 		    Roles.Contains(parts[2]))
 			return new SettingKey(key, ValueType.String, false, null,
 				$"Backend setting for the {parts[2]} role (validated by its provider).",
-				Secret: parts[^1].Equals("Password", StringComparison.OrdinalIgnoreCase));
+				Secret: SecretRedaction.IsSecretName(parts[^1]));
 
 		return null;
 	}

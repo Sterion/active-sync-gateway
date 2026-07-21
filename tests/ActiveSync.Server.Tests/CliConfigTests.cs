@@ -170,6 +170,25 @@ public sealed class CliConfigTests : IDisposable
 	}
 
 	[Fact]
+	public void List_BackendSecretLeaves_AreMasked()
+	{
+		// L30: non-Password backend secrets (ApiKey/Token/ClientSecret) leaked in the clear because
+		// only a trailing "Password" leaf was flagged secret. They must mask like Password does.
+		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:MailStore:ApiKey", "backend-api-secret").ExitCode);
+		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:Calendar:Token", "backend-token-secret").ExitCode);
+
+		(_, _, string listOut) = Run("config", "list");
+		Assert.Contains("ActiveSync:Backends:MailStore:ApiKey", listOut);
+		Assert.DoesNotContain("backend-api-secret", listOut);
+		Assert.DoesNotContain("backend-token-secret", listOut);
+
+		// A non-secret backend leaf still shows its value.
+		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:MailStore:Host", "imap.example.com").ExitCode);
+		(_, _, string listOut2) = Run("config", "list");
+		Assert.Contains("imap.example.com", listOut2);
+	}
+
+	[Fact]
 	public void Set_BackendKey_IsAcceptedAndRestartTierNoted()
 	{
 		// Open-ended backend settings are accepted (validated on the server by the provider).
