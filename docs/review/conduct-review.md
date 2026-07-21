@@ -134,13 +134,25 @@ Each agent needs:
 3. **Domain context.** "This implements MS-ASCMD; protocol violations cause silent sync failures or
    client resync loops, so protocol correctness is high severity." Without this an agent reports
    style issues in a file with a data-loss bug.
-4. **An explicit checklist of what to look for**, tuned per area — concurrency and transactions for
+4. **The project's architecture notes — `AGENTS.md`, `README.md`, the relevant `docs/`.** Tell the
+   agent to read them for the areas it reviews. **This is not optional, and it is the same
+   requirement the *fix* phase has, for the same reason at the other end.** Without it, a reviewer
+   flags deliberate documented decisions as bugs — the dependency direction, an invariant the code
+   deliberately upholds, a convention that looks wrong out of context — and those false positives
+   cost the fix phase real time, or get "fixed" and break something intentional. The original run of
+   this review got away with it only because the agents happened to be careful; do not rely on that.
+   **But do not treat the docs as infallible.** They are written by the same people as the code and
+   can encode the same blind spot. The rule is: if you would flag something the docs call
+   intentional, **flag it anyway** — as a finding that explicitly names the doc's position and says
+   why it is still wrong or risky, so a human decides. Silent agreement with the docs and silent
+   disagreement are both failures; the review's job is to surface the tension.
+5. **An explicit checklist of what to look for**, tuned per area — concurrency and transactions for
    the state layer; auth, injection and secret handling for the web layer; untrusted-input limits
    for a wire codec; connection lifetime and N+1 for backend adapters.
-5. **The output format**, exactly (see template below).
-6. **The project's own conventions**, so it doesn't propose changes that contradict them.
-7. **"Be exhaustive. Do not stop at 10."** Agents self-limit otherwise.
-8. **"Verify by reading the code. Do not speculate."** The single most important line. Findings that
+6. **The output format**, exactly (see template below).
+7. **The project's own conventions**, so it doesn't propose changes that contradict them.
+8. **"Be exhaustive. Do not stop at 10."** Agents self-limit otherwise.
+9. **"Verify by reading the code. Do not speculate."** The single most important line. Findings that
    turn out to be wrong poison the whole document — the reader stops trusting any of it.
 
 ## What makes findings trustworthy
@@ -367,7 +379,11 @@ For calibration, on ~42k lines:
 ## Commissioning the review
 
 > Do a complete and thorough review of all production source in this repository. Read tests, docs
-> and CI for context, but report findings only on source.
+> and CI for context, but report findings only on source. **Read the project's architecture notes
+> first — `AGENTS.md`, `README.md`, the relevant `docs/` — and have every subsystem agent read the
+> parts covering its area.** Use them to avoid flagging deliberate documented decisions as bugs, but
+> do not treat them as infallible: if a documented decision is genuinely wrong or risky, report it as
+> a finding that names the doc's position and says why it still stands.
 >
 > Cover: correctness bugs, security, concurrency, performance, readability, structure, and assembly
 > boundaries (splits, merges, misplaced types, dependency direction).
