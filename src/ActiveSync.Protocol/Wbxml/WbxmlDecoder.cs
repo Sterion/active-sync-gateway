@@ -25,6 +25,13 @@ public static class WbxmlDecoder
 	private const byte Opaque = 0xC3;
 	private const byte LiteralAc = 0xC4;
 
+	// Hostile-input ceilings. Without them one authenticated device can OOM the gateway: a body
+	// of N repeated "tag with content" bytes builds N nested XElements, each far larger than the
+	// byte that produced it. Both limits are orders of magnitude above any real EAS document —
+	// the deepest is Sync/Collections/Collection/Commands/Change/ApplicationData/Body/… at ~10.
+	private const int MaxDepth = 256;
+	private const int MaxElements = 200_000;
+
 	public static async Task<XDocument> DecodeAsync(Stream stream, CancellationToken ct)
 	{
 		using MemoryStream buffer = new();
@@ -51,6 +58,8 @@ public static class WbxmlDecoder
 		XDocument doc = new();
 		WbxmlCodePages.CodePage page = WbxmlCodePages.ForIndex(0)!;
 		XElement? current = null;
+		int depth = 0;
+		int elements = 0;
 
 		while (!reader.AtEnd)
 		{
@@ -67,6 +76,7 @@ public static class WbxmlDecoder
 					if (current is null)
 						throw new WbxmlException("Unbalanced END token.");
 					current = current.Parent;
+					depth--;
 					break;
 
 				case StrI:
@@ -128,6 +138,8 @@ public static class WbxmlDecoder
 							$"Unknown tag token 0x{tagToken:X2} on code page {page.Index} ({page.Namespace}).");
 					if (hasAttributes)
 						throw new WbxmlException("Attributes are not used by EAS.");
+					if (++elements > MaxElements)
+						throw new WbxmlException($"WBXML document exceeds {MaxElements} elements.");
 
 					XElement element = new(page.Namespace + name);
 					if (current is null)
@@ -142,7 +154,12 @@ public static class WbxmlDecoder
 					}
 
 					if (hasContent)
+					{
+						if (++depth > MaxDepth)
+							throw new WbxmlException($"WBXML document nests deeper than {MaxDepth} elements.");
 						current = element;
+					}
+
 					break;
 			}
 		}
