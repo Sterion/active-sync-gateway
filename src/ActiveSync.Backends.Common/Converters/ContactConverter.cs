@@ -222,9 +222,7 @@ public static class ContactConverter
 		if (categories is { Count: > 0 })
 			AppendLine(sb, "CATEGORIES", string.Join(",", categories.Select(Escape)), true);
 
-		string? picture = V("Picture");
-		if (!string.IsNullOrWhiteSpace(picture))
-			AppendFolded(sb, $"PHOTO;ENCODING=b;TYPE=JPEG:{picture.Trim()}");
+		AppendPhoto(sb, V("Picture"));
 
 		if (existingVcard is not null)
 			AppendPreserved(sb, existingVcard);
@@ -389,6 +387,33 @@ public static class ContactConverter
 		int lt = value.IndexOf('<');
 		int gt = value.IndexOf('>');
 		return lt >= 0 && gt > lt ? value[(lt + 1)..gt].Trim() : value.Trim();
+	}
+
+	/// <summary>
+	///   Emits PHOTO from the client's base64 text. The value is decoded and RE-ENCODED rather
+	///   than interpolated: it is the one client-supplied string in this builder that never
+	///   passes through <see cref="Escape" />, and an embedded CRLF would otherwise write
+	///   arbitrary properties into the stored card and, via CardDAV, onto the DAV server.
+	///   Re-encoding makes that structurally impossible. Undecodable input is skipped.
+	/// </summary>
+	private static void AppendPhoto(StringBuilder sb, string? picture)
+	{
+		if (string.IsNullOrWhiteSpace(picture))
+			return;
+
+		byte[] buffer = new byte[picture.Length]; // decoded bytes are always fewer than base64 chars
+		if (!Convert.TryFromBase64String(picture.Trim(), buffer, out int written) || written == 0)
+			return;
+
+		ReadOnlySpan<byte> bytes = buffer.AsSpan(0, written);
+		string type = bytes switch
+		{
+			[0xFF, 0xD8, 0xFF, ..] => ";TYPE=JPEG",
+			[0x89, (byte)'P', (byte)'N', (byte)'G', ..] => ";TYPE=PNG",
+			[(byte)'G', (byte)'I', (byte)'F', (byte)'8', ..] => ";TYPE=GIF",
+			_ => "" // unrecognised: no parameter beats a wrong one
+		};
+		AppendFolded(sb, $"PHOTO;ENCODING=b{type}:{Convert.ToBase64String(bytes)}");
 	}
 
 	private static void AppendAdr(

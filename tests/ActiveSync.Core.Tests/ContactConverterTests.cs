@@ -133,6 +133,44 @@ public class ContactConverterTests
 	}
 
 	[Fact]
+	public void Picture_CannotInjectVcardLines()
+	{
+		// D6 — <Picture> is client-supplied text. It used to be interpolated raw into
+		// PHOTO;ENCODING=b;TYPE=JPEG:{picture.Trim()}, and Trim() strips only LEADING and
+		// TRAILING whitespace, so an embedded CRLF wrote arbitrary properties into the
+		// stored card — and, via CardDAV, onto the DAV server.
+		string injected = "/9j/4AAQSkZJRg==\r\nEMAIL;TYPE=INTERNET:attacker@evil.example\r\nX-INJECTED:pwned";
+
+		string card = ContactConverter.FromApplicationData(AppData(
+			new XElement(Contacts + "FirstName", "Victim"),
+			new XElement(Contacts + "Picture", injected)), "c-9", null);
+
+		Assert.DoesNotContain("attacker@evil.example", card);
+		Assert.DoesNotContain("X-INJECTED", card);
+	}
+
+	[Fact]
+	public void Picture_ValidBase64_IsEmittedWithATypeFromTheDecodedBytes()
+	{
+		byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01];
+		string card = ContactConverter.FromApplicationData(AppData(
+			new XElement(Contacts + "Picture", Convert.ToBase64String(png))), "c-10", null);
+
+		Assert.Contains("PHOTO;ENCODING=b;TYPE=PNG:", card);
+		Assert.Contains(Convert.ToBase64String(png), card.Replace("\r\n ", ""));
+	}
+
+	[Fact]
+	public void Picture_Unparsable_IsSkipped_NotEmitted()
+	{
+		string card = ContactConverter.FromApplicationData(AppData(
+			new XElement(Contacts + "FirstName", "Victim"),
+			new XElement(Contacts + "Picture", "not base64 at all!!")), "c-11", null);
+
+		Assert.DoesNotContain("PHOTO", card);
+	}
+
+	[Fact]
 	public void Read_UnparsableCard_ReturnsNull_LikeEverySiblingConverter()
 	{
 		// D22 — CalendarConverter/TasksConverter/NotesConverter all return null so
