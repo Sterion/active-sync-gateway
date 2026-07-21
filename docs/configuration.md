@@ -315,4 +315,4 @@ at startup); `AdminClaim`/`AdminClaimValue`/`AutoProvision` apply live.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `Directory` | `plugins` (container: `/app/plugins`) | Directory scanned for out-of-repo backend plugins — one subdirectory per plugin. **Host-controlled: file/env only** (it decides what code the gateway loads), and restart-tier. See **[docs/plugins.md](plugins.md)**. |
+| `Directory` | `plugins` (container: `/app/plugins`) | Directory scanned for out-of-repo backend plugins — one subdirectory per plugin. A relative path resolves against the **application directory**, not the working directory, so it means the same thing however the gateway was started. **Host-controlled: file/env only** (it decides what code the gateway loads), and restart-tier. See **[docs/plugins.md](plugins.md)**. |

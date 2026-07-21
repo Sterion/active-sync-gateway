@@ -33,8 +33,12 @@ public static class PluginLoader
 	/// </summary>
 	public static void LoadInto(IServiceCollection services, IConfiguration configuration, ILogger logger)
 	{
+		// A relative path resolves against the APP BASE, the same root the default uses — not the
+		// process working directory. Otherwise setting the option to its own documented default
+		// ("plugins") would change which directory is scanned, and what the gateway loads into
+		// itself would depend on where it was started from.
 		string directory = configuration["ActiveSync:Plugins:Directory"] is { Length: > 0 } configured
-			? Path.GetFullPath(configured)
+			? Path.GetFullPath(configured, AppContext.BaseDirectory)
 			: Path.Combine(AppContext.BaseDirectory, DefaultDirectoryName);
 
 		if (!Directory.Exists(directory))

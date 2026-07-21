@@ -206,6 +206,38 @@ public sealed class PluginLoaderTests : IDisposable
 		Assert.Same(typeof(IBackendProvider), provider.GetType().GetInterface("IBackendProvider"));
 	}
 
+	/// <summary>
+	///   K42 — a configured RELATIVE <c>Plugins:Directory</c> resolved against the process working
+	///   directory while the default resolved against the app base, so setting the option to its own
+	///   documented default (<c>plugins</c>) changed which directory was scanned. What the gateway
+	///   loads into itself must not depend on where it was started from.
+	/// </summary>
+	[Fact]
+	public void RelativeDirectory_ResolvesAgainstTheAppBase_NotTheWorkingDirectory()
+	{
+		// A plugin under <cwd>/<name> and nothing under <app base>/<name>: whichever root wins is
+		// visible in the result. Named uniquely so it cannot collide with a real staging folder.
+		string relative = $"as-relative-{Guid.NewGuid():N}";
+		Directory.CreateDirectory(Path.Combine(_root, relative));
+		string decoy = Path.Combine(_root, relative, "ActiveSync.TestPlugin");
+		Directory.CreateDirectory(decoy);
+		File.Copy(StagedPluginDll, Path.Combine(decoy, "ActiveSync.TestPlugin.dll"));
+
+		string previousCwd = Directory.GetCurrentDirectory();
+		BackendProviderRegistry registry;
+		try
+		{
+			Directory.SetCurrentDirectory(_root);
+			registry = LoadAndBuildRegistry(ConfigFor(relative));
+		}
+		finally
+		{
+			Directory.SetCurrentDirectory(previousCwd);
+		}
+
+		Assert.Empty(registry.All);
+	}
+
 	/// <summary>Copies the fixture plugin into a correctly-named subdirectory and returns it.</summary>
 	private string StagePlugin(string name)
 	{
