@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Text.RegularExpressions;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Administration;
@@ -16,7 +15,7 @@ namespace ActiveSync.Server;
 ///   (passwords in a Postgres connection string) are redacted; backend user credentials
 ///   never live in config — they arrive per request via Basic auth.
 /// </summary>
-public static partial class StartupSummary
+public static class StartupSummary
 {
 	/// <param name="logger">Sink for the banner lines.</param>
 	/// <param name="options">Bound configuration.</param>
@@ -193,26 +192,16 @@ public static partial class StartupSummary
 		return string.Join(" ", fields);
 	}
 
+	/// <summary>
+	///   Redacts the password in a database connection string for the banner. Delegates to the
+	///   shared <see cref="SecretRedaction.RedactConnectionString" /> so the banner, the settings
+	///   surfaces and any other caller mask identically — including SQLite/SQLCipher strings that
+	///   carry a Password keyword, which this used to wave through as "just a file path" (E23).
+	///   The provider is kept for the caller's log message; the redaction is content-driven.
+	/// </summary>
 	internal static string Redact(string provider, string connectionString)
 	{
-		// URI form (postgresql://user:pass@host/db?password=…): mask the userinfo password
-		// and any password query parameter, keep host/port/database for diagnostics.
-		if (PostgresConnectionUri.IsPostgresUri(connectionString))
-			return UriQueryPassword().Replace(
-				UriUserInfoPassword().Replace(connectionString, "$1$2:***@"), "$1=***");
-		// SQLite connection strings are just a file path — nothing to hide.
-		if (provider.StartsWith("sqlite", StringComparison.OrdinalIgnoreCase))
-			return connectionString;
-		// Postgres/other: mask the password keyword's value, keep everything else for diagnostics.
-		return PasswordKeyword().Replace(connectionString, "$1=***");
+		_ = provider;
+		return SecretRedaction.RedactConnectionString(connectionString);
 	}
-
-	[GeneratedRegex(@"(?i)\b(password|pwd)\s*=\s*[^;]*")]
-	private static partial Regex PasswordKeyword();
-
-	[GeneratedRegex(@"(?i)^(jdbc:)?(postgres(?:ql)?://[^:/?#@]*):[^@]*@", RegexOptions.None)]
-	private static partial Regex UriUserInfoPassword();
-
-	[GeneratedRegex(@"(?i)([?&](?:password|pwd))=[^&]*")]
-	private static partial Regex UriQueryPassword();
 }

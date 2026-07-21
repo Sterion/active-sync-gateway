@@ -129,4 +129,15 @@ public class StartupSummaryRedactionTests
 		Assert.Equal("Data Source=/data/activesync.db",
 			StartupSummary.Redact("Sqlite", "Data Source=/data/activesync.db"));
 	}
+
+	[Fact]
+	public void Sqlite_PasswordKeyword_IsMasked()
+	{
+		// E23: SQLite/SQLCipher connection strings accept a Password keyword; the banner treated
+		// every SQLite string as "just a file path" and printed the cipher key in the clear.
+		string redacted = StartupSummary.Redact("Sqlite", "Data Source=/data/activesync.db;Password=cipherkey");
+		Assert.DoesNotContain("cipherkey", redacted);
+		Assert.Contains("Password=***", redacted);
+		Assert.Contains("Data Source=/data/activesync.db", redacted);
+	}
 }
