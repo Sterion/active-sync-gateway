@@ -26,12 +26,18 @@ Two caveats worth respecting:
 - **Quality decays with context.** A session six items deep is worse at the seventh than a fresh one. Prefer 3–5 items per run over 15.
 - **Give these their own run:** item 5 (needs live-server verification mid-item) and item 20 (decompositions — must start from a clean tree).
 
-**Before any run that includes a [LIVE] item**, establish a green baseline first — otherwise the first failure is ambiguous between "my change broke it" and "it was already red":
+**Before any run that includes a [LIVE] item, establish a green baseline first:**
 
 ```powershell
 ./scripts/stalwart-up.ps1      # canonical ports; reuses a warm container
 dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration
 ```
+
+Expect `Passed: 124, Skipped: 0`.
+
+This is not redundant with step 5, and the reason matters: a non-[LIVE] item runs **unit tests only**, but plenty of them touch code the integration suite exercises — item 20 splits `SyncHandler`, item 21 changes session lifetime, item 22 rewrites `SyncStateService`. Any of those can break integration, pass their own unit tests, and commit clean. The breakage then sits undetected until the next [LIVE] item, which may be many commits later.
+
+The baseline is what catches that, and it is also what tells you whether a failure came from your change or from something already broken. Three minutes here beats bisecting ten commits later — and it runs while you do other things.
 
 Expect `Passed: 124, Skipped: 0`. Anything else means the environment, not your change.
 
