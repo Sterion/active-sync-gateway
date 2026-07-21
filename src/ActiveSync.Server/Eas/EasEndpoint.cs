@@ -22,6 +22,9 @@ public static class EasEndpoint
 	/// <summary>HttpContext.Items key carrying (command, user) for the metrics middleware.</summary>
 	public const string MetricsKey = "EasMetrics";
 
+	/// <summary>User label for a request that has not authenticated yet — see <see cref="MetricsKey" />.</summary>
+	public const string AnonymousMetricsUser = "-";
+
 	// 2.5/12.0 were dropped from the advertisement when 16.x arrived: this gateway never
 	// implemented their exclusive commands (GetHierarchy, *Collection), so advertising
 	// them was always a lie a real 2.5 client would have tripped over.
@@ -130,12 +133,19 @@ public static class EasEndpoint
 		// Username and command are client-controlled text — sanitized before logging.
 		http.Items[RequestSummaryKey] =
 			$"EAS {LogText.Clean(parameters.Command, 32)} {LogText.Clean(credentials.UserName, 128)} ({parameters.DeviceId})";
-		http.Items[MetricsKey] =
-			(LogText.Clean(parameters.Command, 32), LogText.Clean(credentials.UserName, 128));
+
+		// Metric label values are time series, so the username may NOT come from an
+		// unauthenticated caller: until the credentials verify, the user label is the same "-"
+		// GatewayMetrics uses when per-user labels are off. 401/429 outcomes are still counted
+		// (the command label is clamped to the known set inside GatewayMetrics), just anonymously.
+		http.Items[MetricsKey] = (parameters.Command, AnonymousMetricsUser);
 
 		if (!await EndpointAuth.AuthenticateAsync(
 			    http, sessionFactory, authThrottle, clientKey, credentials, logger, ct))
 			return;
+
+		// Authenticated: the username is now a real account, so it is safe as a label.
+		http.Items[MetricsKey] = (parameters.Command, LogText.Clean(credentials.UserName, 128));
 
 		// First successful sign-in of a pass-through login: turn it into a managed database
 		// account (ActiveSync:AutoProvisionUsers, on by default). Idempotent and best-effort — it

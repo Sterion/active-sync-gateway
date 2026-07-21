@@ -261,7 +261,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **6. Delete windowing & SoftDelete** [LIVE] — ~~`F2`~~ ~~`F3`~~ ~~`A21`~~ **COMPLETE**
 > Deletes bypass `WindowSize` entirely (50k `<Delete>` elements in one response), and items aging out of the filter window are hard-deleted instead of soft-deleted. `CollectionDiff` + `SyncHandler`.
 
-**7. Unauthenticated resource limits** — `K1` `E2` `K26` `E21` `K33` `W17`
+**7. Unauthenticated resource limits** — ~~`K1`~~ ~~`E2`~~ `K26` `E21` `K33` `W17`
 > Unauthenticated callers control Prometheus label values (`K1`/`E2`), grow the throttle table without bound with an O(n) scan per failure (`K26`), and unlock 16.x behaviour via an unvalidated version byte (`W17`).
 
 ## Phase 2 — Security
@@ -485,7 +485,7 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 
 ## Area E — Server: pipeline, hosting, startup (35)
 `E1` **High** Request bodies dropped on HTTP/2 — the body test relies on HTTP/1.1 framing (`Transfer-Encoding` is forbidden in h2, streamed bodies have no `Content-Length`) while Kestrel's HTTPS listener defaults to `Http1AndHttp2` — `Eas/EasContext.cs:51`. Delete the early return; rely on the existing zero-length check.
-`E2` **High** Unauthenticated clients control Prometheus label values — `MetricsKey` is set two lines *before* `AuthenticateAsync` and the middleware records in a `finally` regardless of 401/429 — `Eas/EasEndpoint.cs:131`, `Setup/WebApplicationExtensions.cs:112`. Move the assignment below auth; clamp `command` to the known set.
+~~`E2`~~ **FIXED** Unauthenticated clients control Prometheus label values — `Eas/EasEndpoint.cs`, `Setup/WebApplicationExtensions.cs`. Both label values are now closed off. **Command:** clamped inside `GatewayMetrics.RecordEasRequest` via the new `EasRequestParameters.CanonicalCommand` — anything outside the MS-ASHTTP set becomes `other`, and known commands fold to one canonical casing (`sync`/`SYNC`/`Sync` were three time series). **User:** the endpoint stashes `MetricsKey` with the anonymous `"-"` user *before* auth and overwrites it with the real username only after `AuthenticateAsync` succeeds. **Deviation from the recommended fix, deliberate:** moving the whole assignment below auth would stop counting 401/429 outcomes entirely, which is exactly the traffic an operator watches during a brute-force attempt — the two-step assignment keeps the count and loses only the (attacker-chosen) name. The command clamp has a red-first reproducer (`GatewayMetricsTests`); the ordering change does **not** — there is no unit-level EAS host, and `Integration.Tests/Scenarios/MetricsTests.cs` is where it would be observable end-to-end (item 7 is not [LIVE]).
 `E3` **High** Auth throttle keys on `RemoteIpAddress`; no forwarded-headers middleware, so behind an ingress every request shares one key and `MaxFailures*5` fumbles 429 the entire gateway — `Eas/EndpointAuth.cs:16`.
 `E4` **Med** Every EAS request constructs all 20 handlers and their dependency graphs — `Eas/EasEndpoint.cs:53,162`. Use keyed services.
 `E5` **Med** Policy document rebuilt, serialized and SHA-256'd per request — `Eas/EasEndpoint.cs:201`, `Eas/PolicyDocument.cs:46`. Cache keyed on options reference identity.
@@ -548,7 +548,7 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 **Verified good:** manual same-origin redirect handling with a credential-leak rationale; the `AllRealOnly` idempotency gate correctly distinguishing replayable reads from `*/set`; response bodies deliberately excluded from exception messages; the trace logger's "method, URI and body only, NEVER headers" construction; the Axigen workarounds carry live-verification dates.
 
 ## Area K — Security / Crypto / Plugins / Observability / Contracts (70)
-`K1` **High** Unauthenticated metric-label cardinality bomb (`user` + `command`) — `Observability/GatewayMetrics.cs:70` (see `E2`).
+~~`K1`~~ **FIXED** Unauthenticated metric-label cardinality bomb (`user` + `command`) — `Observability/GatewayMetrics.cs` (see ~~`E2`~~ for the full note). The clamp lives in `GatewayMetrics` itself, not only at the call site, so any future caller inherits it.
 `K6` **High** Self-signed certificate lifetime of **20 years** violates Apple's 825-day limit — iOS/macOS are the flagship clients, so a user who explicitly trusts it can still be refused — `Security/GatewayCertificateStore.cs:139`. Issue ≤398 days and add the renewal the doc says doesn't exist.
 `K38` **High** `Plugins:Directory` is DB-settable → admin UI to in-process arbitrary code execution with the master key in memory; `Register` also receives the live `IServiceCollection`, so a plugin can replace any host registration — `Plugins/PluginLoader.cs:34`, `Administration/SettingKeys.cs:50`.
 `K56` **High** `BackendCredentials` is a `record` → synthesized `ToString()` prints the plaintext password, recursively via `ResolvedRole`/`BackendConnectionContext`. Published plugin contract — `Contracts/Models.cs:6`.

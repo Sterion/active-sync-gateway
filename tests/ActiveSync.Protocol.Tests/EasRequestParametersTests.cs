@@ -122,4 +122,23 @@ public class EasRequestParametersTests
 		Assert.Equal("Ping", p.Command);
 		Assert.Equal(Convert.ToHexString(guidBytes), p.DeviceId);
 	}
+
+	[Theory]
+	[InlineData("Sync", "Sync")]
+	[InlineData("fOlDeRsYnC", "FolderSync")]
+	[InlineData("Find", "Find")]
+	public void CanonicalCommand_KnownCommand_FoldsToTheCanonicalCasing(string input, string expected)
+	{
+		Assert.Equal(expected, EasRequestParameters.CanonicalCommand(input));
+	}
+
+	[Theory]
+	[InlineData(null)]
+	[InlineData("")]
+	[InlineData("Syncc")]
+	[InlineData("<script>alert(1)</script>")]
+	public void CanonicalCommand_UnknownCommand_IsNull(string? input)
+	{
+		Assert.Null(EasRequestParameters.CanonicalCommand(input));
+	}
 }

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using ActiveSync.Protocol.Http;
 
 namespace ActiveSync.Core.Observability;
 
@@ -67,13 +68,24 @@ public static class GatewayMetrics
 		return PerUserLabels ? user : "-";
 	}
 
+	/// <summary>
+	///   Label value for the EAS command. The command is client-controlled query text and every
+	///   distinct value becomes its own time series, so anything outside the MS-ASHTTP command
+	///   set collapses to "other" and known commands are folded to one canonical casing.
+	/// </summary>
+	private static string Command(string command)
+	{
+		return EasRequestParameters.CanonicalCommand(command) ?? "other";
+	}
+
 	public static void RecordEasRequest(string command, int statusCode, string user, double seconds)
 	{
+		string label = Command(command);
 		EasRequests.Add(1,
-			new KeyValuePair<string, object?>("command", command),
+			new KeyValuePair<string, object?>("command", label),
 			new KeyValuePair<string, object?>("status", statusCode),
 			new KeyValuePair<string, object?>("user", User(user)));
-		EasRequestDuration.Record(seconds, new KeyValuePair<string, object?>("command", command));
+		EasRequestDuration.Record(seconds, new KeyValuePair<string, object?>("command", label));
 	}
 
 	/// <summary>direction: client_to_server | server_to_client; operation: add | change | delete | fetch.</summary>

@@ -97,6 +97,8 @@ public static class WebApplicationExtensions
 	///   Records eas_requests / eas_request_duration_seconds for every request the EAS
 	///   endpoint identified (command + user stashed in HttpContext.Items) — including 401,
 	///   403 and 449 outcomes. Non-EAS requests (healthz, autodiscover) are not counted.
+	///   The stashed labels are attacker-influenced until the request authenticates: the endpoint
+	///   stashes "-" as the user until then, and GatewayMetrics clamps the command to the known set.
 	/// </summary>
 	public static WebApplication UseEasMetrics(this WebApplication app)
 	{

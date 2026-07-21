@@ -37,6 +37,19 @@ public sealed record EasRequestParameters
 		"Find" // 23 (16.1)
 	];
 
+	/// <summary>
+	///   The canonical spelling of <paramref name="command" /> (case-insensitive match against
+	///   the MS-ASHTTP command set), or null when it is not an EAS command at all. The command
+	///   arrives as client-controlled query text, so anything that becomes a metric label, a
+	///   dictionary key or a dimension has to pass through here first.
+	/// </summary>
+	public static string? CanonicalCommand(string? command)
+	{
+		return string.IsNullOrEmpty(command)
+			? null
+			: Array.Find(CommandCodes, known => known.Equals(command, StringComparison.OrdinalIgnoreCase));
+	}
+
 	public required string Command { get; init; }
 	public string ProtocolVersion { get; init; } = "14.1";
 	public string DeviceId { get; init; } = "";
