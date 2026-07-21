@@ -85,6 +85,48 @@ public sealed class JmapCalendarStoreTests
 	}
 
 	/// <summary>
+	///   H4 — recurrence must survive create → get against the live server. Stalwart 0.16 speaks
+	///   the JSCalendar-draft <c>recurrenceRule</c> (a single object) and rejects RFC 8984's
+	///   <c>recurrenceRules</c> array outright, so before the fix this was not merely lossy: the
+	///   create failed with <c>invalidProperties</c>.
+	/// </summary>
+	[JmapGroupwareFact]
+	public async Task Event_Recurrence_RoundTripsThroughTheServer()
+	{
+		JmapCalendarStore store = Store();
+		string folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].BackendKey;
+
+		string subject = $"Standup {Guid.NewGuid():N}"[..16];
+		(string itemKey, _) = await store.CreateItemAsync(folderKey, new XElement("ApplicationData",
+			new XElement(Cal + "Subject", subject),
+			new XElement(Cal + "StartTime", "20260720T090000Z"),
+			new XElement(Cal + "EndTime", "20260720T091500Z"),
+			new XElement(Cal + "BusyStatus", "2"),
+			new XElement(Cal + "Recurrence",
+				new XElement(Cal + "Type", "1"),
+				new XElement(Cal + "Interval", "1"),
+				new XElement(Cal + "DayOfWeek", "2"),
+				new XElement(Cal + "Occurrences", "5"))), CancellationToken.None);
+
+		try
+		{
+			BackendItem? item =
+				await store.GetItemAsync(folderKey, itemKey, BodyPreference.PlainText, CancellationToken.None);
+			Assert.NotNull(item);
+			XElement? recurrence = item.ApplicationData.FirstOrDefault(e => e.Name.LocalName == "Recurrence");
+			Assert.NotNull(recurrence);
+			string? R(string local) => recurrence.Elements().FirstOrDefault(e => e.Name.LocalName == local)?.Value;
+			Assert.Equal("1", R("Type"));          // weekly
+			Assert.Equal("2", R("DayOfWeek"));     // Monday
+			Assert.Equal("5", R("Occurrences"));
+		}
+		finally
+		{
+			await store.DeleteItemAsync(folderKey, itemKey, CancellationToken.None);
+		}
+	}
+
+	/// <summary>
 	///   H7 — the calendar half of the PatchObject question. Free → busy is the case that reaches
 	///   the JSCalendar layer as a *cleared* member: BusyStatus 2 makes the iCalendar TRANSP
 	///   OPAQUE, which the bridge expresses by omitting <c>freeBusyStatus</c> entirely. Under patch

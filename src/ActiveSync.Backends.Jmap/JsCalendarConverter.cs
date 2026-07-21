@@ -24,7 +24,8 @@ public static class JsCalendarConverter
 	private static readonly string[] Managed =
 	[
 		"@type", "uid", "title", "description", "start", "timeZone", "duration", "showWithoutTime",
-		"locations", "status", "freeBusyStatus", "privacy", "participants", "recurrenceRules", "replyTo"
+		"locations", "status", "freeBusyStatus", "privacy", "participants",
+		"recurrenceRules", "recurrenceRule", "replyTo"
 	];
 
 	// JMAP `*/set update` values are PatchObjects (RFC 8620 §5.3) — a member absent from the patch
@@ -35,9 +36,8 @@ public static class JsCalendarConverter
 	//
 	// "@type"/"uid" are always written; "replyTo" is listed as managed but this bridge never
 	// produces it, so nulling it would drop the server's own iMIP reply address on every edit.
-	// The recurrence member is absent here on purpose: its name and shape are server-dependent
-	// (Stalwart 0.16 answers `"recurrenceRules": …` with invalidProperties in any form, verified),
-	// so clearing it is handled alongside whichever shape it is actually read and written in.
+	// The recurrence member is absent here on purpose: its name is server-dependent, so it is
+	// cleared separately under whichever spelling this event is written in — see RecurrenceOf.
 	private static readonly string[] ClearedOnUpdate =
 	[
 		"title", "description", "start", "timeZone", "duration", "showWithoutTime",
@@ -124,7 +124,7 @@ public static class JsCalendarConverter
 				});
 		}
 
-		if (Values(jsEvent, "recurrenceRules").FirstOrDefault() is { ValueKind: JsonValueKind.Object } rule)
+		if (RecurrenceOf(jsEvent) is { ValueKind: JsonValueKind.Object } rule)
 			evt.RecurrenceRule = ToRecurrenceRule(rule);
 
 		return new CalendarSerializer().SerializeToString(calendar) ?? "";
@@ -197,20 +197,59 @@ public static class JsCalendarConverter
 		if (participants.Count > 0)
 			js["participants"] = participants;
 
+		// Write the recurrence back in the shape this server speaks (see RecurrenceOf).
+		bool plural = existing is { ValueKind: JsonValueKind.Object } prior2 &&
+		              prior2.TryGetProperty(RecurrenceRulesMember, out _);
+		string recurrenceMember = plural ? RecurrenceRulesMember : RecurrenceRuleMember;
 		if (evt.RecurrenceRule is { } rp)
-			js["recurrenceRules"] = new object[] { FromRecurrenceRule(rp) };
+			js[recurrenceMember] = plural
+				? new object[] { FromRecurrenceRule(rp) }
+				: FromRecurrenceRule(rp);
 
 		// Update (not create): explicitly null every managed member the event did not produce, so
 		// clearing a location / recurrence / attendee list survives PatchObject update semantics.
 		if (existing is not null)
+		{
 			foreach (string member in ClearedOnUpdate)
 				if (!js.ContainsKey(member))
 					js[member] = null;
+			if (!js.ContainsKey(recurrenceMember))
+				js[recurrenceMember] = null;
+		}
 
 		return js;
 	}
 
 	// ---------- recurrence ----------
+
+	/// <summary>RFC 8984 §4.3.2 — an <em>array</em> of rules.</summary>
+	private const string RecurrenceRulesMember = "recurrenceRules";
+
+	/// <summary>
+	///   The JSCalendar-draft spelling — a <em>single</em> rule object. Stalwart 0.16 emits this
+	///   one and rejects the plural name with <c>invalidProperties</c> in every form (verified
+	///   against the live backend, including the minimal RFC 8984 rule), so it is what the bridge
+	///   writes unless the stored event demonstrates the plural shape.
+	/// </summary>
+	private const string RecurrenceRuleMember = "recurrenceRule";
+
+	/// <summary>
+	///   Reads the first recurrence rule under either spelling. The plural member is an array; the
+	///   singular one is a bare object. The old code read the plural name with the id-map helper —
+	///   which matches neither — so recurrence was silently dropped on every read.
+	/// </summary>
+	private static JsonElement? RecurrenceOf(JsonElement jsEvent)
+	{
+		if (jsEvent.ValueKind != JsonValueKind.Object)
+			return null;
+		if (jsEvent.TryGetProperty(RecurrenceRulesMember, out JsonElement rules) &&
+		    rules.ValueKind == JsonValueKind.Array && rules.GetArrayLength() > 0)
+			return rules[0];
+		if (jsEvent.TryGetProperty(RecurrenceRuleMember, out JsonElement rule) &&
+		    rule.ValueKind == JsonValueKind.Object)
+			return rule;
+		return null;
+	}
 
 	private static RecurrenceRule ToRecurrenceRule(JsonElement rule)
 	{

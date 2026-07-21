@@ -80,6 +80,58 @@ public class JsCalendarConverterTests
 		Assert.Equal("20260721T140000Z", V("StartTime"));
 	}
 
+	// H4 — the recurrence member is written in one shape and read in another, so recurrence never
+	// survives a round trip. Both spellings are exercised: RFC 8984 names it "recurrenceRules" and
+	// types it as an array; Stalwart 0.16 (the live backend) emits and accepts the JSCalendar-draft
+	// "recurrenceRule", a single object, and rejects the plural name outright.
+	[Theory]
+	[InlineData("""{ "recurrenceRules": [ { "@type": "RecurrenceRule", "frequency": "weekly", "count": 5 } ] }""")]
+	[InlineData("""{ "recurrenceRule": { "@type": "RecurrenceRule", "frequency": "weekly", "count": 5 } }""")]
+	public void ToICalendar_ReadsRecurrence_InEitherServerShape(string recurrenceJson)
+	{
+		JsonElement rule = JsonDocument.Parse(recurrenceJson).RootElement;
+		Dictionary<string, object?> js = new()
+		{
+			["@type"] = "Event", ["uid"] = "rec-1", ["title"] = "Standup",
+			["start"] = "2026-07-20T10:00:00", ["timeZone"] = "UTC", ["duration"] = "PT1H"
+		};
+		foreach (JsonProperty p in rule.EnumerateObject())
+			js[p.Name] = JsonSerializer.Deserialize<object>(p.Value.GetRawText());
+
+		string ics = JsCalendarConverter.ToICalendar(JsonSerializer.SerializeToElement(js));
+		Assert.Contains("RRULE:", ics);
+		Assert.Contains("FREQ=WEEKLY", ics);
+		Assert.Contains("COUNT=5", ics);
+	}
+
+	[Fact]
+	public void Recurrence_SurvivesTheFullJsCalendarRoundTrip()
+	{
+		XElement app = new("ApplicationData",
+			new XElement(Cal + "Subject", "Standup"),
+			new XElement(Cal + "StartTime", "20260720T090000Z"),
+			new XElement(Cal + "EndTime", "20260720T091500Z"),
+			new XElement(Cal + "BusyStatus", "2"),
+			new XElement(Cal + "Recurrence",
+				new XElement(Cal + "Type", "1"),
+				new XElement(Cal + "Interval", "1"),
+				new XElement(Cal + "DayOfWeek", "2"),
+				new XElement(Cal + "Occurrences", "5")));
+
+		string ics = CalendarConverter.FromApplicationData(app, "uid-rec-1", null);
+		Assert.Contains("RRULE:", ics);
+
+		// EAS → iCal → JSCalendar → iCal → EAS: the recurrence must still be there.
+		Dictionary<string, object?> js = JsCalendarConverter.FromICalendar(ics, null);
+		string ics2 = JsCalendarConverter.ToICalendar(JsonSerializer.SerializeToElement(js));
+		Assert.Contains("RRULE:", ics2);
+		List<XElement>? eas = CalendarConverter.ToApplicationData(ics2, BodyPreference.PlainText);
+		Assert.NotNull(eas);
+		XElement? recurrence = eas.FirstOrDefault(e => e.Name.LocalName == "Recurrence");
+		Assert.NotNull(recurrence);
+		Assert.Equal("1", recurrence.Elements().First(e => e.Name.LocalName == "Type").Value);
+	}
+
 	[Fact]
 	public void FromICalendar_DropsServerManagedMembers()
 	{
