@@ -105,11 +105,50 @@ one commit per finding ✓
 **Notes:** _(worker report not captured in the orchestrating session — backfilled from git. Future
 entries should carry the worker's own flags.)_
 
+## Item 5 — JMAP converter semantics [LIVE]
+
+**Findings:** `H7` (first, live-settled) → `H4` `H5` `H6` `H23`
+**Commits:** `0f44071` (H7) · `e3e0d04` (H4) · `b988b01` (H5) · `606be41` (H6) · `b9e73cd` (H23) ·
+`9c1544a` (docs: new findings `H32` `D36` spotted in passing)
+
+**Verification:** integrity 56/15/365/365/0 ✓ · cursor → item 6 ✓ · one commit per finding with ID in
+subject ✓ · build **0 warnings** ✓ · integration re-run by the orchestrator: **132 passed, 0 skipped**
+against a 127/0 baseline taken before the worker started — 5 new live tests, no regression ✓ ·
+sequencing constraint honoured (`H7` committed first) ✓
+
+**Notes:**
+- **`H7` is settled: Stalwart 0.16 treats `*/set update` as a PatchObject** (RFC 8620 §5.3) — omitting
+  `titles` from a `ContactCard/set update` left the old value in place. Both converters now emit an
+  explicit `null` for every managed member the payload didn't populate, **on update only**. That is
+  safe under both readings, since null and absent are equivalent under full-replace.
+- **`H4` was worse than "lossy": recurring events hard-failed.** Stalwart does not implement RFC 8984's
+  plural `recurrenceRules` array in any form probed (minimal, `@type`, `count`, `byDay`, `null`, `[]`)
+  — it rejects with `invalidProperties` and speaks the JSCalendar-draft singular `recurrenceRule`.
+  Reads now accept both; writes mirror whatever shape the stored event shows, defaulting to singular.
+  **Judgment call:** a strict RFC 8984 server gets the right member on update but the wrong one on
+  create. Chosen because it is the shape the only verifiable backend accepts.
+- **Two more judgment calls open to reversal:** `H6` writes the birthday as `Timestamp` rather than
+  `PartialDate` (the EAS `Birthday` element is itself a UTC timestamp, so this invents no precision;
+  reads accept both). `H7`'s null-out set excludes contact `media` — the EAS view never reads or
+  writes the photo, so nulling it on each edit would destroy a picture the client never saw — and the
+  calendar recurrence member, deferred to `H4` because its name is server-dependent.
+- **"Clear this field" on a JMAP calendar is bounded by the ICS merge, not by `H7`.** The worker's
+  first `H7` calendar reproducer (clearing `Location`) was green with *and* without the fix:
+  `CalendarConverter.FromApplicationData` merges the payload onto the stored iCalendar, so an absent
+  `<Location>` is restored before the JSCalendar bridge sees it. Filed as **`D36`**. The reproducer
+  was switched to free→busy, the one case that genuinely reaches the bridge as a cleared member.
+- **`H5`'s 5th theory case is coverage, not proof** — labelled as such. The other four, and one live
+  test, are red-first. `H23`'s live coverage is no-regression only; its proof is the unit test.
+- **Diagnostics gap filed as `H32`:** `EnsureNotIn` reports only `type`, so diagnosing `H4` required
+  temporarily patching the raw `SetError` JSON into the exception message.
+- **Two traps for anyone editing this converter:** `WeekDay.Offset` is `int?`, so the obvious
+  `w.Offset != 0` guard is true for null and emits `"nthOfPeriod": null`, which then throws out of
+  `TryGetInt32` on the way back in — both sides are now ValueKind/null-guarded. And
+  `JsCalendarConverter` has a private helper named `Array(...)` that shadows `System.Array`, so
+  `Array.Empty<object>()` will not compile inside that class.
+- **Item 42 (JSCalendar/JSContact round-trip suite) would have caught `H4` `H5` `H6` `H23`
+  mechanically**, as the doc predicted. What landed here are targeted reproducers, not that suite.
+
 ---
 
-## Next: item 5 — JMAP converter semantics [LIVE]
-
-Carries an internal ordering constraint: **`H7` must be settled and tested against the live Stalwart
-backend before `H4` `H5` `H6` `H23`.** It decides whether JMAP `update` is a PatchObject or a full
-replace, and the codebase currently contains evidence for both readings — which changes the *shape*
-of the other four fixes. See the sequencing note in item 5 and in Area H.
+## Next: item 6 — Delete windowing & SoftDelete [LIVE]
