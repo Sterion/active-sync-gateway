@@ -67,6 +67,67 @@ public class WbxmlEncoderHardeningTests
 	}
 
 	[Fact]
+	public void ElementWithBothTextAndChildren_KeepsBoth()
+	{
+		// The old text-or-children rule wrote the children and dropped the text silently.
+		XElement sync = new(AirSync + "Sync",
+			new XText("lead"),
+			new XElement(AirSync + "SyncKey", "1"),
+			new XText("trail"));
+
+		XDocument result = WbxmlDecoder.Decode(WbxmlEncoder.Encode(new XDocument(sync)));
+
+		Assert.Equal("1", result.Root!.Element(AirSync + "SyncKey")!.Value);
+		string text = string.Concat(result.Root.Nodes().OfType<XText>().Select(t => t.Value));
+		Assert.Equal("leadtrail", text);
+	}
+
+	[Fact]
+	public void OpaqueElementWithChildren_IsAWbxmlException()
+	{
+		// Opaque payload and container are mutually exclusive; the old code wrote the payload
+		// and dropped the children, emitting a document that did not match what was built.
+		XElement mime = new(EasNamespaces.ComposeMail + "Mime",
+			Convert.ToBase64String("hi"u8.ToArray()),
+			new XElement(EasNamespaces.ComposeMail + "ClientId", "c1"));
+		mime.SetAttributeValue(EasNamespaces.OpaqueAttribute, "1");
+
+		Assert.Throws<WbxmlException>(() =>
+			WbxmlEncoder.Encode(new XDocument(new XElement(EasNamespaces.ComposeMail + "SendMail", mime))));
+	}
+
+	[Fact]
+	public void WhitespaceBetweenChildElements_IsNotEmittedAsContent()
+	{
+		// Indentation from a parsed document is formatting, not content — walking nodes in
+		// order must not start injecting it into values the client reads back.
+		XElement sync = new(AirSync + "Sync",
+			new XText("\n  "),
+			new XElement(AirSync + "SyncKey", "1"),
+			new XText("\n"));
+
+		XDocument result = WbxmlDecoder.Decode(WbxmlEncoder.Encode(new XDocument(sync)));
+
+		Assert.Empty(result.Root!.Nodes().OfType<XText>());
+	}
+
+	[Fact]
+	public void TextWithEmbeddedNul_DoesNotScrambleTheDocument()
+	{
+		// STR_I is NUL-terminated: an embedded NUL used to end the string early, and every
+		// byte after it was read as tokens — so the following sibling was lost or the whole
+		// document failed to decode.
+		XElement sync = new(AirSync + "Sync",
+			new XElement(AirSync + "SyncKey", "ab\0cd"),
+			new XElement(AirSync + "CollectionId", "5"));
+
+		XDocument result = WbxmlDecoder.Decode(WbxmlEncoder.Encode(new XDocument(sync)));
+
+		Assert.Equal("abcd", result.Root!.Element(AirSync + "SyncKey")!.Value);
+		Assert.Equal("5", result.Root.Element(AirSync + "CollectionId")!.Value);
+	}
+
+	[Fact]
 	public void DocumentAtTheDepthLimit_Encodes()
 	{
 		// Guards the cap against being set too low — 256 levels is the limit, and the

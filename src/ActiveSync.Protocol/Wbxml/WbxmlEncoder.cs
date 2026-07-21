@@ -76,22 +76,51 @@ public static class WbxmlEncoder
 
 		if (isOpaque)
 		{
+			// An element is either a container or an opaque payload — it cannot be both, and
+			// silently dropping one half of it puts a document on the wire that does not say
+			// what the caller built. Refuse instead.
+			if (childElements.Count > 0)
+				throw new WbxmlException(
+					$"Element '{element.Name.LocalName}' is marked opaque but has child elements.");
 			WriteOpaque(output, text);
-		}
-		else if (childElements.Count > 0)
-		{
-			foreach (XElement child in childElements)
-				WriteElement(output, child, ref currentPage, depth + 1);
 		}
 		else
 		{
-			output.WriteByte(StrI);
-			byte[] bytes = Encoding.UTF8.GetBytes(text!);
-			output.Write(bytes);
-			output.WriteByte(0x00);
+			// Walk the nodes in document order rather than text-or-children: WBXML content is
+			// a sequence of inline strings and elements, and an element carrying both used to
+			// lose its text entirely.
+			foreach (XNode node in element.Nodes())
+			{
+				switch (node)
+				{
+					case XElement child:
+						WriteElement(output, child, ref currentPage, depth + 1);
+						break;
+					// Whitespace between child elements is XML formatting, not content — the
+					// previous text-or-children rule discarded it, and emitting it now would
+					// inject indentation into every value the client reads back.
+					case XText t when t.Value.Length > 0
+					                  && (childElements.Count == 0 || !string.IsNullOrWhiteSpace(t.Value)):
+						WriteInlineString(output, t.Value);
+						break;
+				}
+			}
 		}
 
 		output.WriteByte(End);
+	}
+
+	/// <summary>Emits <paramref name="text" /> as a NUL-terminated STR_I run.</summary>
+	private static void WriteInlineString(MemoryStream output, string text)
+	{
+		output.WriteByte(StrI);
+		// STR_I is NUL-terminated, so an embedded NUL ends the string early and every byte
+		// after it is read as tokens — the rest of the document decodes as garbage rather
+		// than failing. NUL is not legal in XML content either, so drop it. Throwing instead
+		// would fail a whole sync response over one bad byte in one backend-supplied value.
+		byte[] bytes = Encoding.UTF8.GetBytes(text.Contains('\0') ? text.Replace("\0", "") : text);
+		output.Write(bytes);
+		output.WriteByte(0x00);
 	}
 
 	/// <summary>Emits <paramref name="base64" /> as an OPAQUE run.</summary>
