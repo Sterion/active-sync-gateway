@@ -121,7 +121,16 @@ Annotating the Part 2 entry as well is welcome — that is the right home for an
 
 **4. If you moved or renamed code other findings reference, fix their `file:line` anchors.** You are the only one who will know where it went. If it invalidates a whole item, add a row to the re-verify table below.
 
-**5. Build and test before each commit.** `dotnet build ActiveSync.slnx` is ~16s and the baseline is **0 warnings** — keep it there. Run the relevant test project. Items marked `[LIVE]` additionally require live-backend verification — see below.
+**5. Build before each commit; test at two different scopes.** The build is ~16s and the baseline is **0 warnings** — run `dotnet build ActiveSync.slnx` every time and keep it there.
+
+Testing splits deliberately, because commits are per finding and full suites are not:
+
+| When | What | Cost |
+|---|---|---|
+| **Before each commit** | only the test(s) for *this finding*, via `--filter` | ~5 s |
+| **Once, before the item's last commit** | full unit suite, plus integration if [LIVE] or per the rule below | ~1–4 min |
+
+Do **not** run a full suite per finding. With one commit per finding that is the same suite re-run a dozen times in an item, and it is where item time disappears — see "Test economy" below for the numbers.
 
 **6. Write the failing test first, then fix.** Red-green, in this order:
 
