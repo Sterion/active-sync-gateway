@@ -123,6 +123,77 @@ public sealed class PolicyEnforcementTests(GatewayFixture gateway)
 	}
 
 	[BackendFact]
+	public async Task Provision_AckWithWrongPolicyKey_IsRefused_AndDoesNotUnlock()
+	{
+		// F23: phase 2 used to issue a final key to ANY request that merely carried a
+		// PolicyKey element, without comparing it to the key the device was handed in
+		// phase 1 — so a single hand-crafted Provision unlocked the whole gate.
+		string dbPath = TempDbPath();
+		try
+		{
+			await using WebApplicationFactory<Program> factory =
+				gateway.CreateIsolatedFactory(PolicyOverrides(dbPath));
+			EasTestClient client = Client(factory);
+
+			// One request, straight to phase 2, with a key nobody ever issued.
+			XDocument? forged = await client.PostAsync("Provision", AckBody("4294967295"));
+			XElement? policy = forged?.Root?.Element(PV + "Policies")?.Element(PV + "Policy");
+			Assert.Equal("5", policy?.Element(PV + "Status")?.Value); // wrong policy key
+			Assert.Null(policy?.Element(PV + "PolicyKey"));
+
+			// And the gate must still be shut.
+			client.PolicyKey = 4294967295;
+			using HttpResponseMessage locked = await client.PostRawAsync("FolderSync", FolderSyncBody());
+			Assert.Equal((HttpStatusCode)449, locked.StatusCode);
+
+			// The honest handshake still works afterwards.
+			await client.ProvisionAsync();
+			await client.FolderSyncAsync();
+		}
+		finally
+		{
+			TryDelete(dbPath);
+		}
+	}
+
+	[BackendFact]
+	public async Task Provision_AckReportingFailure_DoesNotIssueTheFinalKey()
+	{
+		// F23, second half: the client's ack Status was never read, so a device reporting
+		// "I could not apply this policy" was provisioned exactly like one that had.
+		string dbPath = TempDbPath();
+		try
+		{
+			await using WebApplicationFactory<Program> factory =
+				gateway.CreateIsolatedFactory(PolicyOverrides(dbPath));
+			EasTestClient client = Client(factory);
+
+			XDocument? phase1 = await client.PostAsync("Provision", new XDocument(
+				new XElement(PV + "Provision",
+					new XElement(PV + "Policies",
+						new XElement(PV + "Policy",
+							new XElement(PV + "PolicyType", "MS-EAS-Provisioning-WBXML"))))));
+			string tempKey = phase1?.Root?.Element(PV + "Policies")?.Element(PV + "Policy")?
+				.Element(PV + "PolicyKey")?.Value ?? "";
+			Assert.NotEqual("", tempKey);
+
+			// Correct key, but the device says it did not apply the policy (Status 2).
+			XDocument? refused = await client.PostAsync("Provision", AckBody(tempKey, ackStatus: "2"));
+			XElement? policy = refused?.Root?.Element(PV + "Policies")?.Element(PV + "Policy");
+			Assert.Equal("5", policy?.Element(PV + "Status")?.Value);
+			Assert.Null(policy?.Element(PV + "PolicyKey"));
+
+			client.PolicyKey = uint.Parse(tempKey);
+			using HttpResponseMessage locked = await client.PostRawAsync("FolderSync", FolderSyncBody());
+			Assert.Equal((HttpStatusCode)449, locked.StatusCode);
+		}
+		finally
+		{
+			TryDelete(dbPath);
+		}
+	}
+
+	[BackendFact]
 	public async Task RecoveryPassword_IsEscrowedSealed_WhenPolicyOffersIt()
 	{
 		string dbPath = TempDbPath();
@@ -187,6 +258,17 @@ public sealed class PolicyEnforcementTests(GatewayFixture gateway)
 	private static XDocument FolderSyncBody()
 	{
 		return new XDocument(new XElement(FH + "FolderSync", new XElement(FH + "SyncKey", "0")));
+	}
+
+	/// <summary>A Provision phase-2 acknowledgment carrying the given key and ack status.</summary>
+	private static XDocument AckBody(string policyKey, string ackStatus = "1")
+	{
+		return new XDocument(new XElement(PV + "Provision",
+			new XElement(PV + "Policies",
+				new XElement(PV + "Policy",
+					new XElement(PV + "PolicyType", "MS-EAS-Provisioning-WBXML"),
+					new XElement(PV + "PolicyKey", policyKey),
+					new XElement(PV + "Status", ackStatus)))));
 	}
 
 	private static XDocument DevicePasswordSet(string password)

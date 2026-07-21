@@ -45,7 +45,11 @@ public sealed class ProvisionHandler(IOptionsSnapshot<ActiveSyncOptions> options
 		}
 
 		XElement? policy = request?.Root?.Element(PV + "Policies")?.Element(PV + "Policy");
+		// An empty PolicyKey element is not an acknowledgment — treat it as phase 1 (the
+		// forgiving reading; a real ack always carries the key the server just issued).
 		string? clientPolicyKey = policy?.Element(PV + "PolicyKey")?.Value;
+		if (string.IsNullOrWhiteSpace(clientPolicyKey))
+			clientPolicyKey = null;
 
 		// DeviceInformation may be piggybacked on Provision (14.x).
 		XElement? deviceInfo = request?.Root?.Element(ST + "DeviceInformation")?.Element(ST + "Set");
@@ -68,6 +72,16 @@ public sealed class ProvisionHandler(IOptionsSnapshot<ActiveSyncOptions> options
 				new XElement(PV + "Data",
 					PolicyDocument.Build(options.Value.Policy)));
 		}
+		else if (!IsValidAcknowledgment(clientPolicyKey, context.Device.PolicyKey, policy))
+		{
+			// Neither the presented key nor the client's ack Status used to be read, so ONE
+			// request carrying any PolicyKey at all completed the handshake and cleared the
+			// 449 gate for every subsequent command. MS-ASPROV Policy Status 5 tells the
+			// client it acknowledged the wrong key; it restarts from phase 1.
+			policyResponse = new XElement(PV + "Policy",
+				new XElement(PV + "PolicyType", PolicyType),
+				new XElement(PV + "Status", "5"));
+		}
 		else
 		{
 			// Phase 2: the device acknowledged the policy — issue the final key and record
@@ -88,6 +102,22 @@ public sealed class ProvisionHandler(IOptionsSnapshot<ActiveSyncOptions> options
 			response.AddFirst(new XElement(ST + "DeviceInformation", new XElement(ST + "Status", "1")));
 
 		await context.WriteResponseAsync(new XDocument(response));
+	}
+
+	/// <summary>
+	///   A phase-2 acknowledgment counts only when the presented key is the one this device
+	///   was actually handed (the device row's PolicyKey, set in phase 1) AND the client
+	///   reports it applied the policy. The ack Status is optional: clients that omit it are
+	///   taken at the word of the key they echoed, which is what pre-14.0 devices send.
+	///   Anything other than "1" is the device saying it did NOT apply the policy — issuing
+	///   the final key there would record a compliance claim nobody made.
+	/// </summary>
+	private static bool IsValidAcknowledgment(string presentedKey, uint issuedKey, XElement? policy)
+	{
+		if (issuedKey == 0 || !uint.TryParse(presentedKey, out uint parsed) || parsed != issuedKey)
+			return false;
+		string? ackStatus = policy?.Element(PV + "Status")?.Value;
+		return string.IsNullOrWhiteSpace(ackStatus) || ackStatus == "1";
 	}
 
 	private static uint RandomKey()
