@@ -16,24 +16,51 @@ internal static class OidcLogin
 {
 	internal sealed record Verdict(bool Allowed, string? Login, bool IsAdmin, bool Provisioned, string? Reason);
 
+	/// <summary>The immutable subject claim; with MapInboundClaims off it arrives under its raw name.</summary>
+	internal const string SubjectClaim = "sub";
+
 	/// <param name="provisionAsync">
 	///   Persists a JIT account (validate + upsert + resolver refresh); returns validation
 	///   failures — a claim value the account rules reject is refused, never provisioned.
 	/// </param>
+	/// <param name="bindSubjectAsync">
+	///   Records the IdP subject on an as-yet-unbound DATABASE account (trust on first use).
+	///   Null disables the recording, leaving such accounts unbound.
+	/// </param>
 	internal static async Task<Verdict> EvaluateAsync(
 		ClaimsPrincipal ticket, WebUiOidcOptions oidc,
 		IReadOnlyDictionary<string, MergedAccount> mergedUsers,
-		Func<string, AccountOptions, Task<IReadOnlyList<string>>> provisionAsync)
+		Func<string, AccountOptions, Task<IReadOnlyList<string>>> provisionAsync,
+		Func<string, string, Task>? bindSubjectAsync = null)
 	{
 		string? login = ticket.FindFirst(oidc.LoginClaim)?.Value?.Trim();
 		if (string.IsNullOrEmpty(login))
 			return new Verdict(false, null, false, false, $"the token carries no '{oidc.LoginClaim}' claim");
 
 		bool claimAdmin = HasAdminClaim(ticket, oidc);
+		string? subject = ticket.FindFirst(SubjectClaim)?.Value?.Trim();
 		if (mergedUsers.TryGetValue(login, out MergedAccount? account))
-			return account.Options.Enabled == false
-				? new Verdict(false, login, false, false, "the account is disabled")
-				: new Verdict(true, login, account.Options.Admin == true || claimAdmin, false, null);
+		{
+			if (account.Options.Enabled == false)
+				return new Verdict(false, login, false, false, "the account is disabled");
+
+			// The login claim is user-mutable at several common IdPs, so a bound account is
+			// keyed on the immutable subject and a login match alone never suffices.
+			if (!string.IsNullOrEmpty(account.Options.OidcSubject))
+			{
+				if (!string.Equals(account.Options.OidcSubject, subject, StringComparison.Ordinal))
+					return new Verdict(false, login, false, false,
+						"the token's subject does not match the subject bound to this account");
+			}
+			else if (!string.IsNullOrEmpty(subject) && account.FromDatabase && bindSubjectAsync is not null)
+			{
+				// Trust on first use — and only for database accounts: binding a config-declared
+				// one would mint a database row that shadows its configuration entry.
+				await bindSubjectAsync(login, subject);
+			}
+
+			return new Verdict(true, login, account.Options.Admin == true || claimAdmin, false, null);
+		}
 
 		if (!oidc.AutoProvision)
 			return new Verdict(false, login, false, false,
@@ -41,7 +68,8 @@ internal static class OidcLogin
 
 		AccountOptions entry = new()
 		{
-			MailAddress = ticket.FindFirst("email")?.Value is { Length: > 0 } email ? email : null
+			MailAddress = ticket.FindFirst("email")?.Value is { Length: > 0 } email ? email : null,
+			OidcSubject = string.IsNullOrEmpty(subject) ? null : subject
 		};
 		IReadOnlyList<string> failures = await provisionAsync(login, entry);
 		return failures.Count > 0

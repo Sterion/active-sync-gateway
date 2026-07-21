@@ -22,7 +22,7 @@ internal static class AccountFieldPaths
 
 	internal static IReadOnlyCollection<string> Keys { get; } =
 	[
-		"MailAddress", "Password", "Admin", "Enabled",
+		"MailAddress", "Password", "Admin", "Enabled", "OidcSubject",
 		"Backends:<Role>:Provider", "Backends:<Role>:Enabled",
 		"Backends:<Role>:UserName", "Backends:<Role>:Password",
 		"Backends:<Role>:Settings:<Key>",
@@ -47,6 +47,11 @@ internal static class AccountFieldPaths
 		if (key.Equals("Enabled", StringComparison.OrdinalIgnoreCase))
 			return new FieldPath("Enabled", typeof(bool?), false,
 				(account, value) => account.Enabled = (bool?)value);
+		// Settable so an operator can bind a config-declared account to its IdP subject up
+		// front, and clear the binding after a genuine identity-provider migration.
+		if (key.Equals("OidcSubject", StringComparison.OrdinalIgnoreCase))
+			return new FieldPath("OidcSubject", typeof(string), false,
+				(account, value) => account.OidcSubject = (string?)value);
 
 		string[] parts = key.Split(':');
 		if (parts.Length < 3 ||

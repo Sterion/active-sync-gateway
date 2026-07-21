@@ -74,6 +74,15 @@ eas config set ActiveSync:WebUi:Oidc:AutoProvision true                         
 - The **`LoginClaim`** (default `preferred_username`) maps the token to a gateway login.
   Register the redirect URI `https://<gateway>/oidc/callback` at the IdP (the callback is
   deliberately outside `/admin` and `/user` so a portal-only deployment works).
+- **The login claim is not an identity.** `preferred_username` (and `email`) is user-mutable at
+  several common IdPs — Keycloak's self-service account console edits it — so a login match
+  alone would let any directory user claim someone else's gateway account, admin flag included.
+  The gateway therefore binds each account to the IdP's immutable `sub`: the first OIDC sign-in
+  of a **database** account records it (`OidcSubject`), and every later ticket must present the
+  same subject or it is refused. A **config-declared** account is never written to, so it stays
+  unbound until you set `OidcSubject` on it yourself — do that, or use a `LoginClaim` the IdP
+  does not let users edit. Re-binding after a genuine IdP migration means clearing the field
+  (`eas user set <login> OidcSubject ""`).
 - **Behind a TLS-terminating proxy** (e.g. a Kubernetes ingress that forwards to the plain-HTTP
   port), the gateway must know it's serving https so the `redirect_uri` it sends the IdP — used
   at both the authorize step and the token exchange — is `https`, not `http`. Set

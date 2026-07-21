@@ -266,7 +266,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 
 ## Phase 2 — Security
 
-**8. WebUi session & cookies** — ~~`C2`~~ `C3` ~~`C4`~~ `C7` ~~`C8`~~ `C14`
+**8. WebUi session & cookies** — ~~`C2`~~ `C3` ~~`C4`~~ ~~`C7`~~ ~~`C8`~~ `C14`
 > `C3` is the big one: no `OnValidatePrincipal`, so disable/block/admin-revoke don't affect live sessions for up to 12 sliding hours. `C2`/`C4` are the same `CookieSecurePolicy` change.
 
 **9. WebUi privilege & API hardening** — `C1` `C9` `C10` `C15` `C16` `C17` `C20` `C21`

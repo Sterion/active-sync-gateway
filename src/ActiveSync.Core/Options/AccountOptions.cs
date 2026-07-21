@@ -82,6 +82,17 @@ public sealed class AccountOptions
 	/// </summary>
 	public bool? AutoProvisioned { get; set; }
 
+	/// <summary>
+	///   The identity-provider subject (<c>sub</c>) this account is bound to. OIDC sign-in
+	///   refuses a ticket whose subject differs, so an account cannot be taken over by anyone
+	///   who manages to claim its login name — the login claim (<c>preferred_username</c> by
+	///   default) is user-mutable at several common identity providers. Recorded automatically
+	///   on the first OIDC sign-in of a DATABASE account (trust on first use); on a
+	///   config-declared account it only binds when the operator writes it, because the gateway
+	///   must not create a database row that would shadow the configuration entry.
+	/// </summary>
+	public string? OidcSubject { get; set; }
+
 	/// <summary>Per-role overrides, keyed by role name (MailStore, Calendar, Oof, ...).</summary>
 	public Dictionary<string, BackendRoleOverride>? Backends { get; set; }
 }

@@ -162,6 +162,87 @@ public sealed class OidcLoginTests
 	}
 
 	[Fact]
+	public async Task BoundAccount_RefusesADifferentIdpSubject()
+	{
+		// preferred_username is user-mutable at several common IdPs (Keycloak self-service), so
+		// a login match alone must not sign anyone into an account — including its Admin flag.
+		Dictionary<string, MergedAccount> users = new(StringComparer.OrdinalIgnoreCase)
+		{
+			["alice"] = new MergedAccount(
+				new AccountOptions { Admin = true, OidcSubject = "sub-alice" }, true, false)
+		};
+
+		OidcLogin.Verdict impostor = await OidcLogin.EvaluateAsync(
+			Ticket(("preferred_username", "alice"), ("sub", "sub-mallory")),
+			Oidc(), users, NoProvision());
+		Assert.False(impostor.Allowed);
+		Assert.Contains("subject", impostor.Reason);
+
+		// The bound subject still signs in.
+		OidcLogin.Verdict real = await OidcLogin.EvaluateAsync(
+			Ticket(("preferred_username", "alice"), ("sub", "sub-alice")),
+			Oidc(), users, NoProvision());
+		Assert.True(real is { Allowed: true, IsAdmin: true });
+
+		// A ticket with no subject at all cannot satisfy a bound account either.
+		OidcLogin.Verdict subjectless = await OidcLogin.EvaluateAsync(
+			Ticket(("preferred_username", "alice")), Oidc(), users, NoProvision());
+		Assert.False(subjectless.Allowed);
+	}
+
+	[Fact]
+	public async Task UnboundDatabaseAccount_RecordsTheSubject_OnFirstSignIn()
+	{
+		Dictionary<string, MergedAccount> users = Users(("alice", false));
+		List<(string Login, string Subject)> bound = [];
+
+		OidcLogin.Verdict verdict = await OidcLogin.EvaluateAsync(
+			Ticket(("preferred_username", "alice"), ("sub", "sub-alice")),
+			Oidc(), users, NoProvision(),
+			(login, subject) =>
+			{
+				bound.Add((login, subject));
+				return Task.CompletedTask;
+			});
+		Assert.True(verdict.Allowed);
+		Assert.Equal(("alice", "sub-alice"), Assert.Single(bound));
+
+		// A config-declared account is never written to — that would mint a database row
+		// shadowing the configuration entry. It simply stays unbound.
+		Dictionary<string, MergedAccount> configUsers = new(StringComparer.OrdinalIgnoreCase)
+		{
+			["carol"] = new MergedAccount(new AccountOptions(), false, false)
+		};
+		bound.Clear();
+		OidcLogin.Verdict config = await OidcLogin.EvaluateAsync(
+			Ticket(("preferred_username", "carol"), ("sub", "sub-carol")),
+			Oidc(), configUsers, NoProvision(),
+			(login, subject) =>
+			{
+				bound.Add((login, subject));
+				return Task.CompletedTask;
+			});
+		Assert.True(config.Allowed);
+		Assert.Empty(bound);
+	}
+
+	[Fact]
+	public async Task AutoProvisionedAccount_IsBoundToTheSubject_Immediately()
+	{
+		List<(string Login, AccountOptions Entry)> provisioned = [];
+		OidcLogin.Verdict verdict = await OidcLogin.EvaluateAsync(
+			Ticket(("preferred_username", "newbie"), ("sub", "sub-newbie")),
+			Oidc(autoProvision: true), Users(),
+			(login, entry) =>
+			{
+				provisioned.Add((login, entry));
+				return Task.FromResult<IReadOnlyList<string>>([]);
+			});
+		Assert.True(verdict.Allowed);
+		Assert.Equal("sub-newbie", Assert.Single(provisioned).Entry.OidcSubject);
+	}
+
+	[Fact]
 	public async Task DeclaredAccount_NeverProvisions_EvenWithAutoProvisionOn()
 	{
 		OidcLogin.Verdict verdict = await OidcLogin.EvaluateAsync(

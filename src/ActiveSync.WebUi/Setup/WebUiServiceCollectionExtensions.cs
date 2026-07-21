@@ -173,6 +173,20 @@ public static class WebUiServiceCollectionExtensions
 				await store.UpsertAsync(login, entry, ct);
 				await resolver.EnsureFreshAsync(true, ct);
 				return failures;
+			},
+			async (login, subject) =>
+			{
+				// Trust on first use: bind the database row to this IdP subject so a later
+				// ticket that merely claims the same login name cannot take the account over.
+				AccountOptions? existing = await store.GetAsync(login, ct);
+				if (existing is null || !string.IsNullOrEmpty(existing.OidcSubject))
+					return;
+				existing.OidcSubject = subject;
+				await store.UpsertAsync(login, existing, ct);
+				await resolver.EnsureFreshAsync(true, ct);
+				logger.LogInformation(
+					"Bound the database account {Login} to its identity-provider subject on first OIDC sign-in",
+					login);
 			});
 
 		// A user-level login block disables OIDC sign-in exactly like the local form.

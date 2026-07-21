@@ -49,7 +49,7 @@ See [Database-declared users](../README.md#database-declared-users-eas-user-) fo
 | `user add <login>` | Declare a user in the database (an empty entry is an allowlist grant; copies a same-login config entry as the starting point). |
 | `user remove <login>` | Delete the database entry — a same-login config entry becomes active again. |
 | `user disable <login>` · `user enable <login>` | Turn an account off/on. A disabled account refuses **every** login — all devices, EAS and web — with 403 after valid credentials, until re-enabled (a persistent property of the account, distinct from an ad-hoc `block`). |
-| `user set <login> <key> <value>` | Set one field by path (`MailAddress`, `Admin` — grants the web admin UI, `Enabled` — `false` disables the account, `Backends:Calendar:Enabled`, `Backends:MailStore:Settings:Host`, ...); password keys are hashed/sealed automatically. |
+| `user set <login> <key> <value>` | Set one field by path (`MailAddress`, `Admin` — grants the web admin UI, `Enabled` — `false` disables the account, `OidcSubject` — pins the account to one identity-provider `sub`, `Backends:Calendar:Enabled`, `Backends:MailStore:Settings:Host`, ...); password keys are hashed/sealed automatically. |
 | `user unset <login> <key>` | Clear one field (an emptied entry remains an allowlist grant). |
 | `user password <login>` | Set the gateway password from stdin (stored as a pbkdf2$ hash). |
 | `user secret <login> <key>` | Set a backend password (`Backends:MailStore:Password`, ...) from stdin (stored sealed, enc:v1:). |
