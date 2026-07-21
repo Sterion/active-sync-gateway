@@ -62,7 +62,7 @@ internal static class SettingsEndpoints
 			IConfiguration config, CancellationToken ct) =>
 		{
 			if (string.IsNullOrWhiteSpace(request.Value))
-				return Results.BadRequest(new { error = "value is required (DELETE clears an override)" });
+				return EndpointHelpers.BadRequest("value is required (DELETE clears an override)");
 			if (SettingKeys.IsBootstrap(key))
 				return Results.BadRequest(new
 				{
@@ -71,13 +71,13 @@ internal static class SettingsEndpoints
 				});
 			SettingKeys.SettingKey? definition = SettingKeys.Find(key);
 			if (definition is null)
-				return Results.BadRequest(new { error = $"'{key}' is not a recognized setting" });
+				return EndpointHelpers.BadRequest($"'{key}' is not a recognized setting");
 			// Backend leafs are strings to the catalogue; their provider knows their real shape.
 			// The configuration here already carries the database layer, so it IS the effective value.
 			if ((SettingKeys.Validate(definition, request.Value) ??
 			     BackendKeyValidator.Validate(registry, k => config[k], key, request.Value))
 			    is { } validationError)
-				return Results.BadRequest(new { error = validationError });
+				return EndpointHelpers.BadRequest(validationError);
 
 			// Catalogue-level secrets (the OIDC client secret) are sealed at rest when the
 			// master key exists; open-ended backend keys stay raw (their providers read them

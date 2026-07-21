@@ -34,7 +34,7 @@ internal static class LogsEndpoints
 			{
 				int floor = Array.FindIndex(LevelOrder, l => l.Equals(level, StringComparison.OrdinalIgnoreCase));
 				if (floor < 0)
-					return Results.BadRequest(new { error = $"level must be one of: {string.Join(", ", LevelOrder)}" });
+					return EndpointHelpers.BadRequest($"level must be one of: {string.Join(", ", LevelOrder)}");
 				string[] accepted = LevelOrder[floor..];
 				query = query.Where(e => accepted.Contains(e.Level));
 			}

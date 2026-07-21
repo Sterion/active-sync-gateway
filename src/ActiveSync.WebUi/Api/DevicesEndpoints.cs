@@ -69,7 +69,7 @@ internal static class DevicesEndpoints
 			// control character corrupts the session key separator, so either would persist as
 			// a row that can never apply.
 			if (AdminIdentifiers.LoginProblem(request.User) is { } loginError)
-				return Results.BadRequest(new { error = loginError });
+				return EndpointHelpers.BadRequest(loginError);
 			string user = request.User!.Trim();
 			// Blocking a login that is NOT declared is legitimate and deliberately allowed:
 			// pass-through authentication means most users have no entry. The flag lets the UI
@@ -115,7 +115,7 @@ internal static class DevicesEndpoints
 				return Results.NotFound();
 			// Arming a wipe demands the device id typed back (a click can't do this by accident).
 			if (!request.Cancel && !string.Equals(request.Confirm, request.DeviceId, StringComparison.Ordinal))
-				return Results.BadRequest(new { error = "confirm must echo the exact device id" });
+				return EndpointHelpers.BadRequest("confirm must echo the exact device id");
 
 			device.PendingAccountWipe = !request.Cancel;
 			await db.SaveChangesAsync(ct);
@@ -130,11 +130,11 @@ internal static class DevicesEndpoints
 		api.MapPost("devices/purge", async (PurgeRequest request, SyncDbContext db, CancellationToken ct) =>
 		{
 			if (string.IsNullOrWhiteSpace(request.User))
-				return Results.BadRequest(new { error = "user is required" });
+				return EndpointHelpers.BadRequest("user is required");
 			// Purge demands the target typed back: the device id, or the user for a full purge.
 			string expected = request.DeviceId ?? request.User;
 			if (!string.Equals(request.Confirm, expected, StringComparison.Ordinal))
-				return Results.BadRequest(new { error = $"confirm must echo '{expected}'" });
+				return EndpointHelpers.BadRequest($"confirm must echo '{expected}'");
 
 			Dictionary<string, int> deleted = new();
 			if (request.DeviceId is null)

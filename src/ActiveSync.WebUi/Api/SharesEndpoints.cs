@@ -40,9 +40,9 @@ internal static class SharesEndpoints
 			ShareRequest request, SyncDbContext db, AccountResolver resolver, CancellationToken ct) =>
 		{
 			if (AdminIdentifiers.LoginProblem(request.User) is { } loginError)
-				return Results.BadRequest(new { error = loginError });
+				return EndpointHelpers.BadRequest(loginError);
 			if (AdminIdentifiers.HrefProblem(request.CollectionHref) is { } hrefError)
-				return Results.BadRequest(new { error = hrefError });
+				return EndpointHelpers.BadRequest(hrefError);
 			string user = request.User!.Trim();
 			string href = request.CollectionHref!.Trim();
 			// Like a device block: an undeclared login is allowed (pass-through accounts have no

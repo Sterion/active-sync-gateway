@@ -72,8 +72,8 @@ internal static class BackendsEndpoints
 			string role, RoleWriteRequest request, BackendProviderRegistry registry,
 			GlobalSettingStore store, IConfiguration config, CancellationToken ct) =>
 		{
-			if (!Enum.TryParse(role, true, out BackendRole parsed))
-				return Results.BadRequest(new { error = $"'{role}' is not a backend role" });
+			if (!EndpointHelpers.TryParseRole(role, out BackendRole parsed, out IResult? roleError))
+				return roleError!;
 
 			Dictionary<string, string?> db = new(await store.LoadAllAsync(ct), StringComparer.OrdinalIgnoreCase);
 			Dictionary<string, string?> merged = Merge(parsed, request, db, config, out string? providerName);
@@ -83,16 +83,13 @@ internal static class BackendsEndpoints
 			{
 				provider = Resolve(registry, providerName, parsed, out string? providerError);
 				if (provider is null)
-					return Results.BadRequest(new { error = providerError });
+					return EndpointHelpers.BadRequest(providerError!);
 
 				IReadOnlyList<BackendFieldError> errors =
 					BackendConfigValidation.Validate(provider, parsed, merged);
 				if (errors.Count > 0)
-					return Results.BadRequest(new
-					{
-						error = errors[0].Message,
-						failures = errors.Select(e => new FailureDto(e.Field, e.Message))
-					});
+					return EndpointHelpers.BadRequest(errors[0].Message,
+						errors.Select(e => new FailureDto(e.Field, e.Message)));
 			}
 
 			await PersistAsync(parsed, request, db, config, store, provider, ct);
@@ -105,8 +102,8 @@ internal static class BackendsEndpoints
 			string role, BackendProviderRegistry registry, GlobalSettingStore store,
 			IConfiguration config, CancellationToken ct) =>
 		{
-			if (!Enum.TryParse(role, true, out BackendRole parsed))
-				return Results.BadRequest(new { error = $"'{role}' is not a backend role" });
+			if (!EndpointHelpers.TryParseRole(role, out BackendRole parsed, out IResult? roleError))
+				return roleError!;
 
 			// Drop every database row for the role: what the config file says takes over again.
 			string prefix = $"{SectionPrefix}:{parsed}:";
@@ -129,8 +126,8 @@ internal static class BackendsEndpoints
 			string role, RoleWriteRequest request, BackendProviderRegistry registry,
 			GlobalSettingStore store, IConfiguration config, CancellationToken ct) =>
 		{
-			if (!Enum.TryParse(role, true, out BackendRole parsed))
-				return Results.BadRequest(new { error = $"'{role}' is not a backend role" });
+			if (!EndpointHelpers.TryParseRole(role, out BackendRole parsed, out IResult? roleError))
+				return roleError!;
 
 			Dictionary<string, string?> db = new(await store.LoadAllAsync(ct), StringComparer.OrdinalIgnoreCase);
 			Dictionary<string, string?> merged = Merge(parsed, request, db, config, out string? providerName);
@@ -153,8 +150,8 @@ internal static class BackendsEndpoints
 			GlobalSettingStore store, IConfiguration config, ClaimsPrincipal principal,
 			ILoggerFactory loggerFactory, CancellationToken ct) =>
 		{
-			if (!Enum.TryParse(role, true, out BackendRole parsed))
-				return Results.BadRequest(new { error = $"'{role}' is not a backend role" });
+			if (!EndpointHelpers.TryParseRole(role, out BackendRole parsed, out IResult? roleError))
+				return roleError!;
 
 			Dictionary<string, string?> db = new(await store.LoadAllAsync(ct), StringComparer.OrdinalIgnoreCase);
 			Dictionary<string, string?> merged = Merge(parsed, request, db, config, out string? providerName);

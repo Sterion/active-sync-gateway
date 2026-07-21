@@ -115,7 +115,7 @@ internal static class PortalEndpoints
 			if (login is null)
 				return Results.Unauthorized();
 			if (string.IsNullOrEmpty(request.Current) || string.IsNullOrEmpty(request.New))
-				return Results.BadRequest(new { error = "current and new passwords are required" });
+				return EndpointHelpers.BadRequest("current and new passwords are required");
 
 			// Re-verify the CURRENT password (same verdict path as login), throttled — a
 			// hijacked session must not be enough to take the account over.
@@ -144,7 +144,7 @@ internal static class PortalEndpoints
 			if (!verified)
 			{
 				throttle.RecordFailure(throttleKey);
-				return Results.BadRequest(new { error = "the current password is wrong" });
+				return EndpointHelpers.BadRequest("the current password is wrong");
 			}
 
 			throttle.RecordSuccess(throttleKey);
@@ -155,7 +155,7 @@ internal static class PortalEndpoints
 			entry.Password = GatewayPasswordHasher.Hash(request.New);
 			List<string> failures = AccountResolver.ValidateEntry(current, roles, registry, login, entry);
 			if (failures.Count > 0)
-				return Results.BadRequest(new { error = string.Join(Environment.NewLine, failures) });
+				return EndpointHelpers.BadRequest(string.Join(Environment.NewLine, failures));
 			await store.UpsertAsync(login, entry, ct);
 			await resolver.EnsureFreshAsync(true, ct);
 			// A password change signs every OTHER session of this login out — including any
@@ -177,11 +177,8 @@ internal static class PortalEndpoints
 			string? login = principal.Identity?.Name;
 			if (login is null)
 				return Results.Unauthorized();
-			if (!Enum.TryParse(roleName, true, out BackendRole role))
-				return Results.BadRequest(new
-				{
-					error = $"'{roleName}' is not a backend role (roles: {string.Join(", ", Enum.GetNames<BackendRole>())})"
-				});
+			if (!EndpointHelpers.TryParseRole(roleName, out BackendRole role, out IResult? roleError))
+				return roleError!;
 
 			ActiveSyncOptions current = options.CurrentValue;
 			AccountOptions entry = await AccountEditing.LoadStartingEntryAsync(store, current, login, ct);
@@ -209,13 +206,11 @@ internal static class PortalEndpoints
 					.OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
 			];
 			if (refused.Count > 0)
-				return Results.BadRequest(new
-				{
-					error = $"these settings are administered for you and cannot be changed here: " +
-					        $"{string.Join(", ", refused)}",
-					failures = refused.Select(key => new BackendsEndpoints.FailureDto(
-						key, "This setting can only be changed by an administrator."))
-				});
+				return EndpointHelpers.BadRequest(
+					"these settings are administered for you and cannot be changed here: " +
+					string.Join(", ", refused),
+					refused.Select(key => new BackendsEndpoints.FailureDto(
+						key, "This setting can only be changed by an administrator.")));
 
 			// Deliberately untouched: Enabled and Provider (admin-only surface).
 			@override.UserName = string.IsNullOrWhiteSpace(request.UserName) ? null : request.UserName.Trim();
@@ -230,7 +225,7 @@ internal static class PortalEndpoints
 					AccountSecretPolicy.SecretResult prepared = AccountSecretPolicy.PrepareBackendPassword(
 						request.Password, current.Encryption, $"Backends:{role}:Password");
 					if (prepared.Error is not null)
-						return Results.BadRequest(new { error = prepared.Error });
+						return EndpointHelpers.BadRequest(prepared.Error);
 					@override.Password = prepared.Value;
 				}
 			}
@@ -255,7 +250,7 @@ internal static class PortalEndpoints
 
 			List<string> failures = AccountResolver.ValidateEntry(current, roles, registry, login, entry);
 			if (failures.Count > 0)
-				return Results.BadRequest(new { error = string.Join(Environment.NewLine, failures) });
+				return EndpointHelpers.BadRequest(string.Join(Environment.NewLine, failures));
 			await store.UpsertAsync(login, entry, ct);
 			await resolver.EnsureFreshAsync(true, ct);
 			return Results.Ok(new { login, role = role.ToString() });

@@ -83,7 +83,7 @@ internal static class UsersEndpoints
 			string? gatewayPassword = MergeSecret(request.Password, starting.Password,
 				raw => AccountSecretPolicy.PrepareGatewayPassword(raw), out string? passwordError);
 			if (passwordError is not null)
-				return Results.BadRequest(new { error = passwordError });
+				return EndpointHelpers.BadRequest(passwordError);
 			entry.Password = gatewayPassword;
 
 			if (request.Backends is { Count: > 0 })
@@ -99,7 +99,7 @@ internal static class UsersEndpoints
 							raw, current.Encryption, $"Backends:{roleName}:Password"),
 						out string? roleError);
 					if (roleError is not null)
-						return Results.BadRequest(new { error = roleError });
+						return EndpointHelpers.BadRequest(roleError);
 
 					BackendRoleOverride @override = new()
 					{
@@ -123,7 +123,7 @@ internal static class UsersEndpoints
 
 			List<string> failures = AccountResolver.ValidateEntry(current, roles, registry, login, entry);
 			if (failures.Count > 0)
-				return Results.BadRequest(new { error = string.Join(Environment.NewLine, failures) });
+				return EndpointHelpers.BadRequest(string.Join(Environment.NewLine, failures));
 
 			await store.UpsertAsync(login, entry, ct);
 			await resolver.EnsureFreshAsync(true, ct);
@@ -224,7 +224,7 @@ internal static class UsersEndpoints
 		entry.Enabled = enable ? null : false;
 		List<string> failures = AccountResolver.ValidateEntry(current, roles, registry, login, entry);
 		if (failures.Count > 0)
-			return Results.BadRequest(new { error = string.Join(Environment.NewLine, failures) });
+			return EndpointHelpers.BadRequest(string.Join(Environment.NewLine, failures));
 		await store.UpsertAsync(login, entry, ct);
 		await resolver.EnsureFreshAsync(true, ct);
 		return Results.Ok(new
