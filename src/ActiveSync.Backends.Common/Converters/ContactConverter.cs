@@ -33,6 +33,16 @@ public static class ContactConverter
 	/// </summary>
 	public static List<XElement>? ToApplicationData(string vcf, BodyPreference bodyPreference)
 	{
+		return ToApplicationData(vcf, 96 * 1024);
+	}
+
+	/// <summary>
+	///   <paramref name="maxPhotoBytes" /> caps PHOTO on the wire; the ghosting merge passes
+	///   <see cref="int.MaxValue" /> so an oversized stored photo survives an update it was
+	///   never sent in.
+	/// </summary>
+	private static List<XElement>? ToApplicationData(string vcf, int maxPhotoBytes)
+	{
 		if (Vcf.Parse(vcf).FirstOrDefault() is not { } vcard)
 			return null;
 
@@ -123,7 +133,7 @@ public static class ContactConverter
 			data.Add(new XElement(Contacts + "Birthday", EasDateTime.ToLong(dto.UtcDateTime)));
 
 		RawData? photo = vcard.Photos?.FirstOrDefault(p => p is not null)?.Value;
-		if (photo?.Bytes is { Length: > 0 and < 96 * 1024 } bytes)
+		if (photo?.Bytes is { Length: > 0 } bytes && bytes.Length < maxPhotoBytes)
 			data.Add(new XElement(Contacts + "Picture", Convert.ToBase64String(bytes)));
 
 		string? note = vcard.Notes?.FirstOrDefault(n => n is not null)?.Value;
@@ -146,16 +156,19 @@ public static class ContactConverter
 	}
 
 	/// <summary>
-	///   Builds a vCard 3.0 from client ApplicationData. EAS-managed properties are rewritten
-	///   from the payload; everything the Contacts class cannot express (X- properties, IMPP,
-	///   GEO, 4th+ email addresses, …) is carried over from <paramref name="existingVcard" />
-	///   so editing one field never erases data EAS could not have round-tripped.
+	///   Builds a vCard 3.0 from client ApplicationData. A managed property present in the
+	///   payload is rewritten from it; one that is absent is ghosted through from
+	///   <paramref name="existingVcard" />, and everything the Contacts class cannot express
+	///   (X- properties, IMPP, GEO, 4th+ email addresses, …) is carried over verbatim — so
+	///   editing one field never erases another.
 	/// </summary>
 	public static string FromApplicationData(XElement applicationData, string uid, string? existingVcard = null)
 	{
+		XElement merged = Ghost(applicationData, existingVcard);
+
 		string? V(string localName)
 		{
-			return applicationData.Element(Contacts + localName)?.Value;
+			return merged.Element(Contacts + localName)?.Value;
 		}
 
 		StringBuilder sb = new();
@@ -195,16 +208,16 @@ public static class ContactConverter
 			AppendLine(sb, "ORG", $"{Escape(company)};{Escape(department)}", true);
 		AppendLine(sb, "TITLE", V("JobTitle"));
 		AppendLine(sb, "URL", V("WebPage"));
-		AppendLine(sb, "NICKNAME", applicationData.Element(Contacts2 + "NickName")?.Value);
+		AppendLine(sb, "NICKNAME", merged.Element(Contacts2 + "NickName")?.Value);
 
 		string? birthday = V("Birthday");
 		if (birthday is not null)
 			AppendLine(sb, "BDAY", EasDateTime.Parse(birthday).ToString("yyyy-MM-dd"));
 
-		string? body = applicationData.Element(AirSyncBase + "Body")?.Element(AirSyncBase + "Data")?.Value;
+		string? body = merged.Element(AirSyncBase + "Body")?.Element(AirSyncBase + "Data")?.Value;
 		AppendLine(sb, "NOTE", body);
 
-		List<string>? categories = applicationData.Element(Contacts + "Categories")?
+		List<string>? categories = merged.Element(Contacts + "Categories")?
 			.Elements(Contacts + "Category").Select(c => c.Value).ToList();
 		if (categories is { Count: > 0 })
 			AppendLine(sb, "CATEGORIES", string.Join(",", categories.Select(Escape)), true);
@@ -221,8 +234,26 @@ public static class ContactConverter
 	}
 
 	/// <summary>
-	///   Property names the EAS Contacts class manages — rewritten from the payload on every
-	///   change; all other existing lines are preserved verbatim.
+	///   Overlays the payload on the stored card's own EAS view, so a managed element the
+	///   client omitted keeps its stored value (MS-ASCMD ghosting: absent means "leave as is",
+	///   never "erase"). Presence, not value, is what decides — an element sent empty still
+	///   clears the property. Same stance as <c>CalendarConverter</c> and <c>TasksConverter</c>.
+	/// </summary>
+	private static XElement Ghost(XElement applicationData, string? existingVcard)
+	{
+		if (existingVcard is null || ToApplicationData(existingVcard, int.MaxValue) is not { } stored)
+			return applicationData;
+
+		XElement merged = new(applicationData);
+		foreach (XElement element in stored)
+			if (merged.Element(element.Name) is null)
+				merged.Add(element);
+		return merged;
+	}
+
+	/// <summary>
+	///   Property names the EAS Contacts class manages — rewritten from the merged payload on
+	///   every change; all other existing lines are preserved verbatim.
 	/// </summary>
 	private static readonly HashSet<string> ManagedProperties = new(StringComparer.OrdinalIgnoreCase)
 	{

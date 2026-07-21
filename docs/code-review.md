@@ -238,7 +238,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **2. WBXML decoder & encoder hardening** — ~~`W1`~~ ~~`W2`~~ ~~`W3`~~ ~~`W4`~~ ~~`W5`~~ ~~`W6`~~ ~~`W7`~~ ~~`W8`~~ **COMPLETE**
 > `W1` (no depth/element cap → OOM from one request) and `W2` (unbounded recursion → uncatchable `StackOverflowException`) are ~15 lines between them and take down every user's sync. Add the hardening tests with the fix.
 
-**3. Contact, vCard & iTIP integrity** [LIVE] — `D4` `D6` `D7` ~~`D22`~~ `D23`
+**3. Contact, vCard & iTIP integrity** [LIVE] — ~~`D4`~~ `D6` `D7` ~~`D22`~~ `D23`
 > `D4` a ghosted contact Change wipes name, emails, address, photo, note. `D6`/`D7` are injection (vCard line, iCalendar CRLF). All in `ContactConverter` + `ImipMailBuilder`.
 
 **4. Draft & MIME building** [LIVE] — `D15` `D16`
@@ -460,7 +460,7 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 ~~`D1`~~ **FIXED** **CRITICAL** `ExpungeAsync()` with no UID set destroys other clients' `\Deleted` messages — `Imap/ImapMailBackend.cs:204,312`.
 ~~`D2`~~ **FIXED** **CRITICAL** No UIDVALIDITY tracking anywhere in the repo → stale keys address the wrong messages after a restore/migration — `Imap/ImapSession.cs`, `ImapMailBackend.cs:581`. Mail item keys are now `<uidvalidity>:<uid>` (`ToItemKey`/`ParseUid`), and UIDVALIDITY leads the `SnapshotStatusAsync` fingerprint. **Breaking:** one full re-sync of IMAP mail folders on upgrade, as pre-existing bare-UID keys are reissued.
 `D3` **High** Every mail fetch downloads the full message; `EstimateSize` decodes every attachment to a MemoryStream just to read `.Length`, while holding the session gate — `Imap/ImapMailBackend.cs:136`, `Common/Converters/MailConverter.cs:290`.
-`D4` **High** Contact update wipes every managed vCard property absent from the payload (ghosting) — `Common/Converters/ContactConverter.cs:149`.
+~~`D4`~~ **FIXED** Contact update wiped every managed vCard property absent from the payload — `Common/Converters/ContactConverter.cs`. `FromApplicationData` now overlays the payload on the stored card's own EAS view (`Ghost`, built from the same `ToApplicationData` read mapping so the two can't drift) before building. **Presence, not value, decides:** an element sent empty still clears the property, so "clear this field" stays expressible. The photo cap moved to a parameter — the wire view still drops photos ≥ 96 KiB, the merge view keeps them, so an oversized stored photo survives an update it was never sent in. Note: this changes contact Change semantics from full-replace to ghosted; `Update_PresentElementsWin_OverTheStoredValue` (was `Update_ManagedFieldsComeFromThePayload_NotTheOldCard`) was rewritten accordingly.
 `D5` **High** Meeting-request times ignore `TZID` and are treated as UTC; no line unfolding — `Common/Converters/MailConverter.cs:211,277`.
 `D6` **High** vCard line injection via the contact `Picture` element — `Common/Converters/ContactConverter.cs:207`.
 `D7` **High** iCalendar CRLF injection + platform line endings in generated CANCEL messages — `Common/Converters/ImipMailBuilder.cs:37`.

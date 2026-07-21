@@ -8,6 +8,7 @@ namespace ActiveSync.Core.Tests;
 public class ContactConverterTests
 {
 	private static readonly XNamespace Contacts = EasNamespaces.Contacts;
+	private static readonly XNamespace AirSyncBase = EasNamespaces.AirSyncBase;
 
 	private const string ExistingVcard =
 		"BEGIN:VCARD\r\n" +
@@ -20,6 +21,14 @@ public class ContactConverterTests
 		"EMAIL;TYPE=INTERNET:three@example.com\r\n" +
 		"EMAIL;TYPE=INTERNET:four@example.com\r\n" +
 		"TEL;TYPE=CELL:+4512345678\r\n" +
+		"ADR;TYPE=HOME:;;Main Street 1;Copenhagen;;2100;DK\r\n" +
+		"ORG:Contoso;Research\r\n" +
+		"TITLE:Engineer\r\n" +
+		"URL:https://example.com/test\r\n" +
+		"BDAY:1980-04-05\r\n" +
+		"NOTE:Met at the conference.\r\n" +
+		"CATEGORIES:Friends,Work\r\n" +
+		"PHOTO;ENCODING=b;TYPE=JPEG:/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEB\r\n" +
 		"X-SPOUSE:Alex\r\n" +
 		"IMPP:xmpp:test@jabber.example.com\r\n" +
 		"item1.X-ABLABEL:_$!<HomePage>!$_\r\n" +
@@ -55,19 +64,60 @@ public class ContactConverterTests
 	}
 
 	[Fact]
-	public void Update_ManagedFieldsComeFromThePayload_NotTheOldCard()
+	public void Update_PresentElementsWin_OverTheStoredValue()
 	{
 		string updated = ContactConverter.FromApplicationData(AppData(
 			new XElement(Contacts + "FirstName", "Solo"),
 			new XElement(Contacts + "Email1Address", "new@example.com")), "c-1", ExistingVcard);
 
-		// Managed properties are replace-semantics: the payload's single email wins over
-		// the old first three (only the EAS-inexpressible 4th is carried over).
+		// A present element is authoritative: it replaces the stored value for that slot.
 		Assert.Contains("new@example.com", updated);
 		Assert.DoesNotContain("one@example.com", updated);
 		Assert.Contains("four@example.com", updated);
-		// The old mobile number is managed and was omitted → gone (full-item semantics).
+		// Omitted slots are ghosted, not erased (D4) — Email2/3 and the mobile survive.
+		Assert.Contains("two@example.com", updated);
+		Assert.Contains("+4512345678", updated);
+	}
+
+	[Fact]
+	public void GhostedChange_DoesNotEraseOmittedManagedProperties()
+	{
+		// D4 — a Sync Change carrying only <MobilePhoneNumber> used to rebuild the card from
+		// the payload alone, wiping name, emails, address, company, note, photo and
+		// categories. MS-ASCMD ghosting: an omitted element means "leave as is".
+		string updated = ContactConverter.FromApplicationData(AppData(
+			new XElement(Contacts + "MobilePhoneNumber", "+4599999999")), "c-1", ExistingVcard);
+
+		Assert.Contains("+4599999999", updated);
 		Assert.DoesNotContain("+4512345678", updated);
+
+		Assert.Contains("N:Person;Test", updated);
+		Assert.Contains("FN:Test Person", updated);
+		Assert.Contains("one@example.com", updated);
+		Assert.Contains("Main Street 1", updated);
+		Assert.Contains("ORG:Contoso;Research", updated);
+		Assert.Contains("TITLE:Engineer", updated);
+		Assert.Contains("URL:https://example.com/test", updated);
+		Assert.Contains("BDAY:1980-04-05", updated);
+		Assert.Contains("NOTE:Met at the conference.", updated);
+		Assert.Contains("CATEGORIES:Friends", updated);
+		Assert.Contains("PHOTO", updated);
+		Assert.Contains("/9j/4AAQ", updated.Replace("\r\n ", ""));
+	}
+
+	[Fact]
+	public void EmptyElement_ClearsTheProperty_GhostingIsPresenceNotValue()
+	{
+		// Clearing stays expressible: the element is PRESENT with an empty value, so the
+		// stored value does not come back.
+		string updated = ContactConverter.FromApplicationData(AppData(
+			new XElement(Contacts + "MobilePhoneNumber", ""),
+			new XElement(Contacts + "JobTitle", "")), "c-1", ExistingVcard);
+
+		Assert.DoesNotContain("+4512345678", updated);
+		Assert.DoesNotContain("TITLE:Engineer", updated);
+		// Untouched managed properties are still ghosted through.
+		Assert.Contains("ORG:Contoso;Research", updated);
 	}
 
 	[Fact]
@@ -102,8 +152,11 @@ public class ContactConverterTests
 			"X-CUSTOM:first part of a custom value\r\n  that also continues\r\n" +
 			"END:VCARD\r\n";
 
+		// The payload governs NOTE (present, empty → cleared), so nothing ghosts it back and
+		// the assertion still proves the folded managed line was consumed as ONE unit.
 		string updated = ContactConverter.FromApplicationData(AppData(
-			new XElement(Contacts + "FirstName", "F")), "c-3", folded);
+			new XElement(Contacts + "FirstName", "F"),
+			new XElement(AirSyncBase + "Body", new XElement(AirSyncBase + "Data", ""))), "c-3", folded);
 
 		Assert.DoesNotContain("long managed note", updated);
 		Assert.DoesNotContain("that continues folded", updated);
