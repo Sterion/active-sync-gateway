@@ -132,6 +132,49 @@ public class JsCalendarConverterTests
 		Assert.Equal("1", recurrence.Elements().First(e => e.Name.LocalName == "Type").Value);
 	}
 
+	// H5 — the ordinal on a day ("2nd Tuesday"), byMonthDay, byMonth and bySetPosition were
+	// unmapped in both directions, so "2nd Tuesday of the month" degraded to "every Tuesday" and
+	// "the 15th" to "the day the event happens to start on".
+	[Theory]
+	// monthly, 2nd Tuesday: Type 3 + WeekOfMonth 2 + DayOfWeek 4 (Tuesday)
+	[InlineData("3", "2", "4", null, null, "WeekOfMonth", "2")]
+	[InlineData("3", "2", "4", null, null, "DayOfWeek", "4")]
+	// monthly on the 15th: Type 2 + DayOfMonth (the event starts on the 20th, so a dropped
+	// byMonthDay silently reappears as 20)
+	[InlineData("2", null, null, "15", null, "DayOfMonth", "15")]
+	// yearly on 15 March: Type 5 + DayOfMonth + MonthOfYear (event starts in July)
+	[InlineData("5", null, null, "15", "3", "MonthOfYear", "3")]
+	[InlineData("5", null, null, "15", "3", "DayOfMonth", "15")]
+	public void Recurrence_OrdinalsAndByParts_SurviveTheJsCalendarRoundTrip(
+		string type, string? weekOfMonth, string? dayOfWeek, string? dayOfMonth, string? monthOfYear,
+		string expectedElement, string expectedValue)
+	{
+		XElement recurrence = new(Cal + "Recurrence",
+			new XElement(Cal + "Type", type),
+			new XElement(Cal + "Interval", "1"));
+		if (weekOfMonth is not null) recurrence.Add(new XElement(Cal + "WeekOfMonth", weekOfMonth));
+		if (dayOfWeek is not null) recurrence.Add(new XElement(Cal + "DayOfWeek", dayOfWeek));
+		if (dayOfMonth is not null) recurrence.Add(new XElement(Cal + "DayOfMonth", dayOfMonth));
+		if (monthOfYear is not null) recurrence.Add(new XElement(Cal + "MonthOfYear", monthOfYear));
+
+		XElement app = new("ApplicationData",
+			new XElement(Cal + "Subject", "Recurring"),
+			new XElement(Cal + "StartTime", "20260720T090000Z"),
+			new XElement(Cal + "EndTime", "20260720T100000Z"),
+			new XElement(Cal + "BusyStatus", "2"),
+			recurrence);
+
+		string ics = CalendarConverter.FromApplicationData(app, "uid-h5", null);
+		Dictionary<string, object?> js = JsCalendarConverter.FromICalendar(ics, null);
+		string ics2 = JsCalendarConverter.ToICalendar(JsonSerializer.SerializeToElement(js));
+		List<XElement>? eas = CalendarConverter.ToApplicationData(ics2, BodyPreference.PlainText);
+
+		XElement? back = eas!.FirstOrDefault(e => e.Name.LocalName == "Recurrence");
+		Assert.NotNull(back);
+		Assert.Equal(expectedValue,
+			back.Elements().FirstOrDefault(e => e.Name.LocalName == expectedElement)?.Value);
+	}
+
 	[Fact]
 	public void FromICalendar_DropsServerManagedMembers()
 	{

@@ -272,8 +272,34 @@ public static class JsCalendarConverter
 			pattern.Until = new CalDateTime(DateTime.SpecifyKind(untilDt, DateTimeKind.Utc), "UTC");
 		foreach (JsonElement day in Array(rule, "byDay"))
 			if (Str(day, "day") is { } d && DayMap.TryGetValue(d.ToLowerInvariant(), out DayOfWeek dow))
-				pattern.ByDay.Add(new WeekDay(dow));
+			{
+				// RFC 8984 NDay.nthOfPeriod is the ordinal — "2nd Tuesday", "-1 = last". Dropping
+				// it turned every nth-weekday rule into a plain "every Tuesday".
+				int nth = day.TryGetProperty("nthOfPeriod", out JsonElement n) &&
+				          n.ValueKind == JsonValueKind.Number && n.TryGetInt32(out int ordinal)
+					? ordinal
+					: 0;
+				pattern.ByDay.Add(nth == 0 ? new WeekDay(dow) : new WeekDay(dow, nth));
+			}
+
+		pattern.ByMonthDay = Ints(rule, "byMonthDay").ToList();
+		// byMonth is a String[] in JSCalendar ("1".."12", plus a trailing "L" for a leap month in
+		// non-Gregorian calendars, which iCalendar cannot express and which is skipped).
+		pattern.ByMonth = Array(rule, "byMonth")
+			.Select(m => m.ValueKind == JsonValueKind.String ? m.GetString() : m.ToString())
+			.Where(m => m is not null && int.TryParse(m, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+			.Select(m => int.Parse(m!, CultureInfo.InvariantCulture))
+			.ToList();
+		pattern.BySetPosition = Ints(rule, "bySetPosition").ToList();
 		return pattern;
+	}
+
+	private static IEnumerable<int> Ints(JsonElement element, string property)
+	{
+		return Array(element, property)
+			.Where(v => v.ValueKind == JsonValueKind.Number)
+			.Select(v => v.TryGetInt32(out int i) ? i : 0)
+			.Where(i => i != 0);
 	}
 
 	private static Dictionary<string, object?> FromRecurrenceRule(RecurrenceRule pattern)
@@ -291,8 +317,26 @@ public static class JsCalendarConverter
 			rule["until"] = until.Value.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
 		if (pattern.ByDay.Count > 0)
 			rule["byDay"] = pattern.ByDay
-				.Select(object (w) => new Dictionary<string, object?> { ["@type"] = "NDay", ["day"] = DayName(w.DayOfWeek) })
+				.Select(object (w) =>
+				{
+					Dictionary<string, object?> day = new()
+					{
+						["@type"] = "NDay",
+						["day"] = DayName(w.DayOfWeek)
+					};
+					// Offset is nullable and 0/null both mean "no ordinal"; anything else is the
+					// nth occurrence (-1 = last).
+					if (w.Offset is { } offset && offset != 0)
+						day["nthOfPeriod"] = offset;
+					return day;
+				})
 				.ToArray();
+		if (pattern.ByMonthDay is { Count: > 0 } byMonthDay)
+			rule["byMonthDay"] = byMonthDay.ToArray();
+		if (pattern.ByMonth is { Count: > 0 } byMonth)
+			rule["byMonth"] = byMonth.Select(m => m.ToString(CultureInfo.InvariantCulture)).ToArray();
+		if (pattern.BySetPosition is { Count: > 0 } bySetPosition)
+			rule["bySetPosition"] = bySetPosition.ToArray();
 		return rule;
 	}
 

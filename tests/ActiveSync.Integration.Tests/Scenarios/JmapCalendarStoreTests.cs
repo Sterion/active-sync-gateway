@@ -127,6 +127,45 @@ public sealed class JmapCalendarStoreTests
 	}
 
 	/// <summary>
+	///   H5 — the ordinal on a recurrence day must survive the server. "2nd Tuesday of the month"
+	///   degraded to "every Tuesday" because <c>nthOfPeriod</c> was mapped in neither direction.
+	///   Stalwart 0.16 does store and return it, so this is a full end-to-end reproducer.
+	/// </summary>
+	[JmapGroupwareFact]
+	public async Task Event_RecurrenceDayOrdinal_RoundTripsThroughTheServer()
+	{
+		JmapCalendarStore store = Store();
+		string folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].BackendKey;
+
+		string subject = $"Board {Guid.NewGuid():N}"[..14];
+		(string itemKey, _) = await store.CreateItemAsync(folderKey, new XElement("ApplicationData",
+			new XElement(Cal + "Subject", subject),
+			new XElement(Cal + "StartTime", "20260714T090000Z"),
+			new XElement(Cal + "EndTime", "20260714T100000Z"),
+			new XElement(Cal + "BusyStatus", "2"),
+			new XElement(Cal + "Recurrence",
+				new XElement(Cal + "Type", "3"),          // monthly, nth weekday
+				new XElement(Cal + "Interval", "1"),
+				new XElement(Cal + "WeekOfMonth", "2"),   // second
+				new XElement(Cal + "DayOfWeek", "4"))), CancellationToken.None); // Tuesday
+
+		try
+		{
+			BackendItem? item =
+				await store.GetItemAsync(folderKey, itemKey, BodyPreference.PlainText, CancellationToken.None);
+			XElement recurrence = item!.ApplicationData.First(e => e.Name.LocalName == "Recurrence");
+			string? R(string local) => recurrence.Elements().FirstOrDefault(e => e.Name.LocalName == local)?.Value;
+			Assert.Equal("3", R("Type"));
+			Assert.Equal("2", R("WeekOfMonth"));
+			Assert.Equal("4", R("DayOfWeek"));
+		}
+		finally
+		{
+			await store.DeleteItemAsync(folderKey, itemKey, CancellationToken.None);
+		}
+	}
+
+	/// <summary>
 	///   H7 — the calendar half of the PatchObject question. Free → busy is the case that reaches
 	///   the JSCalendar layer as a *cleared* member: BusyStatus 2 makes the iCalendar TRANSP
 	///   OPAQUE, which the bridge expresses by omitting <c>freeBusyStatus</c> entirely. Under patch
