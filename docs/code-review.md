@@ -24,6 +24,37 @@ Two caveats worth respecting:
 - **Quality decays with context.** A session six items deep is worse at the seventh than a fresh one. Prefer 3–5 items per run over 15.
 - **Give these their own run:** item 5 (needs live-server verification mid-item) and item 20 (decompositions — must start from a clean tree).
 
+### Running the queue hands-off
+
+`/loop` self-advances with a fresh context per item, because this document is the cursor — struck-through findings mark the position, so no state has to survive between iterations.
+
+```
+/loop Read docs/code-review.md. Implement the lowest-numbered item in Part 1 that
+still has findings not struck through — exactly one item per iteration, then stop.
+Follow the working protocol in that document, including the 🔌 live-backend rule.
+When every item is struck through, say so and end the loop.
+```
+
+Bound it to a range while you gauge cost or want to inspect the output — append to the first sentence:
+
+```
+…not struck through, within items 1-14, and implement that one item…
+```
+
+Interrupt at any point: whatever is committed and struck through stays done, and the identical command resumes from there.
+
+**Before a run that includes 🔌 items**, bring the stacks up (or let the session do it — `test-fast` starts them only if not already healthy):
+
+```powershell
+./scripts/test-fast.ps1        # Windows — starts stalwart + axigen if cold, reuses if warm
+```
+
+### Standing context for any session
+
+- **Breaking changes are acceptable.** This is not deployed anywhere outside testing, and the published packages have no external consumers. Item 17 in particular is an intentional breaking Contracts change — take it.
+- **Do not push.** Commit freely; pushing is a human decision.
+- **The build baseline is 0 warnings.** Treat a new warning as a failure.
+
 ### Working protocol — follow this for every item
 
 **1. Work findings in the order listed.** Where an item carries a sequencing constraint (item 5 / `H7`), honour it.
