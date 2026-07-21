@@ -68,8 +68,12 @@ public static class WebUiApplicationExtensions
 				// No inline SCRIPTS anywhere in the SPA — scripts stay locked to 'self'.
 				// Inline style ATTRIBUTES are allowed: the views lay themselves out with
 				// them, and a style-injection is a far smaller risk than script injection.
+				// base-uri, form-action and object-src are spelled out because none of the three
+				// falls back to default-src — an injected <base href> would otherwise redirect
+				// the SPA's dynamic module imports to another origin.
 				context.Response.Headers.ContentSecurityPolicy =
-					"default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'";
+					"default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; " +
+					"base-uri 'none'; form-action 'self'; object-src 'none'";
 				context.Response.Headers.XFrameOptions = "DENY";
 				context.Response.Headers["Referrer-Policy"] = "no-referrer";
 				return Task.CompletedTask;
