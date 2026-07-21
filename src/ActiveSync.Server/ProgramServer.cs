@@ -235,7 +235,12 @@ public partial class Program
 					: "");
 		});
 
-		// Correct the request scheme first (behind a TLS-terminating proxy the gateway is hit on
+		// FIRST, before anything else the app registers: nothing may escape into the
+		// developer exception page WebApplication auto-inserts in Development, which would
+		// render stack traces and request headers to an unauthenticated caller.
+		app.UseUnhandledExceptionShield();
+
+		// Correct the request scheme (behind a TLS-terminating proxy the gateway is hit on
 		// HTTP), so every downstream absolute URL — notably the OIDC redirect_uri — is https.
 		app.UsePublicScheme();
 		app.UseEasMetrics();

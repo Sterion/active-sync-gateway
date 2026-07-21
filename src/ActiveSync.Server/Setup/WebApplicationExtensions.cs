@@ -121,6 +121,50 @@ public static class WebApplicationExtensions
 	}
 
 	/// <summary>
+	///   Last line for anything an endpoint lets escape: logs it and answers a bare 500.
+	///   <para>
+	///     This must be the FIRST thing the app registers. <c>WebApplication</c> auto-inserts
+	///     the developer exception page ahead of everything when
+	///     <c>ASPNETCORE_ENVIRONMENT=Development</c>, and that page renders the exception,
+	///     the stack trace, the raw query string and every request header into the response
+	///     body — to whoever sent the request, authenticated or not. Being registered first
+	///     puts this handler directly INSIDE it, so the page has nothing left to render.
+	///   </para>
+	///   <para>
+	///     It is deliberately not an <c>UseExceptionHandler</c> re-execute: there is no error
+	///     page to re-execute into, and the clients here are phones speaking WBXML, for which
+	///     any HTML body would be noise. Serilog's request logging sits outside this and still
+	///     records the failure at Error, so nothing is lost by swallowing.
+	///   </para>
+	/// </summary>
+	public static IApplicationBuilder UseUnhandledExceptionShield(this IApplicationBuilder app)
+	{
+		app.Use(async (context, next) =>
+		{
+			try
+			{
+				await next();
+			}
+			catch (Exception ex) when (ex is not OperationCanceledException ||
+			                           !context.RequestAborted.IsCancellationRequested)
+			{
+				context.RequestServices.GetRequiredService<ILoggerFactory>()
+					.CreateLogger("ActiveSync.UnhandledException")
+					.LogError(ex, "Unhandled exception for {Method} {Path}",
+						context.Request.Method, context.Request.Path.Value);
+				// Once bytes are on the wire the status line is already sent — rewriting it
+				// throws, out of the handler that is supposed to be the last one.
+				if (!context.Response.HasStarted)
+				{
+					context.Response.Clear();
+					context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+				}
+			}
+		});
+		return app;
+	}
+
+	/// <summary>
 	///   Adds <c>X-Content-Type-Options: nosniff</c> to every response. Attachments are served
 	///   with the Content-Type declared inside the (untrusted) email, so browsers must not
 	///   second-guess content types.
