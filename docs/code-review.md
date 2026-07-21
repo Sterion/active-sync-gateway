@@ -67,7 +67,14 @@ fix(imap): scope EXPUNGE to the deleted UID (D1)
 
 Small commits are the point — they make the work resumable and each finding independently revertible. Do not batch a whole item into one commit.
 
-**3. Mark the finding in this document in the same commit** — `~~D1~~ **FIXED** (abc1234)`, or `~~D1~~ **N/A** — <one line why>`.
+**3. Mark the finding in this document in the same commit.** Keep the backticks inside the strikethrough, exactly:
+
+```
+~~`D1`~~ **FIXED** (abc1234)
+~~`D1`~~ **N/A** — <one line why>
+```
+
+The backticks are load-bearing — the integrity check below finds findings by `` `ID` ``, so dropping them makes a finding invisible to verification.
 
 **4. If you moved or renamed code other findings reference, fix their `file:line` anchors.** You are the only one who will know where it went. If it invalidates a whole item, add a row to the re-verify table below.
 
@@ -132,6 +139,36 @@ git show ce6259c:src/ActiveSync.Server/Eas/Handlers/SyncHandler.cs | sed -n '780
 git log -L 780,830:src/ActiveSync.Server/Eas/Handlers/SyncHandler.cs --oneline           # how it changed since
 git diff ce6259c..HEAD -- src/ActiveSync.Core/Backend/                                   # everything that moved in an area
 ```
+
+### Editing this document safely
+
+You will edit this file on every item, so know the two traps — both have already corrupted it once.
+
+**Do not use `perl -i -pe` on this file.** It double-encodes UTF-8: every `—` becomes `Ã¢Â€Â"` mojibake on any line it rewrites. Use the Edit tool (encoding-safe). `sed` is fine for byte-level surgery.
+
+**Do not pattern-match `^\*\*(\d+)\. ` across the whole file.** The working-protocol steps above use the *identical* format to queue items, so a global match hits `**3. Mark the finding…**` as well as `**3. Contact, vCard & iTIP integrity**`. Anchor to the queue first:
+
+```sh
+sed -n '/^# PART 1/,/^# PART 2/p' docs/code-review.md
+```
+
+**Verify after any scripted edit** — run from the repo root:
+
+```sh
+# structure: expect 56 items, 15 [LIVE]
+sed -n '/^# PART 1/,/^# PART 2/p' docs/code-review.md > /tmp/p1
+echo "items=$(grep -cE '^\*\*[0-9]+\. ' /tmp/p1) live=$(grep -cE '^\*\*[0-9]+\..*\[LIVE\]' /tmp/p1)"
+
+# findings: expect 365 assigned, 0 duplicates (count holds — strikethrough keeps the ID)
+grep -E '^\*\*[0-9]+\. ' /tmp/p1 | grep -o '`[ABCDEFHKLSW][0-9]\+`' | tr -d '`' | sort > /tmp/v
+echo "assigned=$(wc -l < /tmp/v) unique=$(sort -u /tmp/v | wc -l) dupes=$(uniq -d /tmp/v | wc -l)"
+
+# encoding: expect 0 on both — double-encoded UTF-8, and any stray emoji
+grep -c $'\xc3\xa2\xc2\x80\|\xc3\xb0\xc2\x9f' docs/code-review.md
+grep -c $'\xf0\x9f\|\xe2\x9a\xa0' docs/code-review.md
+```
+
+All five numbers are invariant for the life of this document — striking a finding through does not remove it, so the counts never legitimately change. Any drift means an edit went wrong.
 
 ### Keeping this document current
 
