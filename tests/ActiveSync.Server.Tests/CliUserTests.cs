@@ -188,6 +188,48 @@ public sealed class CliUserTests : IDisposable
 		Assert.Contains("Backends:MailStore:Password", badKeyErr);
 	}
 
+	// L42 — COVERAGE, NOT PROOF. The fix moves the master-key ZeroMemory into a finally so a
+	// throwing/cancelled stdin read no longer leaks the key on the heap. The key is a local byte[]
+	// with no external handle, so the zeroing itself is not observable from a test; this only
+	// exercises the failure path to prove the finally is reached and the command exits cleanly
+	// (does not hang or crash the process) when the read throws.
+	[Fact]
+	public void Secret_StdinReadThrows_ExitsCleanly()
+	{
+		TextReader originalIn = Console.In;
+		TextWriter originalOut = Console.Out;
+		TextWriter originalError = Console.Error;
+		using StringWriter stdout = new();
+		using StringWriter stderr = new();
+		try
+		{
+			Console.SetOut(stdout);
+			Console.SetError(stderr);
+			Console.SetIn(new ThrowingReader());
+			CommandAppTester tester = new();
+			tester.Configure(CliApp.Configure);
+			CommandAppResult result = tester.Run("user", "secret", "u5", "Backends:Contacts:Password");
+			// Spectre turns the propagated exception into a non-zero exit; the point is the finally
+			// ran (no leak) and the process is still usable, not the specific code.
+			Assert.NotEqual(0, result.ExitCode);
+		}
+		finally
+		{
+			Console.SetOut(originalOut);
+			Console.SetError(originalError);
+			Console.SetIn(originalIn);
+		}
+	}
+
+	private sealed class ThrowingReader : TextReader
+	{
+		public override Task<string> ReadToEndAsync() =>
+			throw new IOException("simulated stdin failure");
+
+		public override Task<string> ReadToEndAsync(CancellationToken cancellationToken) =>
+			throw new IOException("simulated stdin failure");
+	}
+
 	[Fact]
 	public void Set_OnConfigUser_CopiesTheConfigEntry()
 	{

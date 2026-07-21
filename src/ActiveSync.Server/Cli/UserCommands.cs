@@ -362,18 +362,26 @@ internal sealed class UserSecretCommand(IAnsiConsole terminal)
 			return 1;
 		}
 
-		string secret = (await Console.In.ReadToEndAsync(cancellationToken)).TrimEnd('\r', '\n');
-		if (secret.Length == 0)
+		// Zero the master key on every exit — including a failed/cancelled stdin read or a throwing
+		// seal. This runs inside the long-lived gateway process (via /cli), so a leaked key array
+		// sits on the heap until GC (L42).
+		try
 		{
-			await Console.Error.WriteLineAsync("Usage: echo -n 'backend-password' | eas user secret <login> <key>");
-			System.Security.Cryptography.CryptographicOperations.ZeroMemory(key);
-			return 1;
-		}
+			string secret = (await Console.In.ReadToEndAsync(cancellationToken)).TrimEnd('\r', '\n');
+			if (secret.Length == 0)
+			{
+				await Console.Error.WriteLineAsync("Usage: echo -n 'backend-password' | eas user secret <login> <key>");
+				return 1;
+			}
 
-		string sealedValue = SecretValue.Seal(secret, key);
-		System.Security.Cryptography.CryptographicOperations.ZeroMemory(key);
-		AccountOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
-		field.Set(entry, sealedValue);
-		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
+			string sealedValue = SecretValue.Seal(secret, key);
+			AccountOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+			field.Set(entry, sealedValue);
+			return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
+		}
+		finally
+		{
+			System.Security.Cryptography.CryptographicOperations.ZeroMemory(key);
+		}
 	}
 }
