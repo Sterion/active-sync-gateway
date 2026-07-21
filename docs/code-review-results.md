@@ -240,7 +240,7 @@ WebUi 9 — 0 failed, 0 skipped** ✓ · not [LIVE], no backend run required or 
 - **If you ever revert `K26`, the three heavy `AuthThrottleTests` will appear to hang, not fail fast** —
   the red run took 9 minutes.
 
-## Item 8 — WebUi session & cookies — ⚠ **VERIFICATION FAILED, RUN HALTED**
+## Item 8 — WebUi session & cookies — ⚠ **regressed integration, repaired in `1745c8f`**
 
 **Findings:** `C2` `C4` `C8` `C7` `C3` `C14` — all six fixed and struck through
 **Commits:** `dba314d` (C2, C4) · `c2cee3f` (C8) · `4fc94ac` (C7) · `5e6ffc4` (C3) · `63c5681` (C14)
@@ -264,11 +264,25 @@ integration harness (`GatewayFixture`) drives the portals over **plain http** wi
 so the session cookie is never returned and every authenticated request 401s. This is the same failure
 mode the worker predicted for an operator on plain http — it simply lands on the test harness first.
 
-**Recommended fix — harness, not product:** set `ActiveSync:WebUi:AllowInsecureCookies=true` in
-`GatewayFixture`'s configuration. That is the documented local-http opt-out, used exactly as intended,
-and it keeps the `C2` fix at full strength. It should be paired with one integration test that asserts
-the cookie carries `Secure` when the opt-out is *off*, so the harness opt-out cannot quietly become a
-blind spot for the very finding it is working around.
+**Repaired in `1745c8f` — harness only, `src/` untouched (verified by diffstat).**
+`ActiveSync:WebUi:AllowInsecureCookies=true` in `GatewayFixture`, the documented local-http opt-out
+used as intended; the `C2` fix stays at full strength. Integration is green again at **135 passed,
+0 skipped** (134 restored plus the new test).
+
+**Two things worth knowing about that repair:**
+- **The config entry alone is not enough**, and getting this wrong keeps all 23 tests red with no clue
+  why: `AddWebUi` reads `builder.Configuration.GetSection("ActiveSync")` **eagerly at DI time**, so an
+  in-memory `ConfigureAppConfiguration` entry arrives too late to be seen. It needs a matching
+  `builder.UseSetting(...)` inside `WithWebHostBuilder`, placed *before* the caller-overrides loop so a
+  test can still flip it off. This is the same eager-read trap the fixture already documents for the
+  Postgres connection string.
+- **The blind-spot guard is a real integration test, not a fallback.**
+  `SessionCookie_CarriesSecure_WhenTheHttpOptOutIsOff` spins up its own gateway via
+  `CreateIsolatedFactory` with the production default (`AllowInsecureCookies=false`), logs in over a
+  plain client with no cookie container, and asserts the raw `Set-Cookie` for `eas.webui=` carries
+  `secure` and `httponly` — strictly stronger than the `WebUi.Tests` unit assertions, which check the
+  DI option value rather than the emitted header. Confirmed non-vacuous: flipping the opt-out to `true`
+  makes it fail with a sub-string-not-found, then reverted and re-confirmed green.
 
 **Notes (worker-flagged, all still valid — the fixes themselves are sound):**
 - **`C2` is deployment-affecting.** An operator serving the portals over plain http with no
@@ -311,12 +325,12 @@ blind spot for the very finding it is working around.
 
 ---
 
-## Next: item 9 — WebUi privilege & API hardening — **BLOCKED**
+## Next: item 9 — WebUi privilege & API hardening
 
-Do not start item 9 until the item 8 integration regression is resolved. Items 9–14 are Phase 2
-(Security), none [LIVE]; Stalwart is not otherwise needed again until item 26. Note the intra-phase
-ordering constraint: **item 13 (unified redaction) must be done before item 14** — build the one
-redaction implementation, then apply it.
+Items 9–14 are Phase 2 (Security), none [LIVE]; Stalwart is not otherwise needed again until item 26.
+Note the intra-phase ordering constraint: **item 13 (unified redaction) must be done before item 14** —
+build the one redaction implementation, then apply it. The current green baseline is **integration 135
+passed / 0 skipped**, unit Core 401 · Server 115 · Protocol 63 · WebUi 26.
 
 **Process lesson for future runs:** "not [LIVE]" means the *worker* need not run integration. It does
 not mean the *orchestrator* shouldn't, and items 5–8 show why — a non-[LIVE] item with a schema or
