@@ -17,6 +17,9 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\..\src\ActiveSync.WebUi\ActiveSync.WebUi.csproj" />
+		<!-- The account snapshot resolves every declared user's roles through the provider
+		     registry, and the default content roles land on "local". -->
+		<ProjectReference Include="..\..\src\ActiveSync.Backends.Local\ActiveSync.Backends.Local.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

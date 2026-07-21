@@ -106,8 +106,18 @@ eas config set ActiveSync:WebUi:Oidc:AutoProvision true                         
 
 ## Security model
 
-- One passive cookie scheme (`eas.webui`: HttpOnly, SameSite=Strict, sliding 12 h). It
-  never challenges, so the EAS Basic-auth endpoints and `/metrics` are untouched.
+- One passive cookie scheme (`eas.webui`: HttpOnly, SameSite=Strict, `Secure`, sliding 12 h).
+  It never challenges, so the EAS Basic-auth endpoints and `/metrics` are untouched.
+  `WebUi:AllowInsecureCookies` drops `Secure` for plain-http local development only.
+- **Live sessions are re-checked, at most once a minute each.** The ticket is self-contained,
+  so every session re-resolves its account on the next request after that minute: an account
+  that is gone, disabled or blocked is signed out immediately, and a cleared `Admin` flag drops
+  the admin capability while leaving the portal session alive. `eas user disable` / `eas block`
+  therefore reach an already-signed-in browser rather than waiting out the 12 hours.
+  Two limits worth knowing: admin granted by the **OIDC admin claim** is carried forward (the
+  IdP's claims never enter the session, so it cannot be re-derived — revoke it at the IdP), and
+  the check **fails open** on a database fault so an outage does not log every operator out
+  mid-incident (it retries on the very next request).
 - CSRF: SameSite=Strict **plus** a required `X-EAS-WebUi: 1` header on every non-GET API
   call — a cross-site request can produce neither.
 - Strict CSP (`default-src 'self'` — no inline **scripts**; inline style attributes are

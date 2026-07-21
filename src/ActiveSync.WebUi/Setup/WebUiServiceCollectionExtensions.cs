@@ -54,6 +54,9 @@ public static class WebUiServiceCollectionExtensions
 				cookie.Cookie.SecurePolicy = securePolicy;
 				cookie.SlidingExpiration = true;
 				cookie.ExpireTimeSpan = TimeSpan.FromHours(12);
+				// A sliding, self-contained ticket has to be re-checked against the account
+				// state, or disable/block/admin-revoke would not reach a signed-in session.
+				cookie.Events.OnValidatePrincipal = SessionValidation.ValidateAsync;
 				// A JSON API: plain status codes instead of login-page redirects — the SPA
 				// reacts to 401/403 itself.
 				cookie.Events.OnRedirectToLogin = context =>
@@ -209,6 +212,10 @@ public static class WebUiServiceCollectionExtensions
 		List<Claim> claims = [new Claim(ClaimTypes.Name, verdict.Login!)];
 		if (verdict.IsAdmin)
 			claims.Add(new Claim(WebUiAuth.AdminClaim, "true"));
+		// Live revalidation re-derives admin from the account flag; record when the IdP claim
+		// was what granted it, so the re-check does not strip an admin the flag never carried.
+		if (verdict.ClaimAdmin)
+			claims.Add(new Claim(SessionValidation.AdminSourceClaim, SessionValidation.OidcAdminSource));
 		context.Principal = new ClaimsPrincipal(new ClaimsIdentity(claims, WebUiAuth.Scheme));
 	}
 

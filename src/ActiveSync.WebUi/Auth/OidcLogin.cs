@@ -14,7 +14,13 @@ namespace ActiveSync.WebUi.Auth;
 /// </summary>
 internal static class OidcLogin
 {
-	internal sealed record Verdict(bool Allowed, string? Login, bool IsAdmin, bool Provisioned, string? Reason);
+	/// <param name="ClaimAdmin">
+	///   Admin came from the IdP admin claim rather than the account flag. The session records
+	///   that, because live revalidation re-derives admin from the account and cannot re-read a
+	///   claim the ticket deliberately never carried into the session.
+	/// </param>
+	internal sealed record Verdict(
+		bool Allowed, string? Login, bool IsAdmin, bool Provisioned, string? Reason, bool ClaimAdmin = false);
 
 	/// <summary>The immutable subject claim; with MapInboundClaims off it arrives under its raw name.</summary>
 	internal const string SubjectClaim = "sub";
@@ -59,7 +65,8 @@ internal static class OidcLogin
 				await bindSubjectAsync(login, subject);
 			}
 
-			return new Verdict(true, login, account.Options.Admin == true || claimAdmin, false, null);
+			return new Verdict(true, login, account.Options.Admin == true || claimAdmin, false, null,
+				claimAdmin && account.Options.Admin != true);
 		}
 
 		if (!oidc.AutoProvision)
@@ -74,7 +81,7 @@ internal static class OidcLogin
 		IReadOnlyList<string> failures = await provisionAsync(login, entry);
 		return failures.Count > 0
 			? new Verdict(false, login, false, false, string.Join("; ", failures))
-			: new Verdict(true, login, claimAdmin, true, null);
+			: new Verdict(true, login, claimAdmin, true, null, claimAdmin);
 	}
 
 	/// <summary>
