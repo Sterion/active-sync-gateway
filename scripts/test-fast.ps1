@@ -70,6 +70,26 @@ $legs = @(
 		AS_TEST_DAV_HOMESET = '/Calendar/'; AS_TEST_DAV_CONTACTS_HOMESET = '/Contacts/' } }
 )
 
+# Pre-flight: every integration test is a [BackendFact], which xunit turns into a SKIP when
+# TestBackend's IMAP probe fails -- and a run of nothing but skips still exits 0. That makes an
+# unreachable backend indistinguishable from a green run, which is exactly how an unverified fix
+# gets signed off. Probe the same host:port TestBackend will, and refuse to run if it is dead.
+foreach ($leg in $legs) {
+	$probePort = [int]$leg.env.AS_TEST_IMAP_PORT
+	$client = [System.Net.Sockets.TcpClient]::new()
+	try {
+		$ok = $client.ConnectAsync('localhost', $probePort).Wait(3000)
+	}
+	catch { $ok = $false }
+	finally { $client.Dispose() }
+	if (-not $ok) {
+		Write-Host "!! $($leg.name): no IMAP backend reachable at localhost:$probePort" -ForegroundColor Red
+		Write-Host "   Every integration test would SKIP and the run would still report green." -ForegroundColor Red
+		Write-Host "   Refusing to run -- a skipped suite is not verification." -ForegroundColor Red
+		exit 1
+	}
+}
+
 if ($Sequential) {
 	Write-Host "==> Running stalwart + axigen suites SEQUENTIALLY (filter: $Filter)" -ForegroundColor Cyan
 	$results = foreach ($leg in $legs) {
@@ -102,6 +122,18 @@ $failed = $false
 Write-Host "`n==================== summary ====================" -ForegroundColor Yellow
 foreach ($res in $results) {
 	$line = ($res.out -split "`n" | Select-String -Pattern 'Passed!|Failed!' | Select-Object -Last 1).Line
+
+	# A suite that ran nothing, or skipped everything, exits 0 -- treat it as a failure rather
+	# than let "PASS" stand for "verified". Pairs with the pre-flight probe above: that catches a
+	# dead backend, this catches a filter or discovery problem that silently matched no tests.
+	$passedCount = if ($line -match 'Passed:\s*(\d+)') { [int]$Matches[1] } else { -1 }
+	$totalCount = if ($line -match 'Total:\s*(\d+)') { [int]$Matches[1] } else { -1 }
+	if ($res.rc -eq 0 -and ($totalCount -eq 0 -or $passedCount -eq 0)) {
+		$failed = $true
+		Write-Host ("{0,-10} FAIL  no tests actually ran (total={1}, passed={2}) -- filter '{3}' matched nothing, or every test skipped" -f $res.name, $totalCount, $passedCount, $Filter) -ForegroundColor Red
+		continue
+	}
+
 	if ($res.rc -eq 0) {
 		Write-Host ("{0,-10} PASS  {1}" -f $res.name, ($line ?? '').Trim()) -ForegroundColor Green
 	}

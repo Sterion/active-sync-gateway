@@ -47,6 +47,22 @@ up axigen
 echo "==> Building integration test project once"
 dotnet build "$PROJ" -c Release --nologo -v q || exit 1
 
+# Pre-flight: every integration test is a [BackendFact], which xunit turns into a SKIP when
+# TestBackend's IMAP probe fails -- and a run of nothing but skips still exits 0. That makes an
+# unreachable backend indistinguishable from a green run, which is exactly how an unverified fix
+# gets signed off. Probe the same host:port TestBackend will, and refuse to run if it is dead.
+probe() {
+	local name="$1" port="$2"
+	if ! timeout 3 bash -c "echo > /dev/tcp/localhost/$port" 2>/dev/null; then
+		echo "!! $name: no IMAP backend reachable at localhost:$port" >&2
+		echo "   Every integration test would SKIP and the run would still report green." >&2
+		echo "   Refusing to run -- a skipped suite is not verification." >&2
+		exit 1
+	fi
+}
+probe stalwart "$STALWART_IMAP_PORT"
+probe axigen "$AXIGEN_IMAP_PORT"
+
 LOGDIR="$(mktemp -d)"
 run_leg() {
 	local name="$1"; shift
@@ -72,6 +88,19 @@ echo "==================== summary ===================="
 for name in stalwart axigen; do
 	rc=$(cat "$LOGDIR/$name.rc" 2>/dev/null || echo 1)
 	result=$(grep -hE 'Passed!|Failed!' "$LOGDIR/$name.log" | tail -1)
+
+	# A suite that ran nothing, or skipped everything, exits 0 -- treat it as a failure rather
+	# than let "PASS" stand for "verified". Pairs with the pre-flight probe above: that catches a
+	# dead backend, this catches a filter or discovery problem that silently matched no tests.
+	passed=$(sed -n 's/.*Passed:[[:space:]]*\([0-9]\+\).*/\1/p' <<<"$result")
+	total=$(sed -n 's/.*Total:[[:space:]]*\([0-9]\+\).*/\1/p' <<<"$result")
+	if [ "$rc" = 0 ] && { [ "${total:-0}" = 0 ] || [ "${passed:-0}" = 0 ]; }; then
+		FAILED=1
+		printf '%-10s FAIL  no tests actually ran (total=%s, passed=%s) -- filter %s matched nothing, or every test skipped\n' \
+			"$name" "${total:-?}" "${passed:-?}" "'$FILTER'"
+		continue
+	fi
+
 	if [ "$rc" = 0 ]; then
 		printf '%-10s PASS  %s\n' "$name" "$result"
 	else
