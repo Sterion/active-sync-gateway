@@ -160,5 +160,12 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 
 		if (!string.IsNullOrWhiteSpace(oidc.AdminClaimValue) && string.IsNullOrWhiteSpace(oidc.AdminClaim))
 			failures.Add("ActiveSync:WebUi:Oidc:AdminClaimValue requires AdminClaim to be set.");
+		// The reverse omission used to mean "any value grants admin", which turns the obvious
+		// AdminClaim: "groups" into a grant of gateway admin to the entire directory. "Any
+		// value" now has to be spelled out as "*" so it cannot be reached by leaving a field out.
+		if (!string.IsNullOrWhiteSpace(oidc.AdminClaim) && string.IsNullOrWhiteSpace(oidc.AdminClaimValue))
+			failures.Add(
+				"ActiveSync:WebUi:Oidc:AdminClaimValue is required when AdminClaim is set — it is the " +
+				"value that grants admin. Use \"*\" only if ANY value of the claim should grant it.");
 	}
 }

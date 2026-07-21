@@ -95,11 +95,25 @@ public sealed class OidcLoginTests
 			Oidc(adminClaim: "groups", adminClaimValue: "eas-admin"), users, NoProvision());
 		Assert.False(wrongValue.IsAdmin);
 
-		// Without a required value, any value of the claim grants admin.
-		OidcLogin.Verdict anyValue = await OidcLogin.EvaluateAsync(
+		// An explicit "*" is how "any value grants admin" is asked for.
+		OidcLogin.Verdict wildcard = await OidcLogin.EvaluateAsync(
 			Ticket(("preferred_username", "bob"), ("is-admin", "whatever")),
-			Oidc(adminClaim: "is-admin"), users, NoProvision());
-		Assert.True(anyValue.IsAdmin);
+			Oidc(adminClaim: "is-admin", adminClaimValue: "*"), users, NoProvision());
+		Assert.True(wildcard.IsAdmin);
+	}
+
+	[Fact]
+	public void AdminClaim_WithoutARequiredValue_GrantsNothing()
+	{
+		// Reachable only by omission, and the documented example was AdminClaim: "groups" —
+		// every user has groups. Startup validation refuses the combination now, but the claim
+		// evaluation must fail closed too rather than rely on it.
+		Assert.False(OidcLogin.HasAdminClaim(
+			Ticket(("groups", "anything")), Oidc(adminClaim: "groups")));
+		Assert.True(OidcLogin.HasAdminClaim(
+			Ticket(("groups", "anything")), Oidc(adminClaim: "groups", adminClaimValue: "*")));
+		Assert.False(OidcLogin.HasAdminClaim(
+			Ticket(("other", "anything")), Oidc(adminClaim: "groups", adminClaimValue: "*")));
 	}
 
 	[Fact]

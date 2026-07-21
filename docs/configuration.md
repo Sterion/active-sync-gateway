@@ -276,8 +276,8 @@ at startup); `AdminClaim`/`AdminClaimValue`/`AutoProvision` apply live.
 | `Oidc:ClientSecret` | `null` | OIDC client secret, plaintext or `enc:v1:` sealed with the Encryption master key. Rendered masked. Restart-tier. |
 | `Oidc:Scopes` | `openid profile email` | Space-separated scopes requested from the IdP. Restart-tier. |
 | `Oidc:LoginClaim` | `preferred_username` | Token claim mapped to the gateway login (set to `email` for email-keyed accounts). Restart-tier. |
-| `Oidc:AdminClaim` | `null` | Token claim granting web admin as an alternative to the account `Admin` flag (e.g. `groups`). Unset: only the account flag grants admin. |
-| `Oidc:AdminClaimValue` | `null` | Required value of `AdminClaim` (unset = any value grants admin). |
+| `Oidc:AdminClaim` | `null` | Token claim granting web admin as an alternative to the account `Admin` flag (e.g. `roles`). Unset: only the account flag grants admin. Setting it **requires** `AdminClaimValue`. |
+| `Oidc:AdminClaimValue` | `null` | Value of `AdminClaim` that grants admin — required whenever `AdminClaim` is set (startup fails otherwise), because "any value" would hand admin to every user carrying the claim. Use `*` to deliberately accept any value. |
 | `Oidc:AutoProvision` | `false` | Create a database account for unknown OIDC logins on first sign-in (`MailAddress` from the `email` claim), so they can use the portal. Admin only via the claim until an admin grants the flag. |
 | `Oidc:RequireHttpsMetadata` | `true` | Require HTTPS for the OIDC discovery endpoint. Disable only for local dev IdPs. Restart-tier. |
 

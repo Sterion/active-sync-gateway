@@ -276,11 +276,16 @@ public sealed class WebUiOidcOptions
 
 	/// <summary>
 	///   Token claim granting web ADMIN access as an alternative to the account Admin flag
-	///   (e.g. "groups"). Unset: only the account flag grants admin.
+	///   (e.g. "roles"). Unset: only the account flag grants admin. Setting it REQUIRES
+	///   <see cref="AdminClaimValue" /> — startup validation refuses the pair without it.
 	/// </summary>
 	public string? AdminClaim { get; set; }
 
-	/// <summary>Required value of <see cref="AdminClaim" /> (unset = any value grants admin).</summary>
+	/// <summary>
+	///   The value of <see cref="AdminClaim" /> that grants admin; required whenever the claim
+	///   is set. "*" accepts any value — deliberately explicit, because reaching "any value" by
+	///   omitting this field granted gateway admin to every user carrying the claim.
+	/// </summary>
 	public string? AdminClaimValue { get; set; }
 
 	/// <summary>

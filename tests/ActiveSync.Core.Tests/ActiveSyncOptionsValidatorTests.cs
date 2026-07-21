@@ -284,6 +284,28 @@ public class ActiveSyncOptionsValidatorTests
 	}
 
 	[Fact]
+	public void Oidc_AdminClaim_WithoutAValue_IsRefused()
+	{
+		ActiveSyncOptions options = Valid();
+		// "AdminClaim: groups" with no required value grants gateway admin to everyone who has
+		// any groups claim at all — i.e. the whole directory. It has to be unreachable by
+		// omission; "*" is how an operator asks for it deliberately.
+		options.WebUi.Oidc = new WebUiOidcOptions
+		{
+			Authority = "https://id.example.com", ClientId = "eas", AdminClaim = "groups"
+		};
+		ValidateOptionsResult result = Validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains(result.Failures!, f => f.Contains("Oidc:AdminClaimValue"));
+
+		options.WebUi.Oidc.AdminClaimValue = "*";
+		Assert.True(Validator.Validate(null, options).Succeeded);
+
+		options.WebUi.Oidc.AdminClaimValue = "eas-admin";
+		Assert.True(Validator.Validate(null, options).Succeeded);
+	}
+
+	[Fact]
 	public void Oidc_Disabled_IsInert_EvenWhenIncomplete()
 	{
 		ActiveSyncOptions options = Valid();

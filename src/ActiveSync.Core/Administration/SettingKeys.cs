@@ -156,7 +156,7 @@ internal static class SettingKeys
 		new("ActiveSync:WebUi:Oidc:AdminClaim", ValueType.String, false, null,
 			"Token claim granting web admin access (alternative to the account Admin flag)."),
 		new("ActiveSync:WebUi:Oidc:AdminClaimValue", ValueType.String, false, null,
-			"Required value of AdminClaim (unset = any value grants admin)."),
+			"Value of AdminClaim that grants admin; required when AdminClaim is set ('*' = any value)."),
 		new("ActiveSync:WebUi:Oidc:AutoProvision", ValueType.Bool, false, "false",
 			"Create a database account for unknown OIDC logins on first sign-in."),
 		new("ActiveSync:WebUi:Oidc:RequireHttpsMetadata", ValueType.Bool, true, "true",

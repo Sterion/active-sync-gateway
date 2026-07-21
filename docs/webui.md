@@ -81,8 +81,11 @@ eas config set ActiveSync:WebUi:Oidc:AutoProvision true                         
   the proxy send `X-Forwarded-Proto: https`. Without one of these the browser refuses the callback
   ("the information you're about to submit is not secure") because the IdP form-posts tokens to an
   `http` URL.
-- **Admin** = the account's `Admin` flag **or** the `AdminClaim` (with `AdminClaimValue`
-  set, the claim must carry exactly that value; without it, any value grants).
+- **Admin** = the account's `Admin` flag **or** the `AdminClaim` carrying exactly
+  `AdminClaimValue`. **`AdminClaimValue` is mandatory whenever `AdminClaim` is set** and startup
+  refuses the pair without it: `AdminClaim: groups` alone would grant gateway admin to everyone
+  who has *any* groups claim — the whole directory. Set `AdminClaimValue` to `*` if you really
+  do mean "any value of this claim grants admin".
 - **`AutoProvision`**: an unknown login is JIT-created as a plain database account
   (`MailAddress` from the `email` claim) and can then use the portal — it shows up in
   `eas users` like any declared user. A JIT account can only be admin **via the claim**

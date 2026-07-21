@@ -49,12 +49,19 @@ internal static class OidcLogin
 			: new Verdict(true, login, claimAdmin, true, null);
 	}
 
-	/// <summary>The configured admin claim grants admin; with a value set, it must match exactly.</summary>
+	/// <summary>
+	///   The configured admin claim grants admin, and its value must match
+	///   <see cref="WebUiOidcOptions.AdminClaimValue" /> exactly — or any value when that is the
+	///   literal "*". Omitting the value grants NOTHING: "AdminClaim: groups" with no value
+	///   would hand gateway admin to every user who has a groups claim, i.e. the whole
+	///   directory, and that must not be reachable by omission. Startup validation refuses the
+	///   combination as well; this stays fail-closed regardless.
+	/// </summary>
 	internal static bool HasAdminClaim(ClaimsPrincipal ticket, WebUiOidcOptions oidc)
 	{
-		if (string.IsNullOrWhiteSpace(oidc.AdminClaim))
+		if (string.IsNullOrWhiteSpace(oidc.AdminClaim) || string.IsNullOrWhiteSpace(oidc.AdminClaimValue))
 			return false;
-		return string.IsNullOrWhiteSpace(oidc.AdminClaimValue)
+		return oidc.AdminClaimValue == "*"
 			? ticket.Claims.Any(c => c.Type == oidc.AdminClaim)
 			: ticket.HasClaim(oidc.AdminClaim, oidc.AdminClaimValue);
 	}
