@@ -370,13 +370,66 @@ item — item 8's lesson applied)
 
 ---
 
-## Next: item 10 — EAS & server auth
+## Item 10 — EAS & server auth
 
-Items 10–14 are Phase 2 (Security), none [LIVE]; Stalwart is not otherwise needed again until item 26,
-but the orchestrator is running integration after every item from here — items 8 and 9 both changed
-behaviour the integration suite exercises. Ordering constraint still standing: **item 13 (unified
-redaction) before item 14**. Current green baseline: **integration 135 / 0 skipped**, unit Core 401 ·
-WebUi 63 · Server 115 · Protocol 63.
+**Findings:** `F23` `F24` `F21` `F46` `E3` `E14` `E26`
+**Commits:** `3ef4042` (F23) · `66b1f6f` (F24) · `b6ee789` (F21) · `3bc1f84` (F46) · `d5ae1ae` (E3) ·
+`bd10d22` (E14) · `2908ac6` (E26)
+
+**Verification:** integrity 56/15/365/365/0 ✓ · cursor → item 11 ✓ · IDs in subjects ✓ · build
+**0 warnings** ✓ · unit **Core 401, WebUi 63, Server 135 (was 115), Protocol 63 — 0 failed, 0 skipped**
+✓ · integration **139 passed, 0 skipped** (was 135, +4 new) ✓ · no existing integration test needed
+changing, so unlike item 9 every commit in this range is individually bisectable ✓
+
+**Notes:**
+- **Lockout risk was weighed explicitly in `F23`.** Two deliberate leniencies: an *absent* ack
+  `<Status>` still counts as an acknowledgment (pre-14.0 clients send only the key), and an *empty*
+  `<PolicyKey/>` is re-read as phase 1 rather than a bad ack. Strict MS-ASPROV readings would reject
+  both; the failure mode of rejecting is a device that can **never** complete provisioning. The forged-
+  key and failed-ack paths are still closed. `F24` similarly tolerates an absent `PolicyType` as the
+  implied default — rejecting it is defensible and one line away.
+- **⚠ New finding `F49`: a *successful* LongId Fetch cannot be encoded at all.** The handler emits
+  `<itemoperations:LongId>`, but that tag exists only on the Search and ComposeMail code pages, so the
+  encoder throws from `WriteResponseAsync` — **outside** the per-Fetch try/catch that exists precisely
+  so one bad Fetch cannot 500 the request. Found while writing the `F46` reproducer, filed at the
+  bottom of Part 2, not fixed inline. **Consequence for whoever lands `F49`:**
+  `ItemOperationsFetchTests.LongIdFetch_ForARegisteredFolder_StillReachesTheStore` currently asserts
+  the store call **and an expected `WbxmlException`** rather than Status 1 — that test must be updated.
+- **`E3`'s trust direction is the load-bearing decision.** Honouring `X-Forwarded-For` unconditionally
+  would be *worse than the bug* — a direct attacker could mint a fresh throttle key per attempt and
+  never trip the counter. Trust is checked on the peer, never on the header. The new
+  `Auth:TrustedProxies` defaults to empty, so deployed behaviour is byte-for-byte unchanged until an
+  operator opts in. It is **not** a full ForwardedHeaders middleware: `Request.Scheme` is still handled
+  by `UsePublicScheme`, and `RemoteIpAddress` is deliberately untouched so the `/cli` loopback gate is
+  unaffected. Documented in `docs/configuration.md`.
+- **`E3` hit the `W4` problem** — the fix changes `ClientKey`'s signature, so the reproducer could not
+  compile against unmodified code. Handled correctly: the overload was added as a behaviour-preserving
+  passthrough first, the four behind-a-proxy cases confirmed red on behaviour and the five
+  must-not-change cases confirmed already green, then the real implementation landed.
+- **`E26` is defence in depth, not a live leak**, and is labelled as such. Every endpoint today catches
+  its own exceptions, so no throwing route exists in the production pipeline to reproduce against; the
+  test builds the real two-layer pipeline instead. Its `UnhandledException_IsLogged` case is
+  **coverage, not proof** — it passed against the stub too, because the dev page also logs.
+- **`F21`'s live exposure is narrower than the finding implies.** The CalDAV store refuses folder ops
+  and moves at the backend anyway, so today's shared-*calendar* grants were never actually writable
+  through those paths. The real exposure is any store implementing `IReadOnlyCollectionSource` over a
+  class that does support them — hence handler-level reproducers rather than integration ones.
+- **New `EasHandlerHarness`** (reusable): drives any handler against in-memory SQLite state, a stub
+  session and the production WBXML codec. Worth reaching for in later EAS items.
+- **`W22` does not interact with `F23`/`F24`** — checked directly. Neither the 449 policy gate in
+  `EasEndpoint` nor `ProvisionHandler` reads `EasVersion`, so a forged `MS-ASProtocolVersion` header
+  cannot influence the Provision handshake. The two findings are genuinely independent.
+- **`E14` made the two auth prologues agree; it did not merge them.** The duplication `E28` names is
+  still there, so a third check added to EAS needs adding to Autodiscover too until item 20 lands.
+
+---
+
+## Next: item 11 — Plugin & settings privilege
+
+Items 11–14 are Phase 2 (Security), none [LIVE]; the orchestrator is running integration after every
+item regardless. Ordering constraint still standing: **item 13 (unified redaction) before item 14**.
+Current green baseline: **integration 139 / 0 skipped**, unit Core 401 · WebUi 63 · Server 135 ·
+Protocol 63.
 
 **Process lesson for future runs:** "not [LIVE]" means the *worker* need not run integration. It does
 not mean the *orchestrator* shouldn't, and items 5–8 show why — a non-[LIVE] item with a schema or
