@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+	  The plugin contract: the interfaces, records and small helpers an out-of-repo backend
+	  plugin builds against (IBackendProvider, IContentStore, IGatewayPlugin, BackendRole,
+	  ProviderSettings, BackendConfigField, ...). Deliberately tiny — it references only
+	  ActiveSync.Protocol (EAS constants) and the Microsoft.Extensions config/DI abstractions,
+	  NOT Crypto, EF Core or Core's host graph. A plugin references THIS one package (plus
+	  ActiveSync.Backends.Common only if it wants the MIME/iCal/vCard converters).
+	-->
+	<PropertyGroup>
+		<RootNamespace>ActiveSync.Contracts</RootNamespace>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<IsPackable>true</IsPackable>
+		<PackageId>ActiveSync.Contracts</PackageId>
+		<Description>ActiveSync Gateway — the backend plugin contract (IBackendProvider, IContentStore, IGatewayPlugin, roles, provider settings and config schema). The one package to reference when writing a gateway backend plugin.</Description>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Protocol\ActiveSync.Protocol.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Extensions.Configuration" />
+		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+	</ItemGroup>
+
+</Project>

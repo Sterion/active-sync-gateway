@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using MailKit;
 using MailKit.Net.Imap;

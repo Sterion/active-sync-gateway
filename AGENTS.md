@@ -113,16 +113,25 @@ docker compose -f docker/docker-compose.ci.yml run --rm tests        # full suit
 ```
 src/ActiveSync.Protocol/    WBXML codec, code pages, MS-ASHTTP query parser, EAS constants.
                             Depends on NOTHING project-wise. No ASP.NET, no MailKit.
+src/ActiveSync.Contracts/   The PLUGIN CONTRACT: the interfaces/records a backend provider
+                            implements + uses (IBackendProvider, IContentStore, IBackendSession
+                            & the capability interfaces, IGatewayPlugin, BackendRole,
+                            ProviderSettings, BackendConfigField, SharedCollection, the Backend
+                            Models records, DelimitedKey). Namespace ActiveSync.Contracts.
+                            Depends only on Protocol + Microsoft.Extensions config/DI abstractions
+                            — NOT Crypto, EF Core or Core. THE one package an out-of-repo plugin
+                            references. BackendProviderRegistry (host-only) stays in Core.
 src/ActiveSync.Crypto/      BCL-only master-key primitives: EncryptionKeyLoader (base64-or-
                             passphrase → 32-byte key), SecretValue (enc:v1: AES-GCM seal of
                             config secrets), LocalCliEnvelope (the sealed /cli request),
                             EncryptionOptions. Depends on NOTHING. Shared by Core AND the slim
                             eas client (so the client can seal without Core's heavy graph);
                             published as a plugin-contract package.
-src/ActiveSync.Core/        Backend interfaces + provider engine (BackendProviderRegistry,
-                            CompositeBackendSession, BackendSessionFactory), EF Core state
-                            store, diff engine, options. Depends on Protocol + Crypto
-                            (+ EF Core / config-binder packages). Provider-agnostic.
+src/ActiveSync.Core/        Provider engine (BackendProviderRegistry, CompositeBackendSession,
+                            BackendSessionFactory), EF Core state store, diff engine, options.
+                            Depends on Contracts + Protocol + Crypto (+ EF Core / config-binder
+                            packages). Provider-agnostic. (The plugin-facing INTERFACES live in
+                            Contracts, not here.)
 src/ActiveSync.Backends.Common/  Shared building blocks: MIME/iCal/vCard ⇄ EAS converters
                             + TLS/wire-logging helpers + the shared backend-options bases
                             (NetworkBackendOptions = the TLS knobs; MailConnectionOptions =
@@ -176,7 +185,7 @@ tests/ActiveSync.WebUi.Tests/      web UI unit tests (key repository, OIDC decis
 tests/ActiveSync.Integration.Tests/  real-backend E2E tests (see "Integration tests" below)
 ```
 
-Keep the dependency direction strict: `Protocol ← Core ← Backends ← Server`. Converters
+Keep the dependency direction strict: `Protocol ← Contracts ← Core ← Backends ← Server`. Converters
 live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
 
 ## Coding conventions
@@ -501,13 +510,14 @@ derive an address from `UserName` with `Contains('@')`.
 - **Out-of-repo plugins**: `Core/Plugins/PluginLoader` loads assemblies from
   `ActiveSync:Plugins:Directory` (default `/app/plugins`, one subdir per plugin, entry dll
   = dir name) in a per-plugin non-collectible `AssemblyLoadContext` that resolves the
-  contract (Core/Protocol/Backends.*/framework) from the HOST — so a plugin's
+  contract (Contracts/Core/Protocol/Backends.*/framework) from the HOST — so a plugin's
   `IBackendProvider` IS the host type the registry indexes. Each `IGatewayPlugin.Register`
   adds its providers. Fail-fast (corrupt/incompatible/no-entry aborts startup; empty dir =
-  no-op), major-version-gated against `ActiveSync.Core`. Wired in ProgramServer AND
-  CliServices before the container is built. Protocol/Core/Backends.Common are packed to
-  NuGet on tagged CI so plugin authors compile against the contract; see docs/plugins.md
-  (contract NOT ABI-stable pre-2.0).
+  no-op), major-version-gated against **`ActiveSync.Contracts`** (the loader keys the gate off
+  `typeof(IGatewayPlugin).Assembly`, which now IS Contracts). Wired in ProgramServer AND
+  CliServices before the container is built. Contracts/Protocol/Core/Backends.Common are packed to
+  NuGet on tagged CI; a plugin references **ActiveSync.Contracts** alone (+ Backends.Common only for
+  the converters). See docs/plugins.md (contract NOT ABI-stable pre-2.0).
 - One `CompositeBackendSession` per (user, deviceId), cached in `BackendSessionFactory`
   with idle eviction; auth verdicts are cached ~5 minutes. Content roles are optional —
   when a role has no configured provider it falls back to the **local store** (below), so

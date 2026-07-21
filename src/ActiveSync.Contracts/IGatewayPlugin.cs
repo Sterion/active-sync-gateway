@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace ActiveSync.Core.Plugins;
+namespace ActiveSync.Contracts;
 
 /// <summary>
 ///   Entry point of an out-of-repo plugin assembly dropped into the plugins directory. The

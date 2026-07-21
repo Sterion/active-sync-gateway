@@ -1,5 +1,7 @@
 using ActiveSync.Protocol;
 
+using ActiveSync.Contracts;
+
 namespace ActiveSync.Core.Backend;
 
 /// <summary>

@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using ActiveSync.Backends;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using Microsoft.Extensions.Logging.Abstractions;
 

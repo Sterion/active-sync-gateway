@@ -1,3 +1,5 @@
+using ActiveSync.Contracts;
+
 namespace ActiveSync.Core.Backend;
 
 /// <summary>One rejected value, attributable to a field so a form can mark the offending input.</summary>

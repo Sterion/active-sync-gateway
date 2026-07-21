@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Xml.Linq;
 using ActiveSync.Backends.Dav;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Integration.Tests.Infrastructure;
 using ActiveSync.Protocol;

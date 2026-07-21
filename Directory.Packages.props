@@ -15,6 +15,8 @@
 		     that owns them (plugins bind their own option types the host cannot know). -->
 		<PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.10" />
 		<PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.10" />
+		<!-- IServiceCollection for the plugin contract's IGatewayPlugin.Register (ActiveSync.Contracts). -->
+		<PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.10" />
 
 		<!-- SourceLink for the packed contract assemblies (Protocol, Core, Backends.Common). -->
 		<PackageVersion Include="Microsoft.SourceLink.GitHub" Version="8.0.0" />

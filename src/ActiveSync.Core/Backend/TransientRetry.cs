@@ -1,5 +1,7 @@
 using System.Net;
 
+using ActiveSync.Contracts;
+
 namespace ActiveSync.Core.Backend;
 
 /// <summary>

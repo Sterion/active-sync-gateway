@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 
 namespace ActiveSync.Core.Security;

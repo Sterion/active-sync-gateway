@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.Loader;
+using ActiveSync.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -10,7 +11,7 @@ namespace ActiveSync.Core.Plugins;
 ///   Discovers and loads out-of-repo backend plugins from a directory: one subdirectory per
 ///   plugin, its entry assembly named after the subdirectory (<c>my-notes/my-notes.dll</c>),
 ///   private dependencies beside it. Each plugin gets its own <see cref="AssemblyLoadContext" />
-///   that resolves the shared contract (Core/Protocol/Backends.* and the framework) from the
+///   that resolves the shared contract (Contracts/Core/Protocol/Backends.* and the framework) from the
 ///   HOST — so a plugin's <c>IBackendProvider</c> is the same type the registry indexes — and
 ///   falls back to its own folder for private dependencies.
 ///
@@ -75,13 +76,14 @@ public static class PluginLoader
 			throw new InvalidOperationException($"Failed to load plugin assembly '{entryDll}': {ex.Message}", ex);
 		}
 
-		// Compatibility guard: the major version of ActiveSync.Core the plugin was built against
-		// must match the host — the backend contract is not ABI-stable across majors.
+		// Compatibility guard: the major version of ActiveSync.Contracts the plugin was built
+		// against must match the host — the backend contract is not ABI-stable across majors.
+		string contractName = typeof(IGatewayPlugin).Assembly.GetName().Name!;
 		AssemblyName? contractRef = assembly.GetReferencedAssemblies()
-			.FirstOrDefault(a => a.Name == typeof(IGatewayPlugin).Assembly.GetName().Name);
+			.FirstOrDefault(a => a.Name == contractName);
 		if (contractRef?.Version is { } builtAgainst && builtAgainst.Major != hostContractVersion.Major)
 			throw new InvalidOperationException(
-				$"Plugin '{Path.GetFileName(entryDll)}' was built against ActiveSync.Core " +
+				$"Plugin '{Path.GetFileName(entryDll)}' was built against {contractName} " +
 				$"{builtAgainst} but the host is {hostContractVersion}; major versions must match.");
 
 		List<Type> pluginTypes = assembly.GetTypes()
@@ -105,7 +107,7 @@ public static class PluginLoader
 	}
 
 	/// <summary>
-	///   One load context per plugin. The contract assemblies (Core/Protocol/Backends.* and
+	///   One load context per plugin. The contract assemblies (Contracts/Core/Protocol/Backends.* and
 	///   the framework) resolve from the DEFAULT context so their types unify with the host's;
 	///   only genuinely plugin-private dependencies load from the plugin folder.
 	/// </summary>

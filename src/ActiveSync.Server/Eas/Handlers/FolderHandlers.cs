@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;

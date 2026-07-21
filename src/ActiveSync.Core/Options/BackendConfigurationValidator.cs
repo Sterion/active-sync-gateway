@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using ActiveSync.Core.Accounts;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Security;
 using Microsoft.Extensions.Configuration;

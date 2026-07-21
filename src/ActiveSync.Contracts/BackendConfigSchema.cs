@@ -1,4 +1,4 @@
-namespace ActiveSync.Core.Backend;
+namespace ActiveSync.Contracts;
 
 /// <summary>
 ///   How a <see cref="BackendConfigField" /> is entered and validated. The rendering surface

@@ -1,4 +1,5 @@
 using ActiveSync.Core.Accounts;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Settings;
 using Microsoft.Extensions.Configuration;

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;

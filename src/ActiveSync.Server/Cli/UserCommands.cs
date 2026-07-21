@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Administration;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;

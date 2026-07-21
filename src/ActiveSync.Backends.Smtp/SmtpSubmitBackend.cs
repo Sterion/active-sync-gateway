@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using ActiveSync.Backends.Common;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using MailKit.Net.Smtp;
 using Microsoft.Extensions.Logging;

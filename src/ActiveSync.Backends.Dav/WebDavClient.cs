@@ -4,6 +4,7 @@ using System.Net.Security;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Logging;
 using Microsoft.Extensions.Logging;

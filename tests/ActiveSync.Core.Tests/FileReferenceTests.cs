@@ -1,4 +1,5 @@
 using ActiveSync.Backends.Imap;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 
 namespace ActiveSync.Core.Tests;

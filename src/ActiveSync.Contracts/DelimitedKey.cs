@@ -1,4 +1,4 @@
-namespace ActiveSync.Core.Backend;
+namespace ActiveSync.Contracts;
 
 /// <summary>
 ///   Encodes a composite identifier (e.g. an attachment FileReference or a Search LongId)

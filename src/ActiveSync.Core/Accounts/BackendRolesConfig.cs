@@ -1,3 +1,4 @@
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using Microsoft.Extensions.Configuration;
 

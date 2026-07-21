@@ -1,14 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-	<!-- Published so out-of-repo plugins compile against the backend provider contract
-	     (IBackendProvider, IContentStore, IGatewayPlugin, options, account model). -->
+	<!-- Published for plugins that need the host options/account model beyond the pure contract.
+	     The plugin CONTRACT itself now lives in ActiveSync.Contracts — reference that, not this. -->
 	<PropertyGroup>
 		<IsPackable>true</IsPackable>
 		<PackageId>ActiveSync.Core</PackageId>
-		<Description>ActiveSync Gateway — backend provider contract (IBackendProvider, IContentStore, IGatewayPlugin) and shared options/account model. The package to reference when writing a gateway backend plugin.</Description>
+		<Description>ActiveSync Gateway — host services and the shared options/account model. Backend plugins reference ActiveSync.Contracts (the plugin contract), not this.</Description>
 	</PropertyGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Contracts\ActiveSync.Contracts.csproj" />
 		<ProjectReference Include="..\ActiveSync.Protocol\ActiveSync.Protocol.csproj" />
 		<ProjectReference Include="..\ActiveSync.Crypto\ActiveSync.Crypto.csproj" />
 	</ItemGroup>

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using ActiveSync.Backends.Jmap;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 
 namespace ActiveSync.Core.Tests;

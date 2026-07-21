@@ -69,7 +69,7 @@ public class SecretValueTests
 		Assert.False(SecretValue.TryUnseal(row, Key(), out _, out _));
 		// And vice versa: a config secret is not a decryptable content row.
 		string sealedValue = SecretValue.Seal("pw", Key());
-		Assert.Throws<ActiveSync.Core.Backend.BackendException>(
+		Assert.Throws<ActiveSync.Contracts.BackendException>(
 			() => protector.Unprotect(sealedValue, "alice", "contacts"));
 	}
 }

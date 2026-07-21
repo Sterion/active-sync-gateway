@@ -1,6 +1,6 @@
 using System.Xml.Linq;
 
-namespace ActiveSync.Core.Backend;
+namespace ActiveSync.Contracts;
 
 /// <summary>
 ///   Mail-STORE operations that fall outside the generic content-store surface. Submission

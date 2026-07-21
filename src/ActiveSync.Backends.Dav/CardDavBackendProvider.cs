@@ -1,4 +1,5 @@
 using ActiveSync.Backends.Common;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using Microsoft.Extensions.Logging;

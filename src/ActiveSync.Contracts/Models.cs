@@ -1,7 +1,7 @@
 using System.Xml.Linq;
 using ActiveSync.Protocol;
 
-namespace ActiveSync.Core.Backend;
+namespace ActiveSync.Contracts;
 
 public sealed record BackendCredentials(string UserName, string Password);
 

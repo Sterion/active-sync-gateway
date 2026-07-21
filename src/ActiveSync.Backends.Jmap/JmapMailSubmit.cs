@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using Microsoft.Extensions.Logging;
 using MimeKit;

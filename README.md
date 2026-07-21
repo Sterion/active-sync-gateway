@@ -730,10 +730,14 @@ documented in **[docs/testing.md](docs/testing.md)**.
 src/
   ActiveSync.Protocol/   WBXML codec (all MS-ASWBXML code pages), MS-ASHTTP base64 query
                          parser, EAS constants. No ASP.NET dependencies.
-  ActiveSync.Core/       Backend abstractions (IContentStore, IBackendSession) + the
-                         provider engine (registry, composite session, session factory),
+  ActiveSync.Contracts/  The backend plugin contract — the interfaces/records a provider
+                         implements (IBackendProvider, IContentStore, IGatewayPlugin, roles,
+                         provider settings, config schema). Tiny; the one package a plugin
+                         references. Depends only on Protocol + MS config/DI abstractions.
+  ActiveSync.Core/       The provider engine (registry, composite session, session factory),
                          EF Core state store (devices, folder registry, sync keys +
-                         snapshots, DAV href map), differential sync engine (CollectionDiff).
+                         snapshots, DAV href map), differential sync engine (CollectionDiff),
+                         options/account model. References Contracts.
   ActiveSync.Backends.Common/   MIME/iCalendar/vCard ↔ EAS converters, MS-ASTZ timezone
                          blob, TLS/wire-logging helpers — shared by the providers.
   ActiveSync.Backends.{Imap,Smtp,Dav,Sieve,Jmap,Local}/   one assembly per provider (Dav
@@ -745,6 +749,7 @@ src/
 
 **Backend plugins.** Backends are named *providers* that fill *roles*; a new backend (e.g.
 a Microsoft Graph bridge, or your own) is just another provider assembly. Out-of-repo plugins
-drop into `/app/plugins` and register themselves — no fork required. The contract
-(`ActiveSync.Protocol`, `ActiveSync.Core`, `ActiveSync.Backends.Common`) is published to
-NuGet per release. See **[docs/plugins.md](docs/plugins.md)**.
+drop into `/app/plugins` and register themselves — no fork required. A plugin references the
+one small **`ActiveSync.Contracts`** package (published to NuGet per release; optionally
+`ActiveSync.Backends.Common` for the MIME/iCal/vCard converters). See
+**[docs/plugins.md](docs/plugins.md)**.

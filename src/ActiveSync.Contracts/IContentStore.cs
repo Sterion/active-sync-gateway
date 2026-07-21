@@ -1,6 +1,6 @@
 using System.Xml.Linq;
 
-namespace ActiveSync.Core.Backend;
+namespace ActiveSync.Contracts;
 
 /// <summary>
 ///   Uniform view over a backend data class (mail, calendar, contacts, tasks) used by the

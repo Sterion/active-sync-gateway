@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using System.Xml.Linq;
 using ActiveSync.Backends.Sieve;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Integration.Tests.Infrastructure;

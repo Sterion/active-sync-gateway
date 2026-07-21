@@ -1,4 +1,5 @@
 using ActiveSync.Backends.Converters;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using MimeKit;
 

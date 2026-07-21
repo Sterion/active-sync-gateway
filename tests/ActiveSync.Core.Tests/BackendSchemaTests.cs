@@ -3,6 +3,7 @@ using ActiveSync.Backends.Imap;
 using ActiveSync.Backends.Jmap;
 using ActiveSync.Backends.Sieve;
 using ActiveSync.Backends.Smtp;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using Microsoft.Extensions.Configuration;

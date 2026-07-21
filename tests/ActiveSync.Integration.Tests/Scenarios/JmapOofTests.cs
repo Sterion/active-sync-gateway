@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Xml.Linq;
 using ActiveSync.Backends.Jmap;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Integration.Tests.Infrastructure;
 using ActiveSync.Protocol.Wbxml;

@@ -1,4 +1,5 @@
 using System.Globalization;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 
 namespace ActiveSync.Core.Administration;

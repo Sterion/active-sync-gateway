@@ -1,3 +1,5 @@
+using ActiveSync.Contracts;
+
 namespace ActiveSync.Core.Backend;
 
 /// <summary>

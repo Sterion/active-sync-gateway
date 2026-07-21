@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;

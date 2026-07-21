@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Xml;
+using ActiveSync.Contracts;
 using Ical.Net;
 using Ical.Net.CalendarComponents;
 using Ical.Net.DataTypes;
@@ -115,10 +116,10 @@ public static class JsCalendarConverter
 	public static Dictionary<string, object?> FromICalendar(string ics, JsonElement? existing)
 	{
 		IcalCalendar calendar = IcalCalendar.Load(ics)
-		                        ?? throw new Core.Backend.BackendException("iCalendar could not be parsed.");
+		                        ?? throw new BackendException("iCalendar could not be parsed.");
 		CalendarEvent evt = calendar.Events.FirstOrDefault(e => e.RecurrenceIdentifier is null)
 		                    ?? calendar.Events.FirstOrDefault()
-		                    ?? throw new Core.Backend.BackendException("iCalendar carried no event.");
+		                    ?? throw new BackendException("iCalendar carried no event.");
 
 		Dictionary<string, object?> js = new()
 		{

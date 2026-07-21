@@ -1,4 +1,4 @@
-namespace ActiveSync.Core.Backend;
+namespace ActiveSync.Contracts;
 
 /// <summary>
 ///   A shared CalDAV collection reference resolved from config ("/path/" or same-host URL,

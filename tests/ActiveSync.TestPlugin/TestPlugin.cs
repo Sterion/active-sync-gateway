@@ -1,5 +1,4 @@
-using ActiveSync.Core.Backend;
-using ActiveSync.Core.Plugins;
+using ActiveSync.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 

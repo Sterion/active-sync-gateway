@@ -13,14 +13,18 @@ project doesn't ship.
 
 ## The contract
 
-Reference three NuGet packages (published per release to GitHub Packages, and nuget.org
+Reference **one** NuGet package (published per release to GitHub Packages, and nuget.org
 when configured) — pin the **exact minor** you target (see *Versioning* below):
 
-- `ActiveSync.Protocol` — EAS/WBXML primitives.
-- `ActiveSync.Core` — the provider contract (`IBackendProvider`, `IContentStore`,
-  `IGatewayPlugin`), options and account model.
-- `ActiveSync.Backends.Common` — optional; the MIME/iCalendar/vCard converters and
-  TLS/wire-logging helpers, if your provider speaks those formats.
+- **`ActiveSync.Contracts`** — the whole plugin contract: `IBackendProvider`,
+  `IContentStore`, `IGatewayPlugin`, the roles, provider settings and config schema. It is a
+  tiny assembly that pulls in only `ActiveSync.Protocol` (EAS constants) and the
+  Microsoft.Extensions config/DI abstractions — **not** Core, Crypto or EF Core.
+
+Optionally, if your provider speaks MIME/iCalendar/vCard, also reference:
+
+- `ActiveSync.Backends.Common` — the MIME/iCalendar/vCard converters and TLS/wire-logging
+  helpers. Nothing else needs it.
 
 A plugin assembly contains:
 
@@ -28,8 +32,7 @@ A plugin assembly contains:
 2. One **`IGatewayPlugin`** implementation — the entry point that registers them.
 
 ```csharp
-using ActiveSync.Core.Backend;
-using ActiveSync.Core.Plugins;
+using ActiveSync.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -147,7 +150,7 @@ any private dependencies beside it.
     SomePrivateDep.dll     <- private dependencies, if any
 ```
 
-Do **not** ship copies of `ActiveSync.Core`/`Protocol`/`Backends.Common` or the framework
+Do **not** ship copies of `ActiveSync.Contracts`/`Protocol`/`Backends.Common` or the framework
 in your plugin directory — the loader resolves those from the host so your types unify
 with the gateway's (a private copy would make `IBackendProvider` a different type and the
 provider would be ignored). Mark those package references `<Private>false</Private>` (or
@@ -182,6 +185,6 @@ both as-is; a plugin with a native dependency must ship both RIDs.
 
 The backend contract is **not ABI-stable before 2.0** — `IContentStore` and friends still
 evolve with new EAS features. The loader enforces that a plugin's referenced
-`ActiveSync.Core` **major** version matches the host and aborts on a mismatch. Pin the
+`ActiveSync.Contracts` **major** version matches the host and aborts on a mismatch. Pin the
 exact minor you built against and rebuild your plugin when you upgrade the gateway across a
 minor, until a 2.0 stability guarantee lands.

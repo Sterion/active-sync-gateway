@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Xml.Linq;
 using ActiveSync.Backends.Converters;
 using ActiveSync.Backends.Jmap;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Protocol.Wbxml;
 

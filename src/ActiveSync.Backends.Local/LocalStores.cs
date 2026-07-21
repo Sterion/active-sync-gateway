@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using ActiveSync.Backends.Converters;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;

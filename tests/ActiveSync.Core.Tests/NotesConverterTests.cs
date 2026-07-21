@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using ActiveSync.Backends.Converters;
+using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Protocol.Wbxml;
 
