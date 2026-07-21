@@ -42,10 +42,14 @@ export async function render(container) {
 
 	async function add() {
 		try {
-			await api('/admin/api/shares', {
+			const saved = await api('/admin/api/shares', {
 				body: { user: user.value.trim(), collectionHref: href.value.trim(), readOnly: readOnly.checked },
 			});
-			toast('Grant saved.', 'ok');
+			// A grant for an undeclared login is legitimate (pass-through accounts have no
+			// entry) but is also what a typo looks like — say so rather than refusing it.
+			if (saved.knownUser === false)
+				toast(`Grant saved, but "${saved.user}" is not a declared account — check the spelling.`, 'info');
+			else toast('Grant saved.', 'ok');
 			refresh(container);
 		} catch (e) {
 			toast(e.body?.error ?? 'Granting failed.', 'error');

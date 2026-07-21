@@ -432,7 +432,12 @@ public sealed class AccountResolver
 		return ProviderSettings.FromFlat(flat);
 	}
 
-	private static void ValidateLogin(string login, List<string> failures)
+	/// <summary>
+	///   The rules every login has to satisfy, wherever it is written. Public because the same
+	///   text is also stored by paths that do not create an account — device blocks and shared
+	///   calendar grants — where an unchecked value becomes a row that can never match.
+	/// </summary>
+	public static void ValidateLogin(string login, List<string> failures)
 	{
 		if (string.IsNullOrWhiteSpace(login))
 		{

@@ -61,19 +61,31 @@ internal static class DevicesEndpoints
 			});
 		});
 
-		api.MapPost("devices/block", async (BlockRequest request, SyncDbContext db, CancellationToken ct) =>
+		api.MapPost("devices/block", async (
+			BlockRequest request, SyncDbContext db, AccountResolver resolver, CancellationToken ct) =>
 		{
-			if (string.IsNullOrWhiteSpace(request.User))
-				return Results.BadRequest(new { error = "user is required" });
+			// A block is stored text matched against the login a device presents, so it has to
+			// meet the same rules as a declared login — ':' cannot survive Basic auth and a
+			// control character corrupts the session key separator, so either would persist as
+			// a row that can never apply.
+			if (AdminIdentifiers.LoginProblem(request.User) is { } loginError)
+				return Results.BadRequest(new { error = loginError });
+			string user = request.User!.Trim();
+			// Blocking a login that is NOT declared is legitimate and deliberately allowed:
+			// pass-through authentication means most users have no entry. The flag lets the UI
+			// warn about a typo without the gateway refusing a valid pre-emptive block.
+			await resolver.EnsureFreshAsync(false, ct);
+			bool knownUser = resolver.MergedUsers.ContainsKey(user);
+
 			LoginBlock? existing = await db.LoginBlocks.FirstOrDefaultAsync(
-				b => b.UserName == request.User && b.DeviceId == request.DeviceId, ct);
+				b => b.UserName == user && b.DeviceId == request.DeviceId, ct);
 			if (existing is null)
 			{
 				// DbSet.Add is synchronous and local (no I/O).
 #pragma warning disable VSTHRD103
 				db.LoginBlocks.Add(new LoginBlock
 				{
-					UserName = request.User,
+					UserName = user,
 					DeviceId = request.DeviceId,
 					CreatedUtc = DateTime.UtcNow,
 				});
@@ -81,7 +93,7 @@ internal static class DevicesEndpoints
 				await db.SaveChangesAsync(ct);
 			}
 
-			return Results.Ok(new { request.User, request.DeviceId, blocked = true });
+			return Results.Ok(new { user, request.DeviceId, blocked = true, knownUser });
 		});
 
 		api.MapPost("devices/unblock", async (BlockRequest request, SyncDbContext db, CancellationToken ct) =>

@@ -1,3 +1,4 @@
+using ActiveSync.Core.Accounts;
 using ActiveSync.Core.State;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -35,16 +36,22 @@ internal static class SharesEndpoints
 			return Results.Ok(new { total, entries = grants });
 		});
 
-		api.MapPost("shares", async (ShareRequest request, SyncDbContext db, CancellationToken ct) =>
+		api.MapPost("shares", async (
+			ShareRequest request, SyncDbContext db, AccountResolver resolver, CancellationToken ct) =>
 		{
-			if (string.IsNullOrWhiteSpace(request.User))
-				return Results.BadRequest(new { error = "user is required" });
-			string href = request.CollectionHref?.Trim() ?? "";
-			if (!href.StartsWith('/'))
-				return Results.BadRequest(new { error = "the collection must be an absolute path starting with '/'" });
+			if (AdminIdentifiers.LoginProblem(request.User) is { } loginError)
+				return Results.BadRequest(new { error = loginError });
+			if (AdminIdentifiers.HrefProblem(request.CollectionHref) is { } hrefError)
+				return Results.BadRequest(new { error = hrefError });
+			string user = request.User!.Trim();
+			string href = request.CollectionHref!.Trim();
+			// Like a device block: an undeclared login is allowed (pass-through accounts have no
+			// entry) but reported, so a typo is visible instead of silently never applying.
+			await resolver.EnsureFreshAsync(false, ct);
+			bool knownUser = resolver.MergedUsers.ContainsKey(user);
 
 			SharedCalendarGrant? existing = await db.SharedCalendarGrants.FirstOrDefaultAsync(
-				g => g.UserName == request.User && g.CollectionHref == href, ct);
+				g => g.UserName == user && g.CollectionHref == href, ct);
 			if (existing is not null)
 			{
 				existing.ReadOnly = request.ReadOnly;
@@ -57,7 +64,7 @@ internal static class SharesEndpoints
 #pragma warning disable VSTHRD103
 				db.SharedCalendarGrants.Add(new SharedCalendarGrant
 				{
-					UserName = request.User,
+					UserName = user,
 					CollectionHref = href,
 					ReadOnly = request.ReadOnly,
 					CreatedUtc = DateTime.UtcNow,
@@ -66,8 +73,12 @@ internal static class SharesEndpoints
 				await db.SaveChangesAsync(ct);
 			}
 
-			return Results.Ok(new ShareDto(request.User, href, request.ReadOnly,
-				existing?.CreatedUtc ?? DateTime.UtcNow));
+			return Results.Ok(new
+			{
+				user, collectionHref = href, request.ReadOnly,
+				createdUtc = existing?.CreatedUtc ?? DateTime.UtcNow,
+				knownUser
+			});
 		});
 
 		api.MapDelete("shares", async (string user, string collectionHref, SyncDbContext db, CancellationToken ct) =>
