@@ -74,7 +74,7 @@ public static class EasEndpoint
 		}
 
 		// --- Basic auth ---
-		string clientKey = EndpointAuth.ClientKey(http);
+		string clientKey = EndpointAuth.ClientKey(http, options.Value.Auth);
 		if (EndpointAuth.IsThrottled(http, authThrottle, clientKey))
 			return;
 		BackendCredentials? credentials = HttpBasicAuth.Parse(http.Request.Headers.Authorization.ToString());

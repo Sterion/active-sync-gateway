@@ -186,11 +186,29 @@ devices re-upload); key rotation is not supported yet.
 | `NegativeCacheSeconds` | `15` | A rejected (user, password) pair is remembered this long, so repeats are refused without an IMAP login round-trip (the gateway cannot be used to hammer the mail server). `0` disables. |
 | `SuccessCacheMinutes` | `5` | A successful (user, password) pair is trusted this long without re-verifying against IMAP. Note the flip side: a password revoked on the mail server keeps working against the gateway for at most this long. `0` disables (every request performs an IMAP login). |
 | `UsersRefreshSeconds` | `1` | How often the merged user set is re-checked against the database (one primary-key point-read, only when a request arrives). `0` checks on every request; negative disables live pickup (database edits then need a restart). |
+| `TrustedProxies` | *(empty)* | Addresses or CIDR ranges the gateway accepts `X-Forwarded-For` from, e.g. `["10.0.0.0/8"]`. See below. |
 
 Failed logins are logged at Warning with the client-supplied username, so fail2ban-style
-tooling can match them; when the gateway runs behind a reverse proxy, all clients share the
-proxy's address from the throttle's point of view — keep `MaxFailures` generous (a valid
-login resets the counter, so legitimate users recover immediately).
+tooling can match them.
+
+**Behind a reverse proxy, set `TrustedProxies`.** The throttle keys on the address the
+socket came from, which behind an ingress is the ingress — so every client shares one key
+and one user's fumbled password can `429` the whole gateway. Listing the ingress makes the
+gateway read the real client address out of `X-Forwarded-For` instead:
+
+```json
+"Auth": { "TrustedProxies": [ "10.0.0.0/8", "192.168.1.5" ] }
+```
+
+The trust check is on the *peer*, never on the header, and that ordering is the point:
+`X-Forwarded-For` is client-supplied, so honouring it from an unlisted peer would let an
+attacker mint a fresh throttle key per attempt and never trip the counter — strictly worse
+than the shared key it fixes. From an unlisted peer the header is ignored entirely. Within a
+trusted request the gateway takes the rightmost hop that is not itself a listed proxy;
+anything left of that was appended by something it does not trust. Leaving the list empty
+(the default) keeps the pre-existing peer-address behaviour, which is correct when phones
+reach the gateway directly — in that case keep `MaxFailures` generous (a valid login resets
+the counter, so legitimate users recover immediately).
 
 ## `Log` (logging output & retention)
 

@@ -1,5 +1,7 @@
+using System.Net;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
 
 namespace ActiveSync.Server.Eas;
@@ -12,10 +14,105 @@ namespace ActiveSync.Server.Eas;
 /// </summary>
 internal static class EndpointAuth
 {
-	/// <summary>Per-request throttle key: the client's remote address.</summary>
-	public static string ClientKey(HttpContext http)
+	/// <summary>
+	///   Per-request throttle key: the client's address. That is the socket's peer address,
+	///   EXCEPT when the request arrived from a configured <see cref="AuthOptions.TrustedProxies" />
+	///   hop — behind an ingress the peer is the ingress, so every request would share one key
+	///   and one user's fumbled password would 429 the whole gateway.
+	///   <para>
+	///     The trust check is on the peer, not on the header, and that ordering is the whole
+	///     security property: <c>X-Forwarded-For</c> is client-supplied, so honouring it from
+	///     an untrusted peer would let a direct attacker mint a fresh key per attempt and
+	///     never trip the counter — strictly worse than the shared key this fixes.
+	///   </para>
+	/// </summary>
+	public static string ClientKey(HttpContext http, AuthOptions auth)
 	{
-		return http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+		if (Normalize(http.Connection.RemoteIpAddress) is not { } peer)
+			return "unknown";
+		if (auth.TrustedProxies.Count == 0 || !IsTrusted(peer, auth.TrustedProxies))
+			return peer.ToString();
+
+		// Rightmost entry that is not itself a trusted hop: the address the outermost
+		// trusted proxy actually observed. Everything left of it was appended by something
+		// we do not trust, so it proves nothing.
+		List<string> hops = ForwardedFor(http);
+		for (int i = hops.Count - 1; i >= 0; i--)
+			if (ParseForwardedAddress(hops[i]) is { } candidate && !IsTrusted(candidate, auth.TrustedProxies))
+				return candidate.ToString();
+
+		// Header absent, unparsable, or every hop trusted — the peer is the best key left.
+		return peer.ToString();
+	}
+
+	/// <summary>
+	///   X-Forwarded-For entries, in order. Hard-capped: the header is unauthenticated input
+	///   and the values feed throttle keys, so a long chain must not become work per request.
+	/// </summary>
+	private static List<string> ForwardedFor(HttpContext http)
+	{
+		const int maxHops = 16;
+		List<string> entries = new();
+		foreach (string? header in http.Request.Headers["X-Forwarded-For"])
+		{
+			if (string.IsNullOrEmpty(header))
+				continue;
+			foreach (string part in header.Split(','))
+			{
+				if (entries.Count == maxHops)
+					return entries;
+				string trimmed = part.Trim();
+				if (trimmed.Length > 0)
+					entries.Add(trimmed);
+			}
+		}
+
+		return entries;
+	}
+
+	/// <summary>An X-Forwarded-For entry, which may carry a port ("1.2.3.4:5678", "[::1]:5678").</summary>
+	private static IPAddress? ParseForwardedAddress(string entry)
+	{
+		if (IPAddress.TryParse(entry, out IPAddress? bare))
+			return Normalize(bare);
+		// Only strip a trailing ":port" when it cannot be part of a bare IPv6 address —
+		// "::1" has colons but no port, and IPAddress.TryParse above already accepted it.
+		int lastColon = entry.LastIndexOf(':');
+		if (lastColon > 0 && (entry[0] == '[' || entry.IndexOf(':') == lastColon) &&
+		    IPAddress.TryParse(entry[..lastColon].Trim('[', ']'), out IPAddress? withPort))
+			return Normalize(withPort);
+		return null;
+	}
+
+	/// <summary>
+	///   Kestrel reports an IPv4 peer as ::ffff:a.b.c.d on a dual-stack socket, so an
+	///   operator's "10.0.0.0/8" would never match. Compare in IPv4 terms when we can.
+	/// </summary>
+	private static IPAddress? Normalize(IPAddress? address)
+	{
+		return address is not null && address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+	}
+
+	private static bool IsTrusted(IPAddress address, List<string> trustedProxies)
+	{
+		foreach (string entry in trustedProxies)
+		{
+			string trimmed = entry.Trim();
+			if (trimmed.Length == 0)
+				continue;
+			if (trimmed.Contains('/'))
+			{
+				if (IPNetwork.TryParse(trimmed, out IPNetwork network) && network.Contains(address))
+					return true;
+			}
+			else if (IPAddress.TryParse(trimmed, out IPAddress? single) &&
+			         (Normalize(single) ?? single).Equals(address))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/// <summary>

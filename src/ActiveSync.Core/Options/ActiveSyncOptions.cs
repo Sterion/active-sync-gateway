@@ -62,6 +62,18 @@ public sealed class AuthOptions
 	public int FailureWindowSeconds { get; set; } = 300;
 
 	/// <summary>
+	///   Addresses (or CIDR ranges, e.g. <c>10.0.0.0/8</c>) the gateway accepts
+	///   <c>X-Forwarded-For</c> from. Empty — the default — means the throttle keys on the
+	///   address the socket actually came from, which is correct when phones reach the
+	///   gateway directly and WRONG behind an ingress: every request then shares one key and
+	///   one user's fumbled password 429s everybody. List the ingress here to fix that.
+	///   Only a request that ARRIVED from a listed address may claim a different client
+	///   address; from anyone else the header is ignored, so a direct client cannot mint a
+	///   fresh throttle key per attempt.
+	/// </summary>
+	public List<string> TrustedProxies { get; set; } = [];
+
+	/// <summary>
 	///   How long a rejected (user, password) pair is remembered so repeats are refused
 	///   without an IMAP login round-trip. 0 disables the negative cache.
 	/// </summary>

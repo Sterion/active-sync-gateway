@@ -59,7 +59,7 @@ public static class AutodiscoverEndpoint
 
 		// Autodiscover is authenticated (Basic) just like the EAS endpoint, and shares its
 		// brute-force throttle and credential-verification prologue.
-		string clientKey = EndpointAuth.ClientKey(http);
+		string clientKey = EndpointAuth.ClientKey(http, options.Value.Auth);
 		if (EndpointAuth.IsThrottled(http, authThrottle, clientKey))
 			return;
 		BackendCredentials? credentials = HttpBasicAuth.Parse(http.Request.Headers.Authorization.ToString());
