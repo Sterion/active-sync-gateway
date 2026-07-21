@@ -130,7 +130,10 @@ avoids a cold start of the full app per command; secret-setting verbs (`user pas
   the peer address is the real one); requests that fail either check get a 404.
 - **Dev/test without a key** (`ActiveSync:Encryption:AllowPlaintext=true`): there is no key to
   seal with, so `/cli` falls back to loopback-only — acceptable for the same reason that mode runs
-  content unencrypted.
+  content unencrypted. That fallback is gated on the **explicit flag**, not on the key being
+  absent: if a key is configured but fails to load (an unreadable `KeyFile`, a late mount), `/cli`
+  authenticates nobody and answers 404 for every caller, logging an error at startup. Running in
+  the plaintext mode logs a startup warning.
 - **Disable it** with `eas config set ActiveSync:Cli:Enabled false` (live) — `eas` then falls
   back to running every command in process.
 - **`serve` and `protect` never forward** (they take arbitrary `--Section:Key=value` overrides);

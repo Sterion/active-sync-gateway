@@ -14,13 +14,14 @@ namespace ActiveSync.Server.Cli;
 ///   the same Spectre command tree that a local <c>eas</c> would run executes in-process and its
 ///   stdout/stderr/exit-code are returned.
 ///
-///   <para>Security: the ONLY gate is that the connection is loopback — that is the entire auth
-///   boundary and it is essential (the public HTTP port is the one phones/ingress hit). It holds
-///   because the gateway installs no forwarded-headers middleware, so <c>RemoteIpAddress</c> is the
-///   true transport peer and cannot be spoofed by a header. Secrets are forwarded like any other
-///   command: an in-container loopback caller already sits next to the encryption key and the state
-///   database, so loopback forwarding adds no exposure. The request body is never logged
-///   (<c>UseEasRequestLogging</c> records only method/path/status).</para>
+///   <para>Security: the real gate is proof of the <c>ActiveSync:Encryption</c> master key — the
+///   caller must present a fresh <see cref="LocalCliEnvelope" /> sealed with it, which a co-located
+///   sidecar sharing loopback but not the container's secrets cannot produce. Loopback is kept as a
+///   cheap pre-filter, and it is trustworthy because the gateway installs no forwarded-headers
+///   middleware, so <c>RemoteIpAddress</c> is the true transport peer. Loopback alone is accepted
+///   ONLY when the operator explicitly set <c>Encryption:AllowPlaintext</c> (dev/test); a key that
+///   is missing or fails to load disables the endpoint rather than degrading it. The request body is
+///   never logged (<c>UseEasRequestLogging</c> records only method/path/status).</para>
 /// </summary>
 internal static class LocalCliEndpoint
 {
@@ -42,10 +43,27 @@ internal static class LocalCliEndpoint
 
 	internal static void Map(WebApplication app)
 	{
-		// The master key is a restart-tier bootstrap setting, so derive it once. null = no key
-		// configured (AllowPlaintext dev/test), where loopback is the only gate.
-		byte[]? key = EncryptionKeyLoader.TryLoadKey(
-			app.Services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value.Encryption, out _);
+		// The master key is a restart-tier bootstrap setting, so derive it once.
+		EncryptionOptions encryption =
+			app.Services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value.Encryption;
+		byte[]? key = EncryptionKeyLoader.TryLoadKey(encryption, out string? keyError);
+		// Plaintext (loopback-only) auth is opened by the EXPLICIT AllowPlaintext flag, never by the
+		// key merely being absent — a key that fails to load looks identical to "none configured",
+		// and silently degrading to the model the design rejects is the worst possible default.
+		bool allowPlaintext = key is null && encryption.AllowPlaintext;
+		if (key is null)
+		{
+			if (allowPlaintext)
+				app.Logger.LogWarning(
+					"/cli is running with loopback-only authentication (ActiveSync:Encryption:AllowPlaintext " +
+					"is set, so there is no master key to seal requests with). Any local process — including a " +
+					"co-located sidecar sharing this network namespace — can run every eas command. Configure " +
+					"ActiveSync:Encryption:Key for production.");
+			else
+				app.Logger.LogError(
+					"/cli is DISABLED: no usable ActiveSync:Encryption key, and AllowPlaintext is not set, so " +
+					"no caller can be authenticated. {Error}", keyError ?? "No key is configured.");
+		}
 
 		app.MapPost("/cli", async (HttpContext context, IOptionsMonitor<ActiveSyncOptions> options, CliRequest? request) =>
 		{
@@ -53,7 +71,7 @@ internal static class LocalCliEndpoint
 			// pre-filter; the real auth is proof of the master key (see TryAuthorize).
 			if (!options.CurrentValue.Cli.Enabled || !IsLoopback(context.Connection.RemoteIpAddress))
 				return Results.NotFound();
-			if (!TryAuthorize(request, key, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+			if (!TryAuthorize(request, key, allowPlaintext, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
 				    out string[] args, out string stdin))
 				return Results.NotFound();
 
@@ -69,11 +87,21 @@ internal static class LocalCliEndpoint
 	/// <summary>
 	///   Authenticates a request as a master-key holder. With a key configured, the caller MUST
 	///   supply a fresh <see cref="LocalCliEnvelope" /> sealed with it (a co-located sidecar without
-	///   the key can't) — the plaintext args/stdin are ignored. With no key (AllowPlaintext dev/test)
-	///   there is nothing to prove, so the plain body is accepted behind the loopback gate alone.
+	///   the key can't) — the plaintext args/stdin are ignored, and <paramref name="allowPlaintext" />
+	///   cannot weaken that. Only when there is no key AND the operator explicitly set
+	///   <c>ActiveSync:Encryption:AllowPlaintext</c> (dev/test) is a plain body accepted behind the
+	///   loopback gate alone; a key that simply failed to load authenticates nobody.
 	/// </summary>
-	internal static bool TryAuthorize(CliRequest? request, byte[]? key, long nowUnixMs, out string[] args, out string stdin)
+	internal static bool TryAuthorize(
+		CliRequest? request, byte[]? key, bool allowPlaintext, long nowUnixMs, out string[] args, out string stdin)
 	{
+		if (key is null && !allowPlaintext)
+		{
+			args = [];
+			stdin = "";
+			return false;
+		}
+
 		if (key is null)
 		{
 			args = request?.Args ?? [];

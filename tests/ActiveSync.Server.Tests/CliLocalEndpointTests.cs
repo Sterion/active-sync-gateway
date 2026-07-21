@@ -159,7 +159,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 		string sealed_ = new LocalCliEnvelope(["users", "--all"], "pw", now).Seal(key);
 
 		Assert.True(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(null, null, sealed_), key, now, out string[] args, out string stdin));
+			new LocalCliEndpoint.CliRequest(null, null, sealed_), key, allowPlaintext: false, now, out string[] args, out string stdin));
 		Assert.Equal(["users", "--all"], args);
 		Assert.Equal("pw", stdin);
 	}
@@ -173,13 +173,13 @@ public sealed class CliLocalEndpointTests : IDisposable
 
 		// Sealed by a DIFFERENT key (a sidecar guessing) — rejected.
 		Assert.False(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(null, null, sealedWithOther), key, now, out _, out _));
+			new LocalCliEndpoint.CliRequest(null, null, sealedWithOther), key, allowPlaintext: false, now, out _, out _));
 		// No envelope at all — rejected.
 		Assert.False(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(null, null, null), key, now, out _, out _));
+			new LocalCliEndpoint.CliRequest(null, null, null), key, allowPlaintext: false, now, out _, out _));
 		// A plaintext body is ignored when a key is configured — rejected.
 		Assert.False(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(["users"], null, null), key, now, out _, out _));
+			new LocalCliEndpoint.CliRequest(["users"], null, null), key, allowPlaintext: false, now, out _, out _));
 	}
 
 	[Fact]
@@ -190,17 +190,42 @@ public sealed class CliLocalEndpointTests : IDisposable
 		string stale = new LocalCliEnvelope(["users"], null, now - LocalCliEndpoint.AuthWindowMs - 5_000).Seal(key);
 
 		Assert.False(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(null, null, stale), key, now, out _, out _));
+			new LocalCliEndpoint.CliRequest(null, null, stale), key, allowPlaintext: false, now, out _, out _));
 	}
 
 	[Fact]
-	public void Authorize_NoKeyConfigured_AcceptsPlaintext()
+	public void Authorize_NoKey_WithoutAllowPlaintext_Refuses()
+	{
+		// L22: key absence must NOT be what selects plaintext mode. A key that fails to load (an
+		// unreadable KeyFile, a mount that came up late) is indistinguishable from "no key
+		// configured", and silently degrading to loopback-only is the model the design rejects.
+		// Only an explicit ActiveSync:Encryption:AllowPlaintext may open that door.
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		Assert.False(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(["users"], "in", null), key: null, allowPlaintext: false, now,
+			out _, out _));
+	}
+
+	[Fact]
+	public void Authorize_NoKey_WithAllowPlaintext_AcceptsPlaintext()
 	{
 		// AllowPlaintext dev/test: nothing to prove, so the plain body passes (loopback still gates).
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		Assert.True(LocalCliEndpoint.TryAuthorize(
-			new LocalCliEndpoint.CliRequest(["users"], "in", null), key: null, now, out string[] args, out string stdin));
+			new LocalCliEndpoint.CliRequest(["users"], "in", null), key: null, allowPlaintext: true, now,
+			out string[] args, out string stdin));
 		Assert.Equal(["users"], args);
 		Assert.Equal("in", stdin);
+	}
+
+	[Fact]
+	public void Authorize_KeyConfigured_IgnoresAllowPlaintext()
+	{
+		// A key wins over the flag: a plaintext body is still refused, so a stray AllowPlaintext in
+		// a production config can't be used to bypass the envelope.
+		byte[] key = NewKey();
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		Assert.False(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(["users"], "in", null), key, allowPlaintext: true, now, out _, out _));
 	}
 }

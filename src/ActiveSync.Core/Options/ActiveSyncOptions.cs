@@ -333,8 +333,9 @@ public sealed class WebUiOptions
 /// <summary>
 ///   The loopback CLI-forwarding endpoint (<c>POST /cli</c>). The slim <c>eas</c> client posts a
 ///   command line here so it runs against the already-warm gateway instead of paying a cold
-///   process start. Reachable only from loopback connections — that gate is the whole auth
-///   boundary, so keeping it on is safe; set <see cref="Enabled" /> false to remove the endpoint.
+///   process start. Reachable only from loopback connections, and (unless
+///   <c>Encryption:AllowPlaintext</c> is explicitly set) only by a caller that can seal a request
+///   with the master key; set <see cref="Enabled" /> false to remove the endpoint entirely.
 /// </summary>
 public sealed class CliOptions
 {

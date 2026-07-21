@@ -346,7 +346,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **11. Plugin & settings privilege** — ~~`K38`~~ ~~`B22`~~ ~~`K39`~~ ~~`K40`~~ ~~`K41`~~ ~~`K42`~~ ~~`K43`~~ ~~`K44`~~ **COMPLETE**
 > `K38`+`B22` `Plugins:Directory` is DB-settable → admin UI to in-process arbitrary code execution. The rest is loader robustness: bypassable version guard, uncaught `GetTypes()`, host-first resolution downgrading plugin-private dependencies.
 
-**12. Local CLI authentication** — `L22` `L23` `L24` `L25` `L26` `L27` `K54`
+**12. Local CLI authentication** — ~~`L22`~~ `L23` `L24` `L25` `L26` `L27` `K54`
 > `L22` with no encryption key, `/cli` silently degrades to loopback-only auth — the model the design explicitly rejects. Plus plaintext responses, no audit trail, and replayable envelopes.
 
 **13. Unified secret redaction** — `S7` `L29` `L30` `E15` `E23` `C5` `K37` `K53` `L42` `L43`
@@ -654,7 +654,7 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 `W19`–`W21` Low/Nit: raw `FormatException`/overflow on a malformed `ProtocolVersion` (`W19`); `EasVersion.Parse` uses the **current culture** for integer parsing while the rest of the layer is careful to use invariant (`W20`); `EasFolderType` missing 18/19, `EasClass` missing `SMS` (`W21`).
 
 ## Area L — CLI (27)
-`L22` **High** With no encryption key configured, `/cli` falls back to loopback-only auth — so a production misconfiguration silently degrades to the model the design explicitly rejects, and any co-located sidecar or local process gets `eas user set`, `eas device password`, `eas purge user --yes` — `Cli/LocalCliEndpoint.cs:75`. Gate on an explicit `AllowPlaintext` + startup warning, not on key absence.
+`L22` **High** With no encryption key configured, `/cli` falls back to loopback-only auth — so a production misconfiguration silently degrades to the model the design explicitly rejects, and any co-located sidecar or local process gets `eas user set`, `eas device password`, `eas purge user --yes` — `Cli/LocalCliEndpoint.cs:75`. Gate on an explicit `AllowPlaintext` + startup warning, not on key absence. **FIXED** — `TryAuthorize` takes `allowPlaintext` explicitly; a key that is missing or fails to load now 404s every caller (startup logs an error), and the plaintext mode logs a startup warning. A configured key still wins over the flag.
 `L23` **Med** Requests are sealed; responses (including `eas device password` output) travel loopback in plaintext — `Cli/LocalCliEndpoint.cs:60`.
 `L24` **Med** No audit trail for any `/cli` command — account deletion, device-password disclosure, password changes leave no record — `Cli/LocalCliEndpoint.cs:50`.
 `L25` **Med** Process-global `Console.SetOut/SetError` inside a live web server: for the duration of every forwarded command, all gateway log output for all concurrent requests is captured into that command's stdout and vanishes from the container log — `Cli/LocalCliEndpoint.cs:128`.
