@@ -613,3 +613,11 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 `S7` **Med** Four independent secret-redaction implementations: `ConfigCommands.Mask`, `StartupSummary.Redact`, `BackendsEndpoints.SecretMask`, `MailKitWireLogger.Redact` — each with a different notion of what to hide. See item 13.
 `S8` **Nit** `Backends.Common` spans three namespaces across 19 files (`ActiveSync.Backends`, `.Common`, `.Converters`); `ServerCertificateValidator.cs:5` is the odd one out.
 `S9` **Nit** Ten+ copies of the same three-line `#pragma warning disable VSTHRD103` + identical explanatory comment (`SyncStateService` alone has five). Hoist to one file-level suppression with the comment once, or an `.editorconfig` entry with the rationale.
+
+## Found while working the queue
+
+*Not part of any item's scope when they were spotted. Unnumbered by area on purpose — assign an ID and an item when one is picked up.*
+
+`H32` **Med** `EnsureNotIn` in `JmapCalendarStore` and `JmapContactStore` reports only the JMAP `SetError.type`, discarding `description` and — for `invalidProperties`, the single most common `*/set` failure — the `properties` array naming exactly which members the server rejected. Diagnosing `H4` required patching the raw error text in by hand; without it the message is "invalidProperties." and nothing else, for a request carrying a dozen members. Include the rejected property names. Related to `H10` but distinct: this is the message, not the checking. — `Jmap/JmapCalendarStore.cs`, `JmapContactStore.cs` (`EnsureNotIn`).
+
+`D36` **Med** `CalendarConverter.FromApplicationData` merges the EAS payload onto the *stored* iCalendar, so for calendar items **an absent element means "keep", never "clear"** — there is no way for a client to remove a Location, a Body or an attendee list. This is the opposite of the presence-decides rule `D4` established for contacts, it is undocumented, and it silently bounded `H7`: the JMAP null-out fix cannot express a clear for any field this merge restores first (found when a Location-based `H7` reproducer went green with and without the fix). Affects CalDAV and JMAP alike since both go through this converter. Decide the rule once, as `D4` did, and write it down. — `Backends.Common/Converters/CalendarConverter.cs:193`.
