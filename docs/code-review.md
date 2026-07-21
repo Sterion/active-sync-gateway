@@ -73,30 +73,9 @@ only, so the cursor never advanced and the next session would have redone the it
 ran passed. The check it did not run was the one that mattered. A master that reads the summary and
 moves on inherits exactly that class of failure.
 
-### Running the queue hands-off
+**Interrupt at any point.** Whatever is committed and struck through stays done, and the same prompt resumes from there — this document is the cursor, so nothing needs to survive between sessions.
 
-`/loop` self-advances with a fresh context per item, because this document is the cursor — struck-through findings mark the position, so no state has to survive between iterations.
-
-```
-/loop Read docs/code-review.md. Implement the lowest-numbered item in Part 1 that
-still has findings not struck through — exactly one item per iteration, then stop.
-Follow the working protocol in that document, including the [LIVE] live-backend rule.
-When every item is struck through, say so and end the loop.
-```
-
-Bound it to a range while you gauge cost or want to inspect the output — append to the first sentence:
-
-```
-…not struck through, within items 1-14, and implement that one item…
-```
-
-Interrupt at any point: whatever is committed and struck through stays done, and the identical command resumes from there.
-
-**Before a run that includes [LIVE] items**, bring Stalwart up (or let the session do it — it reuses a warm container):
-
-```powershell
-./scripts/stalwart-up.ps1      # Windows — canonical ports, no rebuild
-```
+> **Do not use `/loop` for this queue.** It accumulates context across iterations rather than starting each one clean, so a long run degrades exactly the way a single over-long session does — without the visibility. Orchestrated mode above is the replacement, and it is what the results log is written for.
 
 ### Standing context for any session
 
