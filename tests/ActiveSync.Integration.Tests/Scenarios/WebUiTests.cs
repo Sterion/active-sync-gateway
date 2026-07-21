@@ -71,7 +71,9 @@ public sealed class WebUiTests(GatewayFixture gateway)
 		Assert.Equal(HttpStatusCode.OK, shell.StatusCode);
 		Assert.Contains("ActiveSync", await shell.Content.ReadAsStringAsync());
 		Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/shared/theme.css")).StatusCode);
-		Assert.Equal("default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",
+		Assert.Equal(
+			"default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; " +
+			"base-uri 'none'; form-action 'self'; object-src 'none'",
 			shell.Headers.GetValues("Content-Security-Policy").Single());
 
 		// API without a session: 401. Login without the CSRF header: 403.

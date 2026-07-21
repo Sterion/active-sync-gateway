@@ -194,8 +194,9 @@ public sealed class WebUiAdminApiTests(GatewayFixture gateway) : IAsyncLifetime
 		Assert.Equal(HttpStatusCode.OK, (await PostAsync("/admin/api/shares",
 			new { user = "shareuser", collectionHref = "/dav/cal/family/", readOnly = true })).StatusCode);
 
+		// Paged like /devices: { total, entries }.
 		JsonElement shares = await _client.GetFromJsonAsync<JsonElement>("/admin/api/shares?user=shareuser");
-		JsonElement grant = Assert.Single(shares.EnumerateArray());
+		JsonElement grant = Assert.Single(shares.GetProperty("entries").EnumerateArray());
 		Assert.True(grant.GetProperty("readOnly").GetBoolean());
 
 		Assert.Equal(HttpStatusCode.OK, (await DeleteAsync(

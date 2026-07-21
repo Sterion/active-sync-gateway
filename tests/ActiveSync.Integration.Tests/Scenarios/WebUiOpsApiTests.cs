@@ -76,16 +76,18 @@ public sealed class WebUiOpsApiTests(GatewayFixture gateway) : IAsyncLifetime
 	{
 		await SeedDeviceAsync("deviceuser", "DEVOPS01");
 
-		// List shows the seeded partnership, unblocked.
+		// List shows the seeded partnership, unblocked. The listing is paged: { total, entries }.
 		JsonElement devices = await _client.GetFromJsonAsync<JsonElement>("/admin/api/devices?user=deviceuser");
-		JsonElement device = Assert.Single(devices.EnumerateArray());
+		Assert.Equal(1, devices.GetProperty("total").GetInt32());
+		JsonElement device = Assert.Single(devices.GetProperty("entries").EnumerateArray());
 		Assert.False(device.GetProperty("blocked").GetBoolean());
 
 		// Block (device-level) -> listed as blocked; unblock reverts.
 		Assert.Equal(HttpStatusCode.OK,
 			(await PostAsync("/admin/api/devices/block", new { user = "deviceuser", deviceId = "DEVOPS01" })).StatusCode);
 		devices = await _client.GetFromJsonAsync<JsonElement>("/admin/api/devices?user=deviceuser");
-		Assert.True(devices.EnumerateArray().Single().GetProperty("blocked").GetBoolean());
+		Assert.True(devices.GetProperty("entries").EnumerateArray().Single()
+			.GetProperty("blocked").GetBoolean());
 		Assert.Equal(HttpStatusCode.OK,
 			(await PostAsync("/admin/api/devices/unblock", new { user = "deviceuser", deviceId = "DEVOPS01" })).StatusCode);
 
@@ -95,7 +97,8 @@ public sealed class WebUiOpsApiTests(GatewayFixture gateway) : IAsyncLifetime
 		Assert.Equal(HttpStatusCode.OK, (await PostAsync("/admin/api/devices/wipe",
 			new { user = "deviceuser", deviceId = "DEVOPS01", cancel = false, confirm = "DEVOPS01" })).StatusCode);
 		devices = await _client.GetFromJsonAsync<JsonElement>("/admin/api/devices?user=deviceuser");
-		Assert.True(devices.EnumerateArray().Single().GetProperty("pendingAccountWipe").GetBoolean());
+		Assert.True(devices.GetProperty("entries").EnumerateArray().Single()
+			.GetProperty("pendingAccountWipe").GetBoolean());
 		Assert.Equal(HttpStatusCode.OK, (await PostAsync("/admin/api/devices/wipe",
 			new { user = "deviceuser", deviceId = "DEVOPS01", cancel = true })).StatusCode);
 
@@ -106,7 +109,7 @@ public sealed class WebUiOpsApiTests(GatewayFixture gateway) : IAsyncLifetime
 			new { user = "deviceuser", deviceId = "DEVOPS01", confirm = "DEVOPS01" });
 		Assert.Equal(HttpStatusCode.OK, purge.StatusCode);
 		devices = await _client.GetFromJsonAsync<JsonElement>("/admin/api/devices?user=deviceuser");
-		Assert.Empty(devices.EnumerateArray());
+		Assert.Empty(devices.GetProperty("entries").EnumerateArray());
 	}
 
 	[Fact]

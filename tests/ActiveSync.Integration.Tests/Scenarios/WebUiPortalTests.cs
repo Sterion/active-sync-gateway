@@ -81,11 +81,18 @@ public sealed class WebUiPortalTests(GatewayFixture gateway) : IAsyncLifetime
 		{
 			userName = "real-imap-a",
 			password = "imap-secret-a",
-			settings = new Dictionary<string, string> { ["Port"] = "993" },
 			provider = "jmap",
 			enabled = false
 		});
 		Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+
+		// A connection setting is NOT part of the self-service surface (C1): the imap
+		// provider marks no field SelfServiceEditable, so every settings key is refused.
+		HttpResponseMessage repoint = await SendAsync(clientA, "PUT", "/user/api/backends/MailStore", new
+		{
+			settings = new Dictionary<string, string> { ["Host"] = "attacker.example.net" }
+		});
+		Assert.Equal(HttpStatusCode.BadRequest, repoint.StatusCode);
 
 		meA = await clientA.GetFromJsonAsync<JsonElement>("/user/api/me");
 		JsonElement mailStore = meA.GetProperty("backends").GetProperty("MailStore");
@@ -145,14 +152,16 @@ public sealed class WebUiPortalTests(GatewayFixture gateway) : IAsyncLifetime
 		using HttpClient client = await LoginAsync(UserA);
 		JsonElement meta = await client.GetFromJsonAsync<JsonElement>("/user/api/backends/meta");
 
-		// The fixture serves mail over imap; the portal gets that provider's field descriptions
-		// so it can render "Host" rather than asking the user to invent a key.
+		// The fixture serves mail over imap. The provider is named so the portal can label the
+		// credential fields, but the FIELD list is only what this caller may write for
+		// themselves (C1) — imap opts nothing in, so it is empty. Host/Port are connection
+		// settings and live in the admin editor.
 		JsonElement mailStore = meta.GetProperty("MailStore");
 		Assert.Equal("imap", mailStore.GetProperty("provider").GetString());
 		string[] names = [.. mailStore.GetProperty("fields").EnumerateArray()
 			.Select(f => f.GetProperty("name").GetString()!)];
-		Assert.Contains("Host", names);
-		Assert.Contains("Port", names);
+		Assert.DoesNotContain("Host", names);
+		Assert.DoesNotContain("Port", names);
 
 		// Descriptions only — no configured value, and nothing secret-shaped, is in there.
 		string body = await client.GetStringAsync("/user/api/backends/meta");
@@ -161,31 +170,33 @@ public sealed class WebUiPortalTests(GatewayFixture gateway) : IAsyncLifetime
 	}
 
 	[Fact]
-	public async Task Saving_KeepsSettingsTheSchemaDoesNotCover()
+	public async Task Saving_RefusesAdministeredSettings_AndLeavesThemAlone()
 	{
-		// The portal renders only described fields, and its PUT replaces the settings wholesale
-		// — so a key it cannot show has to ride along, or saving a password would delete it.
+		// INVERTED BY C1. This used to assert that the portal carried undescribed keys through
+		// its own save. It no longer accepts them at all: a connection key is refused with 400,
+		// and keys an administrator set are preserved by the server instead of being echoed
+		// back by the client. Same guarantee ("a portal save does not delete them"), moved to
+		// the side of the wire that can be trusted with it.
 		using HttpClient client = await LoginAsync(UserA);
-		Assert.Equal(HttpStatusCode.OK, (await SendAsync(client, "PUT", "/user/api/backends/Contacts", new
+		HttpResponseMessage refused = await SendAsync(client, "PUT", "/user/api/backends/Contacts", new
 		{
 			settings = new Dictionary<string, string?>
 			{
 				["BaseUrl"] = "https://dav.example.com", ["PluginOnlyKey"] = "keep-me"
 			}
-		})).StatusCode);
+		});
+		Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+		JsonElement error = await refused.Content.ReadFromJsonAsync<JsonElement>();
+		string[] fields = [.. error.GetProperty("failures").EnumerateArray()
+			.Select(f => f.GetProperty("field").GetString()!)];
+		Assert.Equal(["BaseUrl", "PluginOnlyKey"], fields);
 
-		// What the view does on save: described values from the form, undescribed ones carried.
-		Assert.Equal(HttpStatusCode.OK, (await SendAsync(client, "PUT", "/user/api/backends/Contacts", new
-		{
-			settings = new Dictionary<string, string?>
-			{
-				["BaseUrl"] = "https://dav2.example.com", ["PluginOnlyKey"] = "keep-me"
-			}
-		})).StatusCode);
-
+		// A credential-only save still works and does not disturb the role.
+		Assert.Equal(HttpStatusCode.OK, (await SendAsync(client, "PUT", "/user/api/backends/Contacts",
+			new { userName = "contacts-a" })).StatusCode);
 		JsonElement me = await client.GetFromJsonAsync<JsonElement>("/user/api/me");
-		JsonElement settings = me.GetProperty("backends").GetProperty("Contacts").GetProperty("settings");
-		Assert.Equal("https://dav2.example.com", settings.GetProperty("BaseUrl").GetString());
-		Assert.Equal("keep-me", settings.GetProperty("PluginOnlyKey").GetString());
+		JsonElement contacts = me.GetProperty("backends").GetProperty("Contacts");
+		Assert.Equal("contacts-a", contacts.GetProperty("userName").GetString());
+		Assert.False(contacts.GetProperty("enabled").GetBoolean());
 	}
 }
