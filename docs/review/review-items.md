@@ -1,8 +1,8 @@
 # ActiveSync Gateway — source review findings
 
-> **Execution protocol: [`review-fix.md`](review-fix.md) — read it first.**
+> **Execution protocol: [`fix-review.md`](fix-review.md) — read it first.**
 > This file holds only project data: the findings, the work queue, the commands, the invariants.
-> Nothing here describes *how* to work; that lives in `review-fix.md` and does not change.
+> Nothing here describes *how* to work; that lives in `fix-review.md` and does not change.
 > Results of completed items are recorded in [`review-results.md`](review-results.md).
 
 **Scope:** all production code under `src/` — ~42k lines, 14 projects. Tests, docs and CI read for
@@ -13,7 +13,7 @@ than line by line.)
 
 **Baseline commit:** `ce6259c` — every `file:line` below is exact as of this commit. Line numbers
 drift as items land; locate by symbol. See "Locating a finding after code has moved" in
-`review-fix.md`.
+`fix-review.md`.
 
 **Baseline health at `ce6259c`:** build 0 warnings · 543 unit tests green · 124 integration tests
 passed, 0 skipped.
@@ -25,7 +25,7 @@ passed, 0 skipped.
 ## Invariants
 
 These never change as work progresses — striking a finding through does not remove it. Any drift
-means an edit went wrong. See "Integrity check" in `review-fix.md`.
+means an edit went wrong. See "Integrity check" in `fix-review.md`.
 
 | Invariant | Value |
 |---|---|
@@ -37,26 +37,26 @@ means an edit went wrong. See "Integrity check" in `review-fix.md`.
 | Encoding-damage matches | **0** |
 
 ```sh
-sed -n '/^# WORK QUEUE/,/^# FINDINGS/p' docs/review-items.md > /tmp/q
+sed -n '/^# WORK QUEUE/,/^# FINDINGS/p' docs/review/review-items.md > /tmp/q
 echo "items=$(grep -cE '^\*\*[0-9]+\. ' /tmp/q) live=$(grep -cE '^\*\*[0-9]+\..*\[LIVE\]' /tmp/q)"
 grep -E '^\*\*[0-9]+\. ' /tmp/q | grep -o '`[ABCDEFHKLSW][0-9]\+`' | tr -d '`' | sort > /tmp/f
 echo "assigned=$(wc -l </tmp/f) unique=$(sort -u /tmp/f|wc -l) dupes=$(uniq -d /tmp/f|wc -l)"
-grep -c $'\xc3\xa2\xc2\x80\|\xc3\xb0\xc2\x9f' docs/review-items.md
+grep -c $'\xc3\xa2\xc2\x80\|\xc3\xb0\xc2\x9f' docs/review/review-items.md
 ```
 
 ---
 
 ## Orientation documents
 
-Read before touching the areas they cover — see "Orient before you start" in `review-fix.md`. These
+Read before touching the areas they cover — see "Orient before you start" in `fix-review.md`. These
 carry constraints the code does not state and a reasonable change will violate silently.
 
 | Document | Read before touching | Contains |
 |---|---|---|
-| [`AGENTS.md`](../AGENTS.md) | **any structural work** (items 15–20) | Solution layout and the dependency rule; per-layer invariants; coding conventions; decisions already taken and why |
-| [`README.md`](../README.md) | first item in an unfamiliar area | what the project is, how the pieces fit |
-| [`docs/testing.md`](testing.md) | any [LIVE] item | backend stacks, how the suites skip, which runner to use |
-| [`docs/plugins.md`](plugins.md) | items 15–17 | the published plugin contract |
+| [`AGENTS.md`](../../AGENTS.md) | **any structural work** (items 15–20) | Solution layout and the dependency rule; per-layer invariants; coding conventions; decisions already taken and why |
+| [`README.md`](../../README.md) | first item in an unfamiliar area | what the project is, how the pieces fit |
+| [`docs/testing.md`](../testing.md) | any [LIVE] item | backend stacks, how the suites skip, which runner to use |
+| [`docs/plugins.md`](../plugins.md) | items 15–17 | the published plugin contract |
 
 **Hard gates:**
 

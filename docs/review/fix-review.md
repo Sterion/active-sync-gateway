@@ -1,4 +1,4 @@
-# review-fix — how to execute a code review queue
+# fix-review — how to execute a code review queue
 
 **This file is project-independent and should not need editing.** It describes the roles, the
 protocol and the verification. Everything project-specific — the findings, the work queue, the build
@@ -15,7 +15,7 @@ certainly belongs in `review-items.md` instead.
 | File | Changes? | Contains |
 |---|---|---|
 | `conduct-review.md` | never | how to *produce* a review |
-| **`review-fix.md`** (this) | never | how to *execute* one |
+| **`fix-review.md`** (this) | never | how to *execute* one |
 | `review-items.md` | constantly | the findings, the queue, the project's commands and invariants |
 
 ## The roles
@@ -33,7 +33,7 @@ Never edits source or tests.
 
 Single item, or a small range in one session:
 
-> Read `review-fix.md` and `review-items.md`. Implement **item N**. Follow the working protocol.
+> Read `fix-review.md` and `review-items.md`. Implement **item N**. Follow the working protocol.
 
 Items are sizing units, not prompt units — ask for a range freely. Over-asking is safe: every
 finished finding is committed and struck through, so an overflowing session stops at a clean boundary
@@ -46,7 +46,7 @@ and the next resumes there. Prefer 3–5 items per run; quality decays with cont
 For any long run. The master's context grows only by coordination overhead, so each item gets a clean
 slate.
 
-> Read `review-fix.md` and `review-items.md`. Work **items N through M** as an orchestrator.
+> Read `fix-review.md` and `review-items.md`. Work **items N through M** as an orchestrator.
 >
 > For each item in order, spawn **one subagent** to implement it following the working protocol. Run
 > them **strictly sequentially** — never two at once; they collide in git and in `review-items.md`.

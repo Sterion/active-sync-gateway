@@ -185,7 +185,7 @@ done must not change them — which constrains the marking format (below).
 # PART C — The output
 
 **Write the findings into `review-items.md`, using `review-items-TEMPLATE.md`. Do not write a
-protocol section — that already exists, in `review-fix.md`, and does not change.**
+protocol section — that already exists, in `fix-review.md`, and does not change.**
 
 This separation is the most important structural decision in the whole method, and it was learned
 the hard way: the first version put the protocol and the findings in one file, so every protocol
@@ -195,11 +195,11 @@ protocol fixes, nine chances to corrupt live state.
 | File | Changes? | Owns |
 |---|---|---|
 | `conduct-review.md` | never | how to produce a review (this file) |
-| `review-fix.md` | never | how to execute one — roles, protocol, verification |
+| `fix-review.md` | never | how to execute one — roles, protocol, verification |
 | **`review-items.md`** | constantly | findings, work queue, project commands, invariants |
 | `review-results.md` | per item | orchestrator's record of what was done and verified |
 
-The payoff: once `review-fix.md` is right, it is right for every project. A new review produces one
+The payoff: once `fix-review.md` is right, it is right for every project. A new review produces one
 new file and reuses hardened machinery, instead of re-deriving a protocol that took a full
 implementation run to get correct.
 
@@ -207,7 +207,7 @@ implementation run to get correct.
 abstractly — the build command, the test commands and their expected counts, how to start a live
 environment, the baseline commit, the warning baseline, whether breaking changes are acceptable —
 must be filled into `review-items.md`'s **Project commands** and **Standing context** sections. If
-those are vague, `review-fix.md` has nothing concrete to point at and a worker will improvise.
+those are vague, `fix-review.md` has nothing concrete to point at and a worker will improvise.
 
 ### Optional: a detail file
 
@@ -389,7 +389,7 @@ For calibration, on ~42k lines:
 > finding list by area.
 >
 > Do **not** write a protocol, a working agreement, or instructions for implementers — those live in
-> `review-fix.md`, which is project-independent and must not be edited. Your job is the data it
+> `fix-review.md`, which is project-independent and must not be edited. Your job is the data it
 > operates on.
 >
 > Verify coverage mechanically before you finish — every finding assigned to exactly one item, no

@@ -40,14 +40,16 @@ This README is the overview and getting-started guide. The reference material li
 - **[Testing & backend stacks](docs/testing.md)** — the integration suite, the CI pipeline
   and how to run each backend.
 
-Source-review programme — an exhaustive review of `src/`, being worked through item by item:
+Source-review programme ([`docs/review/`](docs/review)) — an exhaustive review of `src/`, being
+worked through item by item:
 
-- **[Review findings & work queue](docs/review-items.md)** — the findings, the numbered
+- **[Review findings & work queue](docs/review/review-items.md)** — the findings, the numbered
   queue, and this project's commands and invariants. The only file that changes as work lands.
-- **[How to execute the queue](docs/review-fix.md)** — roles, working protocol, verification.
+- **[How to execute the queue](docs/review/fix-review.md)** — roles, working protocol, verification.
   Project-independent.
-- **[Results log](docs/review-results.md)** — what each completed item did, independently verified.
-- **[How the review was produced](docs/conduct-review.md)** — method notes, reusable elsewhere.
+- **[Results log](docs/review/review-results.md)** — what each completed item did, independently
+  verified.
+- **[How the review was produced](docs/review/conduct-review.md)** — method notes, reusable elsewhere.
 
 ## Features
 

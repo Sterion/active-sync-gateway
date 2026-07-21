@@ -1,8 +1,8 @@
 # Raw findings — part 1 (areas: Core state/sync/backend, Core accounts/settings/options, WebUi, Backends Common/Imap/Smtp/Local/Sieve)
 
-Companion to [`review-items.md`](review-items.md), which holds the work queue and the full finding index — start there. The execution protocol is [`review-fix.md`](review-fix.md).
+Companion to [`review-items.md`](review-items.md), which holds the work queue and the full finding index — start there. The execution protocol is [`fix-review.md`](fix-review.md).
 
-> **⚠️ Every `file:line` below is exact as of commit `ce6259c` and drifts as soon as any item lands.** Locate findings by the enclosing type/member and the quoted code, using line numbers only to disambiguate. See "Locating a finding after code has moved" in [`review-fix.md`](review-fix.md) for the git commands to trace where something went.
+> **⚠️ Every `file:line` below is exact as of commit `ce6259c` and drifts as soon as any item lands.** Locate findings by the enclosing type/member and the quoted code, using line numbers only to disambiguate. See "Locating a finding after code has moved" in [`fix-review.md`](fix-review.md) for the git commands to trace where something went.
 
 Severity legend: Critical / High / Medium / Low / Nit
 
