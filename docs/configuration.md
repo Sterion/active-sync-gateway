@@ -207,14 +207,23 @@ wire logging) is in the [Logging](../README.md#configuration) narrative in the R
 | `DbMinimumLevel` | `Information` | Minimum level persisted to the database: `Information`, `Warning`, `Error` or `Fatal`. |
 | `RetentionDays` | `7` | Days of database log history to keep; a background sweep deletes older. `0` disables the sweep. |
 
-## `SelfSignedTls` (built-in HTTPS endpoint)
+## `Tls` (the gateway's HTTPS listener)
 
-Both keys are **restart-tier**. See [HTTPS](../README.md#https-self-signed-by-default-or-bring-your-own-certificate).
+All keys are **restart-tier** — the listener binds and the certificate is read once at startup
+(a rotated mount takes effect on the next restart). The certificate is either operator-supplied
+(`CertificatePath` — a mounted PEM/PFX, e.g. cert-manager/ACME) or, when none is set, a
+self-signed one generated on first serve and persisted in the state database (sealed with the
+Encryption master key). A configured-but-unloadable certificate fails startup. Inspect the
+active certificate on the admin **TLS** page or with [`eas tls`](cli.md#inspection). See
+[HTTPS](../README.md#https-self-signed-by-default-or-bring-your-own-certificate).
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `Enabled` | `true` | Serve HTTPS on `Port` with a self-signed certificate generated on first serve and persisted in the state database. Skipped automatically when configuration declares a Kestrel HTTPS endpoint. |
-| `Port` | `5443` | Listen port of the self-signed HTTPS endpoint. |
+| `Enabled` | `true` | Serve the gateway's own HTTPS listener on `Port`. `false` = no HTTPS (terminate TLS in front of the gateway). |
+| `Port` | `5443` | HTTPS listen port. |
+| `CertificatePath` | `null` | Path to a mounted certificate to serve instead of the self-signed one: a PEM full chain (pair it with `CertificateKeyPath`) or a PKCS#12/PFX bundle. Unset = self-signed. |
+| `CertificateKeyPath` | `null` | Path to the PEM private key that pairs with a PEM `CertificatePath`. Leave unset for a PFX bundle. |
+| `CertificatePassword` | `null` | Password for the PFX bundle, or an encrypted PEM key. Stored sealed (`enc:v1:`) and unsealed only when the certificate is loaded. |
 
 ## `Policy` (device security policies)
 

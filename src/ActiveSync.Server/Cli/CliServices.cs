@@ -120,6 +120,8 @@ internal static class CliServices
 		// BackendRolesProvider, which parses the config and would refuse to build on exactly the
 		// broken configuration this command exists to repair.
 		services.AddLocalContentProtection();
+		services.AddSingleton<ActiveSync.Core.Security.GatewayCertificateStore>();
+		services.AddSingleton<ActiveSync.Core.Security.TlsCertificateResolver>();
 		services.AddSingleton<ActiveSync.Backends.Local.LocalChangeNotifier>();
 		services.AddBackendProviders();
 		try

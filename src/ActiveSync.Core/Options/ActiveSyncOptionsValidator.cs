@@ -44,8 +44,7 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 		     (publicUri.Scheme != Uri.UriSchemeHttp && publicUri.Scheme != Uri.UriSchemeHttps)))
 			failures.Add($"ActiveSync:PublicUrl '{options.PublicUrl}' must be an absolute http(s) URL.");
 
-		if (options.SelfSignedTls.Enabled && options.SelfSignedTls.Port is < 1 or > 65535)
-			failures.Add($"ActiveSync:SelfSignedTls:Port {options.SelfSignedTls.Port} is out of range (1-65535).");
+		ValidateTls(options.Tls, failures);
 
 		ValidatePolicy(options.Policy, failures);
 		ValidateMetrics(options.Metrics, failures);
@@ -115,6 +114,25 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 	{
 		if (metrics.Port is { } port and (< 1 or > 65535))
 			failures.Add($"ActiveSync:Metrics:Port {port} is out of range (1-65535).");
+	}
+
+	private static void ValidateTls(TlsOptions tls, List<string> failures)
+	{
+		if (!tls.Enabled)
+			return;
+		if (tls.Port is < 1 or > 65535)
+			failures.Add($"ActiveSync:Tls:Port {tls.Port} is out of range (1-65535).");
+
+		bool hasCert = !string.IsNullOrWhiteSpace(tls.CertificatePath);
+		if (!string.IsNullOrWhiteSpace(tls.CertificateKeyPath) && !hasCert)
+			failures.Add(
+				"ActiveSync:Tls:CertificateKeyPath is set without ActiveSync:Tls:CertificatePath.");
+		// Existence is checked here (fail-fast, clear message); the certificate is actually loaded
+		// at startup by TlsCertificateResolver, which surfaces parse/key-mismatch errors.
+		if (hasCert && !File.Exists(tls.CertificatePath))
+			failures.Add($"ActiveSync:Tls:CertificatePath '{tls.CertificatePath}' does not exist.");
+		if (!string.IsNullOrWhiteSpace(tls.CertificateKeyPath) && !File.Exists(tls.CertificateKeyPath))
+			failures.Add($"ActiveSync:Tls:CertificateKeyPath '{tls.CertificateKeyPath}' does not exist.");
 	}
 
 	private static void ValidateWebUi(WebUiOptions webUi, List<string> failures)

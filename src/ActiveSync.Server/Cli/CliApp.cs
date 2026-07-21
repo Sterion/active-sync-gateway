@@ -31,6 +31,8 @@ internal static class CliApp
 			.WithDescription("Decrypt and print one local item's raw content.");
 		config.AddCommand<LogsCommand>("logs")
 			.WithDescription("Show recent gateway logs from the database (--since/--level/--user/--limit).");
+		config.AddCommand<TlsCommand>("tls")
+			.WithDescription("Show the active HTTPS certificate (mode, subject, SANs, validity, fingerprint).");
 		config.AddCommand<BlockCommand>("block")
 			.WithDescription("Refuse logins (403) for a user, or for one of their devices.");
 		config.AddCommand<UnblockCommand>("unblock")

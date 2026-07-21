@@ -178,7 +178,7 @@ public sealed class CliConfigTests : IDisposable
 		Assert.Contains("within ~1s", output);
 
 		// A restart-tier setting says so.
-		(_, _, string tls) = Run("config", "set", "ActiveSync:SelfSignedTls:Port", "6443");
+		(_, _, string tls) = Run("config", "set", "ActiveSync:Tls:Port", "6443");
 		Assert.Contains("Restart the gateway", tls);
 	}
 

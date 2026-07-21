@@ -87,15 +87,13 @@ public partial class Program
 		// empty), so shutdown is normally instant; this backstop bounds pathological cases.
 		builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(5));
 
-		// Self-signed HTTPS: on by default so phones can connect without a reverse proxy. A
-		// Kestrel HTTPS endpoint in configuration (mounted real certificates) always wins —
-		// the self-signed endpoint is then skipped and the database never gets involved.
-		bool configuredHttps = builder.Configuration.GetSection("Kestrel:Endpoints").GetChildren()
-			.Any(endpoint => endpoint["Url"]?.StartsWith("https", StringComparison.OrdinalIgnoreCase) == true);
-		bool selfSignedTls = options.SelfSignedTls.Enabled && !configuredHttps;
-		// Populated from the database after migrations run; the selector below reads it per
-		// TLS handshake, so Kestrel can be configured before the certificate exists.
-		X509Certificate2? selfSignedCertificate = null;
+		// HTTPS: on by default so phones connect without a reverse proxy. The certificate is
+		// either operator-supplied (ActiveSync:Tls:CertificatePath — a mounted PEM/PFX) or a
+		// self-signed one persisted in the database; both are resolved by TlsCertificateResolver
+		// after migrations run. The selector reads it per handshake, so Kestrel can bind the
+		// listener before the certificate is loaded.
+		bool tlsEnabled = options.Tls.Enabled;
+		X509Certificate2? serverCertificate = null;
 
 		// Long-poll friendly Kestrel limits (Ping can hold a request open for up to an hour).
 		builder.WebHost.ConfigureKestrel(kestrel =>
@@ -103,11 +101,11 @@ public partial class Program
 			kestrel.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(65);
 			kestrel.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(60);
 			kestrel.Limits.MaxRequestBodySize = 64 * 1024 * 1024;
-			if (selfSignedTls)
-				kestrel.ListenAnyIP(options.SelfSignedTls.Port, listen =>
+			if (tlsEnabled)
+				kestrel.ListenAnyIP(options.Tls.Port, listen =>
 					listen.UseHttps(new HttpsConnectionAdapterOptions
 					{
-						ServerCertificateSelector = (_, _) => selfSignedCertificate,
+						ServerCertificateSelector = (_, _) => serverCertificate,
 					}));
 			// Dedicated scrape listener: /metrics only answers on this port (see the map
 			// below), keeping the metric surface off the phone-facing listeners entirely.
@@ -118,6 +116,7 @@ public partial class Program
 		builder.Services.AddSyncDatabase(PostgresConnectionUri.EffectiveProvider(options.Database));
 		builder.Services.AddLocalContentProtection();
 		builder.Services.AddSingleton<GatewayCertificateStore>();
+		builder.Services.AddSingleton<TlsCertificateResolver>();
 
 		// Metrics: BCL Meter instruments (GatewayMetrics) exported via OpenTelemetry.
 		ActiveSync.Core.Observability.GatewayMetrics.PerUserLabels = options.Metrics.PerUser;
@@ -187,23 +186,25 @@ public partial class Program
 		databaseLogSink.Activate(app.Services.GetRequiredService<ISyncDbContextFactory>(),
 			app.Services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>());
 
-		// Load (or generate once) the self-signed certificate — the Kestrel selector above
-		// picks it up when the server starts listening a few lines further down.
-		if (selfSignedTls)
-			selfSignedCertificate = await app.Services.GetRequiredService<GatewayCertificateStore>()
-				.GetOrCreateAsync(GatewayCertificateStore.HostFromPublicUrl(options.PublicUrl),
-					startupLogger, CancellationToken.None);
+		// Load the HTTPS certificate (external mount or self-signed) — the Kestrel selector above
+		// picks it up when the server starts listening a few lines further down. An unloadable
+		// external certificate throws here: fail fast rather than silently serving a self-signed one.
+		TlsCertificateSource tlsSource = TlsCertificateSource.Disabled;
+		if (tlsEnabled)
+			(serverCertificate, tlsSource) = await app.Services.GetRequiredService<TlsCertificateResolver>()
+				.LoadForServingAsync(startupLogger, CancellationToken.None);
 
 		// Load database-declared users into the resolver before the first request.
 		AccountResolver resolver = app.Services.GetRequiredService<AccountResolver>();
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
-		string httpsSummary = selfSignedCertificate is not null
-			? $"self-signed on :{options.SelfSignedTls.Port} — SHA-256 {GatewayCertificateStore.Fingerprint(selfSignedCertificate)}"
-			  + "  (trust it on the device, or configure real TLS)"
-			: configuredHttps
-				? "Kestrel endpoint from configuration (self-signed endpoint skipped)"
-				: "off (SelfSignedTls:Enabled=false) — terminate TLS in front of the gateway";
+		string httpsSummary = serverCertificate is null
+			? "off (Tls:Enabled=false) — terminate TLS in front of the gateway"
+			: tlsSource == TlsCertificateSource.External
+				? $"mounted certificate on :{options.Tls.Port} — SHA-256 " +
+				  $"{GatewayCertificateStore.Fingerprint(serverCertificate)} (from {options.Tls.CertificatePath})"
+				: $"self-signed on :{options.Tls.Port} — SHA-256 " +
+				  $"{GatewayCertificateStore.Fingerprint(serverCertificate)}  (trust it on the device, or mount a real certificate)";
 
 		// Log the effective configuration (reads the resolved IOptions, so test/override values show).
 		StartupSummary.Log(startupLogger,

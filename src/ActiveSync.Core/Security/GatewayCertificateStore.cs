@@ -32,6 +32,19 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 			: FallbackHost;
 	}
 
+	/// <summary>
+	///   Returns the stored self-signed certificate without generating one, for read-only
+	///   inspection (the TLS details view / <c>eas tls</c>). Null when no row exists yet or it
+	///   cannot be decrypted.
+	/// </summary>
+	public async Task<X509Certificate2?> TryLoadStoredAsync(ILogger logger, CancellationToken ct)
+	{
+		await using SyncDbContext db = contextFactory.CreateDbContext();
+		ServerCertificate? row = await db.ServerCertificates.AsNoTracking()
+			.FirstOrDefaultAsync(c => c.Id == 1, ct).ConfigureAwait(false);
+		return row is null ? null : TryLoad(row.PfxProtected, logger);
+	}
+
 	public async Task<X509Certificate2> GetOrCreateAsync(string host, ILogger logger, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();

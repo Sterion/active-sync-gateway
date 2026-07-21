@@ -134,7 +134,9 @@ This README is the overview and getting-started guide. The reference material li
 - **HTTPS out of the box**: alongside HTTP on `:5080`, the gateway serves HTTPS on `:5443`
   with a self-signed certificate generated on first start and persisted in the state
   database — unique per deployment, identical across restarts and replicas, fingerprint in
-  the startup banner. Mounting real certificates switches it off automatically.
+  the startup banner. Point `ActiveSync:Tls:CertificatePath` at a mounted certificate
+  (PEM/PFX, e.g. cert-manager/ACME) to serve that instead; inspect either on the admin
+  **TLS** page or with `eas tls`.
 - The entire admin surface ships inside the image as the **`eas` CLI** — inspection, user
   management, blocking, purging, secret sealing (see [Operator CLI](docs/cli.md)).
 - **SQLite** (zero-config default) or **PostgreSQL** (accepts `postgresql://` URIs, e.g.
@@ -312,7 +314,7 @@ environment variables (`__` separator, e.g. `ActiveSync__Backends__MailStore__Ho
 the database (`eas config set`, which wins). The **complete reference — every key, its
 default, and whether it applies live or on restart — is in
 [docs/configuration.md](docs/configuration.md)**, grouped by section (Root, the per-provider
-Backends settings, Database, Encryption, Eas, Auth, Log, SelfSignedTls, Policy, Metrics,
+Backends settings, Database, Encryption, Eas, Auth, Log, Tls, Policy, Metrics,
 WebUi, Cli, Plugins).
 
 ### Per-user overrides
@@ -502,31 +504,31 @@ the endpoint variable — the others would be ignored with a startup warning.)
 
 ### HTTPS: self-signed by default, or bring your own certificate
 
-The gateway serves HTTP on `:5080` (for a TLS-terminating reverse proxy / ingress) **and
-HTTPS on `:5443` with a self-signed certificate** — publish only the port that matches
-your setup.
+The gateway serves HTTP on `:5080` (for a TLS-terminating reverse proxy / ingress) **and its
+own HTTPS listener on `:5443`** (`ActiveSync:Tls`) — publish only the port that matches your
+setup. The HTTPS certificate is either self-signed (the default) or a file you mount; both are
+viewable on the admin **TLS** page and with `eas tls`. Everything under `ActiveSync:Tls` is
+**restart-tier** — the certificate is read once at startup (so a rotated mount, e.g. from
+cert-manager/ACME, takes effect on the next restart, matching how Kubernetes mounts behave).
 
-**Self-signed (zero config).** On first `serve` the gateway generates a certificate (RSA
-2048, 20-year validity, CN/SAN from `PublicUrl` when set) and stores it **in the state
+**Self-signed (zero config).** With no certificate configured, the first `serve` generates one
+(RSA 2048, 20-year validity, CN/SAN from `PublicUrl` when set) and stores it **in the state
 database**, private key sealed with the `Encryption` master key. Every restart and every
 replica serves the same certificate, so a device only has to trust it once — the SHA-256
-fingerprint is printed in the startup banner for comparison against what the phone shows.
-Nine and iOS Mail offer a one-tap "trust anyway"; **some clients — notably Gmail — refuse
-untrusted certificates entirely**, so real certificates (below) or a reverse proxy remain
-the production path. Tune with `SelfSignedTls:Enabled` / `SelfSignedTls:Port` (see
-[docs/configuration.md](docs/configuration.md)); should the certificate ever need replacing,
-delete the `ServerCertificates` row and restart.
+fingerprint is in the startup banner (and `eas tls`) for comparison against what the phone
+shows. Nine and iOS Mail offer a one-tap "trust anyway"; **some clients — notably Gmail —
+refuse untrusted certificates entirely**, so a mounted certificate (below) or a reverse proxy
+remain the production path. Should the self-signed certificate ever need replacing, delete the
+`ServerCertificates` row and restart.
 
-**Real certificates.** Add a Kestrel HTTPS endpoint via environment variables — the
-self-signed endpoint then switches off automatically and the mounted files are served
-as-is (the database is not involved). A PEM pair (Let's Encrypt / certbot layout) works
-directly:
+**Mounted certificate.** Point `ActiveSync:Tls:CertificatePath` at a mounted certificate and
+the gateway serves it instead of the self-signed one. A PEM pair (Let's Encrypt / certbot /
+cert-manager layout) — a full chain plus its key:
 
 ```bash
 docker run -p 443:5443 -v /path/to/certs:/certs:ro \
-  -e Kestrel__Endpoints__Https__Url=https://0.0.0.0:5443 \
-  -e Kestrel__Endpoints__Https__Certificate__Path=/certs/fullchain.pem \
-  -e Kestrel__Endpoints__Https__Certificate__KeyPath=/certs/privkey.pem \
+  -e ActiveSync__Tls__CertificatePath=/certs/fullchain.pem \
+  -e ActiveSync__Tls__CertificateKeyPath=/certs/privkey.pem \
   -e ActiveSync__Backends__MailStore__Provider=imap \
   -e ActiveSync__Backends__MailStore__Host=imap.example.com \
   -e ActiveSync__Backends__MailSubmit__Provider=smtp \
@@ -535,15 +537,23 @@ docker run -p 443:5443 -v /path/to/certs:/certs:ro \
   -v activesync-data:/data activesync-gateway
 ```
 
-- Point `Certificate__Path` at the **full chain** (leaf + intermediates, certbot's
+The same paths can be set from the database instead — `eas config set
+ActiveSync:Tls:CertificatePath /certs/fullchain.pem` (and `:CertificateKeyPath`) — then restart.
+
+- Point `CertificatePath` at the **full chain** (leaf + intermediates, certbot's
   `fullchain.pem`), not just the leaf — phones are strict about incomplete chains.
-- Have a PFX/PKCS#12 file instead? Use `Kestrel__Endpoints__Https__Certificate__Path=/certs/cert.pfx`
-  plus `Kestrel__Endpoints__Https__Certificate__Password=...` (and no `KeyPath`).
+- Have a PFX/PKCS#12 file instead? Set `ActiveSync:Tls:CertificatePath=/certs/cert.pfx`, leave
+  `CertificateKeyPath` unset, and use `ActiveSync:Tls:CertificatePassword` if it is protected
+  (stored sealed with the Encryption key).
+- A configured certificate that cannot be loaded **fails startup** with a clear error rather
+  than silently falling back to self-signed — so a bad mount surfaces immediately.
 - **Keep the default HTTP endpoint** — the container `HEALTHCHECK` probes `/healthz` over
   it on the loopback. Simply don't publish port 5080; only the HTTPS port needs `-p`.
 - The container runs as a non-root user, so keep the *inside* port above 1024 (`5443`
   here) and map `443` on the outside — EAS clients default to 443.
-- Restart the container after renewing the certificate; the files are read at startup.
+- Restart the container after renewing/rotating the certificate; it is read at startup.
+- Turn the gateway's HTTPS off entirely (terminate TLS in front) with
+  `ActiveSync:Tls:Enabled=false`.
 
 ### Metrics and readiness
 

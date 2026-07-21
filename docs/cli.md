@@ -34,6 +34,7 @@ forces every command local. See [How `eas` forwards](#how-eas-forwards) below.
 | `items <user> [collection]` | List local item metadata (never decrypts). |
 | `show <user> <collection> <uid>` | Decrypt and print one local item (needs the Encryption key). |
 | `logs [--since 1h] [--level Warning] [--user <u>] [-n 100]` | Show recent logs persisted to the database (Information+; every replica on a shared database). |
+| `tls` | Show the active HTTPS certificate — mode (self-signed / mounted file / off), subject, SANs, validity (with an expiry warning), fingerprint and key. Read-only; set the paths with `config set ActiveSync:Tls:CertificatePath …`. |
 | `device password <user> <deviceId>` | Print a device's escrowed recovery password (see [Device security policies](../README.md#device-security-policies)). |
 | `device wipe <user> <deviceId> [--cancel]` | Arm a **16.1 account-only wipe**: the device removes this account (never a factory reset) and the partnership is auto-blocked after the acknowledgment. Warns when the device last spoke <16.1 — use `block` for those. |
 

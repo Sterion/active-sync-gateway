@@ -26,13 +26,29 @@ public class ActiveSyncOptionsValidatorTests
 	[Theory]
 	[InlineData(0)]
 	[InlineData(70000)]
-	public void SelfSignedTlsPortOutOfRange_Fails_UnlessDisabled(int port)
+	public void TlsPortOutOfRange_Fails_UnlessDisabled(int port)
 	{
 		ActiveSyncOptions options = Valid();
-		options.SelfSignedTls.Port = port;
+		options.Tls.Port = port;
 		Assert.True(Validator.Validate(null, options).Failed);
-		options.SelfSignedTls.Enabled = false;
+		options.Tls.Enabled = false;
 		Assert.True(Validator.Validate(null, options).Succeeded);
+	}
+
+	[Fact]
+	public void Tls_CertificateKeyPathWithoutCertificatePath_Fails()
+	{
+		ActiveSyncOptions options = Valid();
+		options.Tls.CertificateKeyPath = "/certs/privkey.pem";
+		Assert.True(Validator.Validate(null, options).Failed);
+	}
+
+	[Fact]
+	public void Tls_MissingCertificateFile_Fails()
+	{
+		ActiveSyncOptions options = Valid();
+		options.Tls.CertificatePath = "/no/such/cert.pfx";
+		Assert.True(Validator.Validate(null, options).Failed);
 	}
 
 	[Theory]

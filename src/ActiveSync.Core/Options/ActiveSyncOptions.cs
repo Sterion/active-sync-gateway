@@ -116,19 +116,43 @@ public sealed class LogOptions
 	public int RetentionDays { get; set; } = 7;
 }
 
-public sealed class SelfSignedTlsOptions
+/// <summary>
+///   The gateway's own HTTPS listener. When <see cref="Enabled" /> the gateway serves HTTPS on
+///   <see cref="Port" /> using either an operator-supplied certificate
+///   (<see cref="CertificatePath" /> — a mounted PEM or PFX, e.g. from cert-manager/ACME) or,
+///   when none is set, a self-signed certificate generated on first serve and persisted in the
+///   state database (sealed with the Encryption master key), so it stays identical across
+///   restarts and replicas. Everything here is <b>restart-tier</b>: Kestrel binds the listener
+///   and reads the certificate once at startup — a mounted certificate that rotates (or a path
+///   change) takes effect on the next restart, which matches how Kubernetes mounts behave.
+/// </summary>
+public sealed class TlsOptions
 {
-	/// <summary>
-	///   Serve HTTPS on <see cref="Port" /> with a self-signed certificate that is generated
-	///   on first serve and persisted in the state database (private key sealed with the
-	///   Encryption master key), so it stays identical across restarts and replicas. Skipped
-	///   automatically when configuration declares a Kestrel HTTPS endpoint — mounted real
-	///   certificates always win and never touch the database.
-	/// </summary>
+	/// <summary>Serve the gateway's own HTTPS listener. Off = terminate TLS in front of the gateway.</summary>
 	public bool Enabled { get; set; } = true;
 
-	/// <summary>Listen port of the self-signed HTTPS endpoint.</summary>
+	/// <summary>Listen port of the HTTPS endpoint.</summary>
 	public int Port { get; set; } = 5443;
+
+	/// <summary>
+	///   Path to an operator-supplied certificate to serve instead of the built-in self-signed
+	///   one: a PEM certificate (full chain; pair it with <see cref="CertificateKeyPath" />) or a
+	///   PKCS#12/PFX bundle (leave the key path unset; use <see cref="CertificatePassword" /> if
+	///   protected). Unset = the self-signed certificate from the database.
+	/// </summary>
+	public string? CertificatePath { get; set; }
+
+	/// <summary>
+	///   Path to the PEM private-key file that pairs with a PEM <see cref="CertificatePath" />.
+	///   Leave unset when <see cref="CertificatePath" /> is a PFX bundle.
+	/// </summary>
+	public string? CertificateKeyPath { get; set; }
+
+	/// <summary>
+	///   Password for the PFX bundle, or for an encrypted PEM private key. Optional. Stored sealed
+	///   (enc:v1:) with the Encryption master key and unsealed only when the certificate is loaded.
+	/// </summary>
+	public string? CertificatePassword { get; set; }
 }
 
 /// <summary>
@@ -301,7 +325,7 @@ public sealed class ActiveSyncOptions
 	public EasOptions Eas { get; set; } = new();
 	public AuthOptions Auth { get; set; } = new();
 	public EncryptionOptions Encryption { get; set; } = new();
-	public SelfSignedTlsOptions SelfSignedTls { get; set; } = new();
+	public TlsOptions Tls { get; set; } = new();
 	public LogOptions Log { get; set; } = new();
 	public PolicyOptions Policy { get; set; } = new();
 	public MetricsOptions Metrics { get; set; } = new();

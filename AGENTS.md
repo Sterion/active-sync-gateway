@@ -415,14 +415,22 @@ SaveChanges; `AccountResolver` point-reads it at most every `Auth:UsersRefreshSe
 `BackendSessionFactory` subscribes to `SnapshotChanged` and clears both auth caches.
 Invalid/malformed DB rows are skipped with a warning — never let one row break auth. The
 resolver's `MergedUsers` view feeds the startup sub-banner (origins + masked secrets).
-**Self-signed HTTPS**: `serve` also listens on `:5443` (`SelfSignedTls` options, default
-on) with a certificate from `GatewayCertificateStore` — generated on first serve (RSA
-2048, 20 years, CN/SAN from `PublicUrl`'s host, no renewal logic) and persisted as the
-single `ServerCertificates` row (Id=1, PKCS#12 base64 sealed by `LocalContentProtector`
-with `_gateway`/`tls` AAD), so restarts and replicas share one fingerprint; the PK
-conflict settles first-boot races, an unsealable row is regenerated. Kestrel reads it via
-`ServerCertificateSelector` from a closure populated after migrations. Any configured
-`Kestrel:Endpoints` https URL disables the whole path — mounted certs are served as-is.
+**HTTPS** (`ActiveSync:Tls`, all keys restart-tier): `serve` listens on `:5443` when
+`Tls:Enabled`. `TlsCertificateResolver.LoadForServingAsync` picks the certificate: an
+operator-supplied file when `Tls:CertificatePath` is set (PEM cert+`CertificateKeyPath`
+pair, or a PFX — `CertificatePassword` optional, sealed and unsealed via `SecretValue`;
+re-exported through PKCS#12 so the private key is usable for server auth on all platforms),
+otherwise the self-signed certificate from `GatewayCertificateStore` — generated on first
+serve (RSA 2048, 20 years, CN/SAN from `PublicUrl`'s host, no renewal logic) and persisted
+as the single `ServerCertificates` row (Id=1, PKCS#12 base64 sealed by `LocalContentProtector`
+with `_gateway`/`tls` AAD), so restarts and replicas share one fingerprint; the PK conflict
+settles first-boot races, an unsealable row is regenerated. Kestrel reads whichever via
+`ServerCertificateSelector` from a closure populated after migrations. An unloadable external
+cert throws at startup (fail-fast, no silent self-sign). No hot reload — a rotated mount takes
+effect on restart (matches k8s mount + Kestrel behavior). `TlsCertificateResolver.DescribeAsync`
+is the read-only, private-key-free description (`TlsCertificateInfo`: source/subject/SANs/
+validity/fingerprint/key) behind `GET /admin/api/tls` (the admin **TLS** page) and `eas tls` —
+both re-resolve from options+DB/file, never a shared held cert.
 **Verbose wire logging** (Serilog `Verbose` / MEL `Trace`): components' own categories,
 no artificial namespace — `ActiveSync.Server.Eas.*` dumps decoded request/response XML in
 `EasContext.ReadRequestAsync`/`WriteResponseAsync` (+ Autodiscover bodies; binary/raw
