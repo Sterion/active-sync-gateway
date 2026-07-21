@@ -58,7 +58,26 @@ docker compose -f docker/backends/james/docker-compose.yml up -d --build --wait
 # AS_TEST_STACK=james AS_TEST_DAV_URL=none dotnet test --filter Category=Integration
 ```
 
-**Fast per-change check (recommended).** `scripts/test-fast` runs the suite against **stalwart +
+**Single-backend loop (leanest).** `scripts/stalwart-up` brings stalwart up alone on the
+**canonical** ports (`143/587/4190/5232`), which are exactly `TestBackend`'s built-in defaults — so
+the test command needs no environment setup and no wrapper at all:
+
+```powershell
+./scripts/stalwart-up.ps1               # Windows  (-Build to rebuild, -Down to tear down)
+scripts/stalwart-up.sh                  # Linux / devcontainer  (-b rebuild, -d tear down)
+
+dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration
+```
+
+It does **not** pass `--build`, so a warm container is reused in seconds rather than rebuilt and
+recreated. Use this when iterating against one backend; use `test-fast` below when you want both
+backends covered. The two are mutually exclusive — see the port note at the end of this section.
+
+After starting, it verifies all four canonical ports are actually published and fails loudly if
+not, because an unreachable backend makes every integration test **skip** while the run still
+exits 0 (see the skip note under "Integration tests" above).
+
+**Fast per-change check (both backends).** `scripts/test-fast` runs the suite against **stalwart +
 axigen in parallel** and leaves both stacks running for the next change (they start only if not
 already healthy, and are reused when warm). To coexist, these two stacks use **dedicated host
 ports** (stalwart `10143/10587/10190/10232`, axigen `20143/20587/20232`) via the compose
@@ -78,8 +97,12 @@ tears down, prints a per-backend summary — sequential, since these use the can
 scripts/test-backends.sh               # Linux / devcontainer
 ```
 
-Don't drive stalwart/axigen through both runners at the same time — `test-fast` uses dedicated
-ports and `test-backends` uses canonical ones, so compose would recreate the container on switch.
+**Pick one runner per session.** All three drive the *same* compose project, so switching between
+them recreates the container onto the other port set: `stalwart-up` and `test-backends` use the
+canonical ports, `test-fast` uses the dedicated ones. Alternating costs a container recreate each
+time — and worse, a shell that has run `test-fast` still has `STALWART_*` exported, which would
+silently put a later `docker compose up` back on `10143`. (`stalwart-up` clears those variables
+for exactly this reason; a bare `docker compose up` in that shell does not.)
 
 ## Where tests run
 

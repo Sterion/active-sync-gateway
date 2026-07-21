@@ -29,8 +29,11 @@ Two caveats worth respecting:
 **Before any run that includes a [LIVE] item**, establish a green baseline first — otherwise the first failure is ambiguous between "my change broke it" and "it was already red":
 
 ```powershell
-./scripts/test-fast.ps1        # starts stalwart + axigen if cold, reuses if warm
+./scripts/stalwart-up.ps1      # canonical ports; reuses a warm container
+dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration
 ```
+
+Expect `Passed: 124, Skipped: 0`. Anything else means the environment, not your change.
 
 ### Running the queue hands-off
 
@@ -51,10 +54,10 @@ Bound it to a range while you gauge cost or want to inspect the output — appen
 
 Interrupt at any point: whatever is committed and struck through stays done, and the identical command resumes from there.
 
-**Before a run that includes [LIVE] items**, bring the stacks up (or let the session do it — `test-fast` starts them only if not already healthy):
+**Before a run that includes [LIVE] items**, bring Stalwart up (or let the session do it — it reuses a warm container):
 
 ```powershell
-./scripts/test-fast.ps1        # Windows — starts stalwart + axigen if cold, reuses if warm
+./scripts/stalwart-up.ps1      # Windows — canonical ports, no rebuild
 ```
 
 ### Standing context for any session
@@ -92,24 +95,30 @@ The backticks are load-bearing — the integrity check below finds findings by `
 
 Items marked [LIVE] change behaviour against a real IMAP/JMAP/DAV server. Unit tests cannot confirm these.
 
-**Stalwart and Axigen run on dedicated host ports** (stalwart `10143/10587/10190/10232`, axigen `20143/20587/20232`), so they coexist and stay warm between runs. Use the fast runner, which starts them only if not already healthy:
+Bring Stalwart up on the **canonical** ports once, then test normally — no environment setup, no wrapper:
 
 ```powershell
-./scripts/test-fast.ps1                      # Windows — reuses warm stacks
-./scripts/test-fast.ps1 -Filter <expr>       # narrow to the relevant tests
+./scripts/stalwart-up.ps1                    # Windows  (-Build to rebuild, -Down to stop)
+dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration
 ```
 
 ```bash
-scripts/test-fast.sh                         # Linux / devcontainer  (-f <expr>)
+scripts/stalwart-up.sh                       # Linux / devcontainer  (-b, -d)
 ```
 
-> **NOTE — `dotnet test` will silently skip these, even with the stacks running.** The suite targets the *canonical* ports (`143/587/5232/4190`) unless `AS_TEST_IMAP_PORT` / `AS_TEST_SMTP_PORT` / `AS_TEST_SIEVE_PORT` / `AS_TEST_DAV_URL` are set. The warm stacks deliberately use dedicated ports (`10143…`, `20143…`) so they can coexist, which leaves the canonical ports **closed** — nothing is reachable, the integration tests skip, and the run reports **green**.
+`stalwart-up` reuses a warm container (it does not pass `--build`), so it costs seconds after the first run, and it verifies all four canonical ports are actually published before handing back. Leave the stack up across items — only `-Down` when you are finished with the [LIVE] items.
+
+Reference numbers for a green tree: **124 tests, 124 passed, 0 skipped, ~2.5 min.** If your run reports far fewer, or a large Skipped count, the backend is not reachable — see below.
+
+`scripts/test-fast` also exists and additionally covers Axigen, but it rebuilds and recreates both stacks on every invocation and requires `AS_TEST_*` overrides. It is the right tool for a pre-merge check across backends, not for iterating. **Do not alternate between the two** — they drive the same compose project on different port sets, so each switch recreates the container.
+
+> **NOTE — a skipped suite exits 0 and looks exactly like a passing one.**
 >
-> `scripts/test-fast` exports those variables for you. That is why it is the required runner, not a convenience. (Verified against a live machine: both stacks healthy on their dedicated ports, all four canonical ports closed.)
+> Every integration test is a `[BackendFact]`, which xunit turns into a **skip** when `TestBackend`'s IMAP probe fails. A run where nothing is reachable therefore reports **green** having verified nothing — the single easiest way to strike a Critical through unverified.
 >
-> **A green run is not proof.** For a [LIVE] item, confirm from the output that integration tests **actually executed** — read the passed/skipped counts, not the exit code. If they skipped, fix the environment and re-run. Do **not** strike a finding through on a skipped suite.
+> This is not hypothetical. If the stack is on the dedicated ports (because `test-fast` last touched it), or a shell still has `STALWART_*` exported, the canonical ports are closed and a plain `dotnet test` skips everything. `stalwart-up` exists partly to make that state impossible: it clears those variables and fails loudly if the four ports are not published.
 >
-> Do not drive stalwart/axigen through `test-backends` while `test-fast` is using them — the two runners use different port sets and compose will recreate the containers on switch.
+> **A green run is not proof.** For a [LIVE] item, read the **passed/skipped counts**, not the exit code. Against a green tree you should see `Passed: 124, Skipped: 0`. If passed is 0, or skipped is large, fix the environment and re-run. Do **not** strike a finding through on a skipped suite.
 
 **[LIVE] items:** 1 · 3 · 4 · 5 · 6 · 26 · 27 · 28 · 30 · 32 · 33 · 34 · 36 · 38 · 42
 
