@@ -194,10 +194,56 @@ post-item-5 baseline — 2 new live tests, no regression ✓ · both fixes red-f
 - The old `DeletesAreNotWindowed` test asserted the defect as intended behaviour — that is what `A21`
   called out. It was replaced, not silently dropped.
 
+## Item 7 — Unauthenticated resource limits
+
+**Findings:** `K1` `E2` `K26` `E21` `K33` `W17`
+**Commits:** `58aa7dd` (K1, E2) · `943b94e` (K26) · `3e77e43` (E21) · `0b37b72` (K33) · `d01b2e9` (W17)
+· `911ac9c` (docs: new finding `W22`)
+
+**Verification:** integrity 56/15/365/365/0 ✓ · cursor → item 8 ✓ · IDs in subjects ✓ · build
+**0 warnings** ✓ · unit suites re-run by the orchestrator: **Core 400, Server 115, Protocol 63,
+WebUi 9 — 0 failed, 0 skipped** ✓ · not [LIVE], no backend run required or performed ✓
+
+**Notes:**
+- **⚠ `W17` is only half the hole — see new finding `W22`.** `EasEndpoint` overwrites
+  `ProtocolVersion` with the raw `MS-ASProtocolVersion` header with no validation, and
+  `EasVersion.Parse("99.9")` returns `99.9`, clearing every `>= V161` gate. Identical unlock-16.x
+  symptom, one field over. The worker left it deliberately — rejecting an unknown header string is a
+  client-compatibility decision deserving its own item — but **anyone reading "`W17` fixed" should not
+  read it as "the version-unlock hole is closed".** `W22` is logged at the bottom of Part 2 and needs
+  assigning to an item.
+- **`E2` was deliberately not fixed as written.** The recommendation — move the label assignment below
+  auth — would stop counting 401/429 outcomes entirely, i.e. exactly the traffic an operator watches
+  during a brute-force attempt. The worker stashes `"-"` before auth and overwrites with the real
+  username after: the count survives, only the attacker-chosen name is lost. **`E2`'s ordering half
+  has no unit-level reproducer** (no unit EAS host; it is only observable through
+  `Integration.Tests/Scenarios/MetricsTests.cs`, and this item is not [LIVE]). Struck on the strength
+  of the fix, labelled as such.
+- **`K26`'s cap drops new keys rather than evicting old ones.** LRU eviction would let a username
+  rotator displace a real user's counter; dropping is safe because the attacker's per-address counter
+  is minted long before the table fills. Consequence: during a sustained attack a genuinely new user
+  gets no *per-user* counter, only the IP-wide ceiling. The measured win is the sharpest number in the
+  run — 60k rotated-username failures went **9m02s → 2s**, table 60k rows → capped.
+- **`K33` is quantified:** `GC.GetAllocatedBytesForCurrentThread` over the wire-log path, **20,165,248
+  bytes → under 1 MB**.
+- **`W17` validates against a set, not a range** (a range still admits 130 = "13.0"), and the set is
+  **wider than the advertised versions** — 2.5 and 12.0 parse but aren't advertised. Rationale:
+  advertisement is the right place to refuse an old client; a 400 at parse time is not.
+- **`K31` in Part 2 is stale and will mislead item 40.** It claims there are "no `AuthThrottleTests` at
+  all"; `tests/ActiveSync.Server.Tests/AuthThrottleTests.cs` exists with 7 pre-existing tests.
+  Re-verify before starting item 40. Item 40's line was left untouched.
+- **`K27` (unlocked read in prune) survived the `K26` rewrite untouched** and still belongs to item 53
+  — the new `Prune()` still reads `entry.WindowStartUtc` without the lock.
+- **`AuthThrottle` gained two `internal` test seams**, `TrackedKeys` and `PruneScans`, added *before*
+  the tests so the symptom was assertable. They are instrumentation, not the fix. Item 40 (`K32`,
+  inject `TimeProvider`) will want the same file.
+- **If you ever revert `K26`, the three heavy `AuthThrottleTests` will appear to hang, not fail fast** —
+  the red run took 9 minutes.
+
 ---
 
-## Next: item 7 — Unauthenticated resource limits
+## Next: item 8 — WebUi session & cookies
 
-First non-[LIVE] item in the range; unit suite alone is sufficient. Items 7–14 are Phase 2 (Security).
-Note the intra-phase ordering constraint: **item 13 (unified redaction) must be done before item 14**
-— build the one redaction implementation, then apply it.
+Items 8–14 are Phase 2 (Security), none [LIVE] — the unit suites suffice and Stalwart is not needed
+again until item 26. Note the intra-phase ordering constraint: **item 13 (unified redaction) must be
+done before item 14** — build the one redaction implementation, then apply it.
