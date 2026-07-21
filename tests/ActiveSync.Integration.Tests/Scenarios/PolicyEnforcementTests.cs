@@ -194,6 +194,34 @@ public sealed class PolicyEnforcementTests(GatewayFixture gateway)
 	}
 
 	[BackendFact]
+	public async Task Provision_UnknownPolicyType_IsRefused()
+	{
+		// F24: PolicyType was accepted unread, so a client asking for the 2.5 WAP XML
+		// document was handed the WBXML one and told it succeeded.
+		string dbPath = TempDbPath();
+		try
+		{
+			await using WebApplicationFactory<Program> factory =
+				gateway.CreateIsolatedFactory(PolicyOverrides(dbPath));
+			EasTestClient client = Client(factory);
+
+			XDocument? response = await client.PostAsync("Provision", new XDocument(
+				new XElement(PV + "Provision",
+					new XElement(PV + "Policies",
+						new XElement(PV + "Policy",
+							new XElement(PV + "PolicyType", "MS-WAP-Provisioning-XML"))))));
+			XElement? policy = response?.Root?.Element(PV + "Policies")?.Element(PV + "Policy");
+			Assert.Equal("2", policy?.Element(PV + "Status")?.Value); // unknown PolicyType
+			Assert.Null(policy?.Element(PV + "Data"));
+			Assert.Null(policy?.Element(PV + "PolicyKey"));
+		}
+		finally
+		{
+			TryDelete(dbPath);
+		}
+	}
+
+	[BackendFact]
 	public async Task RecoveryPassword_IsEscrowedSealed_WhenPolicyOffersIt()
 	{
 		string dbPath = TempDbPath();

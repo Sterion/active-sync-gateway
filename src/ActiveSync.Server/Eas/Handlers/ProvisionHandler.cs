@@ -59,8 +59,26 @@ public sealed class ProvisionHandler(IOptionsSnapshot<ActiveSyncOptions> options
 			await context.State.SaveDeviceInfoAsync(context.Device, JsonSerializer.Serialize(info), ct);
 		}
 
+		// The gateway serves exactly one policy format. A client asking for another (2.5's
+		// MS-WAP-Provisioning-XML is the one still seen in the wild) used to be handed the
+		// WBXML document and told it succeeded; MS-ASPROV Policy Status 2 is "unknown
+		// PolicyType", which is what makes the client re-ask for a type we do serve. The
+		// response echoes OUR type, not the client's string — it is unauthenticated input,
+		// and naming what we do support is the more useful answer anyway. An ABSENT
+		// PolicyType is tolerated: it is the implied default, and rejecting it would break
+		// clients that only send it in phase 1.
+		string? requestedType = policy?.Element(PV + "PolicyType")?.Value;
+		bool unknownType = !string.IsNullOrWhiteSpace(requestedType) &&
+		                   !requestedType.Equals(PolicyType, StringComparison.OrdinalIgnoreCase);
+
 		XElement policyResponse;
-		if (clientPolicyKey is null)
+		if (unknownType)
+		{
+			policyResponse = new XElement(PV + "Policy",
+				new XElement(PV + "PolicyType", PolicyType),
+				new XElement(PV + "Status", "2"));
+		}
+		else if (clientPolicyKey is null)
 		{
 			// Phase 1: hand out a temporary key and the configured policy document.
 			uint tempKey = RandomKey();
