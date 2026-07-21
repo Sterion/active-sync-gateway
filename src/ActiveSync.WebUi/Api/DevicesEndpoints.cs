@@ -27,20 +27,38 @@ internal static class DevicesEndpoints
 
 	internal static void Map(RouteGroupBuilder api)
 	{
-		api.MapGet("devices", async (string? user, SyncDbContext db, AccountResolver resolver, CancellationToken ct) =>
+		api.MapGet("devices", async (
+			string? user, int? limit, int? offset, SyncDbContext db, AccountResolver resolver,
+			CancellationToken ct) =>
 		{
 			await resolver.EnsureFreshAsync(false, ct);
 			List<LoginBlock> blocks = await db.LoginBlocks.AsNoTracking().ToListAsync(ct);
-			List<Device> devices = await db.Devices.AsNoTracking()
-				.Where(d => user == null || d.UserName == user)
+			// Two sets instead of a linear scan per device: the listing was O(devices×blocks).
+			HashSet<string> userBlocks = new(
+				blocks.Where(b => b.DeviceId is null).Select(b => b.UserName), StringComparer.Ordinal);
+			HashSet<(string User, string Device)> deviceBlocks = new(
+				blocks.Where(b => b.DeviceId is not null).Select(b => (b.UserName, b.DeviceId!)));
+
+			IQueryable<Device> query = db.Devices.AsNoTracking().Where(d => user == null || d.UserName == user);
+			// Bounded like /logs — the table is unbounded and an admin refresh must not
+			// materialize all of it.
+			int total = await query.CountAsync(ct);
+			List<Device> devices = await query
 				.OrderBy(d => d.UserName).ThenBy(d => d.DeviceId)
+				.Skip(Math.Max(offset ?? 0, 0))
+				.Take(Math.Clamp(limit ?? 200, 1, 500))
 				.ToListAsync(ct);
-			return Results.Ok(devices.Select(d => new DeviceDto(
-				d.UserName, d.DeviceId, d.DeviceType, d.CreatedUtc, d.LastSeenUtc,
-				d.LastProtocolVersion, d.PendingAccountWipe,
-				blocks.Any(b => b.UserName == d.UserName && (b.DeviceId == null || b.DeviceId == d.DeviceId)),
-				blocks.Any(b => b.UserName == d.UserName && b.DeviceId == null),
-				resolver.IsLoginDisabled(d.UserName))).ToList());
+
+			return Results.Ok(new
+			{
+				total,
+				entries = devices.Select(d => new DeviceDto(
+					d.UserName, d.DeviceId, d.DeviceType, d.CreatedUtc, d.LastSeenUtc,
+					d.LastProtocolVersion, d.PendingAccountWipe,
+					userBlocks.Contains(d.UserName) || deviceBlocks.Contains((d.UserName, d.DeviceId)),
+					userBlocks.Contains(d.UserName),
+					resolver.IsLoginDisabled(d.UserName))).ToList()
+			});
 		});
 
 		api.MapPost("devices/block", async (BlockRequest request, SyncDbContext db, CancellationToken ct) =>

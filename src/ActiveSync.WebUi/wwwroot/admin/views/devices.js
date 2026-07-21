@@ -7,9 +7,12 @@ import { h, render as renderInto, table, toast } from '/shared/ui.js';
 export async function render(container) {
 	// Deep link: #/devices/<user> (e.g. from the dashboard) filters to that user.
 	const userFilter = decodeURIComponent(location.hash.replace(/^#\/devices\/?/, ''));
-	const devices = await api(userFilter
+	// Paged: the endpoint caps a page at 500 rows, so a large estate shows a page and a count
+	// rather than materializing the whole Devices table on every refresh.
+	const page = await api(userFilter
 		? `/admin/api/devices?user=${encodeURIComponent(userFilter)}`
 		: '/admin/api/devices');
+	const devices = page.entries;
 
 	renderInto(container,
 		h('h1', { class: 'page-title' }, 'Devices'),
@@ -28,6 +31,10 @@ export async function render(container) {
 					{ label: 'Status', cell: d => status(d) },
 					{ label: 'Actions', cell: d => actions(d, container) },
 				], devices)),
+			devices.length < page.total
+				? h('div', { class: 'notice' },
+					`Showing ${devices.length} of ${page.total} partnerships. Filter by user to narrow it.`)
+				: null),
 		h('div', { class: 'notice' },
 			'Wipe = the 16.1 account-only directive (removes the account from the device, never a ',
 			'factory reset). Purge = delete the gateway-side sync state. Block = 403 on login.'));

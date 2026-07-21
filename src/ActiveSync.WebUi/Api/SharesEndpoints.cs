@@ -19,14 +19,20 @@ internal static class SharesEndpoints
 
 	internal static void Map(RouteGroupBuilder api)
 	{
-		api.MapGet("shares", async (string? user, SyncDbContext db, CancellationToken ct) =>
+		api.MapGet("shares", async (
+			string? user, int? limit, int? offset, SyncDbContext db, CancellationToken ct) =>
 		{
-			List<ShareDto> grants = await db.SharedCalendarGrants.AsNoTracking()
-				.Where(g => user == null || g.UserName == user)
+			IQueryable<SharedCalendarGrant> query = db.SharedCalendarGrants.AsNoTracking()
+				.Where(g => user == null || g.UserName == user);
+			// Bounded like /logs and /devices — see C10.
+			int total = await query.CountAsync(ct);
+			List<ShareDto> grants = await query
 				.OrderBy(g => g.UserName).ThenBy(g => g.CollectionHref)
+				.Skip(Math.Max(offset ?? 0, 0))
+				.Take(Math.Clamp(limit ?? 200, 1, 500))
 				.Select(g => new ShareDto(g.UserName, g.CollectionHref, g.ReadOnly, g.CreatedUtc))
 				.ToListAsync(ct);
-			return Results.Ok(grants);
+			return Results.Ok(new { total, entries = grants });
 		});
 
 		api.MapPost("shares", async (ShareRequest request, SyncDbContext db, CancellationToken ct) =>

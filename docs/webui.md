@@ -146,14 +146,14 @@ non-GET calls need the `X-EAS-WebUi` header. Login/logout/mode are anonymous.
 | `GET /admin/api/backends/providers` | Every registered provider: the roles it serves, whether it can probe itself, and its config schema per role — what the forms are built from. |
 | `GET /admin/api/backends` · `PUT/DELETE /admin/api/backends/{role}` | Role assignment and settings as database overrides over the config file, per-leaf source. PUT stores only real deviations (a value equal to the config file or the provider default is removed instead); DELETE resets the role to the file. |
 | `POST /admin/api/backends/{role}/validate` · `/test` | Dry-run validation (per-field failures) and, where the provider implements `IReadinessSource`, a credential-less reachability probe. |
-| `GET /user/api/backends/meta` | Per role: the provider serving this caller and its field descriptions, so the portal renders named fields. Descriptions only — no configured values. |
+| `GET /user/api/backends/meta` | Per role: the provider serving this caller and the descriptions of the fields **that caller may set for themselves** (`SelfServiceEditable`), so the portal renders named fields. Descriptions only — no configured values. |
 | `GET/PUT/DELETE /admin/api/users[/{login}]` | Declared users with provenance; PUT = full-replacement upsert with password sentinels (null = keep, `""` = clear, value = hash/seal) plus the `enabled` flag, validated like the CLI. |
 | `POST /admin/api/users/{login}/disable·enable` | Flip the account master switch without a full-replacement PUT (parallel to devices block/unblock); a disabled account refuses every login (403). |
-| `GET/POST/DELETE /admin/api/shares` | Shared-calendar grants (`eas share`). |
-| `GET /admin/api/devices` · `POST .../block·unblock·wipe·purge` | Device management; wipe/purge require the target echoed back in `confirm`. |
+| `GET/POST/DELETE /admin/api/shares` | Shared-calendar grants (`eas share`). GET is paged: `{ total, entries }`, `limit` (default 200, max 500) and `offset`. |
+| `GET /admin/api/devices` · `POST .../block·unblock·wipe·purge` | Device management; wipe/purge require the target echoed back in `confirm`. GET is paged: `{ total, entries }`, `limit` (default 200, max 500), `offset` and an optional `user` filter. |
 | `GET /admin/api/logs` | History (time window, newest first) or tail (`?after=<id>`, chronological — poll every ~2 s); filters: `level` (minimum), `user`, `machine`, `source`, `text`. |
 | `GET /admin/api/state` · `summary` | Live sessions/watchers/long-polls and DB-derived counts (readiness comes from the public `/readyz`). |
-| `GET /user/api/me` · `PUT /user/api/password` · `PUT /user/api/backends/{role}` | Self-service: own account view, password change (re-verifies the current password), own role credentials/settings. Provider/Enabled are admin-only. |
+| `GET /user/api/me` · `PUT /user/api/password` · `PUT /user/api/backends/{role}` | Self-service: own account view, password change (re-verifies the current password), own role credentials and the settings the provider marks self-service. Provider, Enabled and every connection-shaped setting are admin-only — a PUT carrying one is refused 400 and settings an admin set are preserved. |
 
 ## The no-build SPA
 

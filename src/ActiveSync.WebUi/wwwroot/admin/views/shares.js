@@ -4,7 +4,9 @@ import { api } from '/shared/api.js';
 import { h, render as renderInto, table, toast, confirmDialog } from '/shared/ui.js';
 
 export async function render(container) {
-	const shares = await api('/admin/api/shares');
+	// Paged like /devices — see C10; the endpoint caps a page at 500 rows.
+	const page = await api('/admin/api/shares');
+	const shares = page.entries;
 
 	const user = h('input', { placeholder: 'gateway login', spellcheck: 'false' });
 	const href = h('input', { placeholder: '/dav/cal/family/ (absolute CalDAV collection path)', spellcheck: 'false' });
@@ -24,7 +26,10 @@ export async function render(container) {
 						: h('span', { class: 'badge ok' }, 'read-write') },
 					{ label: 'Granted (UTC)', cell: s => s.createdUtc?.replace('T', ' ').slice(0, 16) ?? '' },
 					{ label: '', cell: s => h('button', { class: 'danger', onclick: () => remove(s) }, 'Remove') },
-				], shares)),
+				], shares),
+			shares.length < page.total
+				? h('div', { class: 'notice' }, `Showing ${shares.length} of ${page.total} grants.`)
+				: null),
 		h('div', { class: 'card' },
 			h('h2', {}, 'Grant a collection'),
 			h('label', {}, 'User'), user,
