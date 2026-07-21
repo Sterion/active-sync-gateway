@@ -20,12 +20,19 @@ public static class WireLog
 	}
 
 	/// <summary>
-	///   Prepares payload text for logging: control characters except CR/LF/TAB become '?'
-	///   (multi-line XML/MIME stays readable, escape sequences do not survive), then the
-	///   result is truncated.
+	///   Prepares payload text for logging: the dump is truncated first, then control characters
+	///   except CR/LF/TAB become '?' (multi-line XML/MIME stays readable, escape sequences do not
+	///   survive).
+	///   <para>
+	///     Truncation leads deliberately. Sanitizing first meant scanning and copying the entire
+	///     input — a 50 MB MIME part cost a second 50 MB string on the large-object heap — to keep
+	///     16 KB of it. The output is identical either way: characters past the cap are discarded,
+	///     so whether they were sanitized on the way is unobservable.
+	///   </para>
 	/// </summary>
 	public static string Payload(string text, int max = MaxChars)
 	{
+		text = Truncate(text, max);
 		if (text.Any(static c => char.IsControl(c) && c is not ('\r' or '\n' or '\t')))
 			text = string.Create(text.Length, text, static (span, source) =>
 			{
@@ -34,6 +41,6 @@ public static class WireLog
 						? '?'
 						: source[i];
 			});
-		return Truncate(text, max);
+		return text;
 	}
 }
