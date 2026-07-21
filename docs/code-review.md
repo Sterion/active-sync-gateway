@@ -18,7 +18,90 @@ Part 1 is the **work blocks** — groupings that make sense to do together, orde
 
 Each block is written to be self-contained, so a new session can be pointed at exactly one:
 
-> Read `docs/code-review.md`. Implement **Block 5** (`A2` `A11` `A12` `A24` `A28` `D27` `D28` `K60`). Do not touch anything outside those findings. Line numbers are as of `ce6259c` — locate by symbol and confirm each defect still exists before changing it. When done, update the document per "Keeping this document current".
+> Read `docs/code-review.md`. Implement **Block 5**. Follow the working protocol in that document.
+
+That is deliberately short — the protocol below is the contract, so the prompt doesn't have to repeat it.
+
+### Working protocol — follow this for every block
+
+**1. If the block is split into sub-blocks and the user didn't name one, ask which.** See "Block index" below. Do not pick one yourself, and do not attempt a whole split block in one session.
+
+**2. Work findings in the order listed.** Where a block has a sequencing constraint (Block 1 / `H7`), honour it.
+
+**3. Commit after each finding, or each tight cluster of related findings.** Put the ID in the subject:
+
+```
+fix(imap): scope EXPUNGE to the deleted UID (D1)
+```
+
+Small commits are the point — they make the work resumable and each finding independently revertible. Do not batch a whole block into one commit.
+
+**4. Mark the finding in this document in the same commit** — `~~D1~~ **FIXED** (abc1234)`, or `~~D1~~ **N/A** — already fixed by <block/commit>` with one line of why.
+
+**5. If you moved or renamed code other findings reference, fix their `file:line` anchors.** You are the only one who will know where it went. If it invalidates a whole block, add a row to the re-verify table.
+
+**6. Build and test before each commit.** `dotnet build ActiveSync.slnx` is ~16s and the baseline is **0 warnings** — keep it there. Run the relevant test project; see [`testing.md`](testing.md) for the live-backend suites where a finding needs real server verification.
+
+**7. If you run low on context, stop at a commit boundary** and report exactly which findings are done and which are untouched. Do not start a finding you cannot finish and verify. Because of steps 3–4, stopping early costs nothing — the next session resumes from the document.
+
+---
+
+## Block index — size and splitting
+
+| Block | Findings | Session sizing |
+|---|---|---|
+| 1 — Data loss in item handling | 17 | **Split → 1A–1E** |
+| 2 — Untrusted-input limits | 12 | Single |
+| 3 — Auth / session / privilege | 20 | Single (large) |
+| 4 — Secret handling | 21 | Single (large) |
+| 5 — Session lifetime | 8 | Single |
+| 6 — EF / state layer | 19 | Single |
+| 7 — Config validation | 14 | Single |
+| 8 — Account resolution | 14 | Single |
+| 9 — EAS protocol conformance | 22 | Single — many are one-line status fixes |
+| 10 — Send/submit ordering | 6 | Single |
+| 11 — Long-poll & push | 9 | Single |
+| 12 — Hot-path performance | 24 | **Split → 12A–12C** (independent; split anywhere) |
+| 13 — Incremental sync | 6 | Single — design-heavy, few edits |
+| 14 — Assembly boundaries | 15 | **Split → 14A–14F**, and run alone |
+| 15 — Silent failure | 15 | Single |
+| 16 — Timezone & dates | 8 | Single |
+| 17 — Test coverage | 7 areas | **Split → one suite per session** |
+| 18 — Nits | ~110 | **Split → 18A–18J by area** |
+
+### Sub-block definitions
+
+**Block 1 — split by file cluster; `1D` has an internal ordering constraint.**
+| ID | Scope | Findings |
+|---|---|---|
+| **1A** | IMAP mailbox safety — `ImapMailBackend`, `ImapSession` ← **start here** (2 Criticals) | `D1` `D2` `D17` |
+| **1B** | Contact/vCard converter — `ContactConverter` | `D4` `D6` `D22` `D23` |
+| **1C** | Draft/MIME building — `DraftMessageBuilder` | `D15` `D16` |
+| **1D** | JMAP converters — **`H7` first, verified against a live server, then the rest** | `H7` → `H4` `H5` `H6` `H23` |
+| **1E** | Delete windowing & SoftDelete — `CollectionDiff`, `SyncHandler` | `F2` `F3` `A21` |
+
+**Block 12 — split by assembly; items are independent, so any cut works.**
+| ID | Scope | Findings |
+|---|---|---|
+| **12A** | Server request hot path | `E4` `E5` `E6` `E18` `E31` `E35` `F13` `F14` `F15` `F28` `F40` `F43` |
+| **12B** | Backend round trips | `D3` `D14` `D19` `D32` `H13` `H14` `H15` `H24` `H25` |
+| **12C** | Core & CLI | `B7` `B28` `L35` `L41` |
+
+**Block 14 — split by move. Each sub-block should land on a clean tree and be committed before the next.**
+| ID | Scope | Findings |
+|---|---|---|
+| **14A** | `Backends.Common` drops its `Core` reference (move `WireLog.Payload`, `TransientRetry`, `BackendConfigField` → Contracts) ← **do first, unblocks the rest** | `S1` |
+| **14B** | `ActiveSync.Crypto` namespace realignment | `S2` / `K49` |
+| **14C** | Contracts surface — move host types out, optional-capability split, signature fixes. **Breaking; bundle into one major.** | `K57` `K58` `K59` `K61` `K69` |
+| **14D** | WebUi → Core services (`DeviceAdminService`, `ShareAdminService`, `LogQueryService`) | `S3` / `C18` |
+| **14E** | Decompositions — `SyncHandler`, `SyncStateService`, `ProgramServer` | `F-decomp` `A33` `E27` |
+| **14F** | Guardrails — move `MergedFreeBusy`/`CollectionDiff` to Protocol, architecture test, migration-lockstep CI | `S4` `S5` `S6` |
+
+**Block 17 — one test suite per session.** Endpoint-authorization (`C19`) · `AuthThrottle` + `GatewayMetrics` (`K31`) · WBXML depth/fuzz + code-page table validation (`W13`) · JSCalendar/JSContact round-trip (`H-roundtrip`) · CLI error-path tests (`L33`) · per-backend test project (`S5`) · migration lockstep (`S6`).
+
+**Block 18 — split by area prefix.** `18A` = `A*` (Core state/backend) · `18B` = `B*` (Core accounts/settings) · `18C` = `C*` (WebUi) · `18D` = `D*` (Backends common/imap/smtp/local/sieve) · `18E` = `E*` (Server pipeline) · `18F` = `F*` (EAS handlers) · `18G` = `H*` (JMAP/DAV) · `18H` = `K*` (Security/crypto/contracts) · `18I` = `L*` (CLI) · `18J` = `W*` (WBXML/Protocol).
+
+> Several Block 18 items are **Medium**, not cosmetic — notably `H1` (DAV probe disables TLS validation), `H2` (wrong resource fetched), `H3` (lost update), `K19` (AAD ambiguity), `K62` (fails **open** to read-write), `K64` (cross-host guard skipped). Do `18G` and `18H` before the cosmetic areas.
 
 **Run one block at a time.** The blocks were grouped by *subject*, not by file, so several of them touch the same files from different angles — `SyncStateService.cs` appears in Blocks 6 and 14, `BackendSessionFactory.cs` in Blocks 5 and 6, `SyncHandler.cs` in Blocks 1, 9, 10 and 14. Two sessions working different blocks in parallel will conflict in those files.
 
@@ -58,14 +141,11 @@ git diff ce6259c..HEAD -- src/ActiveSync.Core/Backend/                          
 
 ### Keeping this document current
 
-When a finding is fixed, mark it rather than deleting it — `~~D1~~ **FIXED** (commit abc1234)` — so the IDs stay stable for any session still referencing them.
+Steps 4 and 5 of the working protocol cover the mechanics. The reason they matter:
 
-**At the end of a block, before finishing, update this document:**
-1. Mark every finding you fixed.
-2. If you **moved or renamed** code that other findings reference, correct those `file:line` anchors — you are the only one who knows where it went. Note the move in the table above if it affects a whole block.
-3. If you found a listed finding was already fixed or no longer applies, mark it `**N/A**` with one line of why.
+**Never delete a finding — strike it through.** IDs are referenced by other blocks, by the re-verify table, and by any session started before the fix landed. A deleted ID turns those into dangling references; a struck-through one stays readable.
 
-Skipping step 2 is what makes the next session's job hard, so treat it as part of the work rather than paperwork.
+**Updating the doc is part of the work, not paperwork.** It is what makes a block resumable and what stops the next session from chasing an anchor into a file that no longer holds the code.
 
 **Severity**: Critical = data loss or process death in normal operation · High = security hole, corruption, or a feature that silently doesn't work · Medium = wrong behaviour in a reachable case, or a real performance/maintainability problem · Low = latent, narrow, or defence-in-depth · Nit = polish.
 
