@@ -119,8 +119,13 @@ public class DbAccountTests(GatewayFixture gateway)
 	[BackendFact]
 	public async Task AutoProvisionUsers_Off_LeavesPassThroughUnpersisted()
 	{
+		// Auto-provisioning is on by default, so this leg turns it OFF explicitly.
 		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
-			new Dictionary<string, string?> { ["ActiveSync:Auth:UsersRefreshSeconds"] = "0" });
+			new Dictionary<string, string?>
+			{
+				["ActiveSync:AutoProvisionUsers"] = "false",
+				["ActiveSync:Auth:UsersRefreshSeconds"] = "0",
+			});
 		AccountStore store = factory.Services.GetRequiredService<AccountStore>();
 
 		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));

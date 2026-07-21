@@ -342,13 +342,15 @@ public sealed class ActiveSyncOptions
 	///   MailStore probe over EAS, so the user becomes visible and manageable — listed in
 	///   `eas users`/the admin UI, blockable, and able to sign in to the self-service portal
 	///   (validated against the same backend). The row carries no gateway password, so auth is
-	///   unchanged (still a backend probe). Off by default: it persists login identities that
-	///   were previously ephemeral. Naturally exclusive with <see cref="RequireDeclaredUsers" />
-	///   — that rejects undeclared logins before they authenticate, so nothing is ever
-	///   provisioned. Deleting an auto-created row is not permanent while this stays on: the
-	///   user's next sync re-creates it (block them, or turn this off, to make removal stick).
+	///   unchanged (still a backend probe). ON by default so every user that actually syncs shows
+	///   up as a first-class account instead of appearing only as device/session state that leads
+	///   nowhere — set false to keep pass-through logins ephemeral (nothing is persisted).
+	///   Naturally inert under <see cref="RequireDeclaredUsers" /> — that rejects undeclared
+	///   logins before they authenticate, so nothing is ever provisioned. Deleting an auto-created
+	///   row is not permanent while this stays on: the user's next sync re-creates it (block them,
+	///   or turn this off, to make removal stick).
 	/// </summary>
-	public bool AutoProvisionUsers { get; set; }
+	public bool AutoProvisionUsers { get; set; } = true;
 
 	/// <summary>
 	///   Optional path to a JSON file (mounted secret/configmap) merged into configuration at

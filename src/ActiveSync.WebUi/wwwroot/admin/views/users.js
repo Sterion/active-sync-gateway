@@ -32,11 +32,13 @@ export async function render(container) {
 
 	renderList();
 
-	// Deep link: #/users/<login> (e.g. from the dashboard) opens that user's editor.
+	// Deep link: #/users/<login> (e.g. from the dashboard or devices page) opens that user's
+	// editor — or, when the login isn't a declared account yet (a pass-through user seen only in
+	// device/session state), a pre-filled "Add user" form so the link still lands somewhere.
 	const target = decodeURIComponent(location.hash.replace(/^#\/users\/?/, ''));
 	if (target) {
 		const linked = users.find(u => u.login.toLowerCase() === target.toLowerCase());
-		if (linked) openEditor(linked);
+		openEditor(linked ?? null, linked ? null : target);
 	}
 
 	function renderList() {
@@ -52,10 +54,10 @@ export async function render(container) {
 			], users));
 	}
 
-	function openEditor(user) {
+	function openEditor(user, prefillLogin = null) {
 		const isNew = user === null;
 		const login = h('input', {
-			value: user?.login ?? '', placeholder: 'gateway login (what the phone authenticates as)',
+			value: user?.login ?? prefillLogin ?? '', placeholder: 'gateway login (what the phone authenticates as)',
 			spellcheck: 'false', ...(isNew ? {} : { disabled: true }),
 		});
 		const mail = h('input', {

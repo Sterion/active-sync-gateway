@@ -136,9 +136,9 @@ public static class EasEndpoint
 			return;
 
 		// First successful sign-in of a pass-through login: turn it into a managed database
-		// account (opt-in, ActiveSync:AutoProvisionUsers). Idempotent and best-effort — it never
-		// fails the request. Runs before the block check so an operator can see (and block) even a
-		// user they intend to block.
+		// account (ActiveSync:AutoProvisionUsers, on by default). Idempotent and best-effort — it
+		// never fails the request. Runs before the block check so an operator can see (and block)
+		// even a user they intend to block.
 		await provisioner.ProvisionIfEnabledAsync(credentials.UserName, ct);
 
 		// Operator blocks (eas block/unblock) are enforced after auth so only holders of valid

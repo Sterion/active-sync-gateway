@@ -42,10 +42,10 @@ traffic you need to reach this page).
 get — the local password rule first, else the mail-backend probe — plus the web-only rules:
 
 - Only **declared** accounts (config or database) may log in; a pure pass-through login has
-  nothing to manage. The response is indistinguishable from a wrong password. (Turn on
-  `ActiveSync:AutoProvisionUsers` and a pass-through user becomes declared the first time a
-  phone syncs — then this portal accepts them, verifying the password against their backend
-  exactly as the phone does. See the accounts section of the README.)
+  nothing to manage. The response is indistinguishable from a wrong password. (With
+  `ActiveSync:AutoProvisionUsers` **on — the default** — a pass-through user becomes declared
+  the first time a phone syncs, so this portal then accepts them, verifying the password
+  against their backend exactly as the phone does. See the accounts section of the README.)
 - `/admin` additionally requires the account's **`Admin` flag**
   (`eas user set <login> Admin true`, or the checkbox in the admin users editor).
 - A user-level `eas block` applies to the web exactly like EAS (403 after valid

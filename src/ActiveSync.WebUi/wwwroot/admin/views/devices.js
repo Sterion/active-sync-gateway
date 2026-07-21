@@ -20,7 +20,7 @@ export async function render(container) {
 			devices.length === 0
 				? h('div', { class: 'notice' }, 'No devices have synced yet.')
 				: table([
-					{ label: 'User', cell: d => d.user },
+					{ label: 'User', cell: d => h('a', { href: `#/users/${encodeURIComponent(d.user)}` }, d.user) },
 					{ label: 'Device', cell: d => h('span', { class: 'mono' }, d.deviceId) },
 					{ label: 'Type', cell: d => d.deviceType || '—' },
 					{ label: 'EAS', cell: d => d.lastProtocolVersion ?? '—' },
