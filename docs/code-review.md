@@ -18,7 +18,7 @@ Part 1 is the **work blocks** — groupings that make sense to do together, orde
 
 Each block is written to be self-contained, so a new session can be pointed at exactly one:
 
-> Read `docs/code-review.md`. Implement **Block 5** (`A2` `A11` `A12` `A24` `A28` `D27` `D28` `K60`). Do not touch anything outside those findings.
+> Read `docs/code-review.md`. Implement **Block 5** (`A2` `A11` `A12` `A24` `A28` `D27` `D28` `K60`). Do not touch anything outside those findings. Line numbers are as of `ce6259c` — locate by symbol and confirm each defect still exists before changing it. When done, update the document per "Keeping this document current".
 
 **Run one block at a time.** The blocks were grouped by *subject*, not by file, so several of them touch the same files from different angles — `SyncStateService.cs` appears in Blocks 6 and 14, `BackendSessionFactory.cs` in Blocks 5 and 6, `SyncHandler.cs` in Blocks 1, 9, 10 and 14. Two sessions working different blocks in parallel will conflict in those files.
 
@@ -29,9 +29,43 @@ If parallel work is needed, these sets are close to file-disjoint and can overla
 
 Block 14 (assembly boundaries) moves types between projects, so it should run alone and land before or after everything else, never alongside.
 
+### ⚠️ Locating a finding after code has moved
+
+**Every `file:line` in this document is exact as of commit `ce6259c`** (the last commit touching `src/` before the review; everything after it is docs-only). **Line numbers are a hint, not an address.** As soon as one block lands, they drift for every finding in the same file — and two blocks invalidate them wholesale:
+
+- **Block 14** moves types between assemblies. After it, findings referencing `WireLog`, `TransientRetry`, `BackendConfigField`, `IBackendSession`, `MergedFreeBusy`, `CollectionDiff` and the `ActiveSync.Crypto` types point at the **wrong project**, not just the wrong line.
+- **`F-decomp`** splits `SyncHandler.cs` (826 lines) into six partials. Every `SyncHandler.cs:NNN` reference — Blocks 1, 9, 10 and 12 all have them — lands in a file that no longer holds that code.
+
+**Locate by symbol, not by line.** Each finding names the enclosing type and member, and most quote the offending expression. Grep for that first; use the line number only to disambiguate between several hits in one file.
+
+**Before editing, confirm the defect is still there.** Findings are not independent — an earlier block may have already fixed, moved, or obsoleted one. Specific overlaps worth knowing:
+
+| If you already did | Re-verify before starting |
+|---|---|
+| Block 14 (`S1`, `K49`, `K57`) | anything referencing Core↔Contracts↔Crypto types |
+| `F-decomp` (SyncHandler split) | `F1`–`F15`, `F10`, `F29`, `F40`, `A21` |
+| Block 5 (session lease) | `A2` `A11` `A12` `A24` `D27` `D28` |
+| Block 6 (state layer) | `A1` `A3` `A4` `A9` `A10` `A18` `A19` |
+| Block 4 (unified redaction) | `L29` `L30` `E15` `C5` `B5` |
+
+To find where something moved, the baseline is pinned so git can trace it:
+
+```sh
+git show ce6259c:src/ActiveSync.Server/Eas/Handlers/SyncHandler.cs | sed -n '780,830p'   # what the review saw
+git log -L 780,830:src/ActiveSync.Server/Eas/Handlers/SyncHandler.cs --oneline           # how it changed since
+git diff ce6259c..HEAD -- src/ActiveSync.Core/Backend/                                   # everything that moved in an area
+```
+
 ### Keeping this document current
 
 When a finding is fixed, mark it rather than deleting it — `~~D1~~ **FIXED** (commit abc1234)` — so the IDs stay stable for any session still referencing them.
+
+**At the end of a block, before finishing, update this document:**
+1. Mark every finding you fixed.
+2. If you **moved or renamed** code that other findings reference, correct those `file:line` anchors — you are the only one who knows where it went. Note the move in the table above if it affects a whole block.
+3. If you found a listed finding was already fixed or no longer applies, mark it `**N/A**` with one line of why.
+
+Skipping step 2 is what makes the next session's job hard, so treat it as part of the work rather than paperwork.
 
 **Severity**: Critical = data loss or process death in normal operation · High = security hole, corruption, or a feature that silently doesn't work · Medium = wrong behaviour in a reachable case, or a real performance/maintainability problem · Low = latent, narrow, or defence-in-depth · Nit = polish.
 

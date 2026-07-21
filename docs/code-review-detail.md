@@ -1,5 +1,9 @@
 # Raw findings — part 1 (areas: Core state/sync/backend, Core accounts/settings/options, WebUi, Backends Common/Imap/Smtp/Local/Sieve)
 
+Companion to [`code-review.md`](code-review.md), which holds the work blocks, the sequencing notes and the full finding index. Start there.
+
+> **⚠️ Every `file:line` below is exact as of commit `ce6259c` and drifts as soon as any block lands.** Locate findings by the enclosing type/member and the quoted code, using line numbers only to disambiguate. See "Locating a finding after code has moved" in [`code-review.md`](code-review.md) for the git commands to trace where something went.
+
 Severity legend: Critical / High / Medium / Low / Nit
 
 ---
