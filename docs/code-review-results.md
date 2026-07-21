@@ -240,10 +240,86 @@ WebUi 9 — 0 failed, 0 skipped** ✓ · not [LIVE], no backend run required or 
 - **If you ever revert `K26`, the three heavy `AuthThrottleTests` will appear to hang, not fail fast** —
   the red run took 9 minutes.
 
+## Item 8 — WebUi session & cookies — ⚠ **VERIFICATION FAILED, RUN HALTED**
+
+**Findings:** `C2` `C4` `C8` `C7` `C3` `C14` — all six fixed and struck through
+**Commits:** `dba314d` (C2, C4) · `c2cee3f` (C8) · `4fc94ac` (C7) · `5e6ffc4` (C3) · `63c5681` (C14)
+
+**Verification:** integrity 56/15/365/365/0 ✓ · cursor → item 9 ✓ · IDs in subjects ✓ · build
+**0 warnings** ✓ · unit suites **Core 401, Server 115, Protocol 63, WebUi 26 (was 9) — 0 failed,
+0 skipped** ✓ · **integration ✗ — 23 failed, 111 passed, 0 skipped.**
+
+**The integration regression is real and is the reason the orchestrated run stopped here.** Item 8 is
+not [LIVE], so the worker correctly ran unit tests only and never saw it. The orchestrator ran the
+integration suite anyway because this item landed an EF migration on both providers — a schema change
+is precisely the silent-breakage class the "establish a green baseline" section warns about.
+
+Bisected, not guessed: integration at `911ac9c` (end of item 7) is **134 passed, 0 skipped**; at
+`63c5681` (end of item 8) it is **111 passed, 23 failed**. Item 8 owns the regression.
+
+**Cause — `C2`, working as designed, against a harness that cannot accommodate it.** Every failure is
+WebUi-shaped (401 Unauthorized, `Values differ`, one empty-JSON-body). `WebUiServiceCollectionExtensions`
+now sets `CookieSecurePolicy.Always` unless `ActiveSync:WebUi:AllowInsecureCookies` is set; the
+integration harness (`GatewayFixture`) drives the portals over **plain http** with a cookie container,
+so the session cookie is never returned and every authenticated request 401s. This is the same failure
+mode the worker predicted for an operator on plain http — it simply lands on the test harness first.
+
+**Recommended fix — harness, not product:** set `ActiveSync:WebUi:AllowInsecureCookies=true` in
+`GatewayFixture`'s configuration. That is the documented local-http opt-out, used exactly as intended,
+and it keeps the `C2` fix at full strength. It should be paired with one integration test that asserts
+the cookie carries `Secure` when the opt-out is *off*, so the harness opt-out cannot quietly become a
+blind spot for the very finding it is working around.
+
+**Notes (worker-flagged, all still valid — the fixes themselves are sound):**
+- **`C2` is deployment-affecting.** An operator serving the portals over plain http with no
+  `PublicUrl`/`X-Forwarded-Proto` will find the session cookie rejected after upgrading. That is the
+  intended failure; `ActiveSync:WebUi:AllowInsecureCookies` (restart-tier, warned once at startup) is
+  the escape hatch. Auto-detecting the proxy was rejected as exactly the guesswork `C2` names as unsafe.
+- **`C4` does not reproduce.** .NET 10's `RemoteAuthenticationOptions` already defaults
+  `CorrelationCookie`/`NonceCookie` to `SecurePolicy.Always` — the review read the older documented
+  default. Its test is labelled coverage in both the test comment and the Part 2 note. What did change:
+  under the opt-out those cookies drop to `SameSite=Lax`, because `SameSite=None` without `Secure` is
+  discarded outright by browsers.
+- **`C8` is breaking.** Startup now *fails* for a deployment with `AdminClaim` and no
+  `AdminClaimValue`; `"*"` restores the old directory-wide behaviour. A warning would have been softer
+  but leaves the over-broad grant live.
+- **`C3` fails open on a database fault.** A DB blip logging every operator out mid-incident was judged
+  worse than a one-request window; nothing is stamped, so it retries immediately. Reasonable people
+  would argue for fail-closed.
+- **OIDC-claim admin is carried across revalidation** via an `eas:admin-src` marker, because
+  re-deriving admin from the account flag alone would strip every OIDC admin within 60 s of signing in.
+  Cost: revoking claim-granted admin means revoking it at the IdP.
+- **`C7` binds only database accounts.** Config-declared accounts are never auto-bound — upserting one
+  would mint a DB row shadowing its config entry. They stay unbound until an operator sets
+  `OidcSubject` (now settable via `eas user set` and the admin API).
+- **`C14` added a table** (`WebSessionRevocations`) plus migrations for both providers, rather than
+  settling for "largely resolved by `C3`".
+- **Load-bearing and easy to "simplify" away:** revocation compares against a new `eas:sid-iat` claim,
+  **not** the ticket's `IssuedUtc`. Sliding renewal rewrites `IssuedUtc`, and `C3` sets `ShouldRenew`
+  on every revalidation, so a cut-off compared against `IssuedUtc` would stop biting on the very next
+  request. Tickets minted before this change carry no start stamp and count as older than any cut-off,
+  so the first logout after upgrading invalidates them — fails closed, deliberately.
+- **`WebUi.Tests` now references `ActiveSync.Backends.Local`**, not cosmetically: building an account
+  snapshot resolves every declared user's roles through the provider registry, default content roles
+  land on `local`, and an empty registry throws during `AccountResolver` construction. Relatedly, the
+  `SessionRevalidationTests` helper pre-warms `AccountResolver` on purpose so a resolver fault surfaces
+  as a failure instead of being swallowed by the hook's fail-open catch — **removing that line makes
+  those tests silently vacuous.**
+- **New finding `C22`** (bottom of Part 2): an admin-set or CLI-set password still does not stamp a
+  revocation cut-off. The mechanism exists (`SyncStateService.RevokeSessionsBeforeAsync`); it needs one
+  call per write site, but those files belong to items 9/14/18, so the worker left them alone.
+
 ---
 
-## Next: item 8 — WebUi session & cookies
+## Next: item 9 — WebUi privilege & API hardening — **BLOCKED**
 
-Items 8–14 are Phase 2 (Security), none [LIVE] — the unit suites suffice and Stalwart is not needed
-again until item 26. Note the intra-phase ordering constraint: **item 13 (unified redaction) must be
-done before item 14** — build the one redaction implementation, then apply it.
+Do not start item 9 until the item 8 integration regression is resolved. Items 9–14 are Phase 2
+(Security), none [LIVE]; Stalwart is not otherwise needed again until item 26. Note the intra-phase
+ordering constraint: **item 13 (unified redaction) must be done before item 14** — build the one
+redaction implementation, then apply it.
+
+**Process lesson for future runs:** "not [LIVE]" means the *worker* need not run integration. It does
+not mean the *orchestrator* shouldn't, and items 5–8 show why — a non-[LIVE] item with a schema or
+auth-surface change can pass every check the protocol asks of it and still break 23 integration tests.
+Consider running integration after any item that touches migrations, cookies, or auth, regardless of
+its [LIVE] marking.
