@@ -1,6 +1,6 @@
-using System.Text;
 using Ical.Net;
 using Ical.Net.CalendarComponents;
+using Ical.Net.DataTypes;
 using Ical.Net.Serialization;
 using MimeKit;
 
@@ -29,29 +29,36 @@ public static class ImipMailBuilder
 		return Compose(organizer, recipients, subject, "REQUEST", ics);
 	}
 
-	/// <summary>A cancellation — of the whole meeting, or one occurrence via <paramref name="recurrenceIdUtc" />.</summary>
+	/// <summary>
+	///   A cancellation — of the whole meeting, or one occurrence via
+	///   <paramref name="recurrenceIdUtc" />. Serialized through Ical.Net exactly as
+	///   <see cref="BuildRequest" /> is: the serializer escapes and folds every value, so a
+	///   <paramref name="uid" /> carrying a newline (it comes from client ApplicationData for
+	///   DAV-backed events) cannot inject properties into an outbound iTIP message, and line
+	///   endings are the CRLF RFC 5545 mandates rather than the platform's.
+	/// </summary>
 	public static MimeMessage BuildCancel(
 		string uid, int sequence, string organizer, IReadOnlyList<(string Email, string? Name)> recipients,
 		DateTime? recurrenceIdUtc, string subject)
 	{
-		StringBuilder ics = new StringBuilder()
-			.AppendLine("BEGIN:VCALENDAR")
-			.AppendLine("PRODID:-//ActiveSync Gateway//EN")
-			.AppendLine("VERSION:2.0")
-			.AppendLine("METHOD:CANCEL")
-			.AppendLine("BEGIN:VEVENT")
-			.AppendLine($"UID:{uid}")
-			.AppendLine($"DTSTAMP:{DateTime.UtcNow:yyyyMMdd'T'HHmmss'Z'}")
-			.AppendLine($"SEQUENCE:{sequence}")
-			.AppendLine("STATUS:CANCELLED")
-			.AppendLine($"ORGANIZER:mailto:{organizer}");
+		CalendarEvent evt = new()
+		{
+			Uid = uid,
+			DtStamp = new CalDateTime(DateTime.UtcNow, "UTC"),
+			Sequence = sequence,
+			Status = "CANCELLED",
+			Organizer = new Organizer($"mailto:{organizer}")
+		};
 		if (recurrenceIdUtc is { } occurrence)
-			ics.AppendLine($"RECURRENCE-ID:{occurrence:yyyyMMdd'T'HHmmss'Z'}");
+			evt.RecurrenceIdentifier = new RecurrenceIdentifier(new CalDateTime(occurrence, "UTC"));
 		foreach ((string email, string? _) in recipients)
-			ics.AppendLine($"ATTENDEE:mailto:{email}");
-		ics.AppendLine("END:VEVENT")
-			.AppendLine("END:VCALENDAR");
-		return Compose(organizer, recipients, subject, "CANCEL", ics.ToString());
+			evt.Attendees.Add(new Attendee($"mailto:{email}"));
+
+		Calendar calendar = new() { Method = "CANCEL", ProductId = "-//ActiveSync Gateway//EN" };
+		calendar.Events.Add(evt);
+		string ics = new CalendarSerializer().SerializeToString(calendar)
+			?? throw new InvalidOperationException("Serializing the cancellation produced no output.");
+		return Compose(organizer, recipients, subject, "CANCEL", ics);
 	}
 
 	/// <summary>

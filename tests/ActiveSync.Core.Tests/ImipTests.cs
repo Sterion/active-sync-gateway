@@ -135,4 +135,39 @@ public class ImipTests
 			new DateTime(2026, 8, 5, 9, 0, 0, DateTimeKind.Utc), "Cancelled occurrence: X");
 		Assert.Contains("RECURRENCE-ID:20260805T090000Z", Assert.IsType<TextPart>(occurrence.Body).Text);
 	}
+
+	[Fact]
+	public void BuildCancel_UsesCrlf_NotThePlatformLineEnding()
+	{
+		// D7 — StringBuilder.AppendLine emits Environment.NewLine: bare LF on the Linux
+		// containers this ships in, while RFC 5545 mandates CRLF. Strict iTIP consumers
+		// reject the result. NOTE: this is COVERAGE, not a reproducer — on Windows
+		// Environment.NewLine is already CRLF, so it passes against the unfixed code too. It
+		// guards the Ical.Net serializer (which always emits CRLF) against a regression to
+		// hand-built AppendLine, which only bites on the Linux containers.
+		string body = Assert.IsType<TextPart>(ImipMailBuilder.BuildCancel(
+			"uid-2", 1, "alice@example.com", [("bob@example.com", null)], null, "Cancelled: X").Body).Text!;
+
+		Assert.DoesNotContain("\n", body.Replace("\r\n", ""));
+	}
+
+	[Fact]
+	public void BuildCancel_CannotInjectIcalendarProperties()
+	{
+		// D7 — uid/organizer/attendee were interpolated unescaped and unfolded. For a
+		// DAV-backed event the UID comes from client ApplicationData, so a crafted value
+		// injected arbitrary properties (an extra ATTENDEE, a METHOD override) into an
+		// outbound iTIP message.
+		string body = Assert.IsType<TextPart>(ImipMailBuilder.BuildCancel(
+			"uid-3\r\nATTENDEE:mailto:attacker@evil.example\r\nMETHOD:REQUEST\r\nX-INJECTED:pwned",
+			1, "alice@example.com", [("bob@example.com", null)], null, "Cancelled: X").Body).Text!;
+
+		// The property is structural, not textual: the crafted text may legitimately appear
+		// escaped INSIDE the UID value (Ical.Net writes it as a literal \n), but it must never
+		// become a line of its own.
+		string[] lines = body.Replace("\r\n ", "").Split("\r\n");
+		Assert.Equal("ATTENDEE:mailto:bob@example.com", Assert.Single(lines, l => l.StartsWith("ATTENDEE:")));
+		Assert.Equal("METHOD:CANCEL", Assert.Single(lines, l => l.StartsWith("METHOD:")));
+		Assert.DoesNotContain(lines, l => l.StartsWith("X-INJECTED"));
+	}
 }
