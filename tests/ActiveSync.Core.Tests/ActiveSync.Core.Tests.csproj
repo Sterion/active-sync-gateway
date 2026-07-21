@@ -27,13 +27,17 @@
 		     runtime; the AfterBuild target below stages its DLL under testplugin/. -->
 		<ProjectReference Include="..\ActiveSync.TestPlugin\ActiveSync.TestPlugin.csproj"
 		                  ReferenceOutputAssembly="false" />
+		<!-- Referenced NORMALLY, unlike the plugin itself: the host must have its own copy loadable
+		     from the default context, so PluginLoaderTests can prove the plugin binds to the copy
+		     in its own folder instead (K41). -->
+		<ProjectReference Include="..\PluginPrivateLib\PluginPrivateLib.csproj" />
 	</ItemGroup>
 
 	<!-- Stage the fixture plugin's assembly in a subfolder of the test output (NOT the base
 	     dir — it must not be probed by the default load context) so PluginLoaderTests can copy
 	     it into a temp plugins directory and load it fresh. -->
 	<Target Name="StageTestPlugin" AfterTargets="Build">
-		<Copy SourceFiles="$(MSBuildThisFileDirectory)..\ActiveSync.TestPlugin\bin\$(Configuration)\$(TargetFramework)\ActiveSync.TestPlugin.dll"
+		<Copy SourceFiles="$(MSBuildThisFileDirectory)..\ActiveSync.TestPlugin\bin\$(Configuration)\$(TargetFramework)\ActiveSync.TestPlugin.dll;$(MSBuildThisFileDirectory)..\ActiveSync.TestPlugin\bin\$(Configuration)\$(TargetFramework)\PluginPrivateLib.dll"
 		      DestinationFolder="$(OutDir)testplugin" SkipUnchangedFiles="true" />
 	</Target>
 

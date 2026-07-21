@@ -21,6 +21,7 @@
 		<Project Path="tests/ActiveSync.Protocol.Tests/ActiveSync.Protocol.Tests.csproj" />
 		<Project Path="tests/ActiveSync.Server.Tests/ActiveSync.Server.Tests.csproj" />
 		<Project Path="tests/ActiveSync.TestPlugin/ActiveSync.TestPlugin.csproj" />
+		<Project Path="tests/PluginPrivateLib/PluginPrivateLib.csproj" />
 		<Project Path="tests/ActiveSync.WebUi.Tests/ActiveSync.WebUi.Tests.csproj" />
 	</Folder>
 </Solution>

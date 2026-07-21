@@ -10,6 +10,8 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\..\src\ActiveSync.Contracts\ActiveSync.Contracts.csproj" />
+		<!-- Stands in for a plugin's private dependency; see that project's own comment. -->
+		<ProjectReference Include="..\PluginPrivateLib\PluginPrivateLib.csproj" />
 	</ItemGroup>
 
 </Project>

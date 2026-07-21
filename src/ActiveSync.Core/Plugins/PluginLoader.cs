@@ -171,20 +171,61 @@ public static class PluginLoader
 	private sealed class PluginLoadContext(string entryDll) : AssemblyLoadContext(isCollectible: false)
 	{
 		private readonly AssemblyDependencyResolver _resolver = new(entryDll);
+		private readonly string _pluginDir = Path.GetDirectoryName(entryDll)!;
 
 		protected override Assembly? Load(AssemblyName assemblyName)
 		{
-			// Host-first: if the default context already has (or can load) this assembly, use
-			// that instance — critical for type identity of the shared contract.
-			try
+			// Host-first ONLY for the assemblies whose types must be the host's — the contract
+			// surface and the framework. Applying it to everything silently downgraded a plugin's
+			// private dependency to whatever version the host happened to have loaded, which is
+			// the opposite of what a per-plugin load context is for.
+			if (IsHostOwned(assemblyName))
 			{
-				return Default.LoadFromAssemblyName(assemblyName);
+				try
+				{
+					return Default.LoadFromAssemblyName(assemblyName);
+				}
+				catch (Exception ex) when (ex is FileNotFoundException or FileLoadException)
+				{
+					// Fall through to the plugin's own copy.
+				}
 			}
-			catch (Exception ex) when (ex is FileNotFoundException or FileLoadException)
-			{
-				string? path = _resolver.ResolveAssemblyToPath(assemblyName);
-				return path is null ? null : LoadFromAssemblyPath(path);
-			}
+
+			string? path = _resolver.ResolveAssemblyToPath(assemblyName)
+				?? ProbePluginFolder(assemblyName);
+			// Null hands the assembly back to the runtime, which falls back to the default
+			// context — so a host assembly the plugin does not ship still resolves.
+			return path is null ? null : LoadFromAssemblyPath(path);
+		}
+
+		/// <summary>
+		///   A plugin folder without a .deps.json (a hand-assembled drop rather than a
+		///   <c>dotnet publish</c>) resolves nothing through <see cref="AssemblyDependencyResolver" />,
+		///   so probe the folder by simple name as well. Both layouts are documented.
+		/// </summary>
+		private string? ProbePluginFolder(AssemblyName assemblyName)
+		{
+			if (assemblyName.Name is not { Length: > 0 } name)
+				return null;
+
+			string candidate = Path.Combine(_pluginDir, name + ".dll");
+			return File.Exists(candidate) ? candidate : null;
+		}
+
+		/// <summary>
+		///   The assemblies a plugin must share with the host: the plugin contract (and everything
+		///   the gateway ships alongside it) plus the framework, because their types appear in the
+		///   contract's own signatures. A private copy of any of these would make
+		///   <c>IBackendProvider</c> a different type and the provider would be ignored — which is
+		///   why <c>docs/plugins.md</c> tells plugin authors not to ship them.
+		/// </summary>
+		private static bool IsHostOwned(AssemblyName assemblyName)
+		{
+			string name = assemblyName.Name ?? string.Empty;
+			return name.StartsWith("ActiveSync.", StringComparison.Ordinal)
+			       || name.StartsWith("System.", StringComparison.Ordinal)
+			       || name.StartsWith("Microsoft.Extensions.", StringComparison.Ordinal)
+			       || name is "System" or "mscorlib" or "netstandard";
 		}
 
 		protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)

@@ -22,6 +22,10 @@ public sealed class PluginLoaderTests : IDisposable
 	private static readonly string StagedPluginDll =
 		Path.Combine(AppContext.BaseDirectory, "testplugin", "ActiveSync.TestPlugin.dll");
 
+	/// <summary>The fixture's private dependency, staged beside it and NOT in the base dir.</summary>
+	private static readonly string StagedDepDll =
+		Path.Combine(AppContext.BaseDirectory, "testplugin", "PluginPrivateLib.dll");
+
 	private readonly string _root =
 		Path.Combine(Path.GetTempPath(), $"as-plugins-{Guid.NewGuid():N}");
 
@@ -161,6 +165,45 @@ public sealed class PluginLoaderTests : IDisposable
 
 		Assert.Equal("testplugin", registry.GetFor("testplugin", BackendRole.Notes).Name);
 		Assert.DoesNotContain(registry.All, p => p.Name == "internal-testplugin");
+	}
+
+	/// <summary>
+	///   K41 — resolution was host-first for EVERY assembly, not just the shared contract, so any
+	///   dependency the host happened to have loaded silently won over the copy the plugin shipped
+	///   beside its entry assembly. A plugin pinned to its own build of a library therefore ran
+	///   against the host's version instead — the classic silent downgrade. Only the contract and
+	///   framework assemblies need to unify; everything else belongs to the plugin.
+	/// </summary>
+	[Fact]
+	public void PluginPrivateDependency_LoadsFromThePluginFolder_NotTheHost()
+	{
+		string pluginDir = StagePlugin("ActiveSync.TestPlugin");
+		File.Copy(StagedDepDll, Path.Combine(pluginDir, "PluginPrivateLib.dll"));
+
+		BackendProviderRegistry registry = LoadAndBuildRegistry(ConfigFor(_root));
+
+		// The provider reports where the copy of its private dependency it bound to came from.
+		string described = registry.GetFor("testplugin", BackendRole.Notes)
+			.DescribeRole(BackendRole.Notes, ProviderSettings.Empty);
+		Assert.Contains(pluginDir, described, StringComparison.OrdinalIgnoreCase);
+	}
+
+	/// <summary>
+	///   The other half of the same rule: the shared contract must still come from the HOST even
+	///   when the plugin ships a copy, or its IBackendProvider is a different type and the registry
+	///   never sees it. Guard against over-correcting K41 into plugin-first for everything.
+	/// </summary>
+	[Fact]
+	public void SharedContract_StillResolvesFromTheHost_EvenWhenThePluginShipsACopy()
+	{
+		string pluginDir = StagePlugin("ActiveSync.TestPlugin");
+		File.Copy(typeof(IGatewayPlugin).Assembly.Location,
+			Path.Combine(pluginDir, "ActiveSync.Contracts.dll"));
+
+		BackendProviderRegistry registry = LoadAndBuildRegistry(ConfigFor(_root));
+
+		IBackendProvider provider = registry.GetFor("testplugin", BackendRole.Notes);
+		Assert.Same(typeof(IBackendProvider), provider.GetType().GetInterface("IBackendProvider"));
 	}
 
 	/// <summary>Copies the fixture plugin into a correctly-named subdirectory and returns it.</summary>

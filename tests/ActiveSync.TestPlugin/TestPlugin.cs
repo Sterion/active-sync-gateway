@@ -59,7 +59,9 @@ public sealed class TestBackendProvider : IBackendProvider
 	{
 	}
 
-	public string DescribeRole(BackendRole role, ProviderSettings settings) => "test plugin provider";
+	// Names the copy of the plugin's private dependency this provider bound to (K41).
+	public string DescribeRole(BackendRole role, ProviderSettings settings) =>
+		$"test plugin provider (dep: {PluginPrivateLib.PrivateDependency.LoadedFrom})";
 
 	public IBackendConnection CreateConnection(BackendConnectionContext context) =>
 		throw new NotSupportedException("The test plugin provider does not open connections.");

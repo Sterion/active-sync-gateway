@@ -184,8 +184,13 @@ both as-is; a plugin with a native dependency must ship both RIDs.
 
 ## Loading behavior
 
-- Each plugin loads in its own `AssemblyLoadContext`; the shared contract and framework
-  assemblies resolve from the host (type identity), private deps from the plugin folder.
+- Each plugin loads in its own `AssemblyLoadContext`. The shared assemblies — anything named
+  `ActiveSync.*`, plus `System.*`/`Microsoft.Extensions.*` and the framework — always resolve
+  from the **host**, because their types appear in the contract's own signatures and a private
+  copy would make `IBackendProvider` a different type. **Everything else resolves from your
+  plugin folder first**, so a library you pinned is the one you get even when the gateway ships
+  a different version of it; if the folder does not have it, the host's copy is the fallback.
+  Both a `dotnet publish` layout (with `.deps.json`) and a hand-assembled drop of DLLs work.
 - Loading is **fail-fast**: a corrupt/incompatible plugin, a subdirectory whose entry
   assembly is missing, or an assembly with no `IGatewayPlugin` aborts startup rather than
   silently degrading a role that config assigned to it. An absent or empty plugins
