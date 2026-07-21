@@ -95,7 +95,11 @@ Items marked [LIVE] change behaviour against a real IMAP/JMAP/DAV server. Unit t
 scripts/test-fast.sh                         # Linux / devcontainer  (-f <expr>)
 ```
 
-> **NOTE — A green run is not proof.** The integration suite **skips automatically when no backend is reachable**, so `dotnet test` is always green whether or not anything was verified. For a [LIVE] item you must confirm from the output that the integration tests **actually executed**. If they skipped, bring the stack up and re-run — do **not** strike the finding through on a skipped suite.
+> **NOTE — `dotnet test` will silently skip these, even with the stacks running.** The suite targets the *canonical* ports (`143/587/5232/4190`) unless `AS_TEST_IMAP_PORT` / `AS_TEST_SMTP_PORT` / `AS_TEST_SIEVE_PORT` / `AS_TEST_DAV_URL` are set. The warm stacks deliberately use dedicated ports (`10143…`, `20143…`) so they can coexist, which leaves the canonical ports **closed** — nothing is reachable, the integration tests skip, and the run reports **green**.
+>
+> `scripts/test-fast` exports those variables for you. That is why it is the required runner, not a convenience. (Verified against a live machine: both stacks healthy on their dedicated ports, all four canonical ports closed.)
+>
+> **A green run is not proof.** For a [LIVE] item, confirm from the output that integration tests **actually executed** — read the passed/skipped counts, not the exit code. If they skipped, fix the environment and re-run. Do **not** strike a finding through on a skipped suite.
 >
 > Do not drive stalwart/axigen through `test-backends` while `test-fast` is using them — the two runners use different port sets and compose will recreate the containers on switch.
 
