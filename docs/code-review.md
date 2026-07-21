@@ -73,6 +73,17 @@ only, so the cursor never advanced and the next session would have redone the it
 ran passed. The check it did not run was the one that mattered. A master that reads the summary and
 moves on inherits exactly that class of failure.
 
+**Cap the orchestrator at ~8 items, then start a fresh one.** Subagents get a clean context per item;
+the orchestrator does not — it accumulates every worker report, verification dump and test summary.
+A run through items 5–11 reached **1.5M tokens over four hours**, and judgment degrades well before
+any hard limit. There is no handover cost: the Part 1 cursor is the state, so a new orchestrator
+picks up exactly where the last one stopped.
+
+**Give each worker its findings inline.** Do not tell a worker to read this document in full — it is
+long and growing, and every worker paying that cost is pure overhead. Paste the Part 2 text for its
+findings (and the relevant `code-review-detail.md` entries) directly into the prompt, and point it at
+"Working protocol" and "Editing this document safely" only.
+
 **Interrupt at any point.** Whatever is committed and struck through stays done, and the same prompt resumes from there — this document is the cursor, so nothing needs to survive between sessions.
 
 > **Do not use `/loop` for this queue.** It accumulates context across iterations rather than starting each one clean, so a long run degrades exactly the way a single over-long session does — without the visibility. Orchestrated mode above is the replacement, and it is what the results log is written for.
@@ -155,7 +166,30 @@ Reference numbers for a green tree: **124 tests, 124 passed, 0 skipped, ~2.5 min
 
 **[LIVE] items:** 1 · 3 · 4 · 5 · 6 · 26 · 27 · 28 · 30 · 32 · 33 · 34 · 36 · 38 · 42
 
-Everything else is verifiable with the unit suite alone, so the stacks can come down after item 6 if you want them off — items 26 onward are the next time they're needed.
+**But [LIVE] is a floor, not the whole rule.** Run the integration suite for *any* item that lands an EF migration, changes authentication or cookie policy, or alters the HTTP pipeline — marked or not. Item 8 (not [LIVE]) is why: its `C2` cookie-policy fix broke **23 integration tests** while every unit suite stayed green. The worker was correct to run unit tests only; the orchestrator ran integration anyway on the strength of the migration and caught it. Undetected, it would have surfaced at item 26 — eighteen items later, with eighteen items to bisect.
+
+### Test economy — do not run full suites per finding
+
+The full integration suite is ~3 minutes and the full unit suite ~1 minute. Running both for the red *and* the green of every finding is where item time disappears: an 8-finding item costs **over an hour of pure test execution** for perhaps twenty minutes of work, and run fourteen checks nothing run two didn't.
+
+**Per finding (red-green), run only the test you just wrote:**
+
+```powershell
+dotnet test tests/ActiveSync.Core.Tests --filter "FullyQualifiedName~YourNewTestName"
+dotnet test tests/ActiveSync.Integration.Tests --filter "FullyQualifiedName~YourNewTestName"
+```
+
+Seconds, not minutes. It is the only test whose red-then-green transition you are proving.
+
+**Once per item, before the final commit,** run the full suites and report their counts:
+
+```powershell
+dotnet build ActiveSync.slnx                                                    # expect 0 warnings
+dotnet test ActiveSync.slnx --filter "Category!=Integration"                    # full unit suite
+dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration    # if [LIVE] or per the rule above
+```
+
+Regression protection comes from that final run, not from repeating it per finding. This is roughly a **12× reduction** in test time with no loss of coverage.
 
 **7. If you run low on context, stop at a commit boundary** and report exactly which findings are done and which are untouched. Do not start a finding you cannot finish and verify. Because of steps 2–3, stopping early costs nothing — the next session resumes from this document.
 
@@ -474,7 +508,7 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 ~~`D4`~~ **FIXED** Contact update wiped every managed vCard property absent from the payload — `Common/Converters/ContactConverter.cs`. `FromApplicationData` now overlays the payload on the stored card's own EAS view (`Ghost`, built from the same `ToApplicationData` read mapping so the two can't drift) before building. **Presence, not value, decides:** an element sent empty still clears the property, so "clear this field" stays expressible. The photo cap moved to a parameter — the wire view still drops photos ≥ 96 KiB, the merge view keeps them, so an oversized stored photo survives an update it was never sent in. Note: this changes contact Change semantics from full-replace to ghosted; `Update_PresentElementsWin_OverTheStoredValue` (was `Update_ManagedFieldsComeFromThePayload_NotTheOldCard`) was rewritten accordingly.
 `D5` **High** Meeting-request times ignore `TZID` and are treated as UTC; no line unfolding — `Common/Converters/MailConverter.cs:211,277`.
 ~~`D6`~~ **FIXED** vCard line injection via the contact `Picture` element — `Common/Converters/ContactConverter.cs` (`AppendPhoto`). The base64 is now decoded and **re-encoded** rather than interpolated, so an embedded CRLF cannot survive into the card regardless of what `Convert.TryFromBase64String` tolerates in its input; undecodable values are skipped, and `TYPE=` is derived from the decoded magic bytes (JPEG/PNG/GIF) or omitted rather than asserted as JPEG.
-~~`D7`~~ **FIXED** iCalendar CRLF injection + platform line endings in generated CANCEL messages — `Common/Converters/ImipMailBuilder.cs`. `BuildCancel` now goes through `Ical.Net` exactly as `BuildRequest` does, so the serializer escapes and folds every value and emits CRLF. Note the property is **structural, not textual**: a crafted UID still appears in the output, escaped as a literal `\n` inside the UID value — what the test asserts is that it never becomes a line of its own (exactly one `ATTENDEE:`, one `METHOD:`, no `X-INJECTED:`). Uses `RecurrenceIdentifier`, not the obsolete `RecurrenceId`. The CRLF test is **coverage, not a reproducer** — `Environment.NewLine` is already CRLF on Windows, so it only bites on the Linux containers.
+~~`D7`~~ **FIXED** iCalendar CRLF injection + platform line endings in generated CANCEL messages — `Common/Converters/ImipMailBuilder.cs`. `BuildCancel` now goes through `Ical.Net` exactly as `BuildRequest` does, so the serializer escapes and folds every value and emits CRLF. Note the property is **structural, not textual**: a crafted UID still appears in the output, escaped as a literal `\n` inside the UID value — what the test asserts is that it never becomes a line of its own (exactly one `ATTENDEE:`, one `METHOD:`, no `X-INJECTED:`). Uses `RecurrenceIdentifier`, not the obsolete `RecurrenceId`. The CRLF test is **proof, not coverage — but only off Windows.** `Environment.NewLine` is already CRLF on Windows, so it passes against unfixed code on a Windows dev box; on Linux the unfixed code emits bare LF and the assertion fails. **CI runs `ubuntu-latest` on all three legs**, so this is a genuine reproducer that CI exercises on every push — it simply cannot be observed locally on Windows. (Originally labelled coverage; corrected.)
 ~~`D15`~~ **FIXED** Unnamed-attachment delete removed every unnamed attachment — `Common/Converters/DraftMessageBuilder.cs` (`CollectAttachments`). Deletes now match the **index** parsed out of the FileReference (`DelimitedKey(folderKey, itemKey, index)`, the shape both mail backends mint and the one `GetAttachmentAsync` resolves with `Attachments.Skip(index)`) instead of testing whether the reference ends with the attachment's file name — a test an empty name passed for *every* reference. A reference we did not mint parses to `-1` and targets nothing, preserving the old "missing match keeps everything".
 
 ~~`D16`~~ **FIXED** Draft attachment content type + HTML alternative — same file. `<airsyncbase:ContentType>` is now honoured, falling back to `MimeTypes.GetMimeType(displayName)` and only then to octet-stream; an unparsable declared type falls back rather than throwing. The body merge extracts the stored body via `ExtractBodyEntity`, which descends only into `multipart/mixed` and keeps `alternative`/`related` whole — so a flag-only Change no longer downgrades a rich draft to its text/plain sibling, and inline `cid:` parts (which MimeKit does not report as attachments, so nothing else carries them) survive. **Caveat on the [LIVE] run:** the integration suite passed unchanged at 127/127, but it exercises no draft-attachment content type or alternative-body round trip — it is a no-regression signal, not proof. The proof is the four unit reproducers, each confirmed failing against the unmodified builder before the fix.
