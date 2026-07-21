@@ -52,10 +52,7 @@ public static class DraftMessageBuilder
 			{
 				Text = bodyData
 			}
-			: existing?.Body is Multipart existingMultipart
-				? existingMultipart.OfType<MimePart>().FirstOrDefault(p => p is TextPart)
-				  ?? existingMultipart.FirstOrDefault()
-				: existing?.Body;
+			: ExtractBodyEntity(existing?.Body);
 
 		List<MimeEntity> attachments = CollectAttachments(applicationData, existing);
 		if (attachments.Count == 0)
@@ -133,7 +130,15 @@ public static class DraftMessageBuilder
 			}
 
 			string displayName = add.Element(ASB + "DisplayName")?.Value ?? "attachment";
-			MimePart part = new("application", "octet-stream")
+
+			// Honour the client's ContentType; fall back to the name's type, then octet-stream.
+			// Typing every attachment octet-stream makes a phone photo unopenable at the far end.
+			string? declared = add.Element(ASB + "ContentType")?.Value;
+			if (string.IsNullOrWhiteSpace(declared)
+			    || !ContentType.TryParse(declared, out ContentType? contentType))
+				contentType = ContentType.Parse(MimeTypes.GetMimeType(displayName));
+
+			MimePart part = new(contentType)
 			{
 				Content = new MimeContent(new MemoryStream(bytes)),
 				ContentDisposition = new ContentDisposition(ContentDisposition.Attachment)
@@ -147,6 +152,29 @@ public static class DraftMessageBuilder
 		}
 
 		return result;
+	}
+
+	/// <summary>
+	///   The stored draft's body, minus the attachments <see cref="CollectAttachments" /> carries
+	///   over separately. Everything that is not an attachment stays intact: a
+	///   multipart/alternative keeps its text/html sibling (picking the first TextPart out of it
+	///   downgraded a rich draft to plain text on every flag-only edit) and a multipart/related
+	///   keeps the inline parts nothing else would carry.
+	/// </summary>
+	private static MimeEntity? ExtractBodyEntity(MimeEntity? body)
+	{
+		if (body is not Multipart multipart || body.IsAttachment)
+			return body;
+
+		// alternative/related ARE the body — descending into them is what loses siblings.
+		if (!multipart.ContentType.IsMimeType("multipart", "mixed"))
+			return multipart;
+
+		foreach (MimeEntity child in multipart)
+			if (!child.IsAttachment)
+				return ExtractBodyEntity(child);
+
+		return null;
 	}
 
 	/// <summary>
