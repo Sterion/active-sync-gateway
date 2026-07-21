@@ -6,6 +6,9 @@
 
 	<ItemGroup>
 		<PackageReference Include="coverlet.collector" />
+		<!-- TestServer: the endpoint delegates are lambdas closed over DI, so the only way to
+		     assert what an HTTP caller can reach is to drive the real pipeline (WebUiHost). -->
+		<PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
 		<PackageReference Include="Microsoft.NET.Test.Sdk" />
 		<PackageReference Include="xunit" />
 		<PackageReference Include="xunit.runner.visualstudio" />
@@ -20,6 +23,9 @@
 		<!-- The account snapshot resolves every declared user's roles through the provider
 		     registry, and the default content roles land on "local". -->
 		<ProjectReference Include="..\..\src\ActiveSync.Backends.Local\ActiveSync.Backends.Local.csproj" />
+		<!-- A real provider schema with real connection fields (BaseUrl, HomeSetPath) — what the
+		     portal's self-service allowlist has to keep a non-admin away from. -->
+		<ProjectReference Include="..\..\src\ActiveSync.Backends.Dav\ActiveSync.Backends.Dav.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

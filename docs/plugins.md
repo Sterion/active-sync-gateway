@@ -121,7 +121,7 @@ public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role)
     new BackendConfigField("Endpoint", "Endpoint", BackendFieldType.Url, Required: true,
         Help: "Absolute https URL of the notes service."),
     new BackendConfigField("Mode", "Sync mode", BackendFieldType.Enum, Default: "Auto",
-        EnumValues: ["Auto", "Push", "Poll"])
+        EnumValues: ["Auto", "Push", "Poll"], SelfServiceEditable: true)
 ];
 ```
 
@@ -130,9 +130,20 @@ Field types: `String`, `Int` (with optional `Min`/`Max`), `Bool`, `Enum` (with `
 give the list root as `Name`). `Default` must be the string form of your options class's own
 default, since it is what the UI shows as the dimmed placeholder.
 
+`SelfServiceEditable` decides whether a **non-admin** account holder may set the field for their
+own account in the user portal. It defaults to `false`, so your provider is administration-only
+until you opt a field in — the safe default, because the gateway presents the role's stored
+credential to whatever the connection settings point at, and a portal user is the lowest
+privilege level in the system. Opt in preferences; never a host, URL, port, path template or
+certificate-trust knob. The portal's form is built from the opted-in fields alone, and a save
+carrying anything else is refused with 400 (settings an administrator set on the account are
+preserved untouched across such a save).
+
 The method has a default implementation returning nothing, so an older plugin keeps compiling
 and working — its settings simply stay raw key/value rows in the UI. Describing only part of
-your surface is fine too: undescribed keys remain editable and are never dropped on save.
+your surface is fine too: undescribed keys remain editable **in the admin editor** and are never
+dropped on save. They are never editable from the user portal, which accepts described,
+self-service fields only.
 `ValidateConfiguration` is still where semantic checks belong; the schema covers shape only.
 
 ## Packaging and deployment

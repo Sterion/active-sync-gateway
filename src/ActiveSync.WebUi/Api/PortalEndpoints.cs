@@ -86,16 +86,9 @@ internal static class PortalEndpoints
 						? assignment.ProviderName
 						: null;
 
-				IReadOnlyList<BackendConfigField> fields = [];
-				if (provider is not null)
-					try
-					{
-						fields = registry.GetFor(provider, role).DescribeConfiguration(role);
-					}
-					catch (InvalidOperationException)
-					{
-						// A provider that no longer serves the role: no form, raw editing only.
-					}
+				// ONLY the self-service fields: this drives the portal's form, and a field it
+				// renders but the save below refuses is a form that cannot be submitted.
+				IReadOnlyList<BackendConfigField> fields = SelfServiceFields(registry, provider, role);
 
 				meta[role.ToString()] = new
 				{
@@ -196,6 +189,34 @@ internal static class PortalEndpoints
 			if (!entry.Backends.TryGetValue(role.ToString(), out BackendRoleOverride? @override))
 				entry.Backends[role.ToString()] = @override = new BackendRoleOverride();
 
+			// The settings dictionary is NOT a self-service surface by default. A user key
+			// replaces the whole global subtree it addresses, so accepting it wholesale let a
+			// non-admin point their own role at any host and collect the credential the gateway
+			// presents there. Only fields the provider marks SelfServiceEditable are writable;
+			// everything else keeps whatever an administrator put on the account.
+			string? effectiveProvider = @override.Provider
+				?? (roles.Assignments.TryGetValue(role, out RoleAssignment? assignment)
+					? assignment.ProviderName
+					: null);
+			HashSet<string> editable = new(
+				SelfServiceFields(registry, effectiveProvider, role).Select(f => f.Name),
+				StringComparer.OrdinalIgnoreCase);
+			List<string> refused =
+			[
+				.. (request.Settings ?? [])
+					.Select(pair => pair.Key)
+					.Where(key => !editable.Contains(BackendConfigValidation.ListRoot(key)))
+					.OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+			];
+			if (refused.Count > 0)
+				return Results.BadRequest(new
+				{
+					error = $"these settings are administered for you and cannot be changed here: " +
+					        $"{string.Join(", ", refused)}",
+					failures = refused.Select(key => new BackendsEndpoints.FailureDto(
+						key, "This setting can only be changed by an administrator."))
+				});
+
 			// Deliberately untouched: Enabled and Provider (admin-only surface).
 			@override.UserName = string.IsNullOrWhiteSpace(request.UserName) ? null : request.UserName.Trim();
 			if (request.Password is not null)
@@ -214,9 +235,15 @@ internal static class PortalEndpoints
 				}
 			}
 
-			@override.Settings = request.Settings is { Count: > 0 }
-				? new Dictionary<string, string?>(request.Settings, StringComparer.OrdinalIgnoreCase)
-				: null;
+			// Keep every stored key the caller may not touch, replace the editable ones wholesale
+			// (an omitted editable key still means "cleared", as it always did).
+			Dictionary<string, string?> merged = new(StringComparer.OrdinalIgnoreCase);
+			foreach ((string key, string? value) in @override.Settings ?? [])
+				if (!editable.Contains(BackendConfigValidation.ListRoot(key)))
+					merged[key] = value;
+			foreach ((string key, string? value) in request.Settings ?? [])
+				merged[key] = value;
+			@override.Settings = merged.Count > 0 ? merged : null;
 
 			// An override that says nothing is dropped, not stored as noise.
 			if (@override is { Enabled: null, Provider: null, UserName: null, Password: null, Settings: null })
@@ -233,6 +260,28 @@ internal static class PortalEndpoints
 			await resolver.EnsureFreshAsync(true, ct);
 			return Results.Ok(new { login, role = role.ToString() });
 		});
+	}
+
+	/// <summary>
+	///   The fields of <paramref name="providerName" />'s schema for the role that an account
+	///   holder may set for themselves. Empty for an unknown provider, a provider that no longer
+	///   serves the role, or one that describes nothing — a plugin is administration-only until
+	///   it opts a field in, which is the point of the flag defaulting to false.
+	/// </summary>
+	private static IReadOnlyList<BackendConfigField> SelfServiceFields(
+		BackendProviderRegistry registry, string? providerName, BackendRole role)
+	{
+		if (string.IsNullOrWhiteSpace(providerName))
+			return [];
+		try
+		{
+			return [.. registry.GetFor(providerName, role).DescribeConfiguration(role)
+				.Where(field => field.SelfServiceEditable)];
+		}
+		catch (InvalidOperationException)
+		{
+			return [];
+		}
 	}
 
 	/// <summary>

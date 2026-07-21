@@ -25,6 +25,14 @@ public enum BackendFieldType
 ///   <see cref="Default" /> is the string form of the options-class default and MUST match it
 ///   (BackendSchemaDefaultsTests binds an empty section and compares).
 /// </summary>
+/// <param name="SelfServiceEditable">
+///   Whether a NON-ADMIN account holder may set this field for their own account from the user
+///   portal. Defaults to <c>false</c>, so a field — and a whole plugin provider — is
+///   administration-only until it says otherwise. Opt a field in only when changing it cannot
+///   move the connection or weaken its trust: anything naming a host, URL, port, path template
+///   or certificate policy decides WHERE the gateway connects and WHAT it will trust, and the
+///   gateway presents the role's stored credential to whatever is there.
+/// </param>
 public sealed record BackendConfigField(
 	string Name,
 	string Label,
@@ -34,4 +42,5 @@ public sealed record BackendConfigField(
 	IReadOnlyList<string>? EnumValues = null,
 	string Help = "",
 	long? Min = null,
-	long? Max = null);
+	long? Max = null,
+	bool SelfServiceEditable = false);

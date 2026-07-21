@@ -3,7 +3,7 @@
 
 import { api } from '/shared/api.js';
 import { h, render as renderInto, toast } from '/shared/ui.js';
-import { schemaForm, schemaKeys, listRoot } from '/shared/schema-form.js';
+import { schemaForm } from '/shared/schema-form.js';
 
 const ROLES = ['MailStore', 'MailSubmit', 'Calendar', 'Tasks', 'Contacts', 'Notes', 'Oof'];
 
@@ -71,16 +71,14 @@ function roleCard(role, existing, meta) {
 	let clearPassword = false;
 
 	const values = existing?.settings ?? {};
+	// backends/meta lists ONLY the fields this portal may write (the rest are administered).
+	// Anything else on the account is left alone by the server across a save, so it must not
+	// be echoed back here either — sending it now earns a 400.
 	const fields = meta?.fields ?? [];
-	const known = schemaKeys(fields);
-	// Keys the provider does not describe are carried through the save untouched rather than
-	// shown here: this is the end-user surface, and the admin editor owns the raw view.
-	const untouched = Object.fromEntries(
-		Object.entries(values).filter(([key]) => !known.has(listRoot(key))));
 	const form = schemaForm({ fields, values });
 
 	async function save() {
-		const settings = { ...untouched };
+		const settings = {};
 		for (const [key, value] of Object.entries(form.collect()))
 			if (value !== null && value !== undefined) settings[key] = value;
 		try {
@@ -114,9 +112,10 @@ function roleCard(role, existing, meta) {
 					password.value = '';
 					password.placeholder = 'will be REMOVED on save';
 				} }, 'Clear')),
-			meta?.provider
+			meta?.provider && fields.length
 				? h('div', { class: 'field-help' },
-					`Server settings for ${meta.provider}. Empty fields use what the gateway is configured with.`)
+					`Your own ${meta.provider} preferences. Empty fields use what the gateway is configured ` +
+					'with; the connection itself is set by an administrator.')
 				: null,
 			form.node,
 			h('div', { class: 'row-actions' },

@@ -60,7 +60,8 @@ public sealed class CalDavBackendProvider(ILoggerFactory loggerFactory) : IBacke
 			[
 				new BackendConfigField("TaskFolder", "VTODO collection", BackendFieldType.String, Default: "Tasks",
 					Help: "Display name or path segment of the tasks collection in the calendar home set. " +
-					      "Empty stores tasks in the gateway database instead."),
+					      "Empty stores tasks in the gateway database instead.",
+					SelfServiceEditable: true),
 				new BackendConfigField("BaseUrl", "Base URL", BackendFieldType.Url,
 					Help: "Only when tasks live on a different server than the calendar."),
 				new BackendConfigField("HomeSetPath", "Home set path", BackendFieldType.String,
@@ -74,15 +75,21 @@ public sealed class CalDavBackendProvider(ILoggerFactory loggerFactory) : IBacke
 			new BackendConfigField("HomeSetPath", "Home set path", BackendFieldType.String,
 				Help: "Path template of the user's collection home set — {user} and {localpart} are substituted, " +
 				      "e.g. \"/{user}/\". Empty discovers it via .well-known and current-user-principal."),
+			// The three below are the account holder's own preferences, and none of them can
+			// move the connection: SharedCollections entries are validated against BaseUrl's
+			// host, which stays admin-only.
 			new BackendConfigField("CalendarAttachments", "Event attachments", BackendFieldType.Enum,
 				Default: "Auto", EnumValues: ["Auto", "On", "Off"],
-				Help: "Inline (base64) attachments for EAS 16.x clients. Auto caps them at 1 MiB, On at 16 MiB."),
+				Help: "Inline (base64) attachments for EAS 16.x clients. Auto caps them at 1 MiB, On at 16 MiB.",
+				SelfServiceEditable: true),
 			new BackendConfigField("SendInvitations", "Send iMIP invitations", BackendFieldType.Enum,
 				Default: "Auto", EnumValues: ["Auto", "On", "Off"],
-				Help: "Auto sends unless the server advertises a scheduling outbox and invites on its own."),
+				Help: "Auto sends unless the server advertises a scheduling outbox and invites on its own.",
+				SelfServiceEditable: true),
 			new BackendConfigField("SharedCollections", "Extra calendar collections", BackendFieldType.StringList,
 				Help: "Absolute paths or same-host URLs synced as additional calendar folders, " +
-				      "each optionally suffixed \"|ro\" for read-only."),
+				      "each optionally suffixed \"|ro\" for read-only.",
+				SelfServiceEditable: true),
 			.. BackendSchemaFields.Network()
 		];
 	}
