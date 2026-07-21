@@ -5,6 +5,7 @@ using ActiveSync.Crypto;
 using ActiveSync.Server.Cli;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Spectre.Console;
 
 namespace ActiveSync.Server.Tests;
@@ -245,6 +246,61 @@ public sealed class CliLocalEndpointTests : IDisposable
 		LocalCliEndpoint.CliResponse unkeyed = LocalCliEndpoint.ProtectResponse(plain, key: null);
 		Assert.Equal("device-password: hunter2", unkeyed.Stdout);
 		Assert.Null(unkeyed.Sealed);
+	}
+
+	[Fact]
+	public void Audit_RecordsEveryForwardedCommand_WithSecretArgumentsRedacted()
+	{
+		// L24: account deletion, device-password disclosure and password changes left no record at
+		// all. Every forwarded command must produce one log line — and it must be safe to keep, so
+		// the value following a secret-named option or field is redacted (stdin is never logged).
+		RecordingLogger logger = new();
+
+		LocalCliEndpoint.AuditCommand(logger, ["purge", "user", "alice@example.com", "--yes"], 0, 12, true);
+		LocalCliEndpoint.AuditCommand(logger, ["config", "set", "ActiveSync:Encryption:Key", "s3cr3t"], 0, 3, true);
+		LocalCliEndpoint.AuditCommand(logger, ["user", "set", "bob", "Backends:MailStore:Settings:Password", "hunter2"], 1, 4, false);
+		LocalCliEndpoint.AuditCommand(logger, [], 0, 1, true);
+
+		Assert.Equal(4, logger.Messages.Count);
+		Assert.Contains("purge user alice@example.com --yes", logger.Messages[0]);
+		Assert.Contains("exit 0", logger.Messages[0]);
+		Assert.Contains("sealed", logger.Messages[0]);
+
+		Assert.Contains("ActiveSync:Encryption:Key ***", logger.Messages[1]);
+		Assert.DoesNotContain("s3cr3t", logger.Messages[1]);
+
+		Assert.Contains("Backends:MailStore:Settings:Password ***", logger.Messages[2]);
+		Assert.DoesNotContain("hunter2", logger.Messages[2]);
+		Assert.Contains("exit 1", logger.Messages[2]);
+		Assert.Contains("plaintext", logger.Messages[2]);
+
+		Assert.Contains("(no arguments)", logger.Messages[3]);
+	}
+
+	[Fact]
+	public void Audit_RedactsInlineAndOptionSecrets_ButKeepsTheVerbLegible()
+	{
+		Assert.Equal("device password alice DEV123", LocalCliEndpoint.DescribeCommand(
+			["device", "password", "alice", "DEV123"]));
+		Assert.Equal("user password bob --password ***", LocalCliEndpoint.DescribeCommand(
+			["user", "password", "bob", "--password", "hunter2"]));
+		Assert.Equal("user password bob --password=***", LocalCliEndpoint.DescribeCommand(
+			["user", "password", "bob", "--password=hunter2"]));
+		// A secret-named token with nothing after it must not swallow a following option.
+		Assert.Equal("config set ActiveSync:Encryption:Key --force", LocalCliEndpoint.DescribeCommand(
+			["config", "set", "ActiveSync:Encryption:Key", "--force"]));
+	}
+
+	private sealed class RecordingLogger : ILogger
+	{
+		public List<string> Messages { get; } = [];
+
+		public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+		public bool IsEnabled(LogLevel logLevel) => true;
+
+		public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+			Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
 	}
 
 	[Fact]

@@ -139,6 +139,10 @@ avoids a cold start of the full app per command; secret-setting verbs (`user pas
   absent: if a key is configured but fails to load (an unreadable `KeyFile`, a late mount), `/cli`
   authenticates nobody and answers 404 for every caller, logging an error at startup. Running in
   the plaintext mode logs a startup warning.
+- **Every call is audited.** The gateway logs one line per forwarded command — the command line,
+  the exit code, the duration and whether it authenticated with a sealed envelope or in plaintext
+  mode — plus a warning for each refused call (peer and reason only, never the body). Values
+  following a secret-named option or field path are redacted to `***`, and stdin is never logged.
 - **Disable it** with `eas config set ActiveSync:Cli:Enabled false` (live) — `eas` then falls
   back to running every command in process.
 - **`serve` and `protect` never forward** (they take arbitrary `--Section:Key=value` overrides);

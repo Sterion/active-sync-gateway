@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
@@ -70,18 +71,34 @@ internal static class LocalCliEndpoint
 					"no caller can be authenticated. {Error}", keyError ?? "No key is configured.");
 		}
 
+		ILogger logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(LocalCliEndpoint));
+
 		app.MapPost("/cli", async (HttpContext context, IOptionsMonitor<ActiveSyncOptions> options, CliRequest? request) =>
 		{
 			// Disabled or non-loopback: 404 so the endpoint is invisible. Loopback is a cheap
 			// pre-filter; the real auth is proof of the master key (see TryAuthorize).
-			if (!options.CurrentValue.Cli.Enabled || !IsLoopback(context.Connection.RemoteIpAddress))
+			if (!options.CurrentValue.Cli.Enabled)
 				return Results.NotFound();
+			if (!IsLoopback(context.Connection.RemoteIpAddress))
+			{
+				AuditRefusal(logger, context.Connection.RemoteIpAddress, "the peer is not on the loopback interface");
+				return Results.NotFound();
+			}
 			if (!TryAuthorize(request, key, allowPlaintext, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
 				    out string[] args, out string stdin))
+			{
+				AuditRefusal(logger, context.Connection.RemoteIpAddress,
+					key is null
+						? "no master key is configured and AllowPlaintext is not set"
+						: "no request sealed with the master key was presented");
 				return Results.NotFound();
+			}
 
+			long startedAt = Stopwatch.GetTimestamp();
 			CliResponse response = await ExecuteAsync(args, stdin, context.RequestAborted,
 				request?.Color ?? false, request?.Width ?? 0);
+			AuditCommand(logger, args, response.ExitCode,
+				(long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds, key is not null);
 			return Results.Json(ProtectResponse(response, key));
 		});
 	}
@@ -126,6 +143,77 @@ internal static class LocalCliEndpoint
 		stdin = envelope.Stdin ?? "";
 		return true;
 	}
+
+	/// <summary>
+	///   Tokens whose FOLLOWING argument is a secret value. Matched as a substring, case-insensitively,
+	///   against both option names (<c>--password</c>) and configuration/field paths
+	///   (<c>ActiveSync:Encryption:Key</c>, <c>Backends:MailStore:Settings:Password</c>), so the
+	///   audit line keeps the verb and the target while dropping the value. Over-redaction is the
+	///   safe direction here — an audit trail has to be safe to retain.
+	/// </summary>
+	private static readonly string[] SecretTokens = ["pass", "secret", "key", "token", "credential"];
+
+	/// <summary>
+	///   Renders an argv for the audit log: verbs, targets and option names in full, secret values
+	///   replaced by <c>***</c>. Stdin is never rendered — it is where every secret is supposed to
+	///   travel in the first place.
+	/// </summary>
+	internal static string DescribeCommand(string[] args)
+	{
+		if (args.Length == 0)
+			return "(no arguments)";
+
+		List<string> parts = new(args.Length);
+		bool redactNext = false;
+		for (int index = 0; index < args.Length; index++)
+		{
+			string argument = args[index];
+			// A following option (-x/--x) is never the redacted value — it means the secret-named
+			// token was the last positional, e.g. `config get ActiveSync:Encryption:Key`.
+			if (redactNext && !argument.StartsWith('-'))
+			{
+				parts.Add("***");
+				redactNext = false;
+				continue;
+			}
+
+			redactNext = false;
+			int equals = argument.IndexOf('=');
+			if (equals > 0 && IsSecretToken(argument[..equals]))
+			{
+				parts.Add($"{argument[..equals]}=***");
+				continue;
+			}
+
+			parts.Add(argument);
+			// The first two positionals are the command path (`device password`, `user secret`) —
+			// what follows them is a login or a device id, and redacting THAT would gut the audit
+			// trail. Only an option or a later positional (a field/config path) names a value.
+			redactNext = IsSecretToken(argument) && (index > 1 || argument.StartsWith('-'));
+		}
+
+		return string.Join(' ', parts);
+	}
+
+	private static bool IsSecretToken(string token) =>
+		SecretTokens.Any(secret => token.Contains(secret, StringComparison.OrdinalIgnoreCase));
+
+	/// <summary>
+	///   The audit record for one forwarded command. Every <c>/cli</c> call is an administrative
+	///   action — account deletion, device-password disclosure, credential changes — so each one
+	///   leaves a line naming what ran, how it authenticated and what it returned.
+	/// </summary>
+	internal static void AuditCommand(ILogger logger, string[] args, int exitCode, long elapsedMs, bool sealedAuth) =>
+		logger.LogInformation(
+			"/cli: {Command} — exit {ExitCode} in {ElapsedMs}ms ({Auth} auth)",
+			DescribeCommand(args), exitCode, elapsedMs, sealedAuth ? "sealed" : "plaintext");
+
+	/// <summary>
+	///   The audit record for a refused call. Deliberately omits the body: a caller that failed
+	///   authentication is untrusted input, and its argv has no place in the log.
+	/// </summary>
+	internal static void AuditRefusal(ILogger logger, IPAddress? peer, string reason) =>
+		logger.LogWarning("/cli: refused a request from {Peer} — {Reason}.", peer?.ToString() ?? "(unknown)", reason);
 
 	/// <summary>
 	///   Seals a captured result for the wire when a master key is configured. Command output is as
