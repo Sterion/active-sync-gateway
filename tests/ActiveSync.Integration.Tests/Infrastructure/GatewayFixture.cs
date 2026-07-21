@@ -237,6 +237,12 @@ public sealed class GatewayFixture : IAsyncLifetime
 			// suite's deliberate bad-credential tests would otherwise trip the shared
 			// brute-force throttle for every later test.
 			["ActiveSync:Auth:MaxFailures"] = "1000000",
+			// The WebUi session cookie is Secure unconditionally (C2); the suite drives the
+			// portals over plain http with a cookie container, which would discard it on every
+			// response. This is the documented local-http opt-out, used exactly as intended.
+			// WebUiTests.SessionCookie_CarriesSecure_WhenTheHttpOptOutIsOff turns it back off on
+			// its own host so the opt-out cannot mask a regression in the finding it works around.
+			["ActiveSync:WebUi:AllowInsecureCookies"] = "true",
 			// ManageSieve for the Oof scenarios. Stalwart refuses AUTHENTICATE over plaintext
 			// even in the lab config (ENCRYPT-NEEDED), so STARTTLS against its self-signed
 			// certificate it is — which conveniently exercises the production TLS path.
@@ -320,6 +326,11 @@ public sealed class GatewayFixture : IAsyncLifetime
 			if (TestBackend.PostgresUri is not null)
 				builder.UseSetting("ActiveSync:Database:ConnectionString",
 					settings["ActiveSync:Database:ConnectionString"]);
+			// AddWebUi decides the cookie SecurePolicy EAGERLY (DI time), so the opt-out has
+			// to arrive through host settings too — an in-memory app-configuration entry alone
+			// is added too late to be seen.
+			builder.UseSetting("ActiveSync:WebUi:AllowInsecureCookies",
+				settings["ActiveSync:WebUi:AllowInsecureCookies"]);
 			// Caller overrides go through the same host-settings channel: several of them
 			// gate eager reads too (Metrics:Enabled decides service registrations).
 			if (overrides is not null)

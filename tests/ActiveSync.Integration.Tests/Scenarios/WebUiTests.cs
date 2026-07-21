@@ -109,6 +109,29 @@ public sealed class WebUiTests(GatewayFixture gateway)
 	}
 
 	[Fact]
+	public async Task SessionCookie_CarriesSecure_WhenTheHttpOptOutIsOff()
+	{
+		// GatewayFixture turns ActiveSync:WebUi:AllowInsecureCookies ON, because the suite talks
+		// to the portals over plain http and a cookie container would drop a Secure cookie on
+		// every response. This host turns it back OFF — the production default — so the harness
+		// opt-out cannot quietly become a blind spot for C2: the real Set-Cookie the gateway
+		// emits has to carry Secure.
+		Dictionary<string, string?> settings = UserSettings();
+		settings["ActiveSync:WebUi:AllowInsecureCookies"] = "false";
+		await using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(settings);
+		// Deliberately NOT the cookie-container client: the raw Set-Cookie header is the subject.
+		using HttpClient client = factory.CreateClient(
+			new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+		HttpResponseMessage login = await LoginAsync(client, "admin", AdminUser, Password);
+		Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+		string cookie = Assert.Single(login.Headers.GetValues("Set-Cookie"),
+			value => value.StartsWith("eas.webui=", StringComparison.Ordinal));
+		Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
 	public async Task EnableFlag_AppliesLive_WithoutRestart()
 	{
 		// The enable keys stay ABSENT from the test config (the in-memory test collection is
