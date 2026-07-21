@@ -316,3 +316,5 @@ at startup); `AdminClaim`/`AdminClaimValue`/`AutoProvision` apply live.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `Directory` | `plugins` (container: `/app/plugins`) | Directory scanned for out-of-repo backend plugins — one subdirectory per plugin. A relative path resolves against the **application directory**, not the working directory, so it means the same thing however the gateway was started. **Host-controlled: file/env only** (it decides what code the gateway loads), and restart-tier. See **[docs/plugins.md](plugins.md)**. |
+| `Pins:<dirname>` | *(none)* | Expected SHA-256 digest of that plugin's directory (every `*.dll` beneath it, path and contents); a mismatch aborts startup. A plugin runs with the gateway's full rights — the load context isolates dependencies, not privilege — so this is where you refuse bytes you have not reviewed. Start once with a placeholder to learn the real digest. **Host-controlled**, restart-tier. |
+| `RequirePinned` | `false` | Refuse to load any plugin without a pin. **Host-controlled**, restart-tier. |

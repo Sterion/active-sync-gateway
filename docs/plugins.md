@@ -198,6 +198,40 @@ both as-is; a plugin with a native dependency must ship both RIDs.
   Kubernetes projected volume's `..data` is not mistaken for a half-copied plugin).
 - Each loaded provider appears on the startup banner via its role line.
 
+### The load context is not a sandbox
+
+The per-plugin `AssemblyLoadContext` is **dependency isolation, not a security boundary**.
+A plugin runs in the gateway process with exactly the gateway's rights: it can read the
+master key, open sockets, touch the database and replace host service registrations through
+the `IServiceCollection` it is handed. Installing a plugin is equivalent to installing a
+different build of the gateway — treat it as code you own or code you have reviewed.
+
+What the loader can do is refuse to load bytes you did not review, which is why plugin
+settings are **host-controlled** (file or environment only — never the database or the admin
+UI; see [configuration.md](configuration.md)) and why a plugin can be pinned:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `Plugins:Pins:<dirname>` | *(none)* | Expected SHA-256 digest of the plugin directory — every `*.dll` beneath it, path and contents. A mismatch aborts startup. |
+| `Plugins:RequirePinned` | `false` | Refuse to load any plugin that has no pin. |
+
+To pin a plugin, set the pin to any placeholder and start the gateway once: the failure
+message reports the digest it actually computed, so you can review the directory and paste
+the value in.
+
+```json
+"ActiveSync": {
+  "Plugins": {
+    "RequirePinned": true,
+    "Pins": { "my-notes": "9f2c…" }
+  }
+}
+```
+
+A pin proves the directory is byte-for-byte what you reviewed. It is not a signature — it
+carries no identity and no revocation — and it says nothing about what the code does once
+loaded.
+
 ## Versioning
 
 The backend contract is **not ABI-stable before 2.0** — `IContentStore` and friends still

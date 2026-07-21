@@ -2,6 +2,8 @@ using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Runtime.Loader;
+using System.Security.Cryptography;
+using System.Text;
 using ActiveSync.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +22,13 @@ namespace ActiveSync.Core.Plugins;
 ///   Fails fast: a broken or incompatible plugin aborts startup rather than silently
 ///   degrading a role configured to use it to the local fallback (a data-visibility
 ///   incident). Absent/empty directory = no-op.
+///
+///   The load context is DEPENDENCY ISOLATION, not a security boundary: a plugin runs
+///   in-process with the gateway's full rights (master key included) and is handed the live
+///   <see cref="IServiceCollection" />, so it can replace host registrations. Installing one is
+///   equivalent to installing a different build of the gateway. The only enforceable control is
+///   refusing to load unreviewed bytes — hence <see cref="VerifyPin" /> and the host-controlled
+///   (file/env only) plugin settings.
 /// </summary>
 public static class PluginLoader
 {
@@ -71,12 +80,68 @@ public static class PluginLoader
 					$"Plugin directory '{pluginDir}' has no entry assembly '{name}.dll'; the entry " +
 					"assembly must be named after its directory.");
 
+			VerifyPin(pluginDir, name, configuration, logger);
 			VerifyContractVersions(pluginDir, hostContractVersion);
 			loaded += LoadPlugin(services, configuration, logger, entryDll);
 		}
 
 		if (loaded > 0)
 			logger.LogInformation("Loaded {Count} gateway plugin(s) from {Directory}", loaded, directory);
+	}
+
+	/// <summary>
+	///   Optional integrity pinning. The load context isolates a plugin's *dependencies*, not its
+	///   privileges — plugin code runs in-process with everything the gateway has, including the
+	///   master key — so the only place that trust decision can be made is here, before any of it
+	///   is loaded. An operator who reviews a plugin can pin its digest
+	///   (<c>ActiveSync:Plugins:Pins:&lt;dirname&gt;</c>), and <c>ActiveSync:Plugins:RequirePinned</c>
+	///   refuses anything unpinned. Both live in the host-controlled <c>Plugins</c> section, so they
+	///   cannot be set from the database or the admin UI.
+	/// </summary>
+	private static void VerifyPin(string pluginDir, string name, IConfiguration configuration, ILogger logger)
+	{
+		string? pinned = configuration[$"ActiveSync:Plugins:Pins:{name}"];
+		if (string.IsNullOrWhiteSpace(pinned))
+		{
+			if (!bool.TryParse(configuration["ActiveSync:Plugins:RequirePinned"], out bool required) || !required)
+				return;
+
+			throw new InvalidOperationException(
+				$"Plugin '{name}' has no pinned digest and ActiveSync:Plugins:RequirePinned is set. " +
+				$"Review the plugin and set ActiveSync:Plugins:Pins:{name} to " +
+				$"'{ComputeDirectoryDigest(pluginDir)}'.");
+		}
+
+		string actual = ComputeDirectoryDigest(pluginDir);
+		if (!string.Equals(actual, pinned.Trim(), StringComparison.OrdinalIgnoreCase))
+			throw new InvalidOperationException(
+				$"Plugin '{name}' does not match its pinned digest: expected '{pinned.Trim()}', " +
+				$"found '{actual}'. The plugin directory changed since it was pinned.");
+
+		logger.LogDebug("Plugin {Name} matches its pinned digest", name);
+	}
+
+	/// <summary>
+	///   The digest a plugin directory is pinned by: SHA-256 over every <c>*.dll</c> beneath it,
+	///   ordered by relative path, hashing the path as well as the bytes so a renamed or added
+	///   assembly changes the result. Public because it is the value an operator writes into
+	///   <c>ActiveSync:Plugins:Pins:&lt;name&gt;</c> after reviewing a plugin — the loader also
+	///   reports it in the mismatch message.
+	/// </summary>
+	public static string ComputeDirectoryDigest(string pluginDir)
+	{
+		using IncrementalHash digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+		foreach (string dll in Directory.EnumerateFiles(pluginDir, "*.dll", SearchOption.AllDirectories)
+			         .OrderBy(d => Path.GetRelativePath(pluginDir, d), StringComparer.Ordinal))
+		{
+			digest.AppendData(Encoding.UTF8.GetBytes(
+				Path.GetRelativePath(pluginDir, dll).Replace('\\', '/')));
+			digest.AppendData([0]);
+			using FileStream stream = File.OpenRead(dll);
+			digest.AppendData(SHA256.HashData(stream));
+		}
+
+		return Convert.ToHexStringLower(digest.GetHashAndReset());
 	}
 
 	/// <summary>

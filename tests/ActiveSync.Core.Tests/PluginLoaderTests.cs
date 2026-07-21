@@ -55,10 +55,11 @@ public sealed class PluginLoaderTests : IDisposable
 
 	private IConfiguration ConfigFor(string directory)
 	{
-		return new ConfigurationBuilder()
-			.AddInMemoryCollection(new Dictionary<string, string?> { ["ActiveSync:Plugins:Directory"] = directory })
-			.Build();
+		return ConfigWith(new Dictionary<string, string?> { ["ActiveSync:Plugins:Directory"] = directory });
 	}
+
+	private static IConfiguration ConfigWith(Dictionary<string, string?> values) =>
+		new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 
 	[Fact]
 	public void LoadsPlugin_RegistersProvider_WithSharedContractIdentity()
@@ -264,6 +265,69 @@ public sealed class PluginLoaderTests : IDisposable
 		}
 
 		Assert.Empty(registry.All);
+	}
+
+	/// <summary>
+	///   K44 — the load context is dependency isolation, not a security boundary: plugin code runs
+	///   in-process with the gateway's full rights. The only thing that can gate that is deciding
+	///   *before* loading whether the bytes on disk are the ones the operator reviewed, so the
+	///   loader takes an optional pinned digest per plugin.
+	/// </summary>
+	[Fact]
+	public void PinnedPlugin_WithADifferentDigest_FailsFast()
+	{
+		string pluginDir = StagePlugin("ActiveSync.TestPlugin");
+		string expected = PluginLoader.ComputeDirectoryDigest(pluginDir);
+
+		ServiceCollection services = new();
+		services.AddLogging();
+		InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+			PluginLoader.LoadInto(services, ConfigWith(new Dictionary<string, string?>
+			{
+				["ActiveSync:Plugins:Directory"] = _root,
+				["ActiveSync:Plugins:Pins:ActiveSync.TestPlugin"] = new string('0', 64)
+			}), NullLogger.Instance));
+
+		// The message carries the digest the operator would pin after reviewing the plugin.
+		Assert.Contains(expected, ex.Message, StringComparison.OrdinalIgnoreCase);
+	}
+
+	/// <summary>K44 — the matching pin is the load path, and a private dependency is part of it.</summary>
+	[Fact]
+	public void PinnedPlugin_WithTheMatchingDigest_Loads()
+	{
+		string pluginDir = StagePlugin("ActiveSync.TestPlugin");
+		File.Copy(StagedDepDll, Path.Combine(pluginDir, "PluginPrivateLib.dll"));
+		string digest = PluginLoader.ComputeDirectoryDigest(pluginDir);
+
+		BackendProviderRegistry registry = LoadAndBuildRegistry(ConfigWith(new Dictionary<string, string?>
+		{
+			["ActiveSync:Plugins:Directory"] = _root,
+			["ActiveSync:Plugins:Pins:ActiveSync.TestPlugin"] = digest
+		}));
+
+		Assert.Equal("testplugin", registry.GetFor("testplugin", BackendRole.Notes).Name);
+
+		// A private dependency is covered too: changing one byte of it invalidates the pin.
+		File.AppendAllText(Path.Combine(pluginDir, "PluginPrivateLib.dll"), "x");
+		Assert.NotEqual(digest, PluginLoader.ComputeDirectoryDigest(pluginDir));
+	}
+
+	/// <summary>K44 — opt-in strict mode: with RequirePinned set, an unpinned plugin cannot load.</summary>
+	[Fact]
+	public void RequirePinned_RefusesAnUnpinnedPlugin()
+	{
+		StagePlugin("ActiveSync.TestPlugin");
+
+		ServiceCollection services = new();
+		services.AddLogging();
+		InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+			PluginLoader.LoadInto(services, ConfigWith(new Dictionary<string, string?>
+			{
+				["ActiveSync:Plugins:Directory"] = _root,
+				["ActiveSync:Plugins:RequirePinned"] = "true"
+			}), NullLogger.Instance));
+		Assert.Contains("ActiveSync.TestPlugin", ex.Message, StringComparison.Ordinal);
 	}
 
 	/// <summary>Copies the fixture plugin into a correctly-named subdirectory and returns it.</summary>
