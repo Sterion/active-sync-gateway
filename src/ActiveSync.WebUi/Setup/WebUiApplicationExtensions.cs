@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.WebUi.Setup;
@@ -28,6 +29,15 @@ public static class WebUiApplicationExtensions
 
 		IOptionsMonitor<ActiveSyncOptions> monitor =
 			app.Services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>();
+
+		// The opt-out is restart-tier and easy to leave switched on after a debugging session,
+		// so say so once, loudly, at startup.
+		if (monitor.CurrentValue.WebUi.AllowInsecureCookies)
+			app.Services.GetRequiredService<ILoggerFactory>()
+				.CreateLogger("ActiveSync.WebUi")
+				.LogWarning(
+					"ActiveSync:WebUi:AllowInsecureCookies is on — web session cookies are emitted " +
+					"without the Secure attribute over plain http. Use this for local development only.");
 
 		// Live enable-gate + security headers for the UI path prefixes. /shared holds the
 		// theme/helper assets both portals reference, reachable while either portal is on.

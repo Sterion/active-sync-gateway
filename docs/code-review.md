@@ -266,7 +266,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 
 ## Phase 2 — Security
 
-**8. WebUi session & cookies** — `C2` `C3` `C4` `C7` `C8` `C14`
+**8. WebUi session & cookies** — ~~`C2`~~ `C3` ~~`C4`~~ `C7` `C8` `C14`
 > `C3` is the big one: no `OnValidatePrincipal`, so disable/block/admin-revoke don't affect live sessions for up to 12 sliding hours. `C2`/`C4` are the same `CookieSecurePolicy` change.
 
 **9. WebUi privilege & API hardening** — `C1` `C9` `C10` `C15` `C16` `C17` `C20` `C21`
@@ -461,7 +461,7 @@ Items **1–14** are the ones that matter for a system anyone else runs: data lo
 ## Area C — WebUi (21)
 Baseline verified good: no endpoint is unauthenticated by accident (route-group `RequireAuthorization`, exactly four deliberate `AllowAnonymous`), **zero** XSS sinks in ~2000 lines of hand-rolled frontend, TLS private keys structurally excluded, login timing-indistinguishable, destructive ops require typed confirmation, OIDC principal re-minted so IdP claims never enter the session.
 `C1` **High** Portal users can rewrite their own backend connection settings → SSRF + backend credential exfiltration — `Api/PortalEndpoints.cs:208`.
-`C2` **High** Session cookie uses `CookieSecurePolicy.SameAsRequest` → no `Secure` flag behind a proxy that doesn't forward proto — `Setup/WebUiServiceCollectionExtensions.cs:43`.
+~~`C2`~~ **FIXED** Session cookie uses `CookieSecurePolicy.SameAsRequest` → no `Secure` flag behind a proxy that doesn't forward proto — `Setup/WebUiServiceCollectionExtensions.cs:43`. Now `Always`, with `ActiveSync:WebUi:AllowInsecureCookies` (default false, restart-tier, warned at startup) as the deliberate local-http opt-out. **Deployment note:** an operator serving the portals over plain http without that flag will find the session cookie rejected by the browser after upgrading — that is the intended failure, and the startup warning names the switch.
 `C3` **High** No `OnValidatePrincipal`: disable/block/admin-revoke don't affect live sessions for up to 12 sliding hours — `Setup/WebUiServiceCollectionExtensions.cs:44`.
 `C4`–`C11` **Med**: OIDC correlation/nonce cookies keep `SameSite=None` without guaranteed `Secure` (`C4`); per-account backend `Settings` returned verbatim, unlike the global section (`C5`); portal password change bypasses the shared policy, no strength floor (`C6`); OIDC trusts mutable `preferred_username` → takeover at some IdPs (`C7`); `AdminClaim` without `AdminClaimValue` grants admin to the whole directory (`C8`); backend probe returns raw exception text → internal network scanner (`C9`); devices/shares endpoints unbounded (`C10`); `DbXmlRepository` discards unreadable keys with zero operator signal (`C11`).
 `C12`–`C21` Low/Nit: no DataProtection revocation path (`C12`); `backends/meta` reads a stale snapshot (`C13`); logout is client-side only (`C14`); unescaped `LIKE` + unindexed full scan per keystroke (`C15`); unvalidated block/share identifiers (`C16`); admin can remove the last admin (`C17`); WebUi reaches into `SyncDbContext` directly in 4 files (`C18`); no endpoint-authorization tests (`C19`); CSP omits `base-uri`/`form-action`/`object-src` (`C20`); duplicated role parsing and ad-hoc error shapes (`C21`).

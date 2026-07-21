@@ -300,6 +300,17 @@ public sealed class WebUiOptions
 	public WebUiAdminOptions Admin { get; set; } = new();
 	public WebUiUserPortalOptions UserPortal { get; set; } = new();
 	public WebUiOidcOptions? Oidc { get; set; }
+
+	/// <summary>
+	///   Emit the session cookie (and the OIDC correlation/nonce cookies) without the Secure
+	///   attribute when the request itself resolves to http. OFF by default: the gateway cannot
+	///   tell whether a plain-http request arrived over a TLS-terminating proxy — a proxy that
+	///   forwards neither <see cref="ActiveSyncOptions.PublicUrl" /> nor X-Forwarded-Proto would
+	///   otherwise leave the admin cookie transmittable in cleartext and strippable. Turn this on
+	///   only to run the web interfaces over plain http locally; it is logged as a warning at
+	///   startup. Restart tier (the cookie handler is wired at DI time).
+	/// </summary>
+	public bool AllowInsecureCookies { get; set; }
 }
 
 /// <summary>

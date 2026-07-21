@@ -139,6 +139,8 @@ internal static class SettingKeys
 			"Serve the web admin interface under /admin."),
 		new("ActiveSync:WebUi:UserPortal:Enabled", ValueType.Bool, false, "false",
 			"Serve the user self-service portal under /user."),
+		new("ActiveSync:WebUi:AllowInsecureCookies", ValueType.Bool, true, "false",
+			"Emit web session cookies without Secure over plain http (local development only)."),
 		new("ActiveSync:WebUi:Oidc:Enabled", ValueType.Bool, true, "true",
 			"Master switch for OIDC; false keeps the settings but reverts web login to local passwords."),
 		new("ActiveSync:WebUi:Oidc:Authority", ValueType.String, true, null,

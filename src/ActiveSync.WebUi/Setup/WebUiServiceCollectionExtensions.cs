@@ -34,13 +34,24 @@ public static class WebUiServiceCollectionExtensions
 
 	public static void AddWebUi(this WebApplicationBuilder builder)
 	{
+		// Restart-tier read: the OIDC handler and the cookie hardening can only be decided at DI
+		// time, exactly like the other listener-shaping options ProgramServer reads from the raw
+		// configuration.
+		ActiveSyncOptions startup = builder.Configuration.GetSection("ActiveSync").Get<ActiveSyncOptions>()
+			?? new ActiveSyncOptions();
+		CookieSecurePolicy securePolicy = SecurePolicy(startup.WebUi);
+
 		AuthenticationBuilder authentication = builder.Services.AddAuthentication(WebUiAuth.Scheme)
 			.AddCookie(WebUiAuth.Scheme, cookie =>
 			{
 				cookie.Cookie.Name = WebUiAuth.CookieName;
 				cookie.Cookie.HttpOnly = true;
 				cookie.Cookie.SameSite = SameSiteMode.Strict;
-				cookie.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+				// Secure unconditionally: the gateway cannot see whether a plain-http request
+				// came through a TLS-terminating proxy, so "same as request" silently drops the
+				// flag on exactly the deployment that needs it most (WebUi:AllowInsecureCookies
+				// is the deliberate local-dev opt-out).
+				cookie.Cookie.SecurePolicy = securePolicy;
 				cookie.SlidingExpiration = true;
 				cookie.ExpireTimeSpan = TimeSpan.FromHours(12);
 				// A JSON API: plain status codes instead of login-page redirects — the SPA
@@ -57,13 +68,9 @@ public static class WebUiServiceCollectionExtensions
 				};
 			});
 
-		// Restart-tier read: the OIDC handler can only be added at DI time, exactly like the
-		// other listener-shaping options ProgramServer reads from the raw configuration.
-		ActiveSyncOptions startup = builder.Configuration.GetSection("ActiveSync").Get<ActiveSyncOptions>()
-			?? new ActiveSyncOptions();
 		if (startup.WebUi.Oidc is { Enabled: true } oidc && !string.IsNullOrWhiteSpace(oidc.Authority))
 			authentication.AddOpenIdConnect(OidcScheme,
-				options => ConfigureOidc(options, oidc, startup.Encryption));
+				options => ConfigureOidc(options, oidc, startup.Encryption, securePolicy));
 
 		builder.Services.AddAuthorization(authorization =>
 		{
@@ -86,9 +93,31 @@ public static class WebUiServiceCollectionExtensions
 					provider.GetRequiredService<IOptions<ActiveSyncOptions>>())));
 	}
 
-	private static void ConfigureOidc(
-		OpenIdConnectOptions options, WebUiOidcOptions oidc, EncryptionOptions encryption)
+	/// <summary>
+	///   Secure on every web cookie unless the operator explicitly opted out for local http.
+	///   Exposed to <see cref="WebUiApplicationExtensions" /> so the opt-out can be logged once.
+	/// </summary>
+	internal static CookieSecurePolicy SecurePolicy(WebUiOptions webUi)
 	{
+		return webUi.AllowInsecureCookies ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
+	}
+
+	private static void ConfigureOidc(
+		OpenIdConnectOptions options, WebUiOidcOptions oidc, EncryptionOptions encryption,
+		CookieSecurePolicy securePolicy)
+	{
+		// State and nonce are the CSRF defence of the code flow, so they are pinned here rather
+		// than left to the framework default. Under the http opt-out they additionally have to
+		// leave SameSite=None — a None cookie without Secure is discarded outright by current
+		// browsers, and the failure surfaces only as an opaque "Correlation failed".
+		options.CorrelationCookie.SecurePolicy = securePolicy;
+		options.NonceCookie.SecurePolicy = securePolicy;
+		if (securePolicy != CookieSecurePolicy.Always)
+		{
+			options.CorrelationCookie.SameSite = SameSiteMode.Lax;
+			options.NonceCookie.SameSite = SameSiteMode.Lax;
+		}
+
 		options.Authority = oidc.Authority;
 		options.ClientId = oidc.ClientId;
 		options.ClientSecret = UnsealClientSecret(oidc.ClientSecret, encryption);

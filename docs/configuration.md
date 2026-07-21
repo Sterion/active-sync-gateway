@@ -269,6 +269,7 @@ at startup); `AdminClaim`/`AdminClaimValue`/`AutoProvision` apply live.
 |--------|---------|-------------|
 | `Admin:Enabled` | `false` | Serve the web admin interface under `/admin`. |
 | `UserPortal:Enabled` | `false` | Serve the user self-service portal under `/user`. |
+| `AllowInsecureCookies` | `false` | Emit the session (and OIDC correlation/nonce) cookies without `Secure` when the request resolves to http. Off by default — the gateway cannot tell a plain-http request apart from one that came through a TLS-terminating proxy forwarding neither `PublicUrl` nor `X-Forwarded-Proto`, so the flag would silently disappear on exactly the deployment that needs it. Turn on only to run the portals over plain http locally; logged as a warning at startup. Restart-tier. |
 | `Oidc:Enabled` | `true` | Master switch for OIDC. When `false`, the identity-provider settings are kept but ignored (web login falls back to local passwords) — turn OIDC off without deleting its config. Restart-tier. |
 | `Oidc:Authority` | `null` | Issuer URL of the identity provider. When set (and enabled), **all** web logins go through the IdP and the local login form is disabled. Restart-tier. |
 | `Oidc:ClientId` | `null` | OIDC client id of this gateway. Restart-tier. |
