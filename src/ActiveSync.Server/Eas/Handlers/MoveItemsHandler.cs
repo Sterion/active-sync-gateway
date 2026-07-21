@@ -73,7 +73,9 @@ public sealed class MoveItemsHandler(
 					continue;
 				}
 
-				if (options.Value.ReadOnly)
+				// A move touches BOTH folders — a read-only grant on either end blocks it.
+				if (WritePermission.IsBlocked(context, options.Value, source.Value.Folder) ||
+				    WritePermission.IsBlocked(context, options.Value, destination.Value.Folder))
 				{
 					// Report failure and forget the item in the source snapshot so it is
 					// re-pushed — the client converges even if it already moved it locally.

@@ -7,6 +7,15 @@ internal static class TestOptionsMonitor
 {
 	public static IOptionsMonitor<T> Of<T>(T value) => new Fixed<T>(value);
 
+	/// <summary>Fixed-value <see cref="IOptionsSnapshot{T}" />, for the per-request handlers.</summary>
+	public static IOptionsSnapshot<T> SnapshotOf<T>(T value) where T : class => new FixedSnapshot<T>(value);
+
+	private sealed class FixedSnapshot<T>(T value) : IOptionsSnapshot<T> where T : class
+	{
+		public T Value => value;
+		public T Get(string? name) => value;
+	}
+
 	private sealed class Fixed<T>(T value) : IOptionsMonitor<T>
 	{
 		public T CurrentValue => value;

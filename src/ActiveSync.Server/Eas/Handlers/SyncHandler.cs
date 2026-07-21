@@ -423,7 +423,7 @@ public sealed partial class SyncHandler(
 	{
 		// Global ReadOnly mode and per-folder read-only shared-calendar grants share the
 		// same enforcement: reject Adds, silently revert Changes/Deletes.
-		bool readOnly = options.Value.ReadOnly || context.Session.IsReadOnlyFolder(folder.BackendKey);
+		bool readOnly = WritePermission.IsBlocked(context, options.Value, folder);
 		XElement? appData = command.Element(AS + "ApplicationData");
 		switch (command.Name.LocalName)
 		{

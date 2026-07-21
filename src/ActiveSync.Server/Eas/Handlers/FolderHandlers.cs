@@ -134,6 +134,25 @@ public abstract class FolderModifyHandlerBase(
 	/// <summary>Performs the backend change; returns the new folder's ServerId for FolderCreate.</summary>
 	protected abstract Task<string?> ExecuteAsync(EasContext context, XElement root, CancellationToken ct);
 
+	/// <summary>
+	///   Resolves a folder a modifying operation is about to touch, refusing one the session
+	///   reports read-only (a shared-collection grant). Throws <see cref="BackendException" />
+	///   so the caller's existing handling turns it into Status 3, the same answer an
+	///   unmodifiable system folder gets — the client must not retry either.
+	/// </summary>
+	protected async Task<(UserFolder Folder, IContentStore Store)> ResolveWritableAsync(
+		EasContext context, string serverId, CancellationToken ct)
+	{
+		(UserFolder Folder, IContentStore Store) resolved =
+			await Folders.ResolveCollectionAsync(context.Session, context.Device.UserName, serverId, ct)
+			?? throw new BackendException("Unknown folder");
+		if (!WritePermission.IsBlocked(context, options.Value, resolved.Folder))
+			return resolved;
+		logger.LogInformation("Read-only folder: rejecting {Command} of \"{Folder}\" for {User}",
+			Command, resolved.Folder.DisplayName, context.Device.UserName);
+		throw new BackendException($"Folder \"{resolved.Folder.DisplayName}\" is granted read-only.");
+	}
+
 	private async Task WriteStatusAsync(EasContext context, string status, string? syncKey, string? serverId = null)
 	{
 		XElement root = new(FH + Command, new XElement(FH + "Status", status));
@@ -162,11 +181,9 @@ public sealed class FolderCreateHandler(
 		IContentStore mailStore = context.Session.GetStoreForClass(EasClass.Email)!;
 		string? parentBackendKey = null;
 		if (parentId != "0")
-		{
-			UserFolder parent = await context.State.GetFolderByServerIdAsync(context.Device.UserName, parentId, ct)
-			                    ?? throw new BackendException("Unknown parent folder");
-			parentBackendKey = parent.BackendKey;
-		}
+			// A read-only grant on the parent covers its subtree: creating a child inside it
+			// is a write to the shared collection.
+			parentBackendKey = (await ResolveWritableAsync(context, parentId, ct)).Folder.BackendKey;
 
 		string backendKey = await mailStore.CreateFolderAsync(parentBackendKey, displayName, ct);
 		// Register so the response can carry the assigned ServerId.
@@ -187,9 +204,7 @@ public sealed class FolderDeleteHandler(
 	{
 		string serverId = root.Element(FH + "ServerId")?.Value
 		                  ?? throw new BackendException("Missing ServerId");
-		(UserFolder Folder, IContentStore Store) resolved =
-			await Folders.ResolveCollectionAsync(context.Session, context.Device.UserName, serverId, ct)
-			?? throw new BackendException("Unknown folder");
+		(UserFolder Folder, IContentStore Store) resolved = await ResolveWritableAsync(context, serverId, ct);
 		await resolved.Store.DeleteFolderAsync(resolved.Folder.BackendKey, ct);
 		return null;
 	}
@@ -209,9 +224,7 @@ public sealed class FolderUpdateHandler(
 		                  ?? throw new BackendException("Missing ServerId");
 		string displayName = root.Element(FH + "DisplayName")?.Value
 		                     ?? throw new BackendException("Missing DisplayName");
-		(UserFolder Folder, IContentStore Store) resolved =
-			await Folders.ResolveCollectionAsync(context.Session, context.Device.UserName, serverId, ct)
-			?? throw new BackendException("Unknown folder");
+		(UserFolder Folder, IContentStore Store) resolved = await ResolveWritableAsync(context, serverId, ct);
 		await resolved.Store.RenameFolderAsync(resolved.Folder.BackendKey, displayName, ct);
 		return null;
 	}

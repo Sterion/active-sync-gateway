@@ -173,7 +173,10 @@ public sealed class ItemOperationsHandler(
 		string collectionId = operation.Element(AS + "CollectionId")?.Value ?? "";
 		(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
 			context.Session, context.Device.UserName, collectionId, ct);
-		if (options.Value.ReadOnly || resolved is null || resolved.Value.Store.EasClass != EasClass.Email)
+		// Emptying is a bulk delete: a read-only grant on the folder blocks it just like
+		// global ReadOnly mode does.
+		if (resolved is null || resolved.Value.Store.EasClass != EasClass.Email ||
+		    WritePermission.IsBlocked(context, options.Value, resolved.Value.Folder))
 			return new XElement(IO + "EmptyFolderContents",
 				new XElement(IO + "Status", "2"),
 				new XElement(AS + "CollectionId", collectionId));

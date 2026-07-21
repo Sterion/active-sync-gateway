@@ -103,6 +103,18 @@ public sealed class MeetingResponseHandler(
 				string? calendarId = null;
 				List<UserFolder> registry = await context.State.GetFoldersAsync(context.Device.UserName, ct);
 				UserFolder? calendarFolder = registry.FirstOrDefault(f => f.Type == EasFolderType.Calendar);
+				// Responding writes the attendee PARTSTAT into the calendar folder; a
+				// read-only grant on it blocks that write the same way global ReadOnly does.
+				if (calendarFolder is not null &&
+				    WritePermission.IsBlocked(context, options.Value, calendarFolder))
+				{
+					logger.LogInformation(
+						"Read-only folder: rejecting MeetingResponse for {RequestId} from {User}",
+						requestId, context.Device.UserName);
+					results.Add(Result("2"));
+					continue;
+				}
+
 				if (uid is not null && calendarFolder is not null && context.Session.Calendar is not null)
 				{
 					string? href = await context.Session.Calendar.RespondToMeetingAsync(
