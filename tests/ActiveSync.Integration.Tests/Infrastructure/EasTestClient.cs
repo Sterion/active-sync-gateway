@@ -443,6 +443,17 @@ public sealed class EasTestClient(HttpClient http, string user, string password,
 			data is null ? null : Convert.FromBase64String(data));
 	}
 
+	public async Task<string> EmptyFolderContentsAsync(string collectionId)
+	{
+		XDocument? response = await PostAsync("ItemOperations", new XDocument(
+			new XElement(IO + "ItemOperations",
+				new XElement(IO + "EmptyFolderContents",
+					new XElement(AS + "CollectionId", collectionId)))));
+		XElement? empty = response?.Root?.Element(IO + "Response")?.Element(IO + "EmptyFolderContents");
+		Assert.NotNull(empty);
+		return empty.Element(IO + "Status")?.Value ?? "?";
+	}
+
 	public async Task<byte[]> GetAttachmentAsync(string fileReference)
 	{
 		using HttpResponseMessage response = await PostRawAsync("GetAttachment", null, attachmentName: fileReference);

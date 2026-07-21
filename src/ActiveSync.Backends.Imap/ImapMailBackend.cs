@@ -513,11 +513,18 @@ public sealed partial class ImapMailBackend(
 		{
 			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadWrite, ct)
 				.ConfigureAwait(false);
-			if (folder.Count > 0)
+			// folder.Count is only as fresh as the last EXISTS this connection happened to see,
+			// and a folder that stays selected between requests is never told about new mail
+			// unprompted — the same reason GetItemRevisionsAsync and SearchAsync NOOP first.
+			// Sequence numbers are racy on top of that: a concurrent expunge renumbers them, so
+			// the STORE lands on whatever moved into that slot. SEARCH ALL after the NOOP gives
+			// stable UIDs for exactly what is in the folder now.
+			await client.NoOpAsync(ct).ConfigureAwait(false);
+			IList<UniqueId> uids = await folder.SearchAsync(SearchQuery.All, ct).ConfigureAwait(false);
+			if (uids.Count > 0)
 			{
-				await folder.AddFlagsAsync(
-					Enumerable.Range(0, folder.Count).ToList(), MessageFlags.Deleted, true, ct).ConfigureAwait(false);
-				await folder.ExpungeAsync(ct).ConfigureAwait(false);
+				await folder.AddFlagsAsync(uids, MessageFlags.Deleted, true, ct).ConfigureAwait(false);
+				await folder.ExpungeAsync(uids, ct).ConfigureAwait(false);
 			}
 
 			return true;

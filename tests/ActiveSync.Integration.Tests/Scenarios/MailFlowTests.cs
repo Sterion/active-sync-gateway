@@ -152,6 +152,36 @@ public class MailFlowTests(GatewayFixture gateway)
 			$"'{keep}' was destroyed by an unrelated delete — the expunge was not scoped to one UID");
 	}
 
+	/// <summary>
+	///   Baseline coverage for ItemOperations EmptyFolderContents, which had none. It clears mail
+	///   delivered after the gateway last synced the folder, i.e. without the client having seen
+	///   it. NOTE: this does NOT reproduce D17 — Stalwart's untagged EXISTS is drained by the
+	///   commands the request issues anyway, so the stale folder.Count it fixed does not bite
+	///   here; D17's remaining symptom (sequence numbers renumbered by a concurrent expunge) has
+	///   no deterministic test.
+	/// </summary>
+	[BackendFact]
+	public async Task EmptyFolderContents_RemovesMailDeliveredSinceTheFolderWasSelected()
+	{
+		EasTestClient clientB = gateway.CreateEasClient(TestBackend.User2);
+		await clientB.HandshakeAsync();
+		string inboxB = clientB.FolderOfType(EasFolderType.Inbox).ServerId;
+		await clientB.InitialSyncAsync(inboxB);
+		await clientB.PullAllAsync(inboxB); // the gateway session now holds INBOX selected
+
+		string subject = $"empty-{Guid.NewGuid():N}";
+		await MailSeeder.SeedMailAsync(TestBackend.User1, TestBackend.User2, subject);
+		await WaitUntil.TrueAsync(
+			() => ImapProbe.MessageExistsAsync(TestBackend.User2, "INBOX", subject), $"delivery of '{subject}'");
+
+		// Deliberately no EAS sync in between: the client has never seen this message.
+		Assert.Equal("1", await clientB.EmptyFolderContentsAsync(inboxB));
+
+		await WaitUntil.TrueAsync(
+			async () => !await ImapProbe.MessageExistsAsync(TestBackend.User2, "INBOX", subject),
+			$"'{subject}' removed by EmptyFolderContents");
+	}
+
 	[BackendFact]
 	public async Task Categories_RoundTripAsImapKeywords_AndGhostedChangeLeavesThem()
 	{
