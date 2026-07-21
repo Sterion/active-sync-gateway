@@ -218,19 +218,22 @@ push-vs-poll latency and every partial/unsupported cell, is in
 
 ## Configuration
 
-> **Settings live in layers — the database wins, and it's all CLI-settable.** Every global setting
-> can be set with `eas config set <key> <value>` and is stored in the state **database**, which
-> overrides `appsettings.json` / environment variables, which override the built-in **code
-> defaults**. A database change is applied by every running replica within ~1s (no restart), except
-> a few listener settings — HTTP/HTTPS ports, self-signed-TLS and metrics enable/port — that apply
-> on the next restart. The gateway also starts with **no mail configuration at all**: with only the
-> bootstrap Encryption key set it runs **unconfigured** (EAS/Autodiscover answer 503; `/readyz`
-> stays ready and reports `"configured": false`) until you point it at a backend — from the web
-> admin's **Backends** page or with `eas config set`. So the shipped `appsettings.json`
-> carries only the two **bootstrap** sections — `Database` and `Encryption`, which are needed to
-> open and decrypt the database itself and are the only settings that cannot live in it. Everything
-> shown below is a **code default or example**; set the real values with the
-> [`eas config`](docs/cli.md#global-settings) commands (or `appsettings.json`/env as defaults).
+**Settings live in layers — the database wins, and it's all CLI-settable.** Every global
+setting can be set with [`eas config set <key> <value>`](docs/cli.md#global-settings) and is
+stored in the state database. From highest precedence to lowest:
+
+1. **Database** — set via `eas config set` or the web admin. Applies to every running replica
+   within ~1 s, no restart — except a few listener settings (HTTP/HTTPS ports, self-signed-TLS,
+   metrics enable/port), which apply on the next restart.
+2. **`appsettings.json` / environment variables** — file and env defaults.
+3. **Built-in code defaults** — everything shown below is a code default or example.
+
+The gateway starts with **no mail configuration at all**: with only the bootstrap Encryption
+key set it runs **unconfigured** (EAS/Autodiscover answer 503; `/readyz` stays ready and
+reports `"configured": false`) until you point it at a backend — from the web admin's
+**Backends** page or with `eas config set`. The shipped `appsettings.json` therefore carries
+only the two **bootstrap** sections, `Database` and `Encryption`: they open and decrypt the
+database that stores everything else, so they are the only settings that cannot live in it.
 
 One backend set serves all users; each user authenticates with their own credentials
 (HTTP Basic, validated by the MailStore provider's login probe and passed through to all
@@ -301,29 +304,6 @@ file instead, edit `src/ActiveSync.Server/appsettings.json`:
   validation entirely (lab use only; it wins over `CaCertificatePath` and is called out as
   `certs=ACCEPT-ANY`-style in the startup banner). A configured CA file that is missing or
   not valid PEM fails startup validation.
-
-#### Migrating from the pre-1.x flat sections
-
-The old fixed `ActiveSync:Imap` / `Smtp` / `CalDav` / `CardDav` / `Sieve` sections are
-gone. Move each into its role section and add the matching `Provider`:
-
-| Old key | New key |
-|---------|---------|
-| `ActiveSync:Imap:*` | `ActiveSync:Backends:MailStore:*` + `"Provider": "imap"` |
-| `ActiveSync:Smtp:*` | `ActiveSync:Backends:MailSubmit:*` + `"Provider": "smtp"` |
-| `ActiveSync:CalDav:*` | `ActiveSync:Backends:Calendar:*` + `"Provider": "caldav"` — and, to keep CalDAV tasks, also add `"Tasks": { "Provider": "caldav" }` |
-| `ActiveSync:CardDav:*` | `ActiveSync:Backends:Contacts:*` + `"Provider": "carddav"` |
-| `ActiveSync:Sieve:*` (with `Enabled: true`) | `ActiveSync:Backends:Oof:*` + `"Provider": "sieve"` — **`Host` is now required** (see below) |
-| `Users:<login>:Imap:UserName` | `Users:<login>:Backends:MailStore:UserName` |
-| `Users:<login>:Imap:Host` | `Users:<login>:Backends:MailStore:Settings:Host` |
-| `Users:<login>:CalDav:Enabled=false` | `Users:<login>:Backends:Calendar:Enabled=false` |
-
-Two behavior changes to note: the old `TaskFolder`-drives-tasks rule is replaced by the
-explicit `Tasks` role assignment above, and the Oof/sieve **`Host` no longer defaults to
-the IMAP host** — providers can't see each other's sections, so name it explicitly.
-Database-declared users (`eas user ...`) written before the change are **upgraded
-automatically at startup**; any row that cannot be converted is logged as an error and
-skipped (never silently degraded), so watch the startup log on first boot after upgrading.
 
 ### Full option reference
 
@@ -758,29 +738,3 @@ a Microsoft Graph bridge, or your own) is just another provider assembly. Out-of
 drop into `/app/plugins` and register themselves — no fork required. The contract
 (`ActiveSync.Protocol`, `ActiveSync.Core`, `ActiveSync.Backends.Common`) is published to
 NuGet per release. See **[docs/plugins.md](docs/plugins.md)**.
-
-Design notes:
-
-- **Differential sync** (Z-Push style): each Sync round compares a stored snapshot
-  (item → revision) against the backend's current revision map (IMAP UID+flags, DAV ETags).
-  Works on any server; no CONDSTORE/sync-collection requirement.
-- **Item ServerIds** are `collectionId:sub` where `sub` is the IMAP UID or a short numeric
-  id mapped to the DAV href in the database.
-- **Ping/Sync waits** use `Task.WhenAny` over per-store watchers: a **persistent
-  per-(user, folder) IMAP IDLE connection** (shared by all the user's devices, surviving
-  across requests) watches the priority folder — INBOX when pinged, otherwise the first
-  watched mail folder — for sub-second push; events are **latched**, so a change that
-  fires between two Pings is delivered to the next one instantly (`Eas.UseImapIdle`, on
-  by default, degrades to STATUS polling when the server lacks IDLE). Mail folders poll
-  STATUS every ~30 s and DAV collections poll ctag/sync-token every `DavPollSeconds`. Because IDLE/STATUS notifications are
-  best-effort in practice (some servers never broadcast flag changes; STATUS counters can
-  be coincidentally identical), an exact **watchdog** re-check runs alongside every wait:
-  at watch entry and every `Eas.WatchdogSeconds` (default 60, `0` disables the periodic
-  ticks) it diffs the backend's revision map against the device's synced snapshot — the
-  same ground truth Sync uses — so a change can never sit undetected for a whole
-  heartbeat. Quiet ticks are silent; an entry-check hit (change arrived between requests,
-  a normal path) logs Info, and a mid-wait hit (the watchers were live and stayed silent)
-  logs a Warning.
-- **Empty Sync requests** replay the cached shape of the device's last full Sync request
-  (MS-ASCMD semantics); only when no usable cache exists does the server answer status 13
-  to request a full resend.
