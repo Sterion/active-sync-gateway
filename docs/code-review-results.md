@@ -424,11 +424,55 @@ changing, so unlike item 9 every commit in this range is individually bisectable
 
 ---
 
-## Next: item 11 — Plugin & settings privilege
+## Item 11 — Plugin & settings privilege
 
-Items 11–14 are Phase 2 (Security), none [LIVE]; the orchestrator is running integration after every
+**Findings:** `K38` `B22` `K39` (earlier session) · `K40` `K41` `K42` `K43` `K44` (this session)
+**Commits:** `d23f0c8` (K38, B22) · `f8c38e5` (K39) · `838c2e6` (K40) · `8334d57` (K41) ·
+`5498956` (K42) · `a687cf3` (K43) · `304e5da` (K44)
+
+**Verification:** integrity 56/15/365/365/0 ✓ · cursor → item 12 ✓ · IDs in subjects ✓ · tree clean ✓ ·
+build **0 warnings** ✓ · unit **Protocol 63, Core 420 (was 401), WebUi 67 (was 63), Server 135 — 0
+failed, 0 skipped** ✓ · integration **139 passed, 0 skipped**, unchanged from the pre-item baseline ✓ ·
+`stash@{0}` left untouched as instructed ✓
+
+**Notes:**
+- **Resumed item.** `K38`/`B22`/`K39` landed in an earlier session; this run covered `K40`–`K44` only.
+- **Three operator-visible behaviour changes**, all recorded in the Part 2 notes: a plugin with a
+  **non-public** entry point no longer loads (it was previously instantiated and handed the host's
+  `IServiceCollection`); a plugin subdirectory with **no entry assembly** now aborts startup instead of
+  warning, as `docs/plugins.md` already promised; a **relative** `Plugins:Directory` now resolves
+  against `AppContext.BaseDirectory` rather than the CWD, so any deployment relying on the old
+  behaviour must switch to an absolute path.
+- **`K43` carries one deliberate exemption:** dot-prefixed directories are ignored. Kubernetes
+  projected volumes create `..data`, which would otherwise brick every start of the volume-mount
+  deployment the docs describe.
+- **`K41` cut both ways and the guard test matters.** Host-first resolution is now restricted to
+  assemblies that genuinely must unify (`ActiveSync.*`, `System.*`, `Microsoft.Extensions.*`,
+  `mscorlib`/`netstandard`); everything else is plugin-folder-first with host fallback.
+  `SharedContract_StillResolvesFromTheHost_EvenWhenThePluginShipsACopy` exists to catch an
+  over-correction into plugin-first for everything. The worker also found that a plugin dropped
+  **without `.deps.json`** resolved *nothing* through `AssemblyDependencyResolver`, so a private
+  dependency could not load from the folder at all — hence the added simple-name folder probe.
+- **`K44` landed hash pinning only, not signatures.** `ActiveSync:Plugins:Pins:<dirname>` is a SHA-256
+  over every `*.dll` beneath the directory, checked before load, with `RequirePinned` to refuse
+  unpinned plugins. Both live in the host-controlled `Plugins` section from `K38`, so a pin cannot be
+  relaxed from the DB or the admin UI. The doc and the Part 2 note both state plainly that **a hash pin
+  carries no identity and no revocation** — it is tamper-evidence, not trust.
+- **Test infrastructure was touched and disclosed** (protocol step 9). `src/` changed in exactly one
+  file, `PluginLoader.cs`; everything else is under `tests/`. `K41` needed a genuinely competing copy of
+  a dependency, so a new fixture project **`tests/PluginPrivateLib`** is referenced by both the fixture
+  plugin and `Core.Tests`; `K40` needed a non-public entry point, so the fixture gained an `internal`
+  `IGatewayPlugin`. Both accommodations have guard tests that fail if they stop exercising the finding.
+- **No new findings.** The "`Register` receives the live `IServiceCollection`" trust question the worker
+  hit while rewording `K44` is already tracked as `K70`.
+
+---
+
+## Next: item 12 — Local CLI authentication
+
+Items 12–14 are Phase 2 (Security), none [LIVE]; the orchestrator is running integration after every
 item regardless. Ordering constraint still standing: **item 13 (unified redaction) before item 14**.
-Current green baseline: **integration 139 / 0 skipped**, unit Core 401 · WebUi 63 · Server 135 ·
+Current green baseline: **integration 139 / 0 skipped**, unit Core 420 · WebUi 67 · Server 135 ·
 Protocol 63.
 
 **Process lesson for future runs:** "not [LIVE]" means the *worker* need not run integration. It does
