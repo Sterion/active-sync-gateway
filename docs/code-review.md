@@ -227,7 +227,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **1. IMAP mailbox safety** [LIVE] — ~~`D1`~~ ~~`D2`~~ ~~`D17`~~ **COMPLETE**
 > Two Criticals. `D1` a folder-wide `EXPUNGE` destroys other clients' `\Deleted` mail on every EAS delete; `D2` no UIDVALIDITY tracking anywhere, so after a restore or migration operations hit the wrong messages. Needs a real IMAP server to verify. **Best first item** — small, self-contained, highest value.
 
-**2. WBXML decoder & encoder hardening** — ~~`W1`~~ ~~`W2`~~ ~~`W3`~~ `W4` `W5` `W6` `W7` `W8`
+**2. WBXML decoder & encoder hardening** — ~~`W1`~~ ~~`W2`~~ ~~`W3`~~ ~~`W4`~~ `W5` `W6` `W7` `W8`
 > `W1` (no depth/element cap → OOM from one request) and `W2` (unbounded recursion → uncatchable `StackOverflowException`) are ~15 lines between them and take down every user's sync. Add the hardening tests with the fix.
 
 **3. Contact, vCard & iTIP integrity** [LIVE] — `D4` `D6` `D7` `D22` `D23`

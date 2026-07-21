@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using System.Xml.Linq;
 
@@ -32,10 +33,42 @@ public static class WbxmlDecoder
 	private const int MaxDepth = 256;
 	private const int MaxElements = 200_000;
 
-	public static async Task<XDocument> DecodeAsync(Stream stream, CancellationToken ct)
+	/// <summary>Default ceiling for <see cref="DecodeAsync" />; matches Kestrel's request body limit.</summary>
+	public const int MaxDocumentBytes = 64 * 1024 * 1024;
+
+	/// <summary>
+	///   Buffers <paramref name="stream" /> and decodes it, refusing anything over
+	///   <paramref name="maxBytes" />. The bound is not optional: a chunked request carries no
+	///   Content-Length, so the size is unknown until the copy finishes and an unbounded buffer
+	///   is a memory-exhaustion primitive by itself — independent of what the bytes decode to.
+	/// </summary>
+	public static async Task<XDocument> DecodeAsync(
+		Stream stream, CancellationToken ct, int maxBytes = MaxDocumentBytes)
 	{
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
+
 		using MemoryStream buffer = new();
-		await stream.CopyToAsync(buffer, ct).ConfigureAwait(false);
+		byte[] scratch = ArrayPool<byte>.Shared.Rent(81920);
+		try
+		{
+			int read;
+			while ((read = await stream.ReadAsync(scratch, ct).ConfigureAwait(false)) > 0)
+			{
+				// Check before writing, so the buffer never grows past the ceiling.
+				if (buffer.Length + read > maxBytes)
+					throw new WbxmlException($"WBXML document exceeds {maxBytes} bytes.");
+				// MemoryStream.Write is a memcpy into a heap buffer — there is no I/O to await.
+#pragma warning disable VSTHRD103
+				buffer.Write(scratch, 0, read);
+#pragma warning restore VSTHRD103
+			}
+		}
+		finally
+		{
+			ArrayPool<byte>.Shared.Return(scratch);
+		}
+
+		// maxBytes is an int and the loop above enforces it, so this cast cannot truncate.
 		return Decode(buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
 	}
 

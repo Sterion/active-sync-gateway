@@ -76,6 +76,28 @@ public class WbxmlDecoderHardeningTests
 	}
 
 	[Fact]
+	public async Task DecodeAsync_StreamOverTheLimit_IsAParseError()
+	{
+		// A chunked request has no Content-Length, so the only way to bound the buffer is to
+		// stop copying at the ceiling. The stream here is well-formed WBXML — it is refused
+		// on size alone, before decoding.
+		byte[] oversized = Doc([0x45], new byte[4096], [0x01]);
+		using MemoryStream stream = new(oversized);
+		await Assert.ThrowsAsync<WbxmlException>(
+			() => WbxmlDecoder.DecodeAsync(stream, CancellationToken.None, 1024));
+	}
+
+	[Fact]
+	public async Task DecodeAsync_StreamUnderTheLimit_Decodes()
+	{
+		byte[] valid = Doc([0x45], [0x01]);
+		using MemoryStream stream = new(valid);
+		System.Xml.Linq.XDocument result =
+			await WbxmlDecoder.DecodeAsync(stream, CancellationToken.None, 1024);
+		Assert.Equal("Sync", result.Root!.Name.LocalName);
+	}
+
+	[Fact]
 	public void MultiByteInteger_WrappingToASmallValue_IsAParseError()
 	{
 		// 0x90 0x80 0x80 0x80 0x03 encodes 2^32 + 3, which truncates to exactly 3 in a uint
