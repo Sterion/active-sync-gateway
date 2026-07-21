@@ -175,6 +175,43 @@ public class JsCalendarConverterTests
 			back.Elements().FirstOrDefault(e => e.Name.LocalName == expectedElement)?.Value);
 	}
 
+	// H23 — a JSCalendar event with no timeZone is *floating* (RFC 8984 §4.1.2): it happens at
+	// that wall-clock time wherever the viewer is. Anchoring it to UTC moves it by the viewer's
+	// offset — an 09:00 daily standup becomes 11:00 in Copenhagen.
+	[Fact]
+	public void FloatingEvent_StaysFloating_AndIsNotAnchoredToUtc()
+	{
+		const string floating = """
+		{ "@type": "Event", "uid": "float-1", "title": "Standup",
+		  "start": "2026-07-20T09:00:00", "duration": "PT1H" }
+		""";
+
+		string ics = JsCalendarConverter.ToICalendar(JsonDocument.Parse(floating).RootElement);
+		Assert.Contains("DTSTART:20260720T090000", ics);
+		Assert.DoesNotContain("DTSTART:20260720T090000Z", ics);
+		Assert.DoesNotContain("TZID", ics);
+
+		// ...and coming back out it must still carry no timeZone, at the same wall-clock time.
+		JsonElement back = JsonSerializer.SerializeToElement(JsCalendarConverter.FromICalendar(ics, null));
+		Assert.Equal("2026-07-20T09:00:00", back.GetProperty("start").GetString());
+		Assert.False(back.TryGetProperty("timeZone", out _));
+	}
+
+	[Fact]
+	public void ZonedEvent_KeepsItsZone()
+	{
+		const string zoned = """
+		{ "@type": "Event", "uid": "zoned-1", "title": "Standup",
+		  "start": "2026-07-20T09:00:00", "timeZone": "Europe/Copenhagen", "duration": "PT1H" }
+		""";
+
+		string ics = JsCalendarConverter.ToICalendar(JsonDocument.Parse(zoned).RootElement);
+		Assert.Contains("TZID=Europe/Copenhagen", ics);
+		JsonElement back = JsonSerializer.SerializeToElement(JsCalendarConverter.FromICalendar(ics, null));
+		Assert.Equal("Europe/Copenhagen", back.GetProperty("timeZone").GetString());
+		Assert.Equal("2026-07-20T09:00:00", back.GetProperty("start").GetString());
+	}
+
 	[Fact]
 	public void FromICalendar_DropsServerManagedMembers()
 	{

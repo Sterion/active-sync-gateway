@@ -82,8 +82,12 @@ public static class JsCalendarConverter
 			}
 			else
 			{
-				evt.Start = tzId is not null ? new CalDateTime(start, tzId) : new CalDateTime(start, "UTC");
-				evt.End = tzId is not null ? new CalDateTime(start + duration, tzId) : new CalDateTime(start + duration, "UTC");
+				// A JSCalendar event with no timeZone is *floating* (RFC 8984 §4.1.2) — it happens
+				// at that wall-clock time wherever the viewer is. Anchoring it to UTC instead
+				// silently moves it by the viewer's offset. A null tzId is what Ical.Net wants for
+				// a floating value, so the zone is passed straight through either way.
+				evt.Start = new CalDateTime(start, tzId);
+				evt.End = new CalDateTime(start + duration, tzId);
 			}
 		}
 
