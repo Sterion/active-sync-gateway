@@ -41,6 +41,38 @@ The baseline is what catches that, and it is also what tells you whether a failu
 
 Expect `Passed: 124, Skipped: 0`. Anything else means the environment, not your change.
 
+### Orchestrated mode — one subagent per item (recommended for a long run)
+
+A master session works the queue by spawning a **fresh subagent per item** and verifying each result
+before moving on. The master's context grows only by the coordination overhead, so quality does not
+decay across a long run the way it does in one continuous session — and unlike `/loop`, which
+accumulates context across iterations, this genuinely gives each item a clean slate.
+
+> Read `docs/code-review.md`. Work **items 5 through 14** as an orchestrator.
+>
+> For each item in order: spawn **one subagent** told to implement that item following the working
+> protocol in this document. Run them **strictly sequentially** — never two at once; they would
+> collide in git and in this file.
+>
+> When a subagent returns, **verify independently — do not trust its report**:
+> - run the integrity check from "Editing this document safely" (expect 56 / 15 / 365 / 365 / 0)
+> - confirm `git log` shows one commit per finding with the ID in the subject
+> - confirm the Part 1 cursor advanced, i.e. resume now returns the *next* item
+> - confirm the build is still 0 warnings, and for a [LIVE] item that integration tests **ran**
+>   (`Passed: 124+, Skipped: 0`) rather than skipped
+>
+> Then append an entry to `docs/code-review-results.md` in the established format, recording your
+> verification results and anything the subagent flagged. If a check fails, **stop and report** —
+> do not continue to the next item.
+>
+> Bring Stalwart up first (`./scripts/stalwart-up.ps1`) if any item in the range is [LIVE].
+
+**"Verify, don't trust" is load-bearing, not boilerplate.** Item 1's subagent fixed, tested and
+committed all three findings correctly, and reported success truthfully — but marked them in Part 2
+only, so the cursor never advanced and the next session would have redone the item. Every check it
+ran passed. The check it did not run was the one that mattered. A master that reads the summary and
+moves on inherits exactly that class of failure.
+
 ### Running the queue hands-off
 
 `/loop` self-advances with a fresh context per item, because this document is the cursor — struck-through findings mark the position, so no state has to survive between iterations.
