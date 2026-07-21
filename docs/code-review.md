@@ -258,7 +258,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **5. JMAP converter semantics** [LIVE] — ~~`H7`~~ **then** ~~`H4`~~ ~~`H5`~~ ~~`H6`~~ ~~`H23`~~ **COMPLETE**
 > NOTE — **`H7` first, verified against the live Stalwart backend, before touching the other four.** It decides patch-vs-replace, which changes the *shape* of the other fixes. Full rationale and the safe-under-both-readings fallback are in the Area H sequencing note. Adding the round-trip suite (item 45) alongside is worth it.
 
-**6. Delete windowing & SoftDelete** [LIVE] — `F2` `F3` `A21`
+**6. Delete windowing & SoftDelete** [LIVE] — ~~`F2`~~ `F3` ~~`A21`~~
 > Deletes bypass `WindowSize` entirely (50k `<Delete>` elements in one response), and items aging out of the filter window are hard-deleted instead of soft-deleted. `CollectionDiff` + `SyncHandler`.
 
 **7. Unauthenticated resource limits** — `K1` `E2` `K26` `E21` `K33` `W17`
@@ -506,7 +506,7 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 
 ## Area F — EAS command handlers (48)
 `F1` **High** `<Sync/>` with an empty `Collections` gets Status 13 instead of replaying (only a byte-empty body replays) — `Handlers/SyncHandler.cs:42`.
-`F2` **High** Server→client `Delete` commands bypass `WindowSize` entirely and don't contribute to `MoreAvailable` — `Handlers/SyncHandler.cs:314`.
+~~`F2`~~ **High** Server→client `Delete` commands bypass `WindowSize` entirely and don't contribute to `MoreAvailable` — `Handlers/SyncHandler.cs:314`. FIXED in `CollectionDiff.Compute`: deletes/changes/adds now share one budget, charged in that order; an unsent tombstone keeps its snapshot entry so it reappears next round, and any truncation sets `MoreAvailable`. Same change closes `A21`. Note the restructure also removed the two unreachable branches `A20` describes — `A20` itself (the `Drain` extraction) is untouched and still belongs to item 46.
 `F3` **High** Items aging out of the sliding `FilterType` window are hard-`Delete`d, never `SoftDelete`d (`SoftDelete` is in the code page and emitted by no handler) — `Handlers/SyncHandler.cs:314`.
 `F10` **High** Draft submit sends before recording the replay marker, and a post-send failure reports failure → user resends, recipient gets it twice — `Handlers/SyncHandler.cs:434,496,622`.
 `F23` **High** Provision phase 2 never compares the presented `PolicyKey` and never reads the client's ack `Status` — the whole policy handshake is bypassable in one request — `Handlers/ProvisionHandler.cs:59`.

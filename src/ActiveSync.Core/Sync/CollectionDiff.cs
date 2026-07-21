@@ -13,6 +13,8 @@ public sealed record CollectionChanges(
 ///   Differential sync: compares the last acknowledged snapshot (ServerId → revision) with the
 ///   current backend revision map and produces windowed changes plus the snapshot to persist.
 ///   Items beyond the window are left out of the new snapshot so they surface on the next round.
+///   Deletes, changes and adds share one window budget and are charged in that order, so a
+///   device that lost items drains its tombstones before the window fills with new mail.
 /// </summary>
 public static class CollectionDiff
 {
@@ -36,52 +38,57 @@ public static class CollectionDiff
 				deletes.Add(id);
 
 		// Deterministic order: newest-looking ids last so initial sync fills oldest-first
-		// within a window; string ordinal keeps this stable across rounds.
+		// within a window; string ordinal keeps this stable across rounds. Deletes are sorted
+		// too — an unsent tombstone must come back in the same place on the next round.
 		adds.Sort(static (a, b) => CompareIds(a.ServerId, b.ServerId));
 		changes.Sort(static (a, b) => CompareIds(a.ServerId, b.ServerId));
+		deletes.Sort(CompareIds);
 
 		Dictionary<string, string> newSnapshot = new(snapshot, StringComparer.Ordinal);
-		foreach (string id in deletes)
-			newSnapshot.Remove(id);
 
 		int budget = Math.Max(1, windowSize);
-		List<ItemChange> sentAdds = new();
+		List<string> sentDeletes = new();
 		List<ItemChange> sentChanges = new();
-		bool more = false;
+		List<ItemChange> sentAdds = new();
+
+		// Tombstones first: they are the cheapest thing to send and the client cannot
+		// reconcile anything else until they are gone. An unsent delete keeps its snapshot
+		// entry, which is exactly what makes it reappear as a delete next round.
+		foreach (string id in deletes)
+		{
+			if (budget == 0)
+				break;
+
+			sentDeletes.Add(id);
+			newSnapshot.Remove(id);
+			budget--;
+		}
 
 		foreach (ItemChange change in changes)
 		{
 			if (budget == 0)
-			{
-				more = true;
 				break;
-			}
 
 			sentChanges.Add(change);
 			newSnapshot[change.ServerId] = change.Revision;
 			budget--;
 		}
 
-		if (!more)
-			foreach (ItemChange add in adds)
-			{
-				if (budget == 0)
-				{
-					more = true;
-					break;
-				}
+		foreach (ItemChange add in adds)
+		{
+			if (budget == 0)
+				break;
 
-				sentAdds.Add(add);
-				newSnapshot[add.ServerId] = add.Revision;
-				budget--;
-			}
-		else
-			more = true;
+			sentAdds.Add(add);
+			newSnapshot[add.ServerId] = add.Revision;
+			budget--;
+		}
 
-		if (!more && (sentAdds.Count < adds.Count || sentChanges.Count < changes.Count))
-			more = true;
+		bool more = sentDeletes.Count < deletes.Count
+			|| sentChanges.Count < changes.Count
+			|| sentAdds.Count < adds.Count;
 
-		return new CollectionChanges(sentAdds, sentChanges, deletes, more, newSnapshot);
+		return new CollectionChanges(sentAdds, sentChanges, sentDeletes, more, newSnapshot);
 	}
 
 	private static int CompareIds(string a, string b)
