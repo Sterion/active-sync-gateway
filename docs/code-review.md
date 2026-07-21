@@ -108,6 +108,16 @@ paste from an hour ago cannot see them.
 - **Do not push.** Commit freely; pushing is a human decision.
 - **The build baseline is 0 warnings.** Treat a new warning as a failure.
 
+### Orient before you start
+
+**Read [`AGENTS.md`](../AGENTS.md) for the areas you are about to touch, before you touch them.** Its "Solution layout and dependency rule" section is the authority on which assembly may reference which; "Protocol layer invariants" is a hard gate on anything under `src/ActiveSync.Protocol/`; there are per-layer sections for the backends, server and web UI. [`README.md`](../README.md) is worth a skim when entering an area you have not worked in.
+
+These are not background reading. They carry constraints the code does not state and a reasonable change will violate silently — the dependency direction, "every code-page table change needs a round-trip test", the OPAQUE marker attribute every producer and consumer relies on, decisions already taken and their reasons.
+
+**Structural items make this mandatory.** Items 15–20 move types between assemblies, change the published plugin contract, and split large types — that work *is* the architecture document, executed. Doing it without reading it is guessing.
+
+If `AGENTS.md` contradicts a finding, **stop and report it**. One of the two is wrong, and that is a decision for a human.
+
 ### Working protocol — follow this for every item
 
 **1. Work findings in the order listed.** Where an item carries a sequencing constraint (item 5 / `H7`), honour it.
