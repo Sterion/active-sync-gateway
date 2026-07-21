@@ -43,7 +43,21 @@ When a finding is fixed, mark it rather than deleting it — `~~D1~~ **FIXED** (
 **Why together:** every item here silently destroys or mangles user data during ordinary use. Same review pass, same test surface (a real-backend round-trip suite).
 `D1` `D2` `D4` `D6` `D15` `D16` `D17` `D22` `D23` `H4` `H5` `H6` `H7` `H23` `F2` `F3` `A21`
 
-The three worst: `D1` a folder-wide `EXPUNGE` that permanently deletes *other* clients' `\Deleted` mail on every EAS delete; `D2` zero UIDVALIDITY tracking anywhere in the repo, so after a mailbox restore/migration the gateway applies deletes and flag changes to the wrong messages; `D4` a ghosted contact Change wipes name, emails, address, photo and note. `H7` (JMAP `update` treated as replace, not RFC 8620 patch) means cleared fields never reach the server — resolve that semantic question against the live Stalwart account first, it gates `H4`–`H6`.
+The three worst: `D1` a folder-wide `EXPUNGE` that permanently deletes *other* clients' `\Deleted` mail on every EAS delete; `D2` zero UIDVALIDITY tracking anywhere in the repo, so after a mailbox restore/migration the gateway applies deletes and flag changes to the wrong messages; `D4` a ghosted contact Change wipes name, emails, address, photo and note.
+
+> ### ⚠️ Sequencing: do `H7` first, and verify it against a live server
+>
+> **`H7` gates `H4`, `H5` and `H6`. Do not start those three until `H7` is settled and tested.**
+>
+> The question `H7` raises is whether JMAP `update` is a **PatchObject** (RFC 8620 §5.3 — an absent member means *unchanged*) or a **full replace**. The codebase currently encodes *both beliefs at once*, and they are mutually exclusive:
+> - Under **patch** semantics, the "preserve unknown members" loops (`JsContactConverter.cs:160-163`, `JsCalendarConverter.cs:132-135`) are dead weight, and clearing a field is broken.
+> - Under **replace** semantics, those loops are load-bearing, and `media` being in `Managed` but never re-emitted explains the documented contact-photo loss.
+>
+> The fix for `H4` (recurrence array-vs-map), `H5` (day-ordinals) and `H6` (birthday `utc`-vs-`date`) is *shaped differently* depending on the answer, because each is about what gets written into an update payload. Guessing wrong means redoing all three.
+>
+> **How to settle it:** run against the Stalwart 0.16 test backend (see [`testing.md`](testing.md)) — set a contact field, then clear it, and inspect whether the server retains the old value. Write the answer down in this document and in `docs/backends.md` before touching `H4`–`H6`.
+>
+> **Note:** emitting an explicit `null` for every `Managed` member that has no value is correct under **both** interpretations. If the live test is inconclusive or you want to move now, that is the safe change — it removes the ambiguity permanently, after which the preserve loops can be kept or dropped deliberately rather than by accident.
 
 ## Block 2 — Untrusted-input limits
 **Why together:** all "the cap is applied one step too late". Phones are the attacker here; each is a cheap fix plus a hardening test.
@@ -114,6 +128,8 @@ The rule to apply everywhere: close the `try` around the submit only; everything
 ## Block 13 — Incremental sync (architectural)
 **Why together:** one design decision with the widest blast radius in the backends. Worth an explicit decision record either way.
 `H16` `H8` `H9` `H11` `H12` `A4`
+
+> **⚠️ If Block 1 has not been done yet:** `H7` (JMAP update patch-vs-replace) should be settled before any JMAP converter work, including anything here that touches update payloads. See the sequencing note in **Block 1**.
 
 Neither JMAP nor DAV ever uses `Foo/changes`, `sync-collection`, `queryState` or `ifInState` — verified by grep. Every sync is a full enumeration diffed against a snapshot. DAV even *fetches* `sync-token` and uses it only as a change sentinel. Defensible as v1 (always correct, never stale) but it directly causes `H8`, `H13`, `H14`, `H15` and doesn't scale past a few thousand items per collection.
 
@@ -266,6 +282,12 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 **Six repeated shapes wanting shared helpers:** resolve-collection-or-fail (12 sites), write-permission check (`F21`), `BodyPreference` parsing (two mutually inconsistent parsers), status-response writer (6 reimplementations), EAS time formatting (duplicates `EasDateTime`), long-poll scaffolding (`SyncHandler` vs `PingHandler` — the direct cause of `F16`).
 
 ## Area H — Backends: JMAP / DAV (31)
+
+> **⚠️ Sequencing — read before starting any JMAP converter work.**
+> **`H7` must be resolved and tested first; it gates `H4`, `H5` and `H6`.** The patch-vs-replace semantics of JMAP `update` determine the *shape* of the fix for all three, and the codebase currently contains contradictory evidence for both readings. Settle it against the Stalwart 0.16 test backend, record the answer, then proceed. Full rationale and the safe-under-both-readings fallback are in **Block 1**.
+>
+> Related: **five of the seven High findings in this area** (`H4` `H5` `H6` `H7` `H23`) live in `JsCalendarConverter.cs` and `JsContactConverter.cs`, and they share a signature — a member is written in one shape and read in another, or a mapping is lossy in a way that round-trips *stably* after the first pass, so nothing downstream notices. A property-based round-trip suite (EAS → JSCalendar/JSContact → EAS) would have caught `H4`, `H5`, `H6` and `H23` mechanically; see Block 17.
+
 `H1` **High** DAV readiness probe hardcodes `RemoteCertificateValidationCallback => true`, overriding the operator's TLS settings; the JMAP probe does it correctly — `Dav/DavReadiness.cs:12`.
 `H2` **High** Percent-decoded hrefs are re-resolved as URIs, so a resource whose name contains `#`, `?` or `%` resolves to the wrong path (verified empirically on .NET 10) — `Dav/WebDavClient.cs:306`.
 `H3` **High** `If-Match` silently dropped when the ETag isn't RFC-quoted → unconditional PUT, lost update, and the `idempotent: true` justification breaks — `Dav/WebDavClient.cs:132`.
