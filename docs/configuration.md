@@ -17,6 +17,12 @@ authority/client/scopes — that apply on the next restart (noted per option bel
 are needed to open and decrypt the database that stores everything else, so they can only be
 set via file/env, never `eas config`.
 
+Two more keys are **host-controlled** and likewise file/env only: `UsersFile` and
+`Plugins:Directory`. They name files the gateway reads at startup — and in the plugins case,
+assemblies it loads into its own process — so allowing them to be stored in the database would
+turn settings-write access into arbitrary code execution. A database row for either is refused
+by `eas config set` and the admin Settings page, and **ignored** if one is inserted around them.
+
 For how the config layers interact, unconfigured mode, and per-user overrides, see the
 [Configuration](../README.md#configuration) section of the README.
 
@@ -29,7 +35,7 @@ For how the config layers interact, unconfigured mode, and per-user overrides, s
 | `Users` | `null` | Optional per-user overrides keyed by gateway login (see [Per-user overrides](../README.md#per-user-overrides)). Undeclared logins are plain pass-through. |
 | `RequireDeclaredUsers` | `false` | Allowlist switch: only logins with a `Users` entry (config or database) may authenticate — anyone else gets 401 without a backend probe. An empty entry (`{}`) is a valid grant. |
 | `AutoProvisionUsers` | `true` | Create a database account row for a pass-through login the first time it clears its MailStore probe over EAS, so the user becomes visible/manageable (`eas users`, admin UI), blockable, and able to use the self-service portal. The row carries no gateway password, so auth is unchanged. Set `false` to keep pass-through logins ephemeral. Inert under `RequireDeclaredUsers`. See [Database-declared users](../README.md#database-declared-users-eas-user-). |
-| `UsersFile` | `null` | Path to a JSON file merged into configuration at startup (full shape: `{ "ActiveSync": { "Users": { ... } } }`) — the natural fit for a mounted Kubernetes Secret/ConfigMap. Changes require a restart. |
+| `UsersFile` | `null` | Path to a JSON file merged into configuration at startup (full shape: `{ "ActiveSync": { "Users": { ... } } }`) — the natural fit for a mounted Kubernetes Secret/ConfigMap. **Host-controlled: file/env only**, and changes require a restart. |
 
 ## `Backends:MailStore` (required, provider `imap` or `jmap`)
 
@@ -309,4 +315,4 @@ at startup); `AdminClaim`/`AdminClaimValue`/`AutoProvision` apply live.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `Directory` | `plugins` (container: `/app/plugins`) | Directory scanned for out-of-repo backend plugins — one subdirectory per plugin. Restart-tier. See **[docs/plugins.md](plugins.md)**. |
+| `Directory` | `plugins` (container: `/app/plugins`) | Directory scanned for out-of-repo backend plugins — one subdirectory per plugin. **Host-controlled: file/env only** (it decides what code the gateway loads), and restart-tier. See **[docs/plugins.md](plugins.md)**. |

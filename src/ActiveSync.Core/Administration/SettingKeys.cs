@@ -10,9 +10,9 @@ namespace ActiveSync.Core.Administration;
 ///   truth for `eas config set/unset/list` AND the web admin settings editor — both surfaces
 ///   validate and enumerate from here. Backend role settings
 ///   (<c>ActiveSync:Backends:&lt;Role&gt;:*</c>) are open-ended per provider, so they are matched
-///   dynamically rather than listed. The two bootstrap sections (Database, Encryption) are
-///   explicitly NOT settable — they are needed to open and decrypt the database that stores
-///   everything else.
+///   dynamically rather than listed. Host-controlled keys — the two bootstrap sections
+///   (Database, Encryption) plus the startup paths <c>UsersFile</c> and <c>Plugins:*</c> — are
+///   explicitly NOT settable; see <see cref="HostControlledReason" /> for why.
 /// </summary>
 internal static class SettingKeys
 {
@@ -45,10 +45,9 @@ internal static class SettingKeys
 			"Create a database account for a pass-through login on its first successful EAS sign-in (on by default)."),
 		new("ActiveSync:PublicUrl", ValueType.String, false, null,
 			"Public base URL advertised by Autodiscover (else derived from the request)."),
-		new("ActiveSync:UsersFile", ValueType.String, true, null,
-			"Path to an extra users JSON file merged at startup."),
-		new("ActiveSync:Plugins:Directory", ValueType.String, true, "plugins",
-			"Directory scanned for out-of-repo backend plugins."),
+		// ActiveSync:UsersFile and ActiveSync:Plugins:Directory are deliberately ABSENT — see
+		// HostControlledReason. They name things the host reads off disk at startup (one of them
+		// assemblies it then executes), so they are file/env only.
 
 		new("ActiveSync:Eas:MinHeartbeatSeconds", ValueType.Int, false, "60",
 			"Minimum Ping/Sync heartbeat.", Min: 1, Max: 3540),
@@ -173,12 +172,40 @@ internal static class SettingKeys
 	private static readonly HashSet<string> Roles =
 		new(Enum.GetNames<BackendRole>(), StringComparer.OrdinalIgnoreCase);
 
-	/// <summary>True for the bootstrap sections that can never be stored in the database.</summary>
-	internal static bool IsBootstrap(string key) =>
-		key.StartsWith("ActiveSync:Database:", StringComparison.OrdinalIgnoreCase) ||
-		key.Equals("ActiveSync:Database", StringComparison.OrdinalIgnoreCase) ||
-		key.StartsWith("ActiveSync:Encryption:", StringComparison.OrdinalIgnoreCase) ||
-		key.Equals("ActiveSync:Encryption", StringComparison.OrdinalIgnoreCase);
+	/// <summary>
+	///   Keys that may only come from the environment or a config file, never the database.
+	///   Returns the operator-facing reason, or null for an ordinary settable key.
+	///
+	///   Two classes. The BOOTSTRAP sections (Database, Encryption) are needed to open and
+	///   decrypt the database that stores everything else. The HOST-CONTROLLED paths name
+	///   something the host reads off disk before it trusts anything: <c>Plugins:Directory</c> is
+	///   scanned for plugin assemblies that are then loaded into this process (with the master key
+	///   in memory, and with the live <c>IServiceCollection</c> handed to them), and
+	///   <c>UsersFile</c> is read as a non-optional JSON configuration file. Leaving either
+	///   database-settable would make settings-write access — the admin UI, `eas config set`, a
+	///   DBA, SQL injection anywhere in the system — an arbitrary-code-execution primitive.
+	///   Enforced on the way in (the write surfaces below) AND on the way out
+	///   (<c>DbSettingsConfigurationProvider.SetData</c> drops such rows), so a row inserted
+	///   behind the write path is inert rather than merely unwritable.
+	/// </summary>
+	internal static string? HostControlledReason(string key)
+	{
+		if (IsSection(key, "ActiveSync:Database") || IsSection(key, "ActiveSync:Encryption"))
+			return "bootstrap settings (Database, Encryption) must come from the environment or a " +
+			       "config file — they are needed to open and decrypt the database";
+
+		if (key.Equals("ActiveSync:UsersFile", StringComparison.OrdinalIgnoreCase) ||
+		    IsSection(key, "ActiveSync:Plugins"))
+			return "host-controlled settings (UsersFile, Plugins) must come from the environment or a " +
+			       "config file — they name files the gateway reads, and code it loads, at startup";
+
+		return null;
+	}
+
+	/// <summary>True for the section root itself and anything beneath it.</summary>
+	private static bool IsSection(string key, string section) =>
+		key.Equals(section, StringComparison.OrdinalIgnoreCase) ||
+		key.StartsWith(section + ":", StringComparison.OrdinalIgnoreCase);
 
 	/// <summary>
 	///   Resolves a key to its definition. Statically-known keys return their catalogue entry;

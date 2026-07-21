@@ -63,12 +63,8 @@ internal static class SettingsEndpoints
 		{
 			if (string.IsNullOrWhiteSpace(request.Value))
 				return EndpointHelpers.BadRequest("value is required (DELETE clears an override)");
-			if (SettingKeys.IsBootstrap(key))
-				return Results.BadRequest(new
-				{
-					error = "bootstrap settings (Database, Encryption) must come from the environment " +
-					        "or a config file — they are needed to open and decrypt the database"
-				});
+			if (SettingKeys.HostControlledReason(key) is { } refusal)
+				return Results.BadRequest(new { error = refusal });
 			SettingKeys.SettingKey? definition = SettingKeys.Find(key);
 			if (definition is null)
 				return EndpointHelpers.BadRequest($"'{key}' is not a recognized setting");

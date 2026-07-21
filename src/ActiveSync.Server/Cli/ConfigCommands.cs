@@ -164,11 +164,9 @@ internal sealed class ConfigSetCommand(IAnsiConsole terminal) : SettingsCommandB
 	protected override async Task<int> RunAsync(
 		GlobalSettingStore store, IConfiguration fileConfig, Settings settings, CancellationToken cancellationToken)
 	{
-		if (SettingKeys.IsBootstrap(settings.Key))
+		if (SettingKeys.HostControlledReason(settings.Key) is { } refusal)
 		{
-			await Console.Error.WriteLineAsync(
-				$"'{settings.Key}' is a bootstrap setting — Database and Encryption must come from the " +
-				"environment or a config file (they are needed to open and decrypt the database).");
+			await Console.Error.WriteLineAsync($"'{settings.Key}' cannot be stored: {refusal}.");
 			return 1;
 		}
 

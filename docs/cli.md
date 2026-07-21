@@ -60,6 +60,8 @@ Stored in the database; the database wins over appsettings/env, which win over t
 defaults. Applies live within ~1s (a background change-stamp poll), except a few listener
 settings that apply on restart. The two bootstrap sections (`Database`, `Encryption`) are
 env/file only — they are needed to open and decrypt the database that stores everything else.
+So are the host-controlled paths `UsersFile` and `Plugins:Directory`: they name files the
+gateway reads (and code it loads) at startup, so `config set` refuses them.
 The settable keys, defaults and tiers are catalogued in
 **[docs/configuration.md](configuration.md)**.
 
