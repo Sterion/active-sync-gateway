@@ -86,12 +86,40 @@ public sealed class PluginLoaderTests : IDisposable
 		Assert.Empty(registry.All);
 	}
 
+	/// <summary>
+	///   K43 — a subdirectory whose entry assembly is missing used to log a warning and continue,
+	///   which is exactly the silent degradation the loader's fail-fast policy exists to prevent:
+	///   the role config assigned to that plugin falls back to a local store and the deployment
+	///   looks healthy. `docs/plugins.md` already promised an abort. **Behaviour change** — this
+	///   test previously asserted the skip (`SubdirWithoutEntryAssembly_IsSkipped_NotFatal`).
+	/// </summary>
 	[Fact]
-	public void SubdirWithoutEntryAssembly_IsSkipped_NotFatal()
+	public void SubdirWithoutEntryAssembly_FailsFast()
 	{
 		Directory.CreateDirectory(Path.Combine(_root, "empty-plugin"));
+
+		ServiceCollection services = new();
+		services.AddLogging();
+		InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+			PluginLoader.LoadInto(services, ConfigFor(_root), NullLogger.Instance));
+		Assert.Contains("empty-plugin.dll", ex.Message, StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	///   The one exemption to K43's fail-fast: a dot-prefixed directory is by convention not a
+	///   plugin, and Kubernetes projected volumes create exactly that (`..data`) beside the real
+	///   content. Aborting startup on those would make the documented volume-mount deployment
+	///   unusable.
+	/// </summary>
+	[Fact]
+	public void DotPrefixedSubdir_IsNotTreatedAsAPlugin()
+	{
+		Directory.CreateDirectory(Path.Combine(_root, "..data"));
+		StagePlugin("ActiveSync.TestPlugin");
+
 		BackendProviderRegistry registry = LoadAndBuildRegistry(ConfigFor(_root));
-		Assert.Empty(registry.All);
+
+		Assert.Equal("testplugin", registry.GetFor("testplugin", BackendRole.Notes).Name);
 	}
 
 	/// <summary>

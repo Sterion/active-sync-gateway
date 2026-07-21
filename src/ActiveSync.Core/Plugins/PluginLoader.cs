@@ -52,13 +52,24 @@ public static class PluginLoader
 		foreach (string pluginDir in Directory.EnumerateDirectories(directory).OrderBy(d => d, StringComparer.Ordinal))
 		{
 			string name = Path.GetFileName(pluginDir);
-			string entryDll = Path.Combine(pluginDir, name + ".dll");
-			if (!File.Exists(entryDll))
+
+			// Dot-prefixed directories are by convention not plugins, and Kubernetes projected
+			// volumes create exactly that (`..data`) beside the real content — the documented
+			// volume-mount deployment would otherwise abort on every start.
+			if (name.StartsWith('.'))
 			{
-				logger.LogWarning(
-					"Plugin directory {Dir} has no entry assembly {Name}.dll; skipping", pluginDir, name);
+				logger.LogDebug("Ignoring non-plugin directory {Dir}", pluginDir);
 				continue;
 			}
+
+			// Fail fast, as documented: skipping here silently degrades whichever role config
+			// assigned to this plugin to the local fallback, and the deployment still looks
+			// healthy. A half-copied plugin directory is the common way to reach this.
+			string entryDll = Path.Combine(pluginDir, name + ".dll");
+			if (!File.Exists(entryDll))
+				throw new InvalidOperationException(
+					$"Plugin directory '{pluginDir}' has no entry assembly '{name}.dll'; the entry " +
+					"assembly must be named after its directory.");
 
 			VerifyContractVersions(pluginDir, hostContractVersion);
 			loaded += LoadPlugin(services, configuration, logger, entryDll);

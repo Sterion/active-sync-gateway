@@ -192,9 +192,10 @@ both as-is; a plugin with a native dependency must ship both RIDs.
   a different version of it; if the folder does not have it, the host's copy is the fallback.
   Both a `dotnet publish` layout (with `.deps.json`) and a hand-assembled drop of DLLs work.
 - Loading is **fail-fast**: a corrupt/incompatible plugin, a subdirectory whose entry
-  assembly is missing, or an assembly with no `IGatewayPlugin` aborts startup rather than
-  silently degrading a role that config assigned to it. An absent or empty plugins
-  directory is a no-op.
+  assembly is missing, or an assembly with no public `IGatewayPlugin` aborts startup rather
+  than silently degrading a role that config assigned to it. An absent or empty plugins
+  directory is a no-op, and directories whose name starts with `.` are ignored (so a
+  Kubernetes projected volume's `..data` is not mistaken for a half-copied plugin).
 - Each loaded provider appears on the startup banner via its role line.
 
 ## Versioning
