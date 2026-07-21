@@ -91,6 +91,47 @@ public class AuthThrottleTests
 	}
 
 	[Fact]
+	public void FailureTable_IsBounded_UnderUsernameRotation()
+	{
+		// K26: every distinct (address, username) pair mints a row, and the cleanup only removes
+		// EXPIRED windows — so an attacker rotating usernames inside one window grows the table
+		// without bound. 60k unauthenticated requests must not leave 60k rows behind.
+		AuthThrottle throttle = Create(3, 3600);
+		for (int i = 0; i < 60_000; i++)
+			throttle.RecordFailure($"203.0.113.9\nuser{i}@example.com");
+
+		Assert.InRange(throttle.TrackedKeys, 1, 20_000);
+	}
+
+	[Fact]
+	public void FailureTable_DoesNotRescanItself_OnEveryFailure()
+	{
+		// K26, second half: once the table is over the cleanup threshold the scan runs on EVERY
+		// subsequent failure, so the attack costs the gateway O(n) per request it sends.
+		AuthThrottle throttle = Create(3, 3600);
+		for (int i = 0; i < 60_000; i++)
+			throttle.RecordFailure($"203.0.113.9\nuser{i}@example.com");
+
+		Assert.InRange(throttle.PruneScans, 0, 10);
+	}
+
+	[Fact]
+	public void AtCapacity_ExistingCountersStillBite()
+	{
+		// The cap must not become an escape hatch: the per-address key exists before the table
+		// fills, so the IP-wide ceiling still blocks the rotating attacker that filled it.
+		AuthThrottle throttle = Create(2, 3600);
+		const string ip = "203.0.113.9";
+		throttle.RecordFailure(ip);
+		for (int i = 0; i < 60_000; i++)
+			throttle.RecordFailure($"{ip}\nuser{i}@example.com");
+		for (int i = 0; i < throttle.IpWideLimit; i++)
+			throttle.RecordFailure(ip);
+
+		Assert.NotNull(throttle.BlockedForSeconds(ip, throttle.IpWideLimit));
+	}
+
+	[Fact]
 	public void IpWideCeiling_IsFiveTimesThePerUserLimit_AndBoundsUsernameRotation()
 	{
 		AuthThrottle throttle = Create(2);
