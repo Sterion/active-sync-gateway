@@ -468,12 +468,65 @@ failed, 0 skipped** ✓ · integration **139 passed, 0 skipped**, unchanged from
 
 ---
 
-## Next: item 12 — Local CLI authentication
+## Item 12 — Local CLI authentication
 
-Items 12–14 are Phase 2 (Security), none [LIVE]; the orchestrator is running integration after every
-item regardless. Ordering constraint still standing: **item 13 (unified redaction) before item 14**.
-Current green baseline: **integration 139 / 0 skipped**, unit Core 420 · WebUi 67 · Server 135 ·
-Protocol 63.
+**Findings:** `L22` `L23` `L24` `L25` `L26` `L27` `K54`
+**Commits:** `b880757` (L22) · `648fb8a` (L23) · `430a25e` (L24) · `4f7f4d7` (L25) · `b59a1ac` (L26) ·
+`790aff9` (L27, K54) · `6ee769f` (new finding `L44`, docs only)
+
+**Verification:** integrity 56/15/365/365/0 ✓ · cursor → item 13 ✓ · IDs in subjects ✓ · tree clean ✓ ·
+build **0 warnings** ✓ · unit **Protocol 63, Core 420, WebUi 67, Server 145 (was 135) — 0 failed, 0
+skipped** ✓ · integration **139 passed, 0 skipped**, unchanged ✓ · `stash@{0}` untouched ✓
+
+Integration was worth running here even though the item is not [LIVE]: `L23` changes the `/cli` wire
+format and `L22` changes when the endpoint answers 404. It came back clean.
+
+**Notes:**
+- **⚠ Four of the seven reds were compile failures, not behavioural reds** — `L22`, `L23`, `L24` and
+  `L27`/`K54` all needed new API surface, so the "red" step demonstrated that the *existing* API could
+  not express the safe behaviour. The worker disclosed this plainly rather than implying otherwise,
+  which is the right call, but it is weaker proof than the protocol's step 6 asks for and weaker than
+  item 10's handling of the same problem (`E3` added a behaviour-preserving passthrough overload first,
+  so the reproducer could compile against unmodified code and go red on *behaviour*). Worth preferring
+  the `E3` shape next time a finding changes a signature. `L24`'s second reproducer, `L25` and `L26`
+  were true behavioural reds.
+- **`L26`'s red cost a deliberately crashed test run** — the dependency cycle aborted the whole run
+  with an uncatchable `StackOverflowException`, which is exactly the symptom the finding describes.
+- **Six operator-visible behaviour changes**, all documented in `docs/cli.md`:
+  1. `/cli` now refuses **everything** (404, plus a startup error) when the encryption key is missing
+     *or* fails to load, instead of degrading to loopback-only auth. `eas` falls back to running
+     in-process — still correct, just slower.
+  2. A startup warning whenever `Encryption:AllowPlaintext` mode is active.
+  3. **Breaking wire change** between `eas` and the gateway (sealed responses, nonce field). Both ship
+     in the same image, so this only bites a hand-mixed deployment; a mismatched pair falls back to
+     local execution.
+  4. Envelopes are **single-use**, and the replay window is now asymmetric — 60 s back, 5 s forward.
+     A client clock more than 5 s ahead of the gateway is refused.
+  5. New log volume: one Information line per forwarded command, one Warning per refusal.
+  6. Gateway log output no longer vanishes from the container log while an `eas` command runs.
+- **`L24`'s redaction rule has a deliberate asymmetry:** option *values* after secret-named options and
+  field paths are redacted, but command **verbs** keep their target — otherwise
+  `device password alice` collapsed to `***` and the trail stopped recording *whose* password was
+  disclosed, which is the one thing the audit exists for.
+- **A data race was closed inside `L25`.** The reproducer exposed concurrent unsynchronized writes to
+  the capture `StringWriter` throwing from `StringBuilder.ToString()`. Inside the finding's blast
+  radius, so fixed in the same commit via synchronized wrappers and noted in Part 2.
+- **⚠ New finding `L44`** (appended to Part 2): `ActiveSync.Cli/Program.cs` re-runs a command locally
+  after a `TaskCanceledException` or a non-success status — but a timeout says nothing about whether the
+  gateway already executed it, so a slow `eas purge user --yes` can run **twice**. The sealed-response
+  failure path was given the correct treatment (report, exit 1); the timeout path was left alone as out
+  of scope. Same family as item 26's replay-marker rule.
+- **Item 43 (`L33`) still stands** — `L25` makes the console swap safe, it does not remove the need
+  for it.
+
+---
+
+## Next: item 13 — Unified secret redaction
+
+Items 13–14 are Phase 2 (Security), neither [LIVE]; the orchestrator is running integration after every
+item regardless. Ordering constraint now imminent: **item 13 (unified redaction) before item 14** —
+build the single redactor first, then apply it. Current green baseline: **integration 139 / 0 skipped**,
+unit Core 420 · WebUi 67 · Server 145 · Protocol 63.
 
 **Process lesson for future runs:** "not [LIVE]" means the *worker* need not run integration. It does
 not mean the *orchestrator* shouldn't, and items 5–8 show why — a non-[LIVE] item with a schema or
