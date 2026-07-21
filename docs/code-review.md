@@ -101,9 +101,17 @@ Annotating the Part 2 entry as well is welcome — that is the right home for an
 
 **5. Build and test before each commit.** `dotnet build ActiveSync.slnx` is ~16s and the baseline is **0 warnings** — keep it there. Run the relevant test project. Items marked `[LIVE]` additionally require live-backend verification — see below.
 
-**6. Prove the regression test actually catches the defect.** Write the test, then *temporarily revert the fix* and confirm the test fails. A test that passes both with and without the fix documents behaviour but proves nothing — and a finding struck through on the strength of it is a false record.
+**6. Write the failing test first, then fix.** Red-green, in this order:
 
-If it passes without the fix, you have two honest options: make it a real reproducer, or keep it as coverage and **label it as such** in both the test comment and the Part 2 note. Do not leave it looking like proof. (Item 1 hit exactly this: `D17`'s test passes against the old code because Stalwart drains the pending `EXISTS` anyway. The fix is still correct — UIDs rather than sequence numbers, matching every sibling call — but the test is baseline coverage, not evidence, and says so.)
+1. Write the reproducer against the **unmodified** code and run it. Watch it fail, with the symptom the finding describes.
+2. Only then apply the fix.
+3. Re-run — it should pass, and the rest of the suite with it.
+
+A test that passes both with and without the fix documents behaviour but proves nothing, and a finding struck through on the strength of it is a false record. Writing it first makes that impossible to miss: a reproducer that goes green before you have fixed anything is telling you it does not reproduce the defect.
+
+**Do not write the fix first and verify by reverting it.** Item 2 shows both ways that fails: two `W1` reproducers were written after the fix and passed without it (unclosed nesting threw "unclosed elements remain" before ever reaching the cap), and `W4` could not be reverted at all — the fix had changed the signature, so the revert did not compile and the proof had to be simulated by neutering the bound in place. Test-first has neither problem.
+
+When a finding genuinely cannot be reproduced — a race with no deterministic trigger, or a symptom the test backend does not exhibit — keep the test as coverage and **label it as such** in both the test comment and the Part 2 note, then strike the finding through on the strength of the *fix*, not the test. Do not leave a coverage test looking like proof. Worked examples: `D17` (Stalwart drains the pending `EXISTS`, so the stale-count symptom never bites) and `W5` (an allocation count is not observable from a round trip).
 
 ### [LIVE] Items requiring live-backend verification
 
