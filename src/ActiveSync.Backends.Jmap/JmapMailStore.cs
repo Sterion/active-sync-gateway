@@ -34,6 +34,15 @@ public sealed class JmapMailStore(
 
 	private string? _account;
 
+	// H25: the mailbox role map (id→role and role→id) is stable for a session's lifetime — trash,
+	// drafts and sent do not move — so it is resolved once and cached rather than re-listing every
+	// mailbox (Mailbox/get ids:null) on every delete/create/draft-edit. The session is recycled on
+	// a config change, which is when a re-resolve would matter. Guarded by _rolesGate so concurrent
+	// Sync/Ping on one session do not each issue the load.
+	private readonly SemaphoreSlim _rolesGate = new(1, 1);
+	private Dictionary<string, string?>? _mailboxRole;
+	private Dictionary<string, string>? _roleMailbox;
+
 	public string EasClass => Protocol.EasClass.Email;
 
 	public bool OwnsBackendKey(string backendKey)
@@ -251,12 +260,27 @@ public sealed class JmapMailStore(
 
 		if (patch.Count > 0)
 		{
-			using JmapResponse response = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
-			{
-				["accountId"] = account,
-				["update"] = new Dictionary<string, object?> { [itemKey] = patch }
-			}, ct).ConfigureAwait(false);
+			// H25: batch the Email/set and the trailing Email/get into ONE request instead of two
+			// sequential round trips. JMAP runs method calls in order, so the get reflects the set;
+			// itemKey is known, so the get uses an explicit id list (no result reference needed).
+			IReadOnlyList<JmapCall> calls =
+			[
+				new JmapCall("Email/set", new Dictionary<string, object?>
+				{
+					["accountId"] = account,
+					["update"] = new Dictionary<string, object?> { [itemKey] = patch }
+				}, "0"),
+				new JmapCall("Email/get", new Dictionary<string, object?>
+				{
+					["accountId"] = account,
+					["ids"] = new[] { itemKey },
+					["properties"] = new[] { "id", "keywords" }
+				}, "1")
+			];
+			using JmapResponse response = await client.InvokeAsync(CapMail, calls, ct).ConfigureAwait(false);
 			EnsureUpdated(response.Arguments("0"), itemKey, "Email");
+			JsonElement setList = response.Arguments("1").GetProperty("list");
+			return setList.GetArrayLength() == 0 ? "000" : RevisionOf(KeywordsOf(setList[0]));
 		}
 
 		JsonElement? updated = await GetEmailAsync(account, itemKey, ["id", "keywords"], ct).ConfigureAwait(false);
@@ -585,28 +609,55 @@ public sealed class JmapMailStore(
 
 	private async Task<string?> RoleOfAsync(string account, string mailboxId, CancellationToken ct)
 	{
-		using JmapResponse response = await client.CallAsync(CapMail, "Mailbox/get", new Dictionary<string, object?>
-		{
-			["accountId"] = account,
-			["ids"] = new[] { mailboxId },
-			["properties"] = new[] { "id", "role" }
-		}, ct).ConfigureAwait(false);
-		JsonElement list = response.Arguments("0").GetProperty("list");
-		return list.GetArrayLength() > 0 && list[0].TryGetProperty("role", out JsonElement role) ? role.GetString() : null;
+		Dictionary<string, string?> byId = await MailboxRolesAsync(account, ct).ConfigureAwait(false);
+		return byId.GetValueOrDefault(mailboxId);
 	}
 
 	private async Task<string?> FindMailboxByRoleAsync(string account, string role, CancellationToken ct)
 	{
-		using JmapResponse response = await client.CallAsync(CapMail, "Mailbox/get", new Dictionary<string, object?>
+		await MailboxRolesAsync(account, ct).ConfigureAwait(false);
+		return _roleMailbox!.GetValueOrDefault(role);
+	}
+
+	/// <summary>
+	///   The cached mailbox-id→role map (H25), resolved once per session with a single
+	///   <c>Mailbox/get ids:null</c>. Also populates the reverse role→id map for
+	///   <see cref="FindMailboxByRoleAsync" />.
+	/// </summary>
+	private async Task<Dictionary<string, string?>> MailboxRolesAsync(string account, CancellationToken ct)
+	{
+		if (_mailboxRole is not null)
+			return _mailboxRole;
+		await _rolesGate.WaitAsync(ct).ConfigureAwait(false);
+		try
 		{
-			["accountId"] = account,
-			["ids"] = null,
-			["properties"] = new[] { "id", "role" }
-		}, ct).ConfigureAwait(false);
-		foreach (JsonElement mailbox in response.Arguments("0").GetProperty("list").EnumerateArray())
-			if (mailbox.TryGetProperty("role", out JsonElement r) && r.GetString() == role)
-				return mailbox.GetProperty("id").GetString();
-		return null;
+			if (_mailboxRole is not null)
+				return _mailboxRole;
+			using JmapResponse response = await client.CallAsync(CapMail, "Mailbox/get", new Dictionary<string, object?>
+			{
+				["accountId"] = account,
+				["ids"] = null,
+				["properties"] = new[] { "id", "role" }
+			}, ct).ConfigureAwait(false);
+			Dictionary<string, string?> byId = new(StringComparer.Ordinal);
+			Dictionary<string, string> byRole = new(StringComparer.Ordinal);
+			foreach (JsonElement mailbox in response.Arguments("0").GetProperty("list").EnumerateArray())
+			{
+				string id = mailbox.GetProperty("id").GetString()!;
+				string? role = mailbox.TryGetProperty("role", out JsonElement r) ? r.GetString() : null;
+				byId[id] = role;
+				if (role is not null)
+					byRole[role] = id;
+			}
+
+			_roleMailbox = byRole;
+			_mailboxRole = byId;
+			return _mailboxRole;
+		}
+		finally
+		{
+			_rolesGate.Release();
+		}
 	}
 
 	private async Task<Dictionary<string, string>> FolderTokensAsync(string account, string[] mailboxIds, CancellationToken ct)

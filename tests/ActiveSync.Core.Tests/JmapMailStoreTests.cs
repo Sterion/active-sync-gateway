@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using System.Xml.Linq;
 using ActiveSync.Backends.Jmap;
 using ActiveSync.Contracts;
@@ -104,6 +105,38 @@ public sealed class JmapMailStoreTests
 			store.UpdateItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", change, CancellationToken.None));
 	}
 
+	// H25: a flag/read update issued Email/set then a SEPARATE Email/get — two sequential round
+	// trips where JMAP's whole point is batching. The set and the trailing get must go in ONE
+	// request, so a routine "mark read" costs one API call, not two.
+	[Fact]
+	public async Task UpdateItem_ReadChange_BatchesSetAndGetInOneRequest()
+	{
+		MethodStub stub = new();
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		XElement change = new("ApplicationData", new XElement(XName.Get("Read", "Email"), "1"));
+
+		await store.UpdateItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", change, CancellationToken.None);
+
+		Assert.Equal(1, stub.ApiCalls); // set + get in one request, not two
+	}
+
+	// H25: a non-permanent delete calls FindMailboxByRoleAsync, which did Mailbox/get with ids:null
+	// (the ENTIRE mailbox list) on every delete, uncached. The role→mailbox map must be cached on
+	// the store, so deleting many messages does not re-list the mailboxes each time.
+	[Fact]
+	public async Task DeleteItem_TrashLookup_IsCachedAcrossCalls()
+	{
+		MethodStub stub = new();
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+
+		await store.DeleteItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", permanent: false, CancellationToken.None);
+		await store.DeleteItemAsync(JmapMailStore.ToKey("INBOXID"), "E2", permanent: false, CancellationToken.None);
+
+		Assert.Equal(1, stub.FullMailboxListings); // one Mailbox/get ids:null for both deletes
+	}
+
 	private static HttpResponseMessage Json(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)
@@ -118,6 +151,53 @@ public sealed class JmapMailStoreTests
 			HttpRequestMessage request, CancellationToken cancellationToken)
 		{
 			return Task.FromResult(responder(request));
+		}
+	}
+
+	/// <summary>
+	///   A JMAP handler that answers any batch of method calls per-method, so it works whether the
+	///   store batches or not. Counts total API (<c>/jmap/</c>) requests and full mailbox listings
+	///   (<c>Mailbox/get</c> with <c>ids:null</c>).
+	/// </summary>
+	private sealed class MethodStub : HttpMessageHandler
+	{
+		public int ApiCalls;
+		public int FullMailboxListings;
+
+		protected override async Task<HttpResponseMessage> SendAsync(
+			HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			ApiCalls++;
+			string body = await request.Content!.ReadAsStringAsync(cancellationToken);
+			using JsonDocument doc = JsonDocument.Parse(body);
+			List<string> responses = new();
+			foreach (JsonElement call in doc.RootElement.GetProperty("methodCalls").EnumerateArray())
+			{
+				string name = call[0].GetString()!;
+				JsonElement args = call[1];
+				string id = call[2].GetString()!;
+				bool idsNull = args.TryGetProperty("ids", out JsonElement ids) && ids.ValueKind == JsonValueKind.Null;
+				string argsJson = name switch
+				{
+					"Mailbox/get" when idsNull => Count(ref FullMailboxListings,
+						"\"list\":[{\"id\":\"INBOXID\"},{\"id\":\"TRASHID\",\"role\":\"trash\"}]"),
+					"Mailbox/get" => "\"list\":[{\"id\":\"INBOXID\"}]",
+					"Email/set" => "\"updated\":{\"E1\":null,\"E2\":null}",
+					"Email/get" => "\"state\":\"s\",\"list\":[{\"id\":\"E1\",\"keywords\":{\"$seen\":true}}]",
+					_ => "\"list\":[]"
+				};
+				responses.Add($"[\"{name}\",{{\"accountId\":\"c\",{argsJson}}},\"{id}\"]");
+			}
+
+			return Json($"{{\"methodResponses\":[{string.Join(",", responses)}],\"sessionState\":\"x\"}}");
+		}
+
+		private static string Count(ref int counter, string value)
+		{
+			counter++;
+			return value;
 		}
 	}
 }
