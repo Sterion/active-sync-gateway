@@ -98,7 +98,10 @@ public sealed class CardDavStore(
 
 		List<BackendFolder> folders = new();
 		bool first = true;
-		foreach (DavResource resource in resources)
+		// H22: multistatus order is server whim, and the first address book below becomes THE
+		// default contacts folder — sort by href so the pick is stable across sessions and
+		// servers (CalDavStore already does this for the default calendar).
+		foreach (DavResource resource in resources.OrderBy(r => r.Href, StringComparer.OrdinalIgnoreCase))
 		{
 			XElement? type = resource.Propstat.Descendants(DavNs.D + "resourcetype").FirstOrDefault();
 			if (type?.Element(DavNs.CardDav + "addressbook") is null)
