@@ -200,10 +200,14 @@ public static class WebApplicationExtensions
 	/// </summary>
 	public static WebApplication UsePublicScheme(this WebApplication app)
 	{
+		// IOptionsMonitor<T> is a singleton; capture it once here (as MapWebUi does) rather than
+		// paying a scoped-container lookup through RequestServices on every request. CurrentValue
+		// is still read per request, so a live PublicUrl change is honoured immediately.
+		IOptionsMonitor<ActiveSyncOptions> options =
+			app.Services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>();
 		app.Use(async (context, next) =>
 		{
-			string? publicUrl = context.RequestServices
-				.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>().CurrentValue.PublicUrl;
+			string? publicUrl = options.CurrentValue.PublicUrl;
 			if (ResolvePublicScheme(publicUrl, context.Request.Headers["X-Forwarded-Proto"].FirstOrDefault()) is { } scheme)
 				context.Request.Scheme = scheme;
 			await next();
