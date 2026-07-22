@@ -20,6 +20,11 @@ internal static class LongPollWatchdog
 	/// <param name="watchdog">Periodic exact re-check task, or null when disabled.</param>
 	/// <param name="isPositive">Decides whether a task's result counts as "changed".</param>
 	/// <param name="none">The result meaning "no change" (returned on timeout/shutdown).</param>
+	/// <param name="deadline">
+	///   End of the heartbeat window. Watchers are expected to wait it out, but a degraded one can
+	///   complete "no change" early; the race honours the deadline rather than returning immediately
+	///   (which would collapse the heartbeat into a tight client re-poll loop — <c>E7</c>).
+	/// </param>
 	/// <param name="linkedCts">The caller's cancellation source; cancelled here in the finally.</param>
 	/// <param name="requestAborted">The bare request token, to tell a client disconnect from host shutdown.</param>
 	public static async Task<Outcome<T>> RaceAsync<T>(
@@ -27,6 +32,7 @@ internal static class LongPollWatchdog
 		Task<T>? watchdog,
 		Func<T, bool> isPositive,
 		T none,
+		DateTime deadline,
 		CancellationTokenSource linkedCts,
 		CancellationToken requestAborted)
 	{
@@ -48,6 +54,19 @@ internal static class LongPollWatchdog
 					result = value;
 					foundByWatchdog = finished == watchdog;
 				}
+			}
+
+			// E7: a watcher that completes "no change" before its timeout is spent (a degraded or
+			// unavailable backend watcher) is dropped above — and when the watchdog is disabled
+			// (WatchdogSeconds=0) nothing else keeps the poll alive, so the loop would drain and
+			// return "no change" the instant the last watcher gives up, turning the client's
+			// heartbeat into a tight re-poll loop. Honour the heartbeat: idle out the remaining
+			// window so the wait lasts as long as the client asked for.
+			if (!isPositive(result))
+			{
+				TimeSpan remaining = deadline - DateTime.UtcNow;
+				if (remaining > TimeSpan.Zero)
+					await Task.Delay(remaining, linkedCts.Token);
 			}
 		}
 		catch (OperationCanceledException) when (!requestAborted.IsCancellationRequested)

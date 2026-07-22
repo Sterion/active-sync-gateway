@@ -180,7 +180,7 @@ public sealed class PingHandler(
 		}
 
 		LongPollWatchdog.Outcome<List<string>> outcome = await LongPollWatchdog.RaceAsync(
-			watchers, watchdogTask, changed => changed.Count > 0, new List<string>(), cts, ct);
+			watchers, watchdogTask, changed => changed.Count > 0, new List<string>(), deadline, cts, ct);
 		List<string> changedCollections = outcome.Result;
 
 		if (changedCollections.Count == 0)

@@ -30,7 +30,7 @@ public sealed partial class SyncHandler
 		Task<bool>? watchdogTask = watchdogSeconds > 0 ? WatchdogAsync() : null;
 
 		LongPollWatchdog.Outcome<bool> outcome = await LongPollWatchdog.RaceAsync(
-			[watcherTask], watchdogTask, changed => changed, false, cts, ct);
+			[watcherTask], watchdogTask, changed => changed, false, deadline, cts, ct);
 
 		if (outcome.Result && outcome.FoundByWatchdog)
 			logger.LogWarning(
