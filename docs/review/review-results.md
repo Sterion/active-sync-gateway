@@ -983,14 +983,56 @@ skipped** (full suite, fresh Stalwart container, canonical ports) ✓
 
 ---
 
-## Next: item 22 — State layer correctness (Phase 4 — Correctness)
+## Item 22 — State layer correctness
+**Findings:** `A1` `A5` `A6` `A7` `A8` `A9` `A10` `A17` `A18` `A22`
+**Commits:** `b73dabf` (A1) · `6e0ed6b` (A5) · `d72c454` (A6) · `577ecd3` (A7) · `f36887b` (A8) ·
+`860b37e` (A9) · `b2a92f2` (A10) · `33fca47` (A17) · `c336fd1` (A18) · `d59a730` (A22)
+**Verification:** integrity items=56 · live=15 · assigned=365 · unique=365 · dupes=0 · encoding=0 ✓ ·
+cursor → item 23 ✓ · one commit per finding, ID in each subject ✓ · tree clean ✓ · build 0 warnings /
+0 errors ✓ · **migration lockstep OK** — Sqlite/Npgsql name lists agree in order (item-44 invariant) ✓ ·
+unit **Protocol 63 · Core 510 · WebUi 70 · Server 157** = 800, 0 skipped ✓ · integration **139 passed, 0
+skipped** (full suite, fresh Stalwart container 57 s old, migration applied cleanly via `MigrateAsync`) ✓
+**Notes:**
+- **Schema migration `AddDeviceConcurrencyToken` (both providers).** Adds a nullable-default (zero-GUID)
+  `ConcurrencyToken` column to `Devices`; rolls forward at startup, no data loss, existing rows take the
+  default. Column-add only — does **not** force a re-sync on upgrade. Independently re-verified the two
+  provider migration sets agree on their ordered name lists (timestamps legitimately differ per provider).
+- **Transaction policy decided (`A10`) — durable architectural decision.** Per-collection Sync commits
+  stay **independent**: no transaction spans a multi-collection Sync. This is safe because the SyncKey
+  N−1 replay design already makes each collection an atomic unit — a collection whose commit doesn't land
+  keeps its old key and the client reconciles it next round. The only thing moved off the request context
+  is the self-contained DAV id allocation (`DavItemMap.GetOrAddDavItemIdAsync`), now on its own
+  short-lived `ISyncDbContextFactory` context so it never flushes / re-read-poisons a half-mutated
+  `CollectionState`. A spanning transaction was rejected because it breaks the unique-violation-and-reread
+  pattern under Postgres.
+- **Client-visible behaviour change.** A lost `FolderSyncKey` race now answers **FolderSync Status 9**
+  (client restarts the hierarchy from 0) instead of a silent lost update / potential 500 — new
+  `Device.ConcurrencyToken` (`A6`) drives it, wired through FolderSync and FolderCreate/Delete/Update.
+- **Internal API change.** `ValidateSyncKeyAsync` now returns `CollectionState?` (null on Invalid) instead
+  of a detached synthesized entity (`A17`). No external consumers; the one production caller and tests
+  updated.
+- **All 10 red-first proven — no coverage-not-proof tests.** `A22`/`A1`/`A9` races are made deterministic
+  via a new `SaveChangesInterceptor` fault-injector helper (`StateTestSupport.cs`).
+- **Judgment call (`A10` scope).** Own-context isolation applied to the *writer* only
+  (`GetOrAddDavItemIdAsync`); the reader `ResolveDavHrefAsync`'s `AsNoTracking`/N+1 was deliberately left
+  to item 23 (`A3`). Reads flush nothing, so this is safe — but a reviewer could reasonably have folded
+  the reader in here.
+- **Environment note (not a repo change).** Worker installed `dotnet-ef` 10.0.10 as a **global** tool
+  (outside the repo) to scaffold the migration; a stray empty local `dotnet-tools.json` was removed
+  (amended out of the `A6` commit). Tree independently confirmed clean.
 
-Item 21 verified and recorded above. Cursor is at **item 22** (`A1` `A5` `A6` `A7` `A8` `A9` `A10` `A17`
-`A18` `A22`) — decide the transaction policy here (it settles `A10`/`A18`). Not [LIVE], but it reshapes
-the state layer, so run the unit suite in full; integration is optional unless it touches the pipeline.
+---
 
-Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 500 ·
-WebUi 70 · Server 157**.
+## Next: item 23 — State layer performance & retention (Phase 4 — Correctness)
+
+Items 21–22 verified and recorded above. Cursor is at **item 23** (`A3` `A4` `A19` `A34` `A35`) —
+`A4` rewrites the full snapshot JSON twice per round (2–3 MB/request on a 50k mailbox). Not [LIVE] and
+performance-focused; run the unit suite in full. Integration only if it touches the sync/persistence
+path in a way unit tests can't exercise (a perf refactor of snapshot writing plausibly does — judge from
+the diff; a fresh-container run is cheap).
+
+Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 510 ·
+WebUi 70 · Server 157** = 800.
 
 **Standing lessons that carried this run (items 13–14):**
 - **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/contract
