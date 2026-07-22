@@ -147,7 +147,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 				continue;
 			int separator = key.IndexOf('\n');
 			sessions.Add(new BackendSessionInfo(
-				separator < 0 ? key : key[..separator],
+				UserFromKey(key),
 				separator < 0 ? "" : key[(separator + 1)..],
 				Built(lazy).LastUsedUtc));
 		}
@@ -277,6 +277,21 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 
 	private void EvictIdleSessions()
 	{
+		// A13: this runs on a System.Threading.Timer thread — an escaping exception terminates the
+		// process. Reading _options.CurrentValue can throw (live-editable settings) and the trim
+		// runs plugin code, so the whole body is guarded.
+		try
+		{
+			EvictIdleSessionsCore();
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "Idle backend-session sweep failed");
+		}
+	}
+
+	private void EvictIdleSessionsCore()
+	{
 		DateTime cutoff = DateTime.UtcNow.AddMinutes(-_options.CurrentValue.Eas.SessionIdleMinutes);
 		foreach ((string key, Lazy<Task<CompositeBackendSession>> lazy) in _sessions)
 			if (IsBuilt(lazy) && Built(lazy).LastUsedUtc < cutoff &&
@@ -298,7 +313,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 
 		// Providers with per-user caches (IDLE watchers) trim users without live sessions.
 		HashSet<string> activeUsers = _sessions.Keys
-			.Select(k => k[..k.IndexOf('\n')])
+			.Select(UserFromKey)
 			.ToHashSet(StringComparer.Ordinal);
 		foreach (IBackendProvider provider in _registry.All)
 			if (provider is IPerUserResourceOwner owner)
@@ -358,6 +373,17 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		{
 			_logger.LogDebug(ex, "Error disposing backend session");
 		}
+	}
+
+	/// <summary>
+	///   The gateway login from a "user\ndevice" cache key — the whole key when there is no
+	///   separator (A13: the eviction sweep used an unguarded <c>IndexOf</c> that threw on -1,
+	///   while <see cref="SnapshotSessions" /> guarded it; both now share this).
+	/// </summary>
+	private static string UserFromKey(string key)
+	{
+		int separator = key.IndexOf('\n');
+		return separator < 0 ? key : key[..separator];
 	}
 
 	private static string Hash(string value)

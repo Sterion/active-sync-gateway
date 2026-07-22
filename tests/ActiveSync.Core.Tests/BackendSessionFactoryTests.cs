@@ -122,7 +122,37 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		Assert.False(HasHandlerTargeting(resolver, "SnapshotChanged", factory));
 	}
 
+	[Fact]
+	public void IdleSweep_SwallowsAnEscapingException()
+	{
+		// A13: EvictIdleSessions is a System.Threading.Timer callback — an escaping exception
+		// terminates the process. Reading _options.CurrentValue can throw (live-editable settings),
+		// so the whole body must be guarded.
+		FakeMailProvider provider = new();
+		ToggleThrowMonitor monitor = new(new ActiveSyncOptions
+		{
+			Encryption = new EncryptionOptions { AllowPlaintext = true }, Eas = new EasOptions()
+		});
+		BackendRolesProvider roles = RolesProvider();
+		BackendProviderRegistry registry = new([provider], NullLogger<BackendProviderRegistry>.Instance);
+		AccountResolver resolver = new(monitor, roles, registry);
+		BackendSessionFactory factory = new(monitor, resolver, roles, _dbFactory, registry,
+			NullLogger<BackendSessionFactory>.Instance);
+
+		monitor.Throw = true; // the sweep will now hit a throwing options read
+		Exception? escaped = Record.Exception(() => InvokeEvictIdleSessions(factory));
+		Assert.Null(escaped); // the timer callback must not let it escape
+	}
+
 	// ---------- harness ----------
+
+	private sealed class ToggleThrowMonitor(ActiveSyncOptions value) : IOptionsMonitor<ActiveSyncOptions>
+	{
+		public bool Throw { get; set; }
+		public ActiveSyncOptions CurrentValue => Throw ? throw new InvalidOperationException("options invalid") : value;
+		public ActiveSyncOptions Get(string? name) => CurrentValue;
+		public IDisposable? OnChange(Action<ActiveSyncOptions, string?> listener) => null;
+	}
 
 	private static bool HasHandlerTargeting(object eventSource, string eventName, object handlerTarget)
 	{
