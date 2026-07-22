@@ -111,9 +111,25 @@ public static class EncryptionKeyLoader
 		// the documented high-entropy path); everything else is a passphrase. A passphrase
 		// that happens to BE valid 32-byte base64 lands on the raw path — deterministic
 		// either way, since both interpretations yield a fixed key.
-		return TryDecodeRawKey(material)
-		       ?? Rfc2898DeriveBytes.Pbkdf2(material, ResolveSalt(options), DerivationIterations,
-			       HashAlgorithmName.SHA256, KeySize);
+		byte[]? raw = TryDecodeRawKey(material);
+		if (raw is not null)
+			return raw;
+
+		// K47: feed the passphrase to PBKDF2 as a byte buffer we can zero afterwards, rather than
+		// the string overload — the derived key is already carefully wiped by callers, so the
+		// passphrase copy should be too. UTF-8 bytes match the string overload's own encoding, so
+		// the derived key is unchanged. (The origin string — config-bound Key or key-file text —
+		// stays unzeroable; that residual is inherent to configuration binding.)
+		byte[] passwordBytes = Encoding.UTF8.GetBytes(material);
+		try
+		{
+			return Rfc2898DeriveBytes.Pbkdf2(
+				passwordBytes, ResolveSalt(options), DerivationIterations, HashAlgorithmName.SHA256, KeySize);
+		}
+		finally
+		{
+			CryptographicOperations.ZeroMemory(passwordBytes);
+		}
 	}
 
 	/// <summary>

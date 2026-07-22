@@ -119,13 +119,25 @@ public class ActiveSyncOptionsValidatorTests
 	[Theory]
 	[InlineData("dG9vc2hvcnQ=")] // valid base64 but not 32 bytes → treated as a passphrase
 	[InlineData("!!!not-base64!!!")] // not base64 at all → passphrase
-	[InlineData("pass")] // short passphrases are the operator's call (warned, never rejected)
+	[InlineData("passphrase")] // a passphrase at/above the length floor is accepted
 	public void AnyKeyString_IsAcceptedAsAPassphrase(string key)
 	{
 		ActiveSyncOptions options = Valid();
 		options.Encryption = new EncryptionOptions { Key = key };
 		ValidateOptionsResult result = Validator.Validate(null, options);
 		Assert.True(result.Succeeded, string.Join(";", result.Failures ?? []));
+	}
+
+	[Fact]
+	public void ShortPassphrase_IsRejected_AtStartup()
+	{
+		// Behaviour change (K46): a passphrase below the hard floor now fails startup validation
+		// (it used to be warned about and accepted — the "pass" case above).
+		ActiveSyncOptions options = Valid();
+		options.Encryption = new EncryptionOptions { Key = "pass" };
+		ValidateOptionsResult result = Validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains("at least", string.Join(";", result.Failures!));
 	}
 
 	[Fact]

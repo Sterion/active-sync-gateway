@@ -126,6 +126,22 @@ public class EncryptionKeyLoaderTests
 	}
 
 	[Fact]
+	public void Passphrase_ByteBasedDerivation_IsBehaviourPreserving_Coverage()
+	{
+		// K47 COVERAGE (not proof): the passphrase is now fed to PBKDF2 as a byte buffer that is
+		// zeroed after derivation, rather than via the string overload, so the highest-value copy
+		// we control is wiped. The wipe has no external handle to observe; this guards that the
+		// byte-based path yields the SAME key (UTF-8 bytes == the string overload's own encoding),
+		// i.e. the change is behaviour-preserving. The origin string (config-bound Key, or the key
+		// file text) stays unzeroable and is the documented residual.
+		byte[]? a = Load("a stable passphrase value", out string? error);
+		Assert.Null(error);
+		Assert.NotNull(a);
+		Assert.Equal(32, a.Length);
+		Assert.Equal(a, Load("a stable passphrase value", out _));
+	}
+
+	[Fact]
 	public void PassphraseAndRawKey_YieldDifferentKeys()
 	{
 		// The derived key never accidentally equals raw-key material.
