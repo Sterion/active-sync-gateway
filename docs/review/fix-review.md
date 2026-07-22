@@ -37,15 +37,15 @@ You (the human) only ever type one of these. Everything after is the machine's c
 **One item, or a small range, in this session:**
 
 ```
-Read docs/review/fix-review.md and docs/review/review-items.md. Implement item 13.
+Read docs/review/fix-review.md and docs/review/review-items.md. Implement item N.
 Follow the working protocol.
 ```
 
 **A longer run, hands-off, one fresh subagent per item:**
 
 ```
-Read docs/review/fix-review.md, docs/review/review-items.md, and AGENTS.md.
-Work items 13 through 18 as an orchestrator following "Orchestrated mode".
+Read docs/review/fix-review.md, docs/review/review-items.md, docs/review/review-items-detail.md, and AGENTS.md.
+Work items 1 through N as an orchestrator following "Orchestrated mode".
 ```
 
 Substitute the item number(s). Add nothing else — the policy (breaking changes, push, the warning
