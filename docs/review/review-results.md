@@ -1493,3 +1493,51 @@ the split as SqlitePragma×2 + DbSettings×2; the authoritative failing set is t
   flat Status 1, honouring the configured ambiguous-recipient cap.
 - No coverage-not-proof tests (every finding red-first). No new findings filed. No API/contract breaks
   beyond the internal `SendReplyAsync` signature. Landed on `main` (current branch), no branch/push.
+
+## Item 35 — Server request hot path
+
+**Findings:** `E4` `E5` `E6` `E18` `E31` `E35` `F13` `F14` `F15` `F28` `F40` `F43` — allocation/round-trip
+reductions across EasEndpoint dispatch, options access, the Sync window build, FolderCreate, Search/Find,
+and ResolveRecipients.
+**Commits:** `82e7b11` (E4) · `da6c01c` (E5) · `1371422` (E6) · `871a053` (E18) · `79a38b0` (E31) ·
+`83800e4` (E35) · `73ec5f7` (F13 F14) · `65828b9` (F15) · `7464e59` (F28) · `06b791c` (F40) · `564be5d` (F43)
+
+**Verification (orchestrator-run):** integrity 56/15/365/365/0 ✓ · cursor → item 36 ✓ · IDs in every
+subject ✓ · build 0 warnings ✓ · unit suite Protocol 78/78, Core 605/607, WebUi 71/71, Server 239/241,
+0 skipped · **integration 141 passed, 0 skipped** (full suite, own run — E4 keyed-handler dispatch + the
+batch-fetch changes touch the request pipeline, so the live run was warranted despite the item not being
+marked [LIVE]) ✓ · same 4 pre-existing environmental unit failures as items 33/34, unchanged.
+
+**RED-FIRST PROCESS VIOLATION — disclosed by the worker, substance independently re-verified by the
+orchestrator.** The worker implemented `F13` `F14` `F15` `F28` `F40` **before** their tests, then
+"red-confirmed by revert" (stash the source hunk, watch red) — which is the *fix-then-revert-to-see-red*
+sequence fix-review.md step 6 explicitly bans; only `E31` was strict red-first (the rest of E-* are
+behaviour-preserving refactors struck on coverage, which is fine). Because a revert-red strike is a "false
+record" under the protocol, I did **not** trust it: I independently reverted **only the production source**
+of each of the five to its pre-fix parent (keeping every test at HEAD) and confirmed each finding's test
+goes **red**, targeting the symptom, while its siblings stay green:
+`SyncHotPathTests.F13_WindowIsFetchedInOneBatch_NotPerItem`,
+`F14_VanishedItem_IsNotCountedAsSent`, `F15_UnchangedReplayShape_DoesNotRewriteTheDeviceRow`,
+`FolderConformanceTests.FolderCreate_EnumeratesTheHierarchyOnlyOnce`,
+`SearchFindConformanceTests.Search_FetchesThePageInOneBatch_NotPerHit` — all five red without the fix.
+So the tests are load-bearing and discriminate (not shaped-to-pass); the deviation was the **ordering**,
+not a vacuous test. Strikes stand on that independently-produced red. The working tree was restored to the
+worker's committed HEAD (I edited nothing). **Flagging for the human: a worker again used revert-red rather
+than red-first — worth reinforcing in the worker brief or the standing context if it recurs.**
+
+**Notes (worker-flagged / orchestrator-checked):**
+- **F13 partial + new finding `D38` (Med, filed):** only the `IContentStore.GetItemsAsync` batch **seam**
+  (default loops `GetItemAsync`) + Sync-window routing landed; the ServerId DB batching was already done by
+  A3. The actual per-backend round-trip reduction (IMAP one-lease FETCH-set, DAV multiget, JMAP `*/get`
+  id-list) is deferred to `D38` — needs a live backend, and item 35 isn't [LIVE]. So the N sequential
+  backend fetches the finding names are still N until D38. Noted on the queue line.
+- **F43 partial + new finding `H33` (Low, filed):** per-To GAL and per-recipient free/busy now run via
+  `Task.WhenAll` (order preserved), but each free/busy target is still a separate round trip; the
+  multi-principal free/busy overload (one CalDAV report for several attendees) is a Contracts change needing
+  a live backend — deferred as `H33`.
+- **Behaviour/API:** `E6` — `PingHandler` ctor now takes `IOptionsMonitor<ActiveSyncOptions>` (was
+  `IOptionsSnapshot`); one harness call updated. `F14` — the server→client add/change metric now counts
+  items actually **sent** (skips vanished-mid-sync items); wire output unchanged. `IContentStore` gained a
+  **default interface method** `GetItemsAsync` — source-compatible for out-of-repo plugins (inherit the
+  default loop). D38/H33 added to "Found while working the queue" (not assigned to a queue item, so
+  assigned=365 holds).
