@@ -30,7 +30,10 @@ public sealed class BackendRoleOverride
 	///   Flat configuration keys overlaid on the global role section — but ONLY when the
 	///   effective provider matches the global assignment (a switched provider starts from
 	///   these settings alone). Setting any list element ("X:0") REPLACES the whole global
-	///   list "X". Null values are ignored.
+	///   list "X". A null value CLEARS the inherited global key it addresses: the global
+	///   subtree that key names is removed and nothing is written back, so the effective
+	///   setting falls to the provider option-class default (matching the CLI/web field
+	///   paths, where null = clear — see AccountFieldPaths). Other inherited keys are untouched.
 	/// </summary>
 	public Dictionary<string, string?>? Settings { get; set; }
 }

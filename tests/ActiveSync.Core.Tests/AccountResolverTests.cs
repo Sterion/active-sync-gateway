@@ -296,6 +296,45 @@ public class AccountResolverTests
 	}
 
 	[Fact]
+	public void NullSettingOverride_CLEARS_TheInheritedGlobalKey_NotIgnored()
+	{
+		// B16 (coverage): the doc used to say "Null values are ignored", but a null user setting
+		// actually CLEARS the inherited global key (the removal loop strips the global subtree the
+		// key addresses, and the write loop then skips the null). Pin that so the corrected doc and
+		// the code cannot drift. If null were ignored, the "clears" user would keep the global '/'.
+		Dictionary<string, string?> config = BaseConfig();
+		config["ActiveSync:Backends:MailStore:PathSeparator"] = "/";
+		ActiveSyncOptions options = HostOptions();
+		options.Users = new Dictionary<string, AccountOptions>
+		{
+			["inherits"] = new(),
+			["clears"] = new()
+			{
+				Backends = new Dictionary<string, BackendRoleOverride>
+				{
+					["MailStore"] = new()
+					{
+						Settings = new Dictionary<string, string?> { ["PathSeparator"] = null },
+					},
+				},
+			},
+		};
+		AccountResolver resolver = Resolver(options, config);
+		BackendCredentials presented = new("x", "P");
+
+		// The inheriting user keeps the global separator; the clearing user drops it (back to the
+		// option-class default null) while STILL inheriting the untouched global Host.
+		ImapOptions inherited = resolver.Resolve(presented with { UserName = "inherits" })
+			.Roles[BackendRole.MailStore].Settings.Bind<ImapOptions>();
+		Assert.Equal('/', inherited.PathSeparator);
+
+		ImapOptions cleared = resolver.Resolve(presented with { UserName = "clears" })
+			.Roles[BackendRole.MailStore].Settings.Bind<ImapOptions>();
+		Assert.Null(cleared.PathSeparator);
+		Assert.Equal("imap.global", cleared.Host); // untouched global key still inherited
+	}
+
+	[Fact]
 	public void MailAddress_IsExplicitFlag_AndNeverChangesMailUserName()
 	{
 		ActiveSyncOptions options = HostOptions();
