@@ -156,6 +156,40 @@ public sealed class WebDavClientTests
 			client.PropfindAsync("/dav/cal/", 1, new XElement(XName.Get("propfind", "DAV:")), CancellationToken.None));
 	}
 
+	// H18: a create-PUT (If-None-Match:*) whose response was lost gets replayed by the transient
+	// retry and lands on the resource it just created. Stalwart signals "already exists" with 412;
+	// Axigen signals the identical condition with 409 Conflict. Both must be treated as success (the
+	// create landed) so a replay never tells the client the item was not stored. The 409 arm was the
+	// gap that failed the Axigen CI leg (DavCreatePutReplayTests) while Stalwart stayed green.
+	[Theory]
+	[InlineData(HttpStatusCode.PreconditionFailed)] // 412 — Stalwart
+	[InlineData(HttpStatusCode.Conflict)]           // 409 — Axigen
+	public async Task CreatePut_WhenServerReportsAlreadyExists_IsTreatedAsSuccess(HttpStatusCode status)
+	{
+		RecordingHandler stub = new(_ => new HttpResponseMessage(status));
+		using WebDavClient client = new(Base, new HttpClient(stub));
+
+		string? etag = await client.PutAsync(
+			"/dav/cal/replayed.ics", "BODY", "text/calendar", etag: null, ifNoneMatch: true,
+			CancellationToken.None);
+
+		Assert.Null(etag); // success sentinel — caller re-resolves the stored href/ETag
+	}
+
+	// The boundary the 409 widening must NOT cross: an UPDATE-PUT (If-Match) 409 is a genuine
+	// conflict / lost update and must still surface. Only the create-PUT (If-None-Match:*) 409 is
+	// reinterpreted as "already exists"; a 409 on a conditional update stays an error.
+	[Fact]
+	public async Task UpdatePut_WhenServerReturns409Conflict_StillThrows()
+	{
+		RecordingHandler stub = new(_ => new HttpResponseMessage(HttpStatusCode.Conflict));
+		using WebDavClient client = new(Base, new HttpClient(stub));
+
+		await Assert.ThrowsAsync<ActiveSync.Contracts.BackendException>(() =>
+			client.PutAsync("/dav/cal/x.ics", "BODY", "text/calendar", etag: "12345", ifNoneMatch: false,
+				CancellationToken.None));
+	}
+
 	private static HttpResponseMessage Ok(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)

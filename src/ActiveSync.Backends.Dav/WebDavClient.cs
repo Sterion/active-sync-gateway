@@ -127,17 +127,22 @@ public sealed class WebDavClient : IDisposable
 			return request;
 		}, ct).ConfigureAwait(false);
 
-		// A create-PUT (If-None-Match:*) that comes back 412 means the resource already exists at
-		// this href. The transient retry above replays a PUT whose response was lost, so if the
-		// first attempt actually reached the server the replay lands on the resource it just
-		// created — the create SUCCEEDED. Surfacing the 412 would tell the client the item wasn't
+		// A create-PUT (If-None-Match:*) that comes back "already exists" means the resource is
+		// present at this href. The transient retry above replays a PUT whose response was lost, so
+		// if the first attempt actually reached the server the replay lands on the resource it just
+		// created — the create SUCCEEDED. Surfacing the failure would tell the client the item wasn't
 		// created though it was; instead treat it as success and let the caller (CreateItemAsync ->
-		// ResolveStoredHrefAsync) adopt the stored href/ETag. An update-PUT uses If-Match, so its
-		// 412 (a real ETag conflict / lost update) still surfaces below. (H18)
-		if (ifNoneMatch && response.StatusCode == HttpStatusCode.PreconditionFailed)
+		// ResolveStoredHrefAsync, which re-reads the collection) adopt the stored href/ETag.
+		// Servers disagree on the status for a failed If-None-Match:*: Stalwart answers 412
+		// Precondition Failed (RFC 7232), Axigen answers 409 Conflict — accept both. An update-PUT
+		// uses If-Match, so its 412/409 (a real ETag conflict / lost update) still surfaces below;
+		// this reinterpretation is gated on ifNoneMatch (create-only). (H18)
+		if (ifNoneMatch &&
+			response.StatusCode is HttpStatusCode.PreconditionFailed or HttpStatusCode.Conflict)
 		{
 			_wireLogger?.LogDebug(
-				"DAV create-PUT {Href} returned 412 (already exists — a replayed create); treating as success", href);
+				"DAV create-PUT {Href} returned {Status} (already exists — a replayed create); treating as success",
+				href, (int)response.StatusCode);
 			return null;
 		}
 
@@ -191,7 +196,7 @@ public sealed class WebDavClient : IDisposable
 
 	/// <summary>
 	///   Every DAV verb funnels through here, so fast transient retry lives at this one seam. All
-	///   DAV writes are idempotent — create-PUT carries If-None-Match:* (a replay 412s, never
+	///   DAV writes are idempotent — create-PUT carries If-None-Match:* (a replay 412s or 409s, never
 	///   duplicates), update-PUT carries If-Match, DELETE treats 404 as success — and the rest are
 	///   reads, so a replay is always safe.
 	/// </summary>
