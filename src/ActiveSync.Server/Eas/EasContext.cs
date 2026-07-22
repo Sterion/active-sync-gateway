@@ -46,8 +46,12 @@ public sealed class EasContext
 		_requestRead = true;
 		// Treat a request as body-less only when it has neither a positive Content-Length nor
 		// a Transfer-Encoding header: a chunked request (Transfer-Encoding: chunked) has no
-		// Content-Length but still carries a body we must read.
-		if (Http.Request.ContentLength is 0 or null && !Http.Request.Headers.ContainsKey("Transfer-Encoding"))
+		// Content-Length but still carries a body we must read. This shortcut is an HTTP/1.x
+		// framing fact ONLY — HTTP/2 forbids Transfer-Encoding (RFC 9113 §8.2.2) and streamed
+		// h2 bodies carry no Content-Length, so applying it there drops every request body
+		// (E1). Under h2 (and h3) fall through and let the zero-length read below decide.
+		bool http1 = HttpProtocol.IsHttp11(Http.Request.Protocol) || HttpProtocol.IsHttp10(Http.Request.Protocol);
+		if (http1 && Http.Request.ContentLength is 0 or null && !Http.Request.Headers.ContainsKey("Transfer-Encoding"))
 			return null;
 		using MemoryStream buffer = new();
 		await Http.Request.Body.CopyToAsync(buffer, Aborted);
