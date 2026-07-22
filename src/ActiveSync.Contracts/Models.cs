@@ -3,7 +3,24 @@ using ActiveSync.Protocol;
 
 namespace ActiveSync.Contracts;
 
-public sealed record BackendCredentials(string UserName, string Password);
+public sealed record BackendCredentials(string UserName, string Password)
+{
+	// K56: the compiler-synthesized record ToString() would print Password in plaintext — and this
+	// type is published plugin contract that lands in logs, exception messages and debugger views,
+	// both directly and nested inside ResolvedRole / BackendConnectionContext (whose own ToString()
+	// calls this one). Mask the secret by overriding PrintMembers so the record shape is preserved
+	// and every enclosing record inherits the redaction.
+	//
+	// The mask token is a local literal on purpose: Contracts depends only on Protocol + the
+	// Microsoft.Extensions abstractions and CANNOT reference ActiveSync.Core.Administration
+	// .SecretRedaction across the dependency boundary. It is kept identical to SecretRedaction.Mask
+	// ("***") by convention.
+	private bool PrintMembers(System.Text.StringBuilder builder)
+	{
+		builder.Append("UserName = ").Append(UserName).Append(", Password = ***");
+		return true;
+	}
+}
 
 /// <summary>A folder/collection as reported by a backend store.</summary>
 public sealed record BackendFolder(
