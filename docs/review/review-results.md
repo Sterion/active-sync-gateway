@@ -718,21 +718,78 @@ and the already-correct `LocalCliEnvelope`/`LocalCliResult`.
 
 ---
 
-## Next: item 17 — Contracts surface (Phase 3 — Boundaries) · **breaking, one major bump**
+## Item 17 — Contracts surface (Phase 3 — Boundaries) · **breaking, one major bump**
 
-**Items 17–19 remain in Phase 3 (structural/boundary work):** these items *execute the architecture
-document* — moving types between assemblies, changing the plugin contract. AGENTS.md § *Solution layout
-and dependency rule* and `docs/plugins.md` are **hard gates**, not background reading, and the
-orchestrator must read them before judging a worker's result in scope. Line anchors drift wholesale once
-types move (item 20 especially) — locate findings by symbol.
+**Findings:** `K57` `K58` `K59` `K61` `K62` `K64` `K67` `K69` `K71`
+**Commits:** `5d16682` (K69) · `a7f85cb` (K62, K64) · `174de61` (K67) · `8e02a81` (K59) · `3890c4a` (K57) ·
+`dba9dc2` (K61) · `5024231` (K58) · `002ec53` (K71) · `e997d23` (docs/plugins sync) · `9557d1a`
+(AGENTS.md doc-sync — orchestrator-requested, see below)
 
-**Item 17 is the intentional breaking Contracts change** — `K57 K58 K59 K61 K62 K64 K67 K69 K71`: move
-host-only types out, split `IContentStore` into optional capabilities, make `CreateConnection` async, fix
-fail-open `SharedCollection.Parse`, add `ContractVersion`. Bundle into one major version bump. It is the
-highest DI/pipeline-risk item in this range — the integration run after it is not optional. Item 20 must
-run **alone** (not in this orchestrator's range).
+**Verification (orchestrator-run):** integrity 56/15/365/365/0, encoding 0 ✓ · cursor → item 18 ✓ · one
+commit per finding with ID in subject ✓ (K62+K64 clustered — both touch `SharedCollection.cs`, legitimate) ·
+**clean `-t:Rebuild` 0 warnings** ✓ (an incremental build would have lied — see the VSTHRD003 note) · unit
+**Protocol 63 · Core 476 (was 454) · WebUi 70 · Server 156 = 765 passed, 0 failed, 0 skipped** ✓ ·
+integration **139 / 0 skipped** on a **fresh** container ✓. This was the highest DI/pipeline-risk item in
+the range (async `CreateConnection`, `IContentStore` split, unsealed `BackendException`) — the green
+integration run is the decisive check that the pipeline still wires up.
 
-Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 454 ·
+**K57 host-only claim independently verified — and a doc gap it left, closed.** `git grep`: `IBackendSession`
+is implemented **only** by `CompositeBackendSession` (Core); no provider implements it, so moving it +
+`IBackendSessionFactory`/`BackendSessionInfo` to `ActiveSync.Core.Backend` is correct — they are the host's
+composite-session aggregation and cache, never plugin-facing. **AGENTS.md § *Solution layout* still listed
+`IBackendSession` as a Contracts type** (it documented the leak as if intended); the worker had synced
+`docs/plugins.md` but missed AGENTS.md. This is incomplete doc-sync *within K57's scope*, not a new finding,
+so the worker was sent back to finish it — `9557d1a` replaces `IBackendSession` with `IBackendConnection`
+(what a plugin actually implements) in the enumeration and names the composite session/factory as
+host-only-in-Core. Docs-only, so no re-run needed against the already-verified `e997d23` code state.
+
+**The clustering (`a7f85cb` = K62+K64) is legitimate.** Both are the same `SharedCollection.Parse`/`Validate`
+fail-open→fail-closed security fix in one file; the "each tight cluster" rule applies. Spot-checked both land:
+Parse now returns read-only unless an explicit `|rw`, and the cross-host guard fails closed on an unparseable
+`baseUrl`. `ContractVersion.cs` (K69) and the `IItemMoveOperations`/`IFolderOperations` split out of
+`IContentStore` (K58) confirmed present in Contracts.
+
+**Notes (worker-flagged):**
+- **Intentional breaking Contracts changes (major bump, per Standing context):** `IBackendProvider
+  .CreateConnection` → `CreateConnectionAsync(context, ct)`; `IContentStore` loses its move/folder-mutation
+  members (now optional `IItemMoveOperations` / `IFolderOperations` capabilities); `DeleteItemAsync` reorders
+  to `(…, bool permanent, CancellationToken ct)`; `IBackendSession`/factory moved to Core; `BackendException`
+  unsealed and `BackendItemNotFoundException` now derives from it. All host-internal callers updated; **no
+  EAS-client-visible behaviour change** — MoveItems/Folder* statuses preserved (handlers now guard on the
+  capability and return the same status the old throw produced).
+- **VSTHRD003 / async-lazy, load-bearing for future verifiers.** K61 makes the shared cached-session build an
+  async `Lazy<Task<…>>`; the VS Threading analyzers reject that idiom, and the resulting **VSTHRD003 warning
+  was masked by incremental builds** — it only appears on `-t:Rebuild`. The worker cleared it by routing the
+  await through a single justified-suppression block in `BackendSessionFactory` (no `Microsoft.VisualStudio
+  .Threading` runtime dep added to the packed Core assembly; the idiom is safe here — no sync context,
+  `ConfigureAwait(false)` throughout). **Verify this item, and anything touching that factory, with a clean
+  rebuild, not an incremental one.**
+- **K61 uses `CancellationToken.None` for the shared cached-session build** (not the request ct), so one
+  request's cancellation cannot fault the session other requests await — matching the prior synchronous,
+  uncancellable build. The `ct` on `CreateConnectionAsync` is contract surface for future providers.
+- **K71 resolved by documentation, not an `ISecretProtector` abstraction** (the finding sanctions the doc
+  route). Traced: provider `Secret` settings fields are stored/bound **plaintext**; only the role credential
+  is sealed/unsealed by the host and delivered plaintext via `Credentials`. A plugin never needs a sealing
+  primitive for the standard flow and is not handed the master key, so an `ISecretProtector` on the plugin
+  surface would be unused API. Judgment call open to revision if a future plugin needs to seal its own config.
+- **K57's proof is a relocation guard, not a red-first behavioural reproducer** (`ContractSurfaceTests
+  .HostOnlySessionTypes_AreNotOnTheContractsSurface` / `HostSessionTypes_LiveInCore`) — the established
+  items 15/16 structural pattern. Everything else (K59/K61/K62/K64/K67/K69) is red-first; K58's four members
+  asserted absent from `IContentStore`, red before.
+- **No new findings filed.**
+
+---
+
+## Next: item 18 — WebUi → Core services (Phase 3 — Boundaries)
+
+**Items 18–19 remain in Phase 3 (structural/boundary work):** they *execute the architecture document*.
+AGENTS.md § *Solution layout and dependency rule* and the Web UI layer notes are **hard gates**. Item 18
+extracts `DeviceAdminService`/`ShareAdminService`/`LogQueryService` so CLI and WebUi share one validated
+write path (removes the second write path to the same tables) — touches admin write + shares, which feed
+shared-calendar grants into session building, so the integration run still matters. Item 20 (decompositions)
+must run **alone** and is not in this orchestrator's range.
+
+Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 476 ·
 WebUi 70 · Server 156**.
 
 **Standing lessons that carried this run (items 13–14):**
