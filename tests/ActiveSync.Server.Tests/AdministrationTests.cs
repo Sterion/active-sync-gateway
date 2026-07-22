@@ -170,6 +170,20 @@ public sealed class AdministrationTests
 	}
 
 	[Fact]
+	public void SecretPolicy_BackendPassword_MisconfiguredKey_RefusesPlaintext()
+	{
+		// B4: a key that is CONFIGURED but fails to load (Key and KeyFile both set) used to be
+		// swallowed — TryLoadKey's error was discarded and null was read as "no key", so the
+		// backend password was silently written in plaintext under a broken encryption config.
+		EncryptionOptions broken = new() { Key = "some-key", KeyFile = "/nonexistent/key" };
+		AccountSecretPolicy.SecretResult result =
+			AccountSecretPolicy.PrepareBackendPassword("imap-pw", broken, "Backends:MailStore:Password");
+		Assert.NotNull(result.Error);
+		Assert.Null(result.Value);
+		Assert.NotEqual(AccountSecretPolicy.PlaintextDisposition.StoredPlaintext, result.Plaintext);
+	}
+
+	[Fact]
 	public void OidcValidation_RequiresAuthorityClientIdPair_AndClaimConsistency()
 	{
 		ActiveSyncOptionsValidator validator = new();

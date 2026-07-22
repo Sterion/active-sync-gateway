@@ -71,9 +71,20 @@ internal static class AccountSecretPolicy
 				$"{fieldKey} is a backend password — it must be the real password (sealed enc:v1: or plaintext), " +
 				"not a pbkdf2$ hash the backend cannot verify against.");
 
-		byte[]? key = EncryptionKeyLoader.TryLoadKey(encryption, out _);
+		byte[]? key = EncryptionKeyLoader.TryLoadKey(encryption, out string? keyError);
 		if (key is null)
+		{
+			// B4: null-with-error means a key IS configured but could not be loaded (e.g. Key and
+			// KeyFile both set, or an unreadable KeyFile). Discarding that error and storing the
+			// backend password in plaintext hides a misconfiguration behind a silent downgrade —
+			// refuse. Null-with-no-error is the legitimate "no key configured" case.
+			if (keyError is not null)
+				return new SecretResult(null,
+					$"{fieldKey}: the ActiveSync:Encryption key is configured but could not be loaded " +
+					$"({keyError}); refusing to store the backend password in plaintext.");
 			return new SecretResult(raw, null, PlaintextDisposition.StoredPlaintext);
+		}
+
 		string sealedValue = SecretValue.Seal(raw, key);
 		CryptographicOperations.ZeroMemory(key);
 		return new SecretResult(sealedValue, null, PlaintextDisposition.Sealed);
