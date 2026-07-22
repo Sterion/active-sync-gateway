@@ -90,6 +90,23 @@ public sealed class LegacyAccountJsonTests
 	}
 
 	[Fact]
+	public void RootLevelAccountFields_SurviveTheUpgrade()
+	{
+		// B13: the old converter was a field whitelist (Password + MailAddress + Backends), so it
+		// silently DROPPED Admin/Enabled/AutoProvisioned/OidcSubject — a disabled row came back
+		// ENABLED after the in-place upgrade, with no log line.
+		AccountOptions converted = Convert("""
+			{"enabled":false,"admin":true,"autoProvisioned":true,"oidcSubject":"sub-123",
+			 "imap":{"host":"h"}}
+			""");
+		Assert.False(converted.Enabled);
+		Assert.True(converted.Admin);
+		Assert.True(converted.AutoProvisioned);
+		Assert.Equal("sub-123", converted.OidcSubject);
+		Assert.NotNull(converted.Backends!["MailStore"]); // legacy section still converts
+	}
+
+	[Fact]
 	public void DisabledSections_AndSieveOptIn_MapToTheNewSwitches()
 	{
 		AccountOptions converted = Convert("""

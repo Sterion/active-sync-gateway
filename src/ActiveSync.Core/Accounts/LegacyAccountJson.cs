@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ActiveSync.Core.Options;
+using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Core.Accounts;
 
@@ -15,10 +16,21 @@ public static class LegacyAccountJson
 	private static readonly string[] LegacySections = ["imap", "smtp", "calDav", "cardDav", "sieve"];
 
 	/// <summary>
+	///   Root properties the upgrade understands: the <see cref="AccountOptions" /> members (which
+	///   are carried over verbatim) plus the legacy backend sections (which become role overrides).
+	///   Anything else is a value that would be dropped, so it is logged rather than lost silently.
+	/// </summary>
+	private static readonly HashSet<string> KnownRootProperties = new(StringComparer.OrdinalIgnoreCase)
+	{
+		"password", "mailAddress", "admin", "enabled", "autoProvisioned", "oidcSubject", "backends",
+		"imap", "smtp", "calDav", "cardDav", "sieve",
+	};
+
+	/// <summary>
 	///   The converted JSON, or null when the row is already role-keyed (or not an object).
 	///   Structural problems land in <paramref name="error" /> instead of an exception.
 	/// </summary>
-	public static string? TryConvert(string json, out string? error)
+	public static string? TryConvert(string json, out string? error, ILogger? logger = null)
 	{
 		error = null;
 		JsonDocument document;
@@ -39,12 +51,32 @@ public static class LegacyAccountJson
 			    !LegacySections.Any(section => TryGetCaseInsensitive(root, section, out _)))
 				return null;
 
-			AccountOptions converted = new()
+			// B13: deserialize the root into AccountOptions FIRST so every settable member
+			// (Password, MailAddress, Admin, Enabled, AutoProvisioned, OidcSubject) carries over —
+			// System.Text.Json ignores the unknown legacy sections. The old whitelist reconstructed
+			// only three of them, so a disabled row came back enabled after the in-place upgrade.
+			AccountOptions converted;
+			try
 			{
-				Password = GetString(root, "password"),
-				MailAddress = GetString(root, "mailAddress"),
-				Backends = new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase)
-			};
+				converted = JsonSerializer.Deserialize<AccountOptions>(json, AccountStore.JsonOptions)
+					?? new AccountOptions();
+			}
+			catch (Exception ex) when (ex is JsonException or NotSupportedException)
+			{
+				error = $"stored JSON does not map to an account: {ex.Message}";
+				return null;
+			}
+
+			List<string> unrecognized = root.EnumerateObject()
+				.Select(property => property.Name)
+				.Where(name => !KnownRootProperties.Contains(name))
+				.ToList();
+			if (unrecognized.Count > 0)
+				logger?.LogWarning(
+					"Legacy account row carried unrecognized root propert{Plural} that will be dropped on upgrade: {Names}",
+					unrecognized.Count == 1 ? "y" : "ies", string.Join(", ", unrecognized));
+
+			converted.Backends = new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase);
 
 			if (TryGetCaseInsensitive(root, "imap", out JsonElement imap) &&
 			    ConvertSection(imap, null) is { } mailStore)
@@ -146,14 +178,6 @@ public static class LegacyAccountJson
 			JsonValueKind.False => "false",
 			_ => null
 		};
-	}
-
-	private static string? GetString(JsonElement root, string name)
-	{
-		return TryGetCaseInsensitive(root, name, out JsonElement value) &&
-		       value.ValueKind == JsonValueKind.String
-			? value.GetString()
-			: null;
 	}
 
 	private static bool TryGetCaseInsensitive(JsonElement element, string name, out JsonElement value)

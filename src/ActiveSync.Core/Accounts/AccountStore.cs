@@ -151,7 +151,7 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 		int upgraded = 0;
 		foreach (AccountEntry entry in entries)
 		{
-			string? converted = LegacyAccountJson.TryConvert(entry.Json, out string? error);
+			string? converted = LegacyAccountJson.TryConvert(entry.Json, out string? error, logger);
 			if (error is not null)
 			{
 				logger.LogError("Account row for {User} could not be upgraded: {Error}", entry.UserName, error);
