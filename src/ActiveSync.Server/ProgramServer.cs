@@ -123,9 +123,16 @@ public partial class Program
 			int? metricsPort = options.Metrics.Port;
 			app.MapPrometheusScrapingEndpoint()
 				.AddEndpointFilter(async (context, next) =>
-					metricsPort is null || context.HttpContext.Connection.LocalPort == metricsPort
-						? await next(context)
-						: Results.NotFound());
+				{
+					if (metricsPort is null || context.HttpContext.Connection.LocalPort == metricsPort)
+						return await next(context);
+					// Rejecting a scrape from the wrong port is the common case for this filter
+					// (it is the mitigation for exposing /metrics), so keep it allocation-free:
+					// set the status and hand back the cached empty result instead of minting a
+					// fresh Results.NotFound() object per rejected request.
+					context.HttpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+					return Results.Empty;
+				});
 		}
 
 		EasEndpoint.Map(app);
