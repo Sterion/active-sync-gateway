@@ -154,13 +154,6 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		ResolvedAccount account = _resolver.Resolve(credentials);
 		IReadOnlyList<ResolvedRole> roles = account.OrderedRoles;
 
-		// Shared-calendar grants are read here (async) because the session constructor is
-		// synchronous; a session therefore carries the grants from its build time — `eas
-		// share` changes apply when the session is next rebuilt (idle eviction, restart).
-		// The calendar provider merges these with its own configured SharedCollections.
-		IReadOnlyList<SharedCollection> sharedCalendars =
-			await LoadShareGrantsAsync(credentials.UserName, ct).ConfigureAwait(false);
-
 		// Cache keys and rotation compares stay on the GATEWAY login/password — per-backend
 		// user names never become identity, and in Accounts mode the backend credentials are
 		// config-static (restart to apply changes).
@@ -176,12 +169,19 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			// The build is SHARED across every concurrent caller for this (user, device), so it runs
 			// uncancellable (CancellationToken.None): one request cancelling must not fault the session
 			// the others are awaiting. This matches the pre-K61 synchronous, uncancellable build.
+			// A11: the shared-calendar grants are read HERE, inside the build, so a cache hit never
+			// opens a DbContext — a session carries the grants from its build time (`eas share`
+			// changes apply when the session is next rebuilt), and the calendar provider merges them
+			// with its own configured SharedCollections.
 			Lazy<Task<CompositeBackendSession>> NewLazy() =>
-				MakeLazy(() =>
+				MakeLazy(async () =>
 				{
 					created = true;
-					return CompositeBackendSession.CreateAsync(
-						_registry, credentials, account.MailAddress, roles, sharedCalendars, CancellationToken.None);
+					IReadOnlyList<SharedCollection> sharedCalendars =
+						await LoadShareGrantsAsync(credentials.UserName, CancellationToken.None).ConfigureAwait(false);
+					return await CompositeBackendSession.CreateAsync(
+						_registry, credentials, account.MailAddress, roles, sharedCalendars, CancellationToken.None)
+						.ConfigureAwait(false);
 				});
 
 			Lazy<Task<CompositeBackendSession>> lazy = _sessions.GetOrAdd(key, _ => NewLazy());

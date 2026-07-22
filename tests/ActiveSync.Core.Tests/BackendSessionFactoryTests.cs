@@ -77,6 +77,23 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		return condition();
 	}
 
+	[Fact]
+	public async Task ShareGrants_AreReadOncePerBuild_NotPerRequest()
+	{
+		// A11: LoadShareGrantsAsync opened a DbContext on every GetSessionAsync, though the grants
+		// are consumed only when a session is actually built. A cache hit must not touch the DB.
+		FakeMailProvider provider = new();
+		CountingContextFactory counting = new(_connection);
+		BackendSessionFactory factory = NewFactory(provider, dbFactory: counting);
+
+		await factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None);
+		int afterBuild = counting.Created;
+		await factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None); // cache hit
+		await factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None); // cache hit
+
+		Assert.Equal(afterBuild, counting.Created); // no further DB reads for the cache hits
+	}
+
 	// ---------- harness ----------
 
 	private static void InvokeEvictIdleSessions(BackendSessionFactory factory) =>
@@ -118,6 +135,18 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		public SyncDbContext CreateDbContext() =>
 			new SqliteSyncDbContext(new DbContextOptionsBuilder<SqliteSyncDbContext>()
 				.UseSqlite(connection).Options);
+	}
+
+	private sealed class CountingContextFactory(SqliteConnection connection) : ISyncDbContextFactory
+	{
+		public int Created { get; private set; }
+
+		public SyncDbContext CreateDbContext()
+		{
+			Created++;
+			return new SqliteSyncDbContext(new DbContextOptionsBuilder<SqliteSyncDbContext>()
+				.UseSqlite(connection).Options);
+		}
 	}
 
 	private sealed class FakeMailProvider : IBackendProvider
