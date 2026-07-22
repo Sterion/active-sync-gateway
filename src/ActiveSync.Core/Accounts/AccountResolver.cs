@@ -365,6 +365,19 @@ public sealed class AccountResolver
 				continue;
 			}
 
+			// B21: an unconfigured gateway (no global mail role) must still construct — the invariant
+			// is "start unconfigured so the UI can configure it". A user mail override with no global
+			// and no explicit provider used to fall through to providerName "local", whose
+			// registry.GetFor(MailStore) throws — crashing the resolver ctor for a config user and
+			// misdiagnosing as "provider 'local' does not support MailStore". Mirror the Oof handling.
+			if (global is null && overrideProvider is null &&
+			    role is BackendRole.MailStore or BackendRole.MailSubmit)
+			{
+				failures.Add($"ActiveSync:Users:{login}:Backends:{role}: no global {role} role is configured — " +
+				             "set Provider (e.g. \"imap\") to enable it for this user.");
+				continue;
+			}
+
 			string providerName = overrideProvider ?? global?.ProviderName ?? "local";
 			// Settings inherit the global section ONLY when the provider is unchanged — a
 			// switched provider's keys mean something else entirely.

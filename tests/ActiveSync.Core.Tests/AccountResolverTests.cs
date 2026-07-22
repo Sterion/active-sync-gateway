@@ -466,6 +466,29 @@ public class AccountResolverTests
 	}
 
 	[Fact]
+	public void UnconfiguredMailRole_WithUserOverride_ReportsTargetedFailure_NotProviderMisdiagnosis()
+	{
+		// B21: on an unconfigured gateway (no global MailStore) a user MailStore override took
+		// providerName ?? "local" → registry.GetFor("local", MailStore) threw, crashing the
+		// resolver ctor for a CONFIG user (host won't start) and misdiagnosing as "provider
+		// 'local' does not support MailStore". Mirror the Oof handling with a clear message.
+		ActiveSyncOptions options = HostOptions();
+		AccountOptions entry = new()
+		{
+			Backends = new Dictionary<string, BackendRoleOverride>
+			{
+				["MailStore"] = new() { Settings = new Dictionary<string, string?> { ["Host"] = "h" } },
+			},
+		};
+
+		List<string> failures = AccountResolver.ValidateEntry(
+			options, Roles(new Dictionary<string, string?>()), Registry(), "u", entry);
+		string joined = string.Join(";", failures);
+		Assert.Contains("no global MailStore role is configured", joined);
+		Assert.DoesNotContain("does not support the MailStore role", joined);
+	}
+
+	[Fact]
 	public void ValidateUsers_MalformedGatewayPasswordHash_IsReported()
 	{
 		ActiveSyncOptions options = HostOptions();
