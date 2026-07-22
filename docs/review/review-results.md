@@ -1023,16 +1023,54 @@ skipped** (full suite, fresh Stalwart container 57 s old, migration applied clea
 
 ---
 
-## Next: item 23 — State layer performance & retention (Phase 4 — Correctness)
+## Item 23 — State layer performance & retention
+**Findings:** `A3` `A4` `A19` `A34` (N/A) `A35`
+**Commits:** `9a4d25b` (A3) · `6561912` (A4) · `c33d286` (A19) · `20cf336` (A34, N/A doc) ·
+`c65556e` (A35) · `f94b84c` (anchor fix — repoints F12/F22/F25 to the renamed snapshot columns)
+**Verification:** integrity items=56 · live=15 · assigned=365 · unique=365 · dupes=0 · encoding=0 ✓ ·
+definition-adequacy orphan list empty ✓ · cursor → item 24 ✓ · one commit per finding, ID in each
+subject ✓ · tree clean ✓ · build 0 warnings / 0 errors ✓ · **migration lockstep OK** (both new
+migrations present in Sqlite + Npgsql, name lists agree) ✓ · unit **Protocol 63 · Core 514 · WebUi 70 ·
+Server 158** = 805, 0 skipped ✓ · integration **139 passed, 0 skipped** (full suite, fresh Stalwart
+container 58 s old, both migrations applied cleanly via `MigrateAsync`) ✓
+**Notes:**
+- **⚠ ONE-TIME FULL RESYNC ON UPGRADE (`A4`) — the most important note here.** The
+  `CompressCollectionSnapshots` migration **drops** the old `SnapshotJson`/`PreviousSnapshotJson` TEXT
+  columns and adds `SnapshotCompressed`/`PreviousSnapshotCompressed` (`byte[]?`, gzip) — **drop+add, no
+  data migration**. Every device therefore does one full resync on its next Sync after upgrade. Accepted
+  per Standing context (not deployed; snapshots are regenerable derived state, not user data) — but this
+  is invisible in a diff and would surprise anyone who later ships this to a live fleet.
+- **Two EF migrations, both providers:** `CompressCollectionSnapshots` and `AddUserFolderDeletedUtc`.
+  Re-verified the ordered name lists agree across providers.
+- **New live config knob** `ActiveSync:Eas:FolderRetentionDays` (default **30**; 0 disables). Folders
+  soft-deleted (`UserFolder.DeletedUtc`, new column) more than N days ago are now hard-reclaimed by a new
+  `FolderRetentionService` sweep, along with their dependent DAV/collection/device rows (`A35` — this
+  closes an unbounded-growth leak). `docs/configuration.md` + `SettingKeys` + validator updated.
+- **`A34` marked N/A (legitimately, not skipped).** `A4`'s `SnapshotCodec.Decompress` became the single
+  shared snapshot reader both `PeekSyncKeyAsync` branches now use — which is exactly the deduplication
+  `A34` asked for — so there is nothing left to do. Struck with backticks preserved + reason.
+- **Coverage-not-proof (`A4`, `A35`).** Both hinge on new/renamed APIs, so their "red" was compile-absence
+  rather than a reproduced wrong output. `A4`'s transparency is additionally backed by the entire
+  pre-existing snapshot suite passing unchanged; `A35` is a brand-new mechanism (retention sweep) with no
+  prior behaviour to red-first. Neither is a false record, but neither reproduced a pre-fix failing symptom.
+- **Judgment calls.** (1) `A4`: chose gzip-to-`byte[]` (finding option a) over table normalization (b) —
+  lower blast radius. (2) `A19`: deliberately left `CommitFolderHierarchyAsync`'s load **tracked** because
+  item 22's `A7` fix rewrote it to mutate rows in place, so tracking is now required — the finding's
+  premise for that specific line no longer holds (documented in the A19 detail entry). Both defensible; a
+  reviewer could have pushed on either.
 
-Items 21–22 verified and recorded above. Cursor is at **item 23** (`A3` `A4` `A19` `A34` `A35`) —
-`A4` rewrites the full snapshot JSON twice per round (2–3 MB/request on a 50k mailbox). Not [LIVE] and
-performance-focused; run the unit suite in full. Integration only if it touches the sync/persistence
-path in a way unit tests can't exercise (a perf refactor of snapshot writing plausibly does — judge from
-the diff; a fresh-container run is cheap).
+---
 
-Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 510 ·
-WebUi 70 · Server 157** = 800.
+## Next: item 24 — Config validation unification (Phase 4 — Correctness)
+
+Items 21–23 verified and recorded above. Cursor is at **item 24** (`B1` `B9` `B10` `B11` `B12` `B14`
+`B24` `B25` `B26` `A14`) — `B1`: a CLI-settable value passes validation, persists, runs, then blocks the
+next startup; one fix collapses most of the item by making the write path run the same validator startup
+runs. Not [LIVE] and config-validation-focused; run the unit suite in full. Integration only if the diff
+touches the request pipeline or startup path (a validator-unification change usually doesn't reach live).
+
+Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 514 ·
+WebUi 70 · Server 158** = 805.
 
 **Standing lessons that carried this run (items 13–14):**
 - **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/contract
