@@ -10,9 +10,17 @@ namespace ActiveSync.Server.Eas.Handlers;
 ///   parse-from-request and persist-to-state helpers alongside. Extracted from
 ///   <see cref="SyncHandler" /> so option handling lives in one place.
 /// </summary>
-internal sealed record SyncCollectionOptions(int FilterType, int BodyType, long? TruncationSize, int MimeSupport = 0)
+internal sealed record SyncCollectionOptions(
+	int FilterType, int BodyType, long? TruncationSize, int MimeSupport = 0, int Conflict = 1)
 {
 	public static readonly SyncCollectionOptions Default = new(0, 2, 200 * 1024);
+
+	/// <summary>
+	///   MS-ASCMD Conflict resolution: 0 = the client object replaces the server object (client
+	///   wins); any other value — including the absent default — leaves the server object in place
+	///   (server wins), the safe policy for a concurrent edit.
+	/// </summary>
+	public bool ServerWinsOnConflict => Conflict != 0;
 
 	private static readonly XNamespace AS = EasNamespaces.AirSync;
 	private static readonly XNamespace ASB = EasNamespaces.AirSyncBase;
@@ -44,6 +52,9 @@ internal sealed record SyncCollectionOptions(int FilterType, int BodyType, long?
 		// MS-ASCMD MIMESupport: 0 = never send MIME, 1 = S/MIME messages only, 2 = always send MIME.
 		int mimeSupport = int.TryParse(optionsElement.Element(AS + "MIMESupport")?.Value, out int ms) ? ms : 0;
 
+		// MS-ASCMD Conflict: 0 = client wins, else server wins (default when absent).
+		int conflict = int.TryParse(optionsElement.Element(AS + "Conflict")?.Value, out int cf) ? cf : 1;
+
 		// AirSyncBase body Type codes (MS-ASAIRS): 1 = plain, 2 = HTML, 4 = MIME. When a
 		// client offers several, prefer the richest we render well: HTML (2) > plain (1) >
 		// whatever else it listed first.
@@ -74,6 +85,6 @@ internal sealed record SyncCollectionOptions(int FilterType, int BodyType, long?
 			truncation = chosen.Truncation;
 		}
 
-		return new SyncCollectionOptions(filterType, bodyType, truncation, mimeSupport);
+		return new SyncCollectionOptions(filterType, bodyType, truncation, mimeSupport, conflict);
 	}
 }

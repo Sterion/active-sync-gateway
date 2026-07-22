@@ -47,7 +47,8 @@ public sealed partial class SyncHandler
 	internal async Task<XElement?> ApplyClientCommandAsync(
 		EasContext context, UserFolder folder, IContentStore store, XElement command,
 		Dictionary<string, string> snapshot, BodyPreference bodyPreference, bool deletesAsMoves,
-		ClientCommandLedger ledger, CancellationToken ct)
+		ClientCommandLedger ledger, CancellationToken ct,
+		IReadOnlyDictionary<string, string>? conflictRevisions = null, bool serverWinsOnConflict = true)
 	{
 		// Global ReadOnly mode and per-folder read-only shared-calendar grants share the
 		// same enforcement: reject Adds, silently revert Changes/Deletes.
@@ -146,6 +147,26 @@ public sealed partial class SyncHandler
 						folder.DisplayName, context.Device.UserName);
 					snapshot[itemKey] = ReadOnlyRevertRevision;
 					return null;
+				}
+
+				// F7: conflict detection. When the backend's current revision of this item differs
+				// from the one the client last acked (snapshot[itemKey]), someone else changed it in
+				// the meantime. Server-wins (the default and MS-ASCMD Conflict != 0) rejects the
+				// client's Change with Status 7 and poisons the snapshot so the next diff re-pushes
+				// the server's version — the same revert mechanism read-only mode uses. Client-wins
+				// (Conflict == 0) falls through and overwrites, the historical behaviour.
+				if (conflictRevisions is not null && serverWinsOnConflict &&
+				    snapshot.TryGetValue(itemKey, out string? acked) &&
+				    acked != ReadOnlyRevertRevision &&
+				    conflictRevisions.TryGetValue(itemKey, out string? backendNow) &&
+				    !string.Equals(acked, backendNow, StringComparison.Ordinal))
+				{
+					logger.LogInformation(
+						"Conflict on {Noun} {ServerId} in \"{Folder}\" for {User}: backend moved on since " +
+						"the client last synced — server wins (Status 7)",
+						NounFor(store), serverId, folder.DisplayName, context.Device.UserName);
+					snapshot[itemKey] = ReadOnlyRevertRevision;
+					return ClientCommandStatus(command, "7");
 				}
 
 				// 16.x: email2:Send on a draft Change submits the (merged) draft and removes it.

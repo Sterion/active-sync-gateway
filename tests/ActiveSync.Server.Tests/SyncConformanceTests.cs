@@ -174,6 +174,48 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Equal(0, resolved.MimeSupport);
 	}
 
+	// ---- F7: a client Change to an item the backend moved on must return Status 7, not overwrite ----
+	[Fact]
+	public async Task F7_ClientChangeAgainstMovedBackend_ReturnsStatus7_DoesNotOverwrite()
+	{
+		UserFolder inbox = await RegisterInboxAsync();
+		SyncHandler handler = NewSyncHandler();
+
+		// Prime the collection at key 1 with the client's last-acked revision of item "10".
+		Device device = await _harness.State.GetOrCreateDeviceAsync(
+			EasHandlerHarness.UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
+			device, inbox.ServerId, "0", CancellationToken.None);
+		await _harness.State.CommitCollectionStateAsync(
+			state!, new Dictionary<string, string> { ["10"] = "old" }, 0, CancellationToken.None);
+
+		// The backend has since moved on: its current revision of item "10" differs from what the
+		// client last acked → a concurrent edit.
+		_harness.Session.Store.Revisions["10"] = "new";
+
+		XDocument request = new(new XElement(AS + "Sync",
+			new XElement(AS + "Collections",
+				new XElement(AS + "Collection",
+					new XElement(AS + "SyncKey", "1"),
+					new XElement(AS + "CollectionId", inbox.ServerId),
+					new XElement(AS + "GetChanges", "0"),
+					new XElement(AS + "Commands",
+						new XElement(AS + "Change",
+							new XElement(AS + "ServerId", $"{inbox.ServerId}:10"),
+							new XElement(AS + "ApplicationData",
+								new XElement(EasNamespaces.Email + "Read", "1"))))))));
+
+		XDocument? response = await _harness.RunAsync(handler, "Sync", request);
+
+		Assert.NotNull(response);
+		XElement collection = response!.Root!.Element(AS + "Collections")!.Element(AS + "Collection")!;
+		XElement? change = collection.Element(AS + "Responses")?.Element(AS + "Change");
+		Assert.NotNull(change);
+		Assert.Equal("7", change!.Element(AS + "Status")?.Value);
+		// Server-wins: the client's edit is rejected, not blindly written over the concurrent change.
+		Assert.Empty(_harness.Session.Store.Updated);
+	}
+
 	private sealed class StubLifetime : IHostApplicationLifetime
 	{
 		public CancellationToken ApplicationStarted => CancellationToken.None;

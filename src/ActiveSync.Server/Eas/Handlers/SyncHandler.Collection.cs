@@ -82,6 +82,26 @@ public sealed partial class SyncHandler
 			: ClientCommandLedger.Empty();
 		int clientAdds = 0, clientChanges = 0, clientDeletes = 0;
 		XElement? commands = collectionElement.Element(AS + "Commands");
+
+		// F7: to detect a concurrent edit (client Change vs a backend that moved on) we need the
+		// backend's CURRENT revision of the changed items. Fetch the folder's revision map once,
+		// only when the client actually sent Change commands, and only for conflict comparison —
+		// NOT for the diff, which must fetch AFTER the client commands land so echo suppression
+		// works. A fetch failure degrades to "no conflict detection" (the historical overwrite).
+		IReadOnlyDictionary<string, string>? conflictRevisions = null;
+		bool hasChangeCommands = commands?.Elements(AS + "Change").Any() == true;
+		if (hasChangeCommands && collectionOptions.ServerWinsOnConflict)
+			try
+			{
+				conflictRevisions = await store.GetItemRevisionsAsync(folder.BackendKey, filter, ct);
+			}
+			catch (Exception ex) when (ex is not OperationCanceledException)
+			{
+				logger.LogWarning(ex,
+					"Conflict pre-check revision listing failed for {CollectionId}; applying client " +
+					"changes without conflict detection", collectionId);
+			}
+
 		if (commands is not null)
 			foreach (XElement command in commands.Elements())
 			{
@@ -95,7 +115,8 @@ public sealed partial class SyncHandler
 				try
 				{
 					XElement? handled = await ApplyClientCommandAsync(
-						context, folder, store, command, snapshot, bodyPreference, deletesAsMoves, ledger, ct);
+						context, folder, store, command, snapshot, bodyPreference, deletesAsMoves, ledger, ct,
+						conflictRevisions, collectionOptions.ServerWinsOnConflict);
 					if (handled is not null)
 						clientResponses.Add(handled);
 					snapshotDirty = true;

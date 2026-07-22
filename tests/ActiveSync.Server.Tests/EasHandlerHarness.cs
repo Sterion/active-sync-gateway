@@ -156,6 +156,9 @@ public sealed class EasHandlerHarness : IDisposable
 		public List<string> Fetched { get; } = [];
 		public List<string> Moved { get; } = [];
 
+		/// <summary>Item keys a handler asked to update, so a conflict test can assert none happened.</summary>
+		public List<string> Updated { get; } = [];
+
 		/// <summary>
 		///   The backend revision map returned by <see cref="GetItemRevisionsAsync" /> — the
 		///   server→client diff source. Left empty (the default), a getChanges round reports no
@@ -209,7 +212,8 @@ public sealed class EasHandlerHarness : IDisposable
 		public Task<string> UpdateItemAsync(
 			string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct)
 		{
-			throw new NotSupportedException();
+			Updated.Add(itemKey);
+			return Task.FromResult("updated-rev");
 		}
 
 		public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
