@@ -1,7 +1,9 @@
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 
 namespace ActiveSync.Core.Settings;
 
@@ -18,21 +20,60 @@ public static class DbSettingsLoader
 {
 	public static Dictionary<string, string?> TryLoad(DatabaseOptions database, ILogger? logger)
 	{
-		Dictionary<string, string?> result = new(StringComparer.OrdinalIgnoreCase);
-		try
+		// A missing GlobalSettings table means "fresh install, migrations haven't run" — expected,
+		// Debug. Anything else (Postgres down for 20 s at boot, a wrong connection string) silently
+		// reverts restart-tier settings that live ONLY in the database — TLS/metrics enable, listener
+		// ports — to their POCO defaults, which the old catch-all hid at Debug. Distinguish them, and
+		// retry a couple of times so a brief connect blip at boot isn't fatal to those settings (B9).
+		const int attempts = 3;
+		for (int attempt = 1; ; attempt++)
 		{
-			using SyncDbContext db = Create(database);
-			foreach (GlobalSetting row in db.GlobalSettings.AsNoTracking().ToList())
-				result[row.Key] = row.Value;
+			try
+			{
+				Dictionary<string, string?> result = new(StringComparer.OrdinalIgnoreCase);
+				using SyncDbContext db = Create(database);
+				foreach (GlobalSetting row in db.GlobalSettings.AsNoTracking().ToList())
+					result[row.Key] = row.Value;
+				return result;
+			}
+			catch (Exception ex) when (IsMissingSettingsTable(ex))
+			{
+				logger?.LogDebug(ex,
+					"No database settings table yet (fresh install); starting from file/env values");
+				return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+			}
+			catch (Exception ex)
+			{
+				if (attempt < attempts)
+				{
+					Thread.Sleep(TimeSpan.FromMilliseconds(250 * attempt));
+					continue;
+				}
+
+				logger?.LogWarning(ex,
+					"Could not read database-stored settings after {Attempts} attempts — database-stored " +
+					"settings are NOT applied (starting from file/env values only)", attempts);
+				return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+			}
 		}
-		catch (Exception ex)
+	}
+
+	/// <summary>
+	///   True when the failure is "the settings table does not exist yet" (a fresh install before
+	///   migrations), as opposed to a genuine outage. Sqlite reports "no such table"; Postgres reports
+	///   SQLSTATE 42P01 (undefined_table).
+	/// </summary>
+	private static bool IsMissingSettingsTable(Exception exception)
+	{
+		for (Exception? ex = exception; ex is not null; ex = ex.InnerException)
 		{
-			// Fresh install (table not created yet) or unreachable database — start from the
-			// file/env values and let the post-migration refresh pick up rows once they exist.
-			logger?.LogDebug(ex, "No database settings loaded at startup (fresh install or database unreachable)");
+			if (ex is PostgresException pg && pg.SqlState == PostgresErrorCodes.UndefinedTable)
+				return true;
+			if (ex is SqliteException && ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
+				return true;
 		}
 
-		return result;
+		return false;
 	}
 
 	private static SyncDbContext Create(DatabaseOptions database)
