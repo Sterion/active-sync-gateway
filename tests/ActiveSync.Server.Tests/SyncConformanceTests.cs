@@ -112,6 +112,36 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Equal("0", collection.Element(AS + "SyncKey")?.Value);
 	}
 
+	// ---- F5: an out-of-range HeartbeatInterval is answered with Status 14 + Limit, not clamped ----
+	[Fact]
+	public async Task F5_HeartbeatBelowMinimum_ReturnsStatus14AndLimit()
+	{
+		UserFolder inbox = await RegisterInboxAsync();
+		SyncHandler handler = NewSyncHandler();
+		await _harness.RunAsync(handler, "Sync",
+			SyncRequest(inbox.ServerId, "0", new XElement(AS + "GetChanges", "0")));
+
+		// So that the UNMODIFIED code's long-poll wait (which clamps 30s → 60s and would otherwise
+		// block for a full minute) resolves instantly instead: report a change the moment it waits.
+		_harness.Session.Store.WaitForChanges = keys => keys;
+
+		// HeartbeatInterval 30 is below the 60 s minimum.
+		XDocument request = new(new XElement(AS + "Sync",
+			new XElement(AS + "HeartbeatInterval", "30"),
+			new XElement(AS + "Collections",
+				new XElement(AS + "Collection",
+					new XElement(AS + "SyncKey", "1"),
+					new XElement(AS + "CollectionId", inbox.ServerId),
+					new XElement(AS + "GetChanges", "0")))));
+
+		XDocument? response = await _harness.RunAsync(handler, "Sync", request);
+
+		Assert.NotNull(response);
+		Assert.Equal("14", response!.Root!.Element(AS + "Status")?.Value);
+		// Limit teaches the client the correct bound, in the unit it used (HeartbeatInterval = seconds).
+		Assert.Equal("60", response.Root.Element(AS + "Limit")?.Value);
+	}
+
 	private sealed class StubLifetime : IHostApplicationLifetime
 	{
 		public CancellationToken ApplicationStarted => CancellationToken.None;

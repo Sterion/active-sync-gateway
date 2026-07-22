@@ -56,10 +56,35 @@ public sealed partial class SyncHandler(
 			XElement root = request!.Root!;
 			collectionElements = requested;
 
+			// Wait is in minutes, HeartbeatInterval in seconds; both normalize to seconds here.
+			bool waitInMinutes = false;
 			if (int.TryParse(root.Element(AS + "Wait")?.Value, out int waitMinutes))
+			{
 				waitSeconds = waitMinutes * 60;
+				waitInMinutes = true;
+			}
 			else if (int.TryParse(root.Element(AS + "HeartbeatInterval")?.Value, out int heartbeat))
+			{
 				waitSeconds = heartbeat;
+			}
+
+			// F5: a heartbeat outside the accepted range is answered with top-level Status 14 and a
+			// Limit teaching the correct bound (in the unit the client used) — not silently clamped
+			// upward, which would hold a client that asked for 30 s for a full 60 s (twice its socket
+			// budget) and provoke abandon/retry churn. Mirrors PingHandler's Status 5 + HeartbeatInterval.
+			EasOptions eas = options.Value.Eas;
+			if (waitSeconds is { } requestedWait &&
+			    (requestedWait < eas.MinHeartbeatSeconds || requestedWait > eas.MaxHeartbeatSeconds))
+			{
+				int clampedSeconds = Math.Clamp(requestedWait, eas.MinHeartbeatSeconds, eas.MaxHeartbeatSeconds);
+				int limit = waitInMinutes ? clampedSeconds / 60 : clampedSeconds;
+				await context.WriteResponseAsync(new XDocument(
+					new XElement(AS + "Sync",
+						new XElement(AS + "Status", "14"),
+						new XElement(AS + "Limit", limit.ToString()))));
+				return;
+			}
+
 			if (int.TryParse(root.Element(AS + "WindowSize")?.Value, out int gw))
 				globalWindow = gw;
 

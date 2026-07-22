@@ -255,7 +255,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 ## Phase 5 — Protocol conformance
 *Mostly small independent fixes; each item is a quick pass.*
 
-**32. Sync command conformance** [LIVE] — ~~`F1`~~ ~~`F4`~~ `F5` `F6` `F7` `F8` `F9` `F12` `F22`
+**32. Sync command conformance** [LIVE] — ~~`F1`~~ ~~`F4`~~ ~~`F5`~~ `F6` `F7` `F8` `F9` `F12` `F22`
 > `F4` echoes the *rejected* sync key with Status 3, causing the resync loop. `F6` `MIMESupport` is read nowhere and Type-4 is force-downgraded, so S/MIME can't work on-device.
 
 **33. Folder & provision conformance** [LIVE] — `F25` `F26` `F27`
