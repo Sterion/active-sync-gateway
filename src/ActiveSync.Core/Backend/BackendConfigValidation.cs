@@ -32,12 +32,21 @@ public static class BackendConfigValidation
 	public static IReadOnlyList<BackendFieldError> ValidateFields(
 		IReadOnlyList<BackendConfigField> fields, IReadOnlyDictionary<string, string?> values)
 	{
+		// Configuration keys are case-insensitive, but this dictionary's comparer depends on the
+		// caller (the web endpoint builds it from a request body). A scalar lookup below used the
+		// caller's comparer while the list check compared ordinal-ignore-case, so "host=" against a
+		// field "Host" was treated as unset and rejected as missing (A14). Normalize once here so
+		// both paths agree on ordinal-ignore-case.
+		Dictionary<string, string?> lookup = new(StringComparer.OrdinalIgnoreCase);
+		foreach ((string key, string? value) in values)
+			lookup[key] = value;
+
 		List<BackendFieldError> errors = [];
 		foreach (BackendConfigField field in fields)
 		{
 			if (field.Type == BackendFieldType.StringList)
 			{
-				bool anyElement = values.Any(pair =>
+				bool anyElement = lookup.Any(pair =>
 					ListRoot(pair.Key).Equals(field.Name, StringComparison.OrdinalIgnoreCase) &&
 					!string.IsNullOrWhiteSpace(pair.Value));
 				if (field.Required && !anyElement)
@@ -45,7 +54,7 @@ public static class BackendConfigValidation
 				continue;
 			}
 
-			values.TryGetValue(field.Name, out string? value);
+			lookup.TryGetValue(field.Name, out string? value);
 			if (string.IsNullOrWhiteSpace(value))
 			{
 				// An unset field falls back to the provider default; only a required field with
