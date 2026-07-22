@@ -132,6 +132,13 @@ public sealed partial class SyncHandler(
 			bool changed = await WaitWithWatchdogAsync(
 				context, pendingWaitCollections, TimeSpan.FromSeconds(wait), ct);
 			if (changed)
+				// F11: re-processing each waitable and appending its response is duplication-free by
+				// invariant, not by coincidence. This block is reached only when `responses` is empty
+				// (guarded above), and a WaitableCollection is produced by ProcessCollectionAsync ONLY
+				// when that first pass emitted no Response (see CollectionResult: "empty response ⇒
+				// waitable"). So every collection re-processed here contributed nothing on the first
+				// pass — re-emitting its now-non-empty response cannot double-count one already in the
+				// list. Re-running against the same request element is safe: it re-diffs current state.
 				foreach (WaitableCollection waitable in pendingWaitCollections)
 				{
 					CollectionResult result = await ProcessCollectionAsync(context, waitable.Element, globalWindow, ct);
