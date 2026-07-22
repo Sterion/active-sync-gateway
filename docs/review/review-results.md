@@ -1061,16 +1061,59 @@ container 58 s old, both migrations applied cleanly via `MigrateAsync`) ✓
 
 ---
 
-## Next: item 24 — Config validation unification (Phase 4 — Correctness)
+## Item 24 — Config validation unification
+**Findings:** `B1` `B9` `B10` `B11` `B12` `B14` `B24` `B25` `B26` `A14`
+**Commits:** `e038cc0` (B1) · `da62dcc` (B9) · `e9e70ec` (B10) · `dfed4e5` (B11) · `137d765` (B12) ·
+`60767d0` (B14) · `45f72a4` (B24) · `29b9033` (B25) · `19ab6b5` (B26) · `eb2d6b7` (A14) ·
+`8b88271` (B1/B24 refinement — reconciles 4 pre-existing `CliConfigTests` per protocol step 9)
+**Verification:** integrity items=56 · live=15 · assigned=365 · unique=365 · dupes=0 · encoding=0 ✓ ·
+cursor → item 25 ✓ · one commit per finding, ID in each subject ✓ · tree clean ✓ · build 0 warnings /
+0 errors ✓ · no new migration (count 19, unchanged) ✓ · unit **Protocol 63 · Core 553 · WebUi 70 ·
+Server 158** = 844, 0 skipped ✓ · integration **139 passed, 0 skipped** (full suite, fresh Stalwart
+container 41 s old — run because `B14` rewires the `BackendRolesProvider` DI graph and `B11` touches the
+auth-path resolver) ✓
+**Notes:**
+- **⚠ `B1`'s headline scenario is only PARTIALLY closed — read before trusting B1 as done.** `B1` is
+  "a value passes validation, persists, runs, then bricks the next startup." A literal fix (bind a clone,
+  run the full `ActiveSyncOptionsValidator`, reject any write producing an invalid config) is **mutually
+  exclusive with incremental single-key setup** of interdependent keys — you could never set
+  `Oidc:ClientSecret` before `Oidc:Authority`, or a backend `Provider` before its `Host`, because each
+  single write transiently fails the whole-config validator (this broke the pre-existing `CliConfigTests`).
+  The worker therefore scoped write-time rejection to failures **that name the key being written** (the
+  entered value is itself wrong). **Consequence: `Oidc:Authority` set without `ClientId` — a delayed-brick
+  case the finding explicitly lists — is NOT caught at write time; it is still only caught at startup.**
+  This is a defensible trade (incremental setup is a hard UX + existing-test constraint), but B1's own
+  example is not fully solved, and no diff makes that obvious. A reviewer could reasonably have demanded
+  a different resolution (e.g. a two-phase "draft then commit-validate" write model).
+- **`B11` behaviour change.** The documented `Auth:UsersRefreshSeconds` "negative = load once" semantics
+  is **removed**: a negative / non-finite cadence now clamps to "check every request" so live refresh can
+  never permanently lock itself out, and the catalogue bounds the key at `Min 0` so the write path rejects
+  negatives outright. `docs/configuration.md`, the catalogue help, and the `eas user` pickup note updated.
+- **`B14` behaviour change.** The live backend-role rebuild now runs each provider's `ValidateConfiguration`
+  and materializes settings into a snapshot, so a live edit that fails provider validation is now rejected
+  (last-good kept) where it previously was accepted and only failed at the next restart. Registry is
+  injected as an **optional** ctor param (null in test call sites; DI supplies the real one).
+- **`B12` was largely pre-done** (item 11 / K38-B22 already drops host-controlled keys at both write
+  surfaces); this item adds the store-level `GlobalSettingStore.UpsertAsync` guard as defence-in-depth at
+  the last common chokepoint. Small surface — don't expect a large B12 diff.
+- **All 10 red-first proven — no coverage-not-proof tests.** Findings fixing existing public behaviour
+  (B9/B10/B11/B12/B26/A14) were reddened via `git stash` of source; findings adding a new API/signature
+  (B1/B14/B24/B25) via a temporary in-place stub (a stash can't compile against a symbol that doesn't yet
+  exist). Independently re-verified the reconciled `CliConfigTests` are green in the full suite.
 
-Items 21–23 verified and recorded above. Cursor is at **item 24** (`B1` `B9` `B10` `B11` `B12` `B14`
-`B24` `B25` `B26` `A14`) — `B1`: a CLI-settable value passes validation, persists, runs, then blocks the
-next startup; one fix collapses most of the item by making the write path run the same validator startup
-runs. Not [LIVE] and config-validation-focused; run the unit suite in full. Integration only if the diff
-touches the request pipeline or startup path (a validator-unification change usually doesn't reach live).
+---
 
-Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 514 ·
-WebUi 70 · Server 158** = 805.
+## Next: item 25 — Account resolution & storage casing (Phase 4 — Correctness)
+
+Items 21–24 verified and recorded above. Cursor is at **item 25** (`B2` `B3` `B6` `B8` `B13` `B15` `B16`
+`B17` `B21` `B23`) — `B2`: case-sensitive in SQL, case-insensitive in memory → duplicate rows,
+nondeterministic winner across restarts; `B3`: an invalid row degrades to credential pass-through **and
+un-disables** the account. This touches the auth/account-resolution path — run the unit suite in full,
+and run integration (auth-path change; a casing regression in login resolution is exactly the class that
+passes unit but breaks live login).
+
+Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 553 ·
+WebUi 70 · Server 158** = 844.
 
 **Standing lessons that carried this run (items 13–14):**
 - **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/contract
