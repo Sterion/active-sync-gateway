@@ -10,6 +10,18 @@ namespace ActiveSync.Server.Eas.Handlers;
 // backend against the stored snapshot, and emit the server→client commands.
 public sealed partial class SyncHandler
 {
+	/// <summary>
+	///   F8: EAS 12.1 identifies a collection by Class + CollectionId, and the response is expected
+	///   to echo the request's Class as the first child of the Collection. 14.0+ dropped it — the
+	///   CollectionId alone identifies the collection — so it is emitted only for &lt;= 12.1 to keep
+	///   the 14.1 wire form byte-identical.
+	/// </summary>
+	private static void EchoClassIfLegacy(XElement collection, EasContext context, IContentStore store)
+	{
+		if (context.Version <= EasVersion.V121)
+			collection.AddFirst(new XElement(AS + "Class", store.EasClass));
+	}
+
 	private async Task<CollectionResult> ProcessCollectionAsync(
 		EasContext context, XElement collectionElement, int globalWindow, CancellationToken ct)
 	{
@@ -48,10 +60,12 @@ public sealed partial class SyncHandler
 			state.OptionsJson = collectionOptions.ToJson();
 			int initialKey = await context.State.CommitCollectionStateAsync(
 				state, [], collectionOptions.FilterType, ct);
-			return new CollectionResult(new XElement(AS + "Collection",
+			XElement initial = new(AS + "Collection",
 				new XElement(AS + "SyncKey", initialKey.ToString()),
 				new XElement(AS + "CollectionId", collectionId),
-				new XElement(AS + "Status", "1")), true, null);
+				new XElement(AS + "Status", "1"));
+			EchoClassIfLegacy(initial, context, store);
+			return new CollectionResult(initial, true, null);
 		}
 
 		BodyPreference bodyPreference = new(
@@ -251,6 +265,7 @@ public sealed partial class SyncHandler
 			new XElement(AS + "SyncKey", newKey.ToString()),
 			new XElement(AS + "CollectionId", collectionId),
 			new XElement(AS + "Status", "1"));
+		EchoClassIfLegacy(response, context, store);
 		if (clientResponses.Count > 0)
 			response.Add(new XElement(AS + "Responses", clientResponses));
 		if (serverCommands.Count > 0)

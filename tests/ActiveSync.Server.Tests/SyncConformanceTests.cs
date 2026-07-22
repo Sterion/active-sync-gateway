@@ -216,6 +216,62 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Empty(_harness.Session.Store.Updated);
 	}
 
+	// ---- F8: the Collection Class is echoed as the first child on a 12.1 response ----
+	[Fact]
+	public async Task F8_InitialSync_Eas121_EchoesClassFirst()
+	{
+		UserFolder inbox = await RegisterInboxAsync();
+		SyncHandler handler = NewSyncHandler();
+
+		XDocument? response = await _harness.RunAsync(handler, "Sync",
+			SyncRequest(inbox.ServerId, "0"), protocolVersion: "12.1");
+
+		XElement collection = response!.Root!.Element(AS + "Collections")!.Element(AS + "Collection")!;
+		XElement? first = collection.Elements().FirstOrDefault();
+		Assert.NotNull(first);
+		Assert.Equal("Class", first!.Name.LocalName);
+		Assert.Equal(EasClass.Email, first.Value);
+	}
+
+	[Fact]
+	public async Task F8_SteadyStateSync_Eas121_EchoesClassFirst()
+	{
+		UserFolder inbox = await RegisterInboxAsync();
+		SyncHandler handler = NewSyncHandler();
+
+		// A collection at key 1 whose snapshot holds an item the backend no longer has → a Delete
+		// command, so the round emits a real Collection response (the steady-state path).
+		Device device = await _harness.State.GetOrCreateDeviceAsync(
+			EasHandlerHarness.UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
+			device, inbox.ServerId, "0", CancellationToken.None);
+		await _harness.State.CommitCollectionStateAsync(
+			state!, new Dictionary<string, string> { ["10"] = "x" }, 0, CancellationToken.None);
+
+		XDocument? response = await _harness.RunAsync(handler, "Sync",
+			SyncRequest(inbox.ServerId, "1"), protocolVersion: "12.1");
+
+		XElement collection = response!.Root!.Element(AS + "Collections")!.Element(AS + "Collection")!;
+		Assert.Equal("Class", collection.Elements().First().Name.LocalName);
+		Assert.Equal(EasClass.Email, collection.Elements().First().Value);
+		// Sanity: this really is the steady-state path (a Delete was emitted).
+		Assert.NotNull(collection.Element(AS + "Commands")?.Element(AS + "Delete"));
+	}
+
+	// Gating: 14.1 (and above) must NOT emit Class — the 14.1 wire form stays byte-identical.
+	[Fact]
+	public async Task F8_InitialSync_Eas141_OmitsClass()
+	{
+		UserFolder inbox = await RegisterInboxAsync();
+		SyncHandler handler = NewSyncHandler();
+
+		XDocument? response = await _harness.RunAsync(handler, "Sync",
+			SyncRequest(inbox.ServerId, "0"), protocolVersion: "14.1");
+
+		XElement collection = response!.Root!.Element(AS + "Collections")!.Element(AS + "Collection")!;
+		Assert.Null(collection.Element(AS + "Class"));
+	}
+
 	private sealed class StubLifetime : IHostApplicationLifetime
 	{
 		public CancellationToken ApplicationStarted => CancellationToken.None;

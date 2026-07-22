@@ -79,7 +79,8 @@ public sealed class EasHandlerHarness : IDisposable
 	}
 
 	/// <summary>Runs one command and returns the decoded response document (null for an empty body).</summary>
-	public async Task<XDocument?> RunAsync(IEasCommandHandler handler, string command, XDocument request)
+	public async Task<XDocument?> RunAsync(
+		IEasCommandHandler handler, string command, XDocument request, string protocolVersion = "14.1")
 	{
 		// Encode is pure CPU/in-memory work (no I/O) — EncodeAsync just calls it internally
 		// before writing to a Stream, and the request body here is a byte[] MemoryStream.
@@ -96,7 +97,10 @@ public sealed class EasHandlerHarness : IDisposable
 		EasContext context = new()
 		{
 			Http = http,
-			Parameters = new EasRequestParameters { Command = command, DeviceId = device.DeviceId },
+			Parameters = new EasRequestParameters
+			{
+				Command = command, DeviceId = device.DeviceId, ProtocolVersion = protocolVersion
+			},
 			Credentials = new BackendCredentials(UserName, "pw"),
 			Session = Session,
 			Device = device,
