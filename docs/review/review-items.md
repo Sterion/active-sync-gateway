@@ -235,7 +235,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **26. Send/submit ordering & idempotency** [LIVE] — ~~`F10`~~ ~~`F29`~~ ~~`F30`~~ ~~`F31`~~ ~~`D9`~~ ~~`H18`~~ ~~`L36`~~ **COMPLETE**
 > One rule everywhere: close the `try` around the submit only; record the replay marker *before* the irreversible step; everything after is best-effort and swallowed. Otherwise the client resends and recipients get duplicates.
 
-**27. Long-poll & push reliability** [LIVE] — ~~`E7`~~ ~~`E8`~~ `F11` `F16` ~~`F17`~~ `F18` `H17` `H19`
+**27. Long-poll & push reliability** [LIVE] — ~~`E7`~~ ~~`E8`~~ `F11` ~~`F16`~~ ~~`F17`~~ `F18` `H17` `H19`
 > `E7` a watcher completing non-positively is dropped for the rest of the heartbeat. `E8` one faulting watcher 500s the whole Ping. `H17` the SSE stream is killed every 100s by `HttpClient.Timeout`.
 
 **28. DAV & JMAP request correctness** [LIVE] — `H1` `H2` `H3` `H10` `H20` `H21` `H22` `H26` `H27` `H28` `H29` `H31`

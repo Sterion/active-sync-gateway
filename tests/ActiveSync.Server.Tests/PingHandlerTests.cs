@@ -43,6 +43,25 @@ public sealed class PingHandlerTests : IDisposable
 		Assert.Equal("2", Status(second));
 	}
 
+	// F16: the watcher detects a change but the returned backend key maps to no watched collection
+	// (a store reporting at coarser granularity). The change must surface, not be silently dropped.
+	[Fact]
+	public async Task Ping_ChangeWithAnUnmappedBackendKey_IsNotSilentlyDropped()
+	{
+		_harness.Options.Eas.MinHeartbeatSeconds = 1; // keep the "no change" (red) path bounded
+		UserFolder inbox = await InboxAsync();
+		_harness.Session.Store.WaitForChanges = _ => new[] { "imap:SomethingElseEntirely" };
+
+		PingHandler handler = NewHandler();
+		XDocument? response = await _harness.RunAsync(handler, "Ping",
+			PingRequest(new[] { inbox.ServerId }, heartbeat: 2));
+
+		Assert.Equal("2", Status(response)); // reported as a change, not lost to the heartbeat
+		List<string> reported = response!.Root!.Element(P + "Folders")!
+			.Elements(P + "Folder").Select(f => f.Value).ToList();
+		Assert.Contains(inbox.ServerId, reported);
+	}
+
 	private async Task<UserFolder> InboxAsync()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(

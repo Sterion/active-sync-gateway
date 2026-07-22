@@ -161,11 +161,21 @@ public sealed class PingHandler(
 			{
 				IReadOnlyList<string> changedKeys = await kv.Key.WaitForChangesAsync(
 					kv.Value.Select(v => v.Folder.BackendKey).Distinct().ToList(), timeout, cts.Token);
-				return changedKeys
+				if (changedKeys.Count == 0)
+					return new List<string>();
+
+				List<string> mapped = changedKeys
 					.SelectMany(key => kv.Value.Where(v => v.Folder.BackendKey == key))
 					.Select(v => v.CollectionId)
 					.Distinct()
 					.ToList();
+				// F16: the store signalled a change but none of the returned keys matched a watched
+				// folder (a store reporting at a coarser granularity, or a normalized/aliased key).
+				// Never drop the notification — surface every collection on this store so the client
+				// resyncs and reconciles, rather than sitting blind for the rest of the heartbeat.
+				return mapped.Count > 0
+					? mapped
+					: kv.Value.Select(v => v.CollectionId).Distinct().ToList();
 			})
 			.ToList();
 
