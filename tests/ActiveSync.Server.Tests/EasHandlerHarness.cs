@@ -230,9 +230,17 @@ public sealed class EasHandlerHarness : IDisposable
 			throw new NotSupportedException();
 		}
 
+		/// <summary>
+		///   When set, <see cref="GetItemRevisionsAsync" /> throws this instead of returning the
+		///   revision map — a flaky backend during a listing (F20).
+		/// </summary>
+		public Func<Exception>? GetRevisionsFailWith { get; set; }
+
 		public Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
 			string folderBackendKey, ContentFilter filter, CancellationToken ct)
 		{
+			if (GetRevisionsFailWith is { } fail)
+				throw fail();
 			return Task.FromResult<IReadOnlyDictionary<string, string>>(
 				new Dictionary<string, string>(Revisions, StringComparer.Ordinal));
 		}
