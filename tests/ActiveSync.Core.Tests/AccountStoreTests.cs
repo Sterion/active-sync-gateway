@@ -208,6 +208,23 @@ public sealed class AccountStoreTests : IDisposable
 	}
 
 	[Fact]
+	public async Task Upsert_IsCaseInsensitive_NoDuplicateRow()
+	{
+		// B2: the store matched the login case-SENSITIVELY in SQL but case-INsensitively in memory,
+		// so an upsert under a different casing inserted a SECOND row; LoadAllAsync then collapsed
+		// both with a last-row-wins winner that flipped across restarts.
+		await _store.UpsertAsync("phone1", new AccountOptions { MailAddress = "first@x" }, CancellationToken.None);
+		await _store.UpsertAsync("PHONE1", new AccountOptions { MailAddress = "second@x" }, CancellationToken.None);
+
+		Assert.Single(await _store.ListAsync(CancellationToken.None));
+		Assert.Equal("second@x", (await _store.GetAsync("Phone1", CancellationToken.None))?.MailAddress);
+		Assert.NotNull(await _store.GetAsync("phone1", CancellationToken.None));
+
+		Assert.True(await _store.DeleteAsync("PHONE1", CancellationToken.None));
+		Assert.Empty(await _store.ListAsync(CancellationToken.None));
+	}
+
+	[Fact]
 	public async Task Store_ListAndGet_RoundTrip()
 	{
 		Assert.Null(await _store.ReadStampAsync(CancellationToken.None));

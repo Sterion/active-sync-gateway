@@ -38,8 +38,10 @@ public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)
 	public async Task<string?> GetAsync(string key, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
+		// B2: configuration keys are case-insensitive everywhere in memory, so match that way in
+		// SQL too — otherwise a differently-cased key misses the existing row (see UpsertAsync).
 		GlobalSetting? row = await db.GlobalSettings.AsNoTracking()
-			.FirstOrDefaultAsync(s => s.Key == key, ct).ConfigureAwait(false);
+			.FirstOrDefaultAsync(s => s.Key.ToLower() == key.ToLower(), ct).ConfigureAwait(false);
 		return row?.Value;
 	}
 
@@ -62,8 +64,10 @@ public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)
 			throw new InvalidOperationException($"'{key}' cannot be stored in the database: {reason}.");
 
 		await using SyncDbContext db = contextFactory.CreateDbContext();
+		// B2: match case-insensitively so a re-set under different casing updates the existing row
+		// instead of inserting a second, colliding one.
 		GlobalSetting? row = await db.GlobalSettings
-			.FirstOrDefaultAsync(s => s.Key == key, ct).ConfigureAwait(false);
+			.FirstOrDefaultAsync(s => s.Key.ToLower() == key.ToLower(), ct).ConfigureAwait(false);
 		if (row is null)
 		{
 			// DbSet.Add is synchronous and local (no I/O); AddAsync exists only for async value
@@ -86,7 +90,7 @@ public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
 		GlobalSetting? row = await db.GlobalSettings
-			.FirstOrDefaultAsync(s => s.Key == key, ct).ConfigureAwait(false);
+			.FirstOrDefaultAsync(s => s.Key.ToLower() == key.ToLower(), ct).ConfigureAwait(false);
 		if (row is null)
 			return false;
 		db.GlobalSettings.Remove(row);

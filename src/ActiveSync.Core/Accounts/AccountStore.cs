@@ -61,8 +61,10 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 	public async Task<AccountOptions?> GetAsync(string login, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
+		// B2: logins are case-insensitive everywhere in memory, so match that way in SQL too —
+		// otherwise a differently-cased login misses the existing row (see UpsertAsync).
 		AccountEntry? entry = await db.AccountEntries.AsNoTracking()
-			.FirstOrDefaultAsync(a => a.UserName == login, ct).ConfigureAwait(false);
+			.FirstOrDefaultAsync(a => a.UserName.ToLower() == login.ToLower(), ct).ConfigureAwait(false);
 		return entry is null
 			? null
 			: JsonSerializer.Deserialize<AccountOptions>(entry.Json, JsonOptions) ?? new AccountOptions();
@@ -85,8 +87,10 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 	public async Task UpsertAsync(string login, AccountOptions options, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
+		// B2: match case-insensitively so `eas user set Phone1` updates the existing `phone1` row
+		// instead of inserting a second, colliding one.
 		AccountEntry? entry = await db.AccountEntries
-			.FirstOrDefaultAsync(a => a.UserName == login, ct).ConfigureAwait(false);
+			.FirstOrDefaultAsync(a => a.UserName.ToLower() == login.ToLower(), ct).ConfigureAwait(false);
 		string json = JsonSerializer.Serialize(options, JsonOptions);
 		if (entry is null)
 		{
@@ -110,7 +114,7 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
 		AccountEntry? entry = await db.AccountEntries
-			.FirstOrDefaultAsync(a => a.UserName == login, ct).ConfigureAwait(false);
+			.FirstOrDefaultAsync(a => a.UserName.ToLower() == login.ToLower(), ct).ConfigureAwait(false);
 		if (entry is null)
 			return false;
 		db.AccountEntries.Remove(entry);

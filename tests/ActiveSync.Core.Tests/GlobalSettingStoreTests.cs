@@ -61,6 +61,22 @@ public sealed class GlobalSettingStoreTests : IDisposable
 	}
 
 	[Fact]
+	public async Task Upsert_IsCaseInsensitive_NoDuplicateRow()
+	{
+		// B2: the store matched the key case-SENSITIVELY in SQL but case-INsensitively in memory,
+		// so an upsert under a different casing inserted a SECOND row; the loaded snapshot then
+		// collapsed both with a nondeterministic winner across restarts.
+		await _store.UpsertAsync("ActiveSync:ReadOnly", "true", CancellationToken.None);
+		await _store.UpsertAsync("activesync:readonly", "false", CancellationToken.None);
+
+		Assert.Single(await _store.ListAsync(CancellationToken.None));
+		Assert.Equal("false", await _store.GetAsync("ActiveSync:ReadOnly", CancellationToken.None));
+
+		Assert.True(await _store.DeleteAsync("ACTIVESYNC:READONLY", CancellationToken.None));
+		Assert.Empty(await _store.ListAsync(CancellationToken.None));
+	}
+
+	[Fact]
 	public async Task DbSetting_OverridesConfig_AndFallsBackOnDelete()
 	{
 		// A file/env value the database will override, plus a POCO-default value (ReadOnly=false).
