@@ -165,10 +165,13 @@ passphrases shorter than 12 characters work but are called out in the startup ba
 |--------|---------|-------------|
 | `Key` | `null` | Master key, inline — a raw base64 32-byte key or any passphrase. Mutually exclusive with `KeyFile`. |
 | `KeyFile` | `null` | Path to a file containing the key (same raw-or-passphrase interpretation) — the right choice with docker secrets (`/run/secrets/...`). |
+| `KeyDerivationSalt` | `null` | Optional per-deployment salt for the **passphrase** path, so one precomputed rainbow table cannot cover every deployment. Supply it identically wherever the key is derived (the gateway and the slim `eas` client both derive from config alone — nothing is stored). Ignored on the raw base64 key path, which skips PBKDF2. Changing it changes the derived key (one-time re-encrypt of stored local content). |
 | `AllowPlaintext` | `false` | Explicitly store local content unencrypted (dev/test only; shouted in the startup banner). Ignored when a key is configured. |
 
-Losing the key makes the stored local content unrecoverable (drop the database and let
-devices re-upload); key rotation is not supported yet.
+A raw base64 32-byte key is immune to rainbow tables (no PBKDF2); with a passphrase, set a
+unique `KeyDerivationSalt` per deployment. Losing the key (or the salt) makes the stored local
+content unrecoverable (drop the database and let devices re-upload); key rotation is not
+supported yet.
 
 ## `Eas` (protocol tuning)
 

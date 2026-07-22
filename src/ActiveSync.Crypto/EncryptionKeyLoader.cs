@@ -34,7 +34,7 @@ public static class EncryptionKeyLoader
 		string? material = LoadKeyMaterial(options, out error);
 		if (material is null)
 			return null;
-		return DeriveKey(material);
+		return DeriveKey(material, options);
 	}
 
 	/// <summary>
@@ -90,15 +90,30 @@ public static class EncryptionKeyLoader
 		return null;
 	}
 
-	private static byte[] DeriveKey(string material)
+	private static byte[] DeriveKey(string material, EncryptionOptions options)
 	{
 		// A value that decodes as base64 to exactly 32 bytes is the raw key (back-compat and
 		// the documented high-entropy path); everything else is a passphrase. A passphrase
 		// that happens to BE valid 32-byte base64 lands on the raw path — deterministic
 		// either way, since both interpretations yield a fixed key.
 		return TryDecodeRawKey(material)
-		       ?? Rfc2898DeriveBytes.Pbkdf2(material, DerivationSalt, DerivationIterations,
+		       ?? Rfc2898DeriveBytes.Pbkdf2(material, ResolveSalt(options), DerivationIterations,
 			       HashAlgorithmName.SHA256, KeySize);
+	}
+
+	/// <summary>
+	///   The PBKDF2 salt for passphrase stretching. K45: when an operator supplies
+	///   <see cref="EncryptionOptions.KeyDerivationSalt" />, the salt is deployment-specific
+	///   (bound under a fixed context so even a short operator value yields a full-width salt), so
+	///   one precomputed table does not cover every deployment. Unset keeps the historical fixed
+	///   application salt for back-compat. Deterministic either way — nothing is stored.
+	/// </summary>
+	private static byte[] ResolveSalt(EncryptionOptions options)
+	{
+		if (string.IsNullOrWhiteSpace(options.KeyDerivationSalt))
+			return DerivationSalt;
+		return SHA256.HashData(
+			Encoding.UTF8.GetBytes("ActiveSync.Encryption.KeyDerivation.v1:" + options.KeyDerivationSalt.Trim()));
 	}
 
 	private static byte[]? TryDecodeRawKey(string material)

@@ -82,6 +82,37 @@ public class EncryptionKeyLoaderTests
 	}
 
 	[Fact]
+	public void KeyDerivationSalt_ProducesDeploymentSpecificKeys()
+	{
+		// K45: a per-deployment PBKDF2 salt, so one precomputed rainbow table cannot cover every
+		// deployment. The same passphrase under two different salts must yield different keys, while
+		// the unset case stays back-compatible and deterministic.
+		byte[]? a = EncryptionKeyLoader.TryLoadKey(
+			new EncryptionOptions { Key = "shared passphrase", KeyDerivationSalt = "deployment-a" }, out _);
+		byte[]? b = EncryptionKeyLoader.TryLoadKey(
+			new EncryptionOptions { Key = "shared passphrase", KeyDerivationSalt = "deployment-b" }, out _);
+		byte[]? none = EncryptionKeyLoader.TryLoadKey(
+			new EncryptionOptions { Key = "shared passphrase" }, out _);
+
+		Assert.NotEqual(a, b);
+		Assert.NotEqual(a, none);
+		Assert.NotEqual(b, none);
+		// Deterministic within a deployment: same passphrase + same salt = same key.
+		Assert.Equal(a, EncryptionKeyLoader.TryLoadKey(
+			new EncryptionOptions { Key = "shared passphrase", KeyDerivationSalt = "deployment-a" }, out _));
+	}
+
+	[Fact]
+	public void KeyDerivationSalt_IgnoredForRawBase64Key()
+	{
+		// The raw 32-byte key path skips PBKDF2 entirely, so the salt cannot change it.
+		Assert.Equal(
+			Load(RawKeyBase64, out _),
+			EncryptionKeyLoader.TryLoadKey(
+				new EncryptionOptions { Key = RawKeyBase64, KeyDerivationSalt = "whatever" }, out _));
+	}
+
+	[Fact]
 	public void PassphraseAndRawKey_YieldDifferentKeys()
 	{
 		// The derived key never accidentally equals raw-key material.
