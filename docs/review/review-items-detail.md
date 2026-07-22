@@ -78,7 +78,7 @@ A32. **[Nit]** `CancellationToken` not last on four public methods — `SyncStat
 
 A33. **[Nit]** `SyncStateService` unsealed, mixes six responsibilities — `SyncStateService.cs:53`. 535 lines: device partnerships, folder registry, hierarchy diffing, sync keys, DAV href map, policy/wipe, OOF. Banner comments at 115/199/273/415 mark the seams. FIX: seal; split into `DeviceStore`, `FolderRegistry`, `CollectionStateStore`, `DavItemMap`.
 
-A34. **[Nit]** `PeekSyncKeyAsync` duplicates snapshot deserialization — `SyncStateService.cs:349-351` vs `355-358`. FIX: shared `ReadSnapshotJson(string?)`.
+A34. **[Nit]** `PeekSyncKeyAsync` duplicates snapshot deserialization — `SyncStateService.cs:349-351` vs `355-358`. FIX: shared `ReadSnapshotJson(string?)`. — N/A: A4 replaced the two inline `JsonSerializer.Deserialize` sites with the single `SnapshotCodec.Decompress(byte[]?)` reader (Current via `ReadSnapshot`, Replay directly), which IS the shared reader this asked for; no separate string helper is meaningful once the columns are `byte[]`.
 
 A35. **[Nit]** Soft-deleted folders + dependent state never reclaimed — `SyncStateService.cs:165-167`, `Entities.cs:72`. `UserFolder.Deleted=true` but no path removes the row, cascaded `DavItems`, or per-device `CollectionState`. Tables only grow. FIX: retention sweep alongside the `LogEntry` one; needs a `DeletedUtc` column.
 
