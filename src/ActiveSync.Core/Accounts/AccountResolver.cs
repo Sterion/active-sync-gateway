@@ -353,14 +353,19 @@ public sealed class AccountResolver
 				continue;
 			}
 
-			if (global is null && user.Provider is null && role == BackendRole.Oof)
+			// B17: the global Provider is trimmed at load; normalize the per-user override the same
+			// way so " imap" (or "") doesn't fail the inheritance equality check, drop the inherited
+			// settings, and then throw an unrelated "unknown provider" from registry.GetFor.
+			string? overrideProvider = string.IsNullOrWhiteSpace(user.Provider) ? null : user.Provider.Trim();
+
+			if (global is null && overrideProvider is null && role == BackendRole.Oof)
 			{
 				failures.Add($"ActiveSync:Users:{login}:Backends:Oof: no global Oof role is configured — " +
 				             "set Provider (e.g. \"sieve\") to enable it for this user.");
 				continue;
 			}
 
-			string providerName = user.Provider ?? global?.ProviderName ?? "local";
+			string providerName = overrideProvider ?? global?.ProviderName ?? "local";
 			// Settings inherit the global section ONLY when the provider is unchanged — a
 			// switched provider's keys mean something else entirely.
 			bool inheritGlobal = global is not null &&

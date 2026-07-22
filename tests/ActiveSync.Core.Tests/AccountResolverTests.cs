@@ -443,6 +443,29 @@ public class AccountResolverTests
 	}
 
 	[Fact]
+	public void ProviderOverride_IsTrimmed_BeforeLookupAndInheritance()
+	{
+		// B17: the global Provider is trimmed but the per-user override was used raw. " imap"
+		// failed the equality check → inheritGlobal false → the role dropped the inherited
+		// host/port/TLS, and registry.GetFor(" imap") threw an unrelated "unknown provider".
+		ActiveSyncOptions options = HostOptions();
+		AccountOptions entry = new()
+		{
+			Backends = new Dictionary<string, BackendRoleOverride>
+				{ ["MailStore"] = new() { Provider = " imap" } },
+		};
+
+		List<string> failures = AccountResolver.ValidateEntry(options, Roles(BaseConfig()), Registry(), "u", entry);
+		Assert.Empty(failures); // trimmed → known provider AND inherits the global host
+
+		options.Users = new Dictionary<string, AccountOptions> { ["u"] = entry };
+		ResolvedRole mailStore = Resolver(options, BaseConfig())
+			.Resolve(new BackendCredentials("u", "P")).Roles[BackendRole.MailStore];
+		Assert.Equal("imap", mailStore.ProviderName);
+		Assert.Equal("imap.global", mailStore.Settings.Bind<ImapOptions>().Host); // inherited, not dropped
+	}
+
+	[Fact]
 	public void ValidateUsers_MalformedGatewayPasswordHash_IsReported()
 	{
 		ActiveSyncOptions options = HostOptions();
