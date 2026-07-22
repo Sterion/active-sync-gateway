@@ -1,6 +1,7 @@
 using System.Security.Cryptography.X509Certificates;
 using ActiveSync.Backends.Local;
 using ActiveSync.Core.Accounts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
@@ -131,6 +132,7 @@ public partial class Program
 		builder.Services.AddScoped<FolderService>();
 		builder.Services.AddSingleton<AccountStore>();
 		builder.Services.AddSingleton<AccountResolver>();
+		builder.Services.AddAdministrationServices();
 		builder.Services.AddSingleton<PassThroughProvisioner>();
 		builder.Services.AddSingleton<GlobalSettingStore>();
 		builder.Services.AddSingleton(settingsSource.Provider);

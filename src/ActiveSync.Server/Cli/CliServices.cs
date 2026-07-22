@@ -55,6 +55,7 @@ internal static class CliServices
 		}
 
 		services.AddSingleton<ActiveSync.Core.Accounts.AccountStore>();
+		ActiveSync.Core.Administration.AdministrationServiceCollectionExtensions.AddAdministrationServices(services);
 		ServiceProvider provider = services.BuildServiceProvider();
 
 		// `eas user` writes are validated with the exact rules serve applies at startup —
@@ -115,6 +116,7 @@ internal static class CliServices
 		services.AddOptions<ActiveSyncOptions>().Bind(config.GetSection("ActiveSync"));
 		services.AddSyncDatabase(PostgresConnectionUri.EffectiveProvider(database));
 		services.AddSingleton<GlobalSettingStore>();
+		ActiveSync.Core.Administration.AdministrationServiceCollectionExtensions.AddAdministrationServices(services);
 		// The providers come along so `eas config set ActiveSync:Backends:...` is checked against
 		// the shape the provider actually reads. Registration is lazy: nothing here resolves
 		// BackendRolesProvider, which parses the config and would refuse to build on exactly the

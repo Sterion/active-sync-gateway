@@ -4,6 +4,7 @@ using System.Text.Json;
 using ActiveSync.Backends.Dav;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Accounts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
@@ -97,6 +98,7 @@ internal sealed class WebUiHost : IAsyncDisposable
 		builder.Services.AddSingleton<IOptionsMonitor<ActiveSyncOptions>>(new StaticOptionsMonitor(options));
 		builder.Services.AddSingleton<ISyncDbContextFactory>(factory);
 		builder.Services.AddSingleton(new AccountStore(factory));
+		builder.Services.AddAdministrationServices();
 		builder.Services.AddSingleton(registry);
 		builder.Services.AddSingleton(rolesProvider);
 		builder.Services.AddSingleton(rolesProvider.Current);
