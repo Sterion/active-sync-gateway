@@ -106,16 +106,19 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	// Re-stamp the concurrency token on every insert/update so a lost update (two writers
 	// off the same snapshot) turns into a DbUpdateConcurrencyException instead of silently
 	// overwriting — the token EF compares in the UPDATE's WHERE is the value originally read.
-	public override int SaveChanges()
+	// Overridden on the two-argument forms: those are EF's real interception point, through
+	// which the parameterless overloads and every execution-strategy retry funnel, so stamping
+	// here can never be bypassed (A5).
+	public override int SaveChanges(bool acceptAllChangesOnSuccess)
 	{
 		StampConcurrencyTokens();
-		return base.SaveChanges();
+		return base.SaveChanges(acceptAllChangesOnSuccess);
 	}
 
-	public override Task<int> SaveChangesAsync(CancellationToken ct = default)
+	public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken ct = default)
 	{
 		StampConcurrencyTokens();
-		return base.SaveChangesAsync(ct);
+		return base.SaveChangesAsync(acceptAllChangesOnSuccess, ct);
 	}
 
 	private void StampConcurrencyTokens()

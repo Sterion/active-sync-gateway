@@ -127,6 +127,22 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task SaveChangesAsync_TwoArgOverload_StampsConcurrencyToken()
+	{
+		// EF's real interception point is SaveChangesAsync(bool, ct) — an execution-strategy retry
+		// or any caller using it bypassed stamping when only the 0/1-arg forms were overridden,
+		// writing a CollectionState without a fresh token and defeating lost-update detection (A5).
+		Device device = await _service.GetOrCreateDeviceAsync("u@a5", "DEV1", "Phone", CancellationToken.None);
+		(_, CollectionState state) = await _service.ValidateSyncKeyAsync(device, "1", "0", CancellationToken.None);
+		Guid before = state.ConcurrencyToken;
+
+		state.SnapshotJson = "{\"x\":\"1\"}";
+		await _db.SaveChangesAsync(acceptAllChangesOnSuccess: true, CancellationToken.None);
+
+		Assert.NotEqual(before, state.ConcurrencyToken);
+	}
+
+	[Fact]
 	public async Task FolderRegistry_AssignsStableServerIds_AndSoftDeletes()
 	{
 		List<BackendFolder> folders = new()
