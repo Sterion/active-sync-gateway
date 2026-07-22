@@ -1629,3 +1629,37 @@ it: **B7's request-thread O(N²) symptom is only partially mitigated; the real f
 - **B28 (red-first):** `OrderedRoles` memoized in a lazy backing field; verified no `with`-mutation of
   `ResolvedAccount` exists that would carry a stale cache.
 - New finding `B33` (High) filed. Landed on `main`, no branch/push.
+
+## Item 38 — Incremental sync [LIVE]
+
+**Findings:** `H8` `H9` `H11` `H16` — design item, few edits.
+**Commits:** `06e2f49` (H9) · `04a4f8b` (H8) · `ffa2ae0` (H11) · `b1ae2ae` (H16, AGENTS.md decision)
+
+**Verification (orchestrator-run):** integrity 56/15/365/365/0 ✓ · item 38 struck COMPLETE ✓ · IDs in
+every subject ✓ · build 0 warnings ✓ · unit suite Protocol 78/78, Core 626/628, WebUi 71/71, Server
+241/243, 0 skipped (+6 tests) · **integration 141 passed, 0 skipped** (full suite, own run, fresh
+clean-volume Stalwart) ✓ · same 4 pre-existing environmental unit failures, unchanged.
+
+**Cursor note:** item 38 is COMPLETE, but **item 36 remains the lowest open item** (D3/D14/D32/H13
+unstruck), so a naive resume lands on 36, not 39 — expected, given item 36 was deliberately left partial.
+
+**Notes (worker-flagged / orchestrator-checked):**
+- **H8 (red-first) — correctness win, and it does NOT repeat the D32 hazard.** JMAP mail listing now pages
+  at `min(500, maxObjectsInGet)`, advances by the server's reported position, and stops only on an empty
+  page/reported total (was: hardcoded 500, broke the loop on `returned < page` → silent truncation, and
+  threw `requestTooLarge` on a low-cap server). This pages through the **complete** set in server-legal
+  batches — the opposite of D32's dangerous newest-N cap; the revision map stays complete.
+- **H9 (red-first):** `JmapClient.ParseSession` now keeps a typed `JmapCoreLimits`; stores call
+  `RequireCapability` and throw a named `BackendException` when a required URN is absent, instead of sending
+  `using:[…]` blindly for an opaque 400. Directly enables H8. (`JmapSessionResource` gained a `CoreLimits`
+  member — host-internal, no contract change.)
+- **H11 (coverage):** `Eas:DavPollSeconds` is now threaded through `PollCtagsAsync`/`DavStoreBase` (both DAV
+  providers gained `IOptionsMonitor` + `pollSeconds` ctor params — host-internal). Coverage, not red-first,
+  because the interval was never passed before (no pre-existing path to observe red); a poll-cadence test
+  pins detection at the configured interval. Default 60 s → default behaviour unchanged.
+- **H16 (design decision, N/A red-first):** written into `AGENTS.md § Sync model` — full enumeration + diff
+  is the deliberate correctness-first posture; incremental `/changes`/`sync-collection` deferred to a future
+  `ContractVersion` as an OPTIONAL plugin-contract capability (item-17 surface), **with an explicit guard
+  that a store must never return partial revision maps** (the exact D32 failure mode). Sound and
+  architecture-consistent; no contradiction. Reasonable to record the decision rather than re-open a settled
+  contract without a version plan. No new findings filed. Landed on `main`, no branch/push.
