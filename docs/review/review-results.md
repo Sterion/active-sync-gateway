@@ -1271,16 +1271,57 @@ a restart; ran it to check the DI-graph + /readyz reshape + metric renames survi
 
 ---
 
-## Next: item 30 — Timezone & date handling [LIVE] (Phase 4 — Correctness)
+## Item 30 — Timezone & date handling [LIVE]
+**Findings:** `W15` `W16` `D5` `D24` `D12` `D33` `H30`
+**Commits:** `5f7eeac` (W15) · `4986b3a` (W16) · `280dea8` (D5) · `e644509` (D24) · `dcb24df` (D12) · `7151d9b` (D33) ·
+`5e7bc19` (H30)
+**Verification:** integrity items=56 live=15 assigned=365 unique=365 dupes=0 encoding=0 ✓ · cursor → item 31 ✓ ·
+one commit per finding, ID in subject, committed to `main` (no branch — the new no-branch rule held) ✓ · build clean
+0 warnings ✓ · unit **Protocol 78 · WebUi 71 · Core 600 · Server 174 = 923 / 0 skipped** ✓ · **integration 141 / 0
+skipped** (full suite, fresh clean-volume backend) ✓
+**Notes:**
+- **Verified on a Copenhagen (+01/+02) host — the RIGHT environment for this item.** Every timezone finding
+  (W15/H30/D5/D12) is about a non-UTC machine offset that is *invisible in UTC CI*; the worker's red observations were
+  concrete (`07:00Z` vs the correct `09:00Z`), so the reproducers genuinely exercised the offset rather than passing
+  trivially. **Complementary watch for PR CI (which runs in UTC):** a correctly kind-aware fix must produce
+  host-independent results, so these tests should ALSO pass on UTC — if any test hardcoded the +02:00 offset it would
+  fail on CI. That failure direction is loud (not a silent false-green), so CI is the safe cross-check; flagging it so
+  a red date-test on CI is read as "test is host-coupled," not "fix regressed."
+- **BREAKING (W16):** `EasDateTime.Parse` now throws `WbxmlException` (not `FormatException`) and no longer accepts
+  loose culture-dependent forms like `"3/4/2026"` — exact MS-ASDTYPE formats only (added the no-`Z` basic form). A
+  malformed client date that used to surface as **HTTP 500 now surfaces as 400** (Parse) or is skipped (TryParse
+  sites). Two `catch (FormatException)` callers migrated (`ParseFreeBusy`, `SyncHandler.ClientCommands` — the latter
+  keeps its Status 6 via `TryParse`). **Judgment call:** reused `WbxmlException` (already caught → 400 in
+  `EasEndpoint`) rather than inventing a new exception+catch — matches the finding's stated intent.
+- **D24 / JSContact Birthday:** malformed *optional* client dates are now silently skipped (TryParse) at every
+  client-input site rather than failing the whole Sync. The worker included `JsContactConverter.Birthday` (not in
+  D24's enumerated list) for consistency, since W16 would otherwise make it throw — a reasonable in-scope extension.
+- **D12 scope (judgment call, per the finding's documented fallback):** an EAS update now **preserves** a stored
+  non-UTC `TZID` instead of rewriting it to UTC, but the full "recover an IANA/Windows zone from the bias-only
+  TimeZone blob" is **deferred** (the finding offers this as the out-of-scope alternative). Fresh events still store
+  UTC — the documented limitation, annotated on the queue line.
+- **Coverage-not-proof, correctly labelled:** `D33` (null-start `TakeWhile` guard — Ical.Net resolves floating times
+  via the system zone, so the null trigger isn't deterministically reproducible; struck on the fix). Annotated on the
+  queue line too. `H30` made `CalDavStore.BuildEventFilter` `internal` as a test seam (Dav already exposes internals
+  to Core.Tests).
+- **Worker judgment NOT to file a new finding — flagged for a human to revisit.** The W15 fix resolves the wire
+  corruption at the formatter seam (`AsUtc`), but the worker's incidental audit found **~15 `*Utc` columns in
+  `Entities.cs` with no EF UTC value-converter** (SQLite returns `Unspecified` on read). It judged this
+  defense-in-depth (the actual corruption is fixed) and did **not** file it as a new finding. Defensible, but it is a
+  latent gap a future reader would not see from the diff — worth a human deciding whether it deserves its own finding.
 
-Cursor is at **item 30** (`W15` `W16` `D5` `D12` `D24` `D33` `H30`). [LIVE] — restart clean-volume in parallel, run
-the **full** integration suite. `W15` `EasDateTime` shifts `DateTimeKind.Unspecified` by the machine offset (invisible
-in UTC CI, wrong in production); `D12` recurring events drift an hour across DST — these are exactly the class where
-UTC-CI unit tests pass and a real timezone round-trip through the backend is the only proof. **CI runs in UTC**, so
-watch that any date test asserting a non-UTC shift actually exercises a non-UTC zone rather than silently passing.
+---
 
-Current green baseline: **integration 141 / 0 skipped** (fresh container), unit **Protocol 63 · WebUi 71 · Core 588 ·
-Server 174** = 896.
+## Next: item 31 — Hosting & startup correctness (Phase 4 — Correctness)
+
+Cursor is at **item 31** (`E1` `E12` `E13` `E17` `E19` `E20` `E22` `E25`). **Last item of this batch and of Phase 4**
+— hand off to a fresh orchestrator after it (Phase 5 begins at item 32). Not marked [LIVE], but `E1` is about request
+bodies dropped on **HTTP/2** and `E12` is `KeepAliveTimeout` behaviour — both alter Kestrel/hosting config, exactly
+the pipeline class the "marked list is a floor" rule says to run live. **Judge from the worker's report and run the
+full integration suite if the HTTP pipeline/hosting is meaningfully changed.**
+
+Current green baseline: **integration 141 / 0 skipped** (fresh container), unit **Protocol 78 · WebUi 71 · Core 600 ·
+Server 174** = 923.
 
 **Standing lessons that carried this run (items 13–14):**
 - **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/contract
