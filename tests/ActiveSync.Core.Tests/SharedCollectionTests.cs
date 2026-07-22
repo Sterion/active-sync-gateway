@@ -36,4 +36,40 @@ public class SharedCollectionTests
 	{
 		Assert.NotNull(SharedCollection.Validate(entry, "https://dav.example.com"));
 	}
+
+	// K62: Parse is the RUNTIME path (CalDavBackendProvider parses configured SharedCollections
+	// with it). It used to fail OPEN — any mode suffix that was not "ro" produced a read-WRITE
+	// grant, so a typo like "|read-only" or "|r" silently handed a shared collection full write
+	// access. A present-but-unrecognized suffix must fail CLOSED (read-only): read-write is only
+	// ever granted by an explicit "|rw" or by no suffix at all (a plain href is the owner's own).
+	[Theory]
+	[InlineData("/cal/team/|banana")]
+	[InlineData("/cal/team/|r")]
+	[InlineData("/cal/team/|read-only")]
+	[InlineData("/cal/team/|")]
+	public void Parse_UnknownModeSuffix_FailsClosedAsReadOnly(string entry)
+	{
+		Assert.True(SharedCollection.Parse(entry).ReadOnly);
+	}
+
+	// K64: the cross-host guard used `if (Uri.TryCreate(baseUrl, ...) && hostsDiffer)`, so an
+	// UNPARSEABLE BaseUrl made the whole condition false and an absolute href to an attacker host
+	// validated. A malformed BaseUrl must fail CLOSED — an absolute URL cannot be admitted when
+	// there is no base host to compare it against.
+	[Theory]
+	[InlineData("https://evil.example.com/cal/", "not-a-url")]
+	[InlineData("https://evil.example.com/cal/", "")]
+	[InlineData("https://evil.example.com/cal/", "dav.example.com")] // no scheme → not absolute
+	public void Validate_AbsoluteUrl_WithUnparseableBaseUrl_IsRejected(string entry, string baseUrl)
+	{
+		Assert.NotNull(SharedCollection.Validate(entry, baseUrl));
+	}
+
+	// K64 guard: a same-host absolute URL against a parseable BaseUrl must still validate — the
+	// fail-closed change must not reject the legitimate case.
+	[Fact]
+	public void Validate_AbsoluteSameHostUrl_WithParseableBaseUrl_IsAccepted()
+	{
+		Assert.Null(SharedCollection.Validate("https://dav.example.com/cal/", "https://dav.example.com/dav/"));
+	}
 }

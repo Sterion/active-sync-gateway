@@ -14,8 +14,13 @@ public sealed record SharedCollection(string Href, bool ReadOnly)
 		if (separator < 0)
 			return new SharedCollection(entry.Trim(), false);
 		string mode = entry[(separator + 1)..].Trim();
-		return new SharedCollection(entry[..separator].Trim(),
-			mode.Equals("ro", StringComparison.OrdinalIgnoreCase));
+		// K62: fail CLOSED. A present-but-unrecognized suffix ("|banana", "|r", a typo) is treated
+		// as read-only, not read-write — the safe default for a shared collection. Read-write is
+		// granted only by an explicit "|rw" (or by no suffix at all, a plain href being the user's
+		// own collection). Validate() separately reports the typo; Parse() must never widen access
+		// because of one.
+		bool readOnly = !mode.Equals("rw", StringComparison.OrdinalIgnoreCase);
+		return new SharedCollection(entry[..separator].Trim(), readOnly);
 	}
 
 	/// <summary>Returns a failure message for an unusable entry, null when valid.</summary>
@@ -36,8 +41,13 @@ public sealed record SharedCollection(string Href, bool ReadOnly)
 		if (!Uri.TryCreate(parsed.Href, UriKind.Absolute, out Uri? uri) ||
 		    (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
 			return $"'{entry}' must be an absolute path (\"/cal/team/\") or an http(s) URL.";
-		if (Uri.TryCreate(baseUrl, UriKind.Absolute, out Uri? baseUri) &&
-		    !string.Equals(uri.Host, baseUri.Host, StringComparison.OrdinalIgnoreCase))
+		// K64: an absolute URL must be proven same-host. If the BaseUrl cannot be parsed there is
+		// no host to compare against, so fail CLOSED — otherwise the old `TryCreate(baseUrl) && ...`
+		// short-circuited to "valid" and an absolute href to an attacker host was admitted.
+		if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out Uri? baseUri))
+			return $"'{entry}' is an absolute URL, but the DAV BaseUrl '{baseUrl}' could not be parsed " +
+			       "to verify it targets the same host; use an absolute path (\"/cal/team/\") instead.";
+		if (!string.Equals(uri.Host, baseUri.Host, StringComparison.OrdinalIgnoreCase))
 			return $"'{entry}' points at host '{uri.Host}', but the DAV BaseUrl host is '{baseUri.Host}'.";
 		return null;
 	}
