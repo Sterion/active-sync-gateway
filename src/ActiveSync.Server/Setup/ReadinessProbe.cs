@@ -26,15 +26,25 @@ public sealed class ReadinessProbe(
 	private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(10);
 	private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
 	private readonly SemaphoreSlim _gate = new(1, 1);
-	private (DateTime AtUtc, Dictionary<string, bool> Components)? _cached;
+	// Published via Volatile so the lock-free fast path below reads a consistent reference; the
+	// Components dictionary is never mutated after publish, so sharing it is safe.
+	private CacheEntry? _cached;
+
+	private sealed record CacheEntry(DateTime AtUtc, Dictionary<string, bool> Components);
 
 	public async Task<(bool Ready, Dictionary<string, bool> Components)> CheckAsync(CancellationToken ct)
 	{
+		// E16: serve a warm cache without touching the gate, so concurrent probes (an orchestrator
+		// scraping /readyz, k8s liveness) are not serialized behind a single semaphore for a value
+		// that is already computed. The gate is taken only to run — and single-flight — a refresh.
+		if (TryReadFresh() is { } fast)
+			return fast;
+
 		await _gate.WaitAsync(ct);
 		try
 		{
-			if (_cached is { } cached && DateTime.UtcNow - cached.AtUtc < CacheTtl)
-				return (IsReady(cached.Components), cached.Components);
+			if (TryReadFresh() is { } cached)
+				return cached; // another caller refreshed while we waited
 
 			List<(string Name, Task<bool> Probe)> probes = [("database", ProbeDatabaseAsync(ct))];
 			foreach ((BackendRole role, RoleAssignment assignment) in rolesProvider.Current.Assignments.OrderBy(a => a.Key))
@@ -49,13 +59,21 @@ public sealed class ReadinessProbe(
 			foreach ((string name, Task<bool> probe) in probes)
 				components[name] = await probe;
 
-			_cached = (DateTime.UtcNow, components);
+			Volatile.Write(ref _cached, new CacheEntry(DateTime.UtcNow, components));
 			return (IsReady(components), components);
 		}
 		finally
 		{
 			_gate.Release();
 		}
+	}
+
+	private (bool Ready, Dictionary<string, bool> Components)? TryReadFresh()
+	{
+		CacheEntry? snapshot = Volatile.Read(ref _cached);
+		if (snapshot is { } cached && DateTime.UtcNow - cached.AtUtc < CacheTtl)
+			return (IsReady(cached.Components), cached.Components);
+		return null;
 	}
 
 	private const string ConfiguredComponent = "configured";

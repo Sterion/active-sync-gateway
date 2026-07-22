@@ -4,6 +4,7 @@ using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using Microsoft.Extensions.Options;
 using Serilog.Core;
+using Serilog.Debugging;
 using Serilog.Events;
 
 namespace ActiveSync.Server.Setup;
@@ -30,11 +31,18 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 	private ISyncDbContextFactory? _contextFactory;
 	private IOptionsMonitor<ActiveSyncOptions>? _options;
 	private Task? _drain;
+	private int _drainErrors;
 
 	public void Emit(LogEvent logEvent)
 	{
 		// Hard floor: Trace/Debug (and the EAS wire dumps) are never persisted.
 		if (logEvent.Level < LogEventLevel.Information)
+			return;
+		// E10: honor Log:Database at Emit once options are available. The drain re-checks it too
+		// (it may flip between enqueue and write), but checking here avoids rendering the message
+		// and allocating a LogEntry for an event that will only be discarded. Before Activate the
+		// options are unknown, so buffer — the drain applies the live switch when it starts.
+		if (_options is { } options && !options.CurrentValue.Log.Database)
 			return;
 		LogEntry entry = new()
 		{
@@ -72,35 +80,57 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 
 	private async Task DrainAsync()
 	{
-		List<LogEntry> batch = new(BatchSize);
-		while (await _channel.Reader.WaitToReadAsync().ConfigureAwait(false))
+		try
 		{
-			batch.Clear();
-			while (batch.Count < BatchSize && _channel.Reader.TryRead(out LogEntry? entry))
-				batch.Add(entry);
+			List<LogEntry> batch = new(BatchSize);
+			while (await _channel.Reader.WaitToReadAsync().ConfigureAwait(false))
+			{
+				batch.Clear();
+				while (batch.Count < BatchSize && _channel.Reader.TryRead(out LogEntry? entry))
+					batch.Add(entry);
 
-			ActiveSyncOptions options = _options!.CurrentValue;
-			if (!options.Log.Database)
-				continue; // persistence disabled live — discard the batch
-			int min = Rank(options.Log.DbMinimumLevel);
-			List<LogEntry> keep = batch.Where(e => Rank(e.Level) >= min).ToList();
-			if (keep.Count == 0)
-				continue;
-			try
-			{
-				await using SyncDbContext db = _contextFactory!.CreateDbContext();
-				// AddRange is synchronous and local (no I/O); AddRangeAsync exists only for async
-				// value generators, which this project doesn't use.
+				ActiveSyncOptions options = _options!.CurrentValue;
+				if (!options.Log.Database)
+					continue; // persistence disabled live — discard the batch
+				int min = Rank(options.Log.DbMinimumLevel);
+				List<LogEntry> keep = batch.Where(e => Rank(e.Level) >= min).ToList();
+				if (keep.Count == 0)
+					continue;
+				try
+				{
+					await using SyncDbContext db = _contextFactory!.CreateDbContext();
+					// AddRange is synchronous and local (no I/O); AddRangeAsync exists only for async
+					// value generators, which this project doesn't use.
 #pragma warning disable VSTHRD103
-				db.LogEntries.AddRange(keep);
+					db.LogEntries.AddRange(keep);
 #pragma warning restore VSTHRD103
-				await db.SaveChangesAsync().ConfigureAwait(false);
+					await db.SaveChangesAsync().ConfigureAwait(false);
+				}
+				catch (Exception ex)
+				{
+					// E9: a transient database hiccup (or the table not yet present on a very early
+					// write) must never crash the drain — drop the batch and keep going. But it must
+					// not be swallowed silently either: a persistent outage would otherwise disable DB
+					// logging for the process lifetime with no trace. The sink IS the logging pipeline,
+					// so route to SelfLog rather than risk recursing back into ourselves. Log the first
+					// occurrence and every 100th after, so a sustained failure leaves a trail without
+					// flooding.
+					int n = Interlocked.Increment(ref _drainErrors);
+					if (n == 1 || n % 100 == 0)
+						SelfLog.WriteLine(
+							"DatabaseLogSink: batch write failed (occurrence {0}); dropping {1} event(s): {2}",
+							n, keep.Count, ex);
+				}
 			}
-			catch
-			{
-				// A transient database hiccup (or the table not yet present on a very early write)
-				// must never crash the drain — drop the batch and keep going.
-			}
+		}
+		catch (Exception ex)
+		{
+			// E9: WaitToReadAsync (or anything outside the per-batch guard) faulted — the drain is
+			// exiting and database logging is now dead for the process lifetime. This is exactly the
+			// loss-of-the-diagnostic-channel failure, so it must be announced where the logger itself
+			// is suspect.
+			SelfLog.WriteLine(
+				"DatabaseLogSink: drain terminated unexpectedly; database logging is now disabled: {0}", ex);
 		}
 	}
 

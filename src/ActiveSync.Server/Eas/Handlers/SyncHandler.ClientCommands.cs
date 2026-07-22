@@ -175,7 +175,7 @@ public sealed partial class SyncHandler
 				// Meetings: the pre-change ICS feeds the invitation diff (what changed, who
 				// was removed) — captured only for the calendar class.
 				string? previousIcs = IsCalendarClass(store)
-					? await MeetingInvitationService.CaptureIcsAsync(store, folder.BackendKey, itemKey, ct)
+					? await MeetingInvitationService.CaptureIcsAsync(store, folder.BackendKey, itemKey, logger, ct)
 					: null;
 				string revision = await store.UpdateItemAsync(folder.BackendKey, itemKey, appData, ct);
 				snapshot[itemKey] = revision;
@@ -247,7 +247,7 @@ public sealed partial class SyncHandler
 
 					// Meetings: the ICS must be read BEFORE the delete for the CANCEL mail.
 					string? deletedIcs = IsCalendarClass(store)
-						? await MeetingInvitationService.CaptureIcsAsync(store, folder.BackendKey, itemKey, ct)
+						? await MeetingInvitationService.CaptureIcsAsync(store, folder.BackendKey, itemKey, logger, ct)
 						: null;
 					await store.DeleteItemAsync(folder.BackendKey, itemKey, !deletesAsMoves, ct);
 					snapshot.Remove(itemKey);

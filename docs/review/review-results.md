@@ -1235,16 +1235,52 @@ Server 166 = 878 / 0 skipped** ✓ · **integration 141 / 0 skipped** (full suit
 
 ---
 
-## Next: item 29 — Silent failure & diagnostics (Phase 4 — Correctness)
+## Item 29 — Silent failure & diagnostics
+**Findings:** `E9` `E10` `E11` `E16` `E24` `E34` `C11` `K2` `K3` `K4` `K5` `H12`
+**Commits:** `fa7ae3b` (E9+E10) · `b35af88` (E11) · `476d3ea` (E16) · `e2a2dea` (E34+E24) · `381c0d1` (C11) ·
+`6e5a13a` (K2+K3+K4+K5, GatewayMetrics cluster) · `253a380` (H12)
+**Verification:** integrity items=56 live=15 assigned=365 unique=365 dupes=0 encoding=0 ✓ · cursor → item 30 ✓ ·
+each finding ID in a fix-commit subject, strikethroughs marked per-finding (house pattern — no separate marking
+commit, unlike item 28) ✓ · build clean 0 warnings ✓ · unit **Protocol 63 · WebUi 71 · Core 588 · Server 174 =
+896 / 0 skipped** ✓ · **integration 141 / 0 skipped** (full suite, warm backend — a green live run is trusted without
+a restart; ran it to check the DI-graph + /readyz reshape + metric renames survive) ✓
+**Notes:**
+- **Ran the full integration suite despite the item not being [LIVE]** — it lands DI-registered ctor signature
+  changes (`SettingsRefreshService` +monitor/logger, `MeetingInvitationService.CaptureIcsAsync` +logger,
+  `DbXmlRepository` +logger — registration updated), reshapes `/readyz`, and rewires metric emission in `EndpointAuth`;
+  a moved ctor breaks the DI graph at runtime in ways manual-construction unit tests miss. All green.
+- **BREAKING — metrics (K4):** every Prometheus instrument name now carries the `activesync_` prefix; dashboards keyed
+  on bare names must update. The duration histogram gained a `status` tag. Integration's `Contains("eas_requests")`
+  still matches as a substring, and the AGENTS.md metrics note was updated to match. **Taken deliberately** under the
+  standing "breaking changes acceptable" rather than fixing only the `status` tag — the finding names the
+  un-namespaced instrument names.
+- **BREAKING — API (K5):** `RecordThrottleRejection()` → `RecordThrottleRejection(string source)` (both EAS callers
+  updated). New `activesync_auth_outcomes` counter (success/failure/throttled/error, wired into `EndpointAuth`) and
+  `activesync_tls_certificate_expiry_seconds` gauge (fed from the serving cert in ProgramServer). Additive emissions
+  only — no auth *verdict* change.
+- **Behaviour (E16):** `/readyz` returns the `components` map only to loopback/local callers; remote anonymous callers
+  get bare `{status}` + the HTTP code. **Judgment call:** gated on loopback rather than removing `components` entirely
+  or moving them to a separate listener — preserves the AGENTS-documented operator detail for local/k8s/TestServer
+  callers (null `RemoteIpAddress` treated as local, so the integration `"database":true` assertions still hold) while
+  hiding topology from remote anonymous callers. A blanket "always bare status" was the alternative.
+- **Coverage-not-proof, correctly labelled:** E24 (`DiffRecipients` O(n²)→O(n), behaviour-preserving), E16 semaphore
+  fast-path (concurrency), K4 namespace assertion, K5 auth-outcome + cert-expiry gauge (additive). K3 is a volatile
+  memory-model fix, N/A-for-red (struck on the fix, indirectly covered by observer/gauge tests).
+- **Incidental (C11):** fixed a latent definite-assignment bug (`error` unassigned when the `key is null` short-circuit
+  fires) surfaced while referencing the unseal error in the new log. In scope — same code path.
 
-Cursor is at **item 29** (`E9` `E10` `E11` `E16` `E24` `E34` `C11` `K2` `K3` `K4` `K5` `H12`). Not marked [LIVE].
-Mostly diagnostics/logging policy (log first + every Nth), but `H12` touches JMAP and the E-findings sit in the
-server pipeline — **judge from the worker's report whether the request pipeline is meaningfully changed and run the
-full integration suite if so** (the "marked list is a floor" rule). Backend is warm from item 28 if a live check is
-warranted.
+---
 
-Current green baseline: **integration 141 / 0 skipped** (fresh container), unit **Protocol 63 · WebUi 70 · Core 579 ·
-Server 166** = 878.
+## Next: item 30 — Timezone & date handling [LIVE] (Phase 4 — Correctness)
+
+Cursor is at **item 30** (`W15` `W16` `D5` `D12` `D24` `D33` `H30`). [LIVE] — restart clean-volume in parallel, run
+the **full** integration suite. `W15` `EasDateTime` shifts `DateTimeKind.Unspecified` by the machine offset (invisible
+in UTC CI, wrong in production); `D12` recurring events drift an hour across DST — these are exactly the class where
+UTC-CI unit tests pass and a real timezone round-trip through the backend is the only proof. **CI runs in UTC**, so
+watch that any date test asserting a non-UTC shift actually exercises a non-UTC zone rather than silently passing.
+
+Current green baseline: **integration 141 / 0 skipped** (fresh container), unit **Protocol 63 · WebUi 71 · Core 588 ·
+Server 174** = 896.
 
 **Standing lessons that carried this run (items 13–14):**
 - **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/contract

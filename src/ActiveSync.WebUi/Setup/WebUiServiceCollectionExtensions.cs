@@ -93,7 +93,8 @@ public static class WebUiServiceCollectionExtensions
 			new ConfigureOptions<KeyManagementOptions>(management => management.XmlRepository =
 				new DbXmlRepository(
 					provider.GetRequiredService<ISyncDbContextFactory>(),
-					provider.GetRequiredService<IOptions<ActiveSyncOptions>>())));
+					provider.GetRequiredService<IOptions<ActiveSyncOptions>>(),
+					provider.GetRequiredService<ILogger<DbXmlRepository>>())));
 	}
 
 	/// <summary>

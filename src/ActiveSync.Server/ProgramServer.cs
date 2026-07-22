@@ -69,6 +69,10 @@ public partial class Program
 		ServerInitResult init = await InitializeAsync(app, options, databaseLogSink);
 		serverCertificate = init.Certificate;
 
+		// K5: feed the serving certificate's expiry to the TLS-expiry gauge (null when plaintext).
+		ActiveSync.Core.Observability.GatewayMetrics.SetCertificateExpiryObserver(
+			() => serverCertificate is { } cert ? new DateTimeOffset(cert.NotAfter.ToUniversalTime()) : null);
+
 		LogStartupBanner(app, options, init);
 
 		// Report the bound addresses and public endpoints once the server is listening.
@@ -100,12 +104,14 @@ public partial class Program
 
 		app.MapGet("/", () => Results.Text("ActiveSync gateway is running. EAS endpoint: /Microsoft-Server-ActiveSync"));
 		app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
-		app.MapGet("/readyz", async (ReadinessProbe probe, CancellationToken ct) =>
+		app.MapGet("/readyz", async (HttpContext http, ReadinessProbe probe, CancellationToken ct) =>
 		{
 			(bool ready, Dictionary<string, bool> components) = await probe.CheckAsync(ct);
-			return ready
-				? Results.Ok(new { status = "ready", components })
-				: Results.Json(new { status = "not ready", components }, statusCode: 503);
+			// E16: withhold the component topology from anonymous, non-local callers — the HTTP
+			// status is the readiness verdict; only a local caller (k8s node probe, operator) sees
+			// which backend roles are configured.
+			object body = ReadinessResponse.Body(ready, components, ReadinessResponse.IsLocal(http));
+			return ready ? Results.Ok(body) : Results.Json(body, statusCode: 503);
 		});
 		if (options.Metrics.Enabled)
 		{

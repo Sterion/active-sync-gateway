@@ -7,6 +7,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Serilog;
 using Serilog.Context;
 using Serilog.Core;
+using Serilog.Debugging;
+using Serilog.Events;
+using Serilog.Parsing;
 
 namespace ActiveSync.Server.Tests;
 
@@ -134,6 +137,79 @@ public sealed class DatabaseLogSinkTests : IDisposable
 		await service.StopAsync(CancellationToken.None);
 		Assert.Single(rows);
 		Assert.Equal("fresh", rows[0].Message);
+	}
+
+	[Fact]
+	public void Emit_DatabaseDisabledLive_DropsAtEmit_WithoutRenderingTheMessage()
+	{
+		// E10: the Log:Database switch was only checked in the drain, so every event was fully
+		// rendered (and a LogEntry allocated) even when persistence is off. With the option
+		// visible at Emit, a disabled sink must not touch the message template at all.
+		using DatabaseLogSink sink = new();
+		sink.Activate(_factory, TestOptionsMonitor.Of(Options(false, "Information")));
+
+		RenderSpy spy = new();
+		MessageTemplate template = new MessageTemplateParser().Parse("value={Spy}");
+		LogEvent evt = new(DateTimeOffset.UtcNow, LogEventLevel.Information, null, template,
+			[new LogEventProperty("Spy", new ScalarValue(spy))]);
+
+		sink.Emit(evt);
+
+		Assert.Equal(0, spy.Renders);
+	}
+
+	[Fact]
+	public async Task Drain_PersistFailure_IsReportedToSelfLog_NotSilentlySwallowed()
+	{
+		// E9: a failing batch write was swallowed with no signal, so a persistent database
+		// outage silently disabled DB logging for the process lifetime. The failure must reach
+		// SelfLog (the logger itself is suspect, so it cannot be reported through Serilog).
+		List<string> selfLog = [];
+		SelfLog.Enable(msg =>
+		{
+			lock (selfLog)
+				selfLog.Add(msg);
+		});
+		try
+		{
+			using DatabaseLogSink sink = new();
+			sink.Activate(new ThrowingContextFactory(), TestOptionsMonitor.Of(Options(true, "Information")));
+			using Logger logger = new LoggerConfiguration()
+				.MinimumLevel.Verbose().WriteTo.Sink(sink).CreateLogger();
+			logger.Information("this write will fail");
+
+			DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+			while (DateTime.UtcNow < deadline)
+			{
+				lock (selfLog)
+					if (selfLog.Any(m => m.Contains("DatabaseLogSink")))
+						break;
+				await Task.Delay(50);
+			}
+
+			lock (selfLog)
+				Assert.Contains(selfLog, m => m.Contains("DatabaseLogSink"));
+		}
+		finally
+		{
+			SelfLog.Disable();
+		}
+	}
+
+	private sealed class RenderSpy
+	{
+		public int Renders;
+
+		public override string ToString()
+		{
+			Renders++;
+			return "rendered";
+		}
+	}
+
+	private sealed class ThrowingContextFactory : ISyncDbContextFactory
+	{
+		public SyncDbContext CreateDbContext() => throw new InvalidOperationException("database unavailable");
 	}
 
 	private sealed class TestContextFactory(string connectionString) : ISyncDbContextFactory
