@@ -41,7 +41,7 @@ public static class AutodiscoverEndpoint
 		AuthThrottle authThrottle,
 		AccountResolver resolver,
 		SyncStateService state,
-		IOptionsSnapshot<ActiveSyncOptions> options,
+		IOptionsMonitor<ActiveSyncOptions> options,
 		BackendRolesProvider rolesProvider,
 		ILoggerFactory loggerFactory)
 	{
@@ -53,7 +53,7 @@ public static class AutodiscoverEndpoint
 		// auth, and the disabled/blocked ⇒ 403 gate. It carries no device id, so the block is
 		// necessarily the user-level one — the device-scoped variant applies only on EAS.
 		AuthOutcome auth = await EndpointAuth.TryAuthorizeAsync(
-			http, rolesProvider, options.Value.Auth, authThrottle, sessionFactory, resolver, state, null, logger, ct);
+			http, rolesProvider, options.CurrentValue.Auth, authThrottle, sessionFactory, resolver, state, null, logger, ct);
 		if (!auth.Authorized)
 			return;
 		BackendCredentials credentials = auth.Credentials!;
@@ -64,7 +64,7 @@ public static class AutodiscoverEndpoint
 		ResolvedAccount account = resolver.Resolve(credentials);
 		string? configuredAddress = account.MailAddressIsExplicit ? account.MailAddress : null;
 		string email = configuredAddress ?? await ExtractEmailAsync(http, wireLogger, ct) ?? credentials.UserName;
-		string easUrl = BuildEasUrl(http, options.Value.PublicUrl);
+		string easUrl = BuildEasUrl(http, options.CurrentValue.PublicUrl);
 
 		XDocument doc = new(
 			new XDeclaration("1.0", "utf-8", null),

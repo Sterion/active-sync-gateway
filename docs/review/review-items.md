@@ -266,7 +266,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 
 ## Phase 6 — Performance
 
-**35. Server request hot path** — `E4` ~~`E5`~~ `E6` ~~`E18`~~ ~~`E31`~~ ~~`E35`~~ `F13` `F14` `F15` `F28` `F40` `F43`
+**35. Server request hot path** — `E4` ~~`E5`~~ ~~`E6`~~ ~~`E18`~~ ~~`E31`~~ ~~`E35`~~ `F13` `F14` `F15` `F28` `F40` `F43`
 > `E4` every request constructs all 20 handlers and discards 19. Biggest single allocation win for a polling fleet.
 
 **36. Backend round trips** [LIVE] — `D3` `D14` `D19` `D32` `H13` `H14` `H15` `H24` `H25`

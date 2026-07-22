@@ -94,7 +94,7 @@ public sealed class PingHandlerTests : IDisposable
 	{
 		return new PingHandler(
 			_harness.Folders,
-			TestOptionsMonitor.SnapshotOf(_harness.Options),
+			TestOptionsMonitor.Of(_harness.Options),
 			new StubLifetime(),
 			NullLogger<PingHandler>.Instance);
 	}

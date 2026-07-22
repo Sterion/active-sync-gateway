@@ -55,7 +55,7 @@ public static class EasEndpoint
 		SyncStateService state,
 		IEnumerable<IEasCommandHandler> handlers,
 		AuthThrottle authThrottle,
-		IOptionsSnapshot<ActiveSyncOptions> options,
+		IOptionsMonitor<ActiveSyncOptions> options,
 		BackendRolesProvider rolesProvider,
 		PassThroughProvisioner provisioner,
 		AccountResolver accountResolver,
@@ -74,7 +74,7 @@ public static class EasEndpoint
 		}
 
 		// --- Basic auth ---
-		string clientKey = EndpointAuth.ClientKey(http, options.Value.Auth);
+		string clientKey = EndpointAuth.ClientKey(http, options.CurrentValue.Auth);
 		if (EndpointAuth.IsThrottled(http, authThrottle, clientKey))
 			return;
 		BackendCredentials? credentials = HttpBasicAuth.Parse(http.Request.Headers.Authorization.ToString());
@@ -201,7 +201,7 @@ public static class EasEndpoint
 		// acknowledged the CURRENT policy document (config changes change the hash). HTTP 449
 		// tells the client to run the Provision handshake and retry. Checked before a backend
 		// session is built — a 449 answer needs no IMAP/DAV connections.
-		PolicyOptions policy = options.Value.Policy;
+		PolicyOptions policy = options.CurrentValue.Policy;
 		if (policy.Enabled && !parameters.Command.Equals("Provision", StringComparison.OrdinalIgnoreCase))
 		{
 			uint presentedKey = parameters.PolicyKey;

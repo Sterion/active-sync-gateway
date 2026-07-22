@@ -12,7 +12,7 @@ namespace ActiveSync.Server.Eas.Handlers;
 /// <summary>Ping (MS-ASCMD 2.2.1.13): long-poll push notification.</summary>
 public sealed class PingHandler(
 	FolderService folders,
-	IOptionsSnapshot<ActiveSyncOptions> options,
+	IOptionsMonitor<ActiveSyncOptions> options,
 	IHostApplicationLifetime lifetime,
 	ILogger<PingHandler> logger) : IEasCommandHandler
 {
@@ -69,7 +69,7 @@ public sealed class PingHandler(
 			return;
 		}
 
-		EasOptions eas = options.Value.Eas;
+		EasOptions eas = options.CurrentValue.Eas;
 		if (parameters.HeartbeatSeconds < eas.MinHeartbeatSeconds ||
 		    parameters.HeartbeatSeconds > eas.MaxHeartbeatSeconds)
 		{
