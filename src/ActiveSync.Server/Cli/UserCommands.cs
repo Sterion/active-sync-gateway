@@ -322,8 +322,16 @@ internal sealed class UserPasswordCommand(IAnsiConsole terminal)
 			return 1;
 		}
 
+		// C6: through the shared policy (strength floor + empty/sealed rejection), not a direct hash.
+		AccountSecretPolicy.SecretResult prepared = AccountSecretPolicy.PrepareGatewayPassword(password);
+		if (prepared.Error is not null)
+		{
+			await Console.Error.WriteLineAsync(prepared.Error);
+			return 1;
+		}
+
 		AccountOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
-		entry.Password = GatewayPasswordHasher.Hash(password);
+		entry.Password = prepared.Value;
 		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 	}
 }

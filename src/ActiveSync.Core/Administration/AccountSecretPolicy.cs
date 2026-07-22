@@ -13,6 +13,13 @@ namespace ActiveSync.Core.Administration;
 /// </summary>
 internal static class AccountSecretPolicy
 {
+	/// <summary>
+	///   Minimum length for a plaintext gateway password, enforced by every write surface (CLI,
+	///   admin API, self-service portal) through <see cref="PrepareGatewayPassword" /> so none can
+	///   set a trivially weak value (C6). Already-hashed/sealed values are validated by shape.
+	/// </summary>
+	internal const int MinGatewayPasswordLength = 8;
+
 	/// <summary>What happened to a plaintext input — callers phrase their own warnings.</summary>
 	internal enum PlaintextDisposition
 	{
@@ -39,6 +46,12 @@ internal static class AccountSecretPolicy
 		    string.IsNullOrWhiteSpace(raw))
 			return new SecretResult(null,
 				"The gateway Password cannot be empty (clear it instead to fall through to the backend).");
+		// C6: a strength floor on the one shared policy, so the portal (which used to hash
+		// directly), the admin API and the CLI all reject a weak plaintext identically.
+		if (!GatewayPasswordHasher.IsHashed(raw) && !SecretValue.IsSealed(raw) &&
+		    raw.Length < MinGatewayPasswordLength)
+			return new SecretResult(null,
+				$"The gateway Password must be at least {MinGatewayPasswordLength} characters.");
 		if (GatewayPasswordHasher.IsHashed(raw))
 			return GatewayPasswordHasher.TryParse(raw, out string? error)
 				? new SecretResult(raw, null)

@@ -101,7 +101,9 @@ public sealed class AdministrationTests
 	[Fact]
 	public void SecretPolicy_GatewayPassword_HashesPlaintext_PassesHash_RejectsSealed()
 	{
-		AccountSecretPolicy.SecretResult hashed = AccountSecretPolicy.PrepareGatewayPassword("hunter2");
+		// Behaviour change (C6): plaintext gateway passwords now have a strength floor, so this
+		// sample is >= AccountSecretPolicy.MinGatewayPasswordLength (it was "hunter2", now rejected).
+		AccountSecretPolicy.SecretResult hashed = AccountSecretPolicy.PrepareGatewayPassword("hunter2-strong");
 		Assert.Null(hashed.Error);
 		Assert.True(GatewayPasswordHasher.IsHashed(hashed.Value!));
 		Assert.Equal(AccountSecretPolicy.PlaintextDisposition.Hashed, hashed.Plaintext);
@@ -113,6 +115,16 @@ public sealed class AdministrationTests
 
 		Assert.NotNull(AccountSecretPolicy.PrepareGatewayPassword("pbkdf2$broken").Error);
 		Assert.NotNull(AccountSecretPolicy.PrepareGatewayPassword("enc:v1:AAAA").Error);
+	}
+
+	[Fact]
+	public void SecretPolicy_GatewayPassword_EnforcesStrengthFloor()
+	{
+		// C6: the shared gateway-password policy now imposes a minimum length, so every write
+		// surface — CLI 'user password', the admin API, and the self-service portal that used to
+		// call GatewayPasswordHasher.Hash directly — rejects a trivially weak password identically.
+		Assert.NotNull(AccountSecretPolicy.PrepareGatewayPassword("short").Error); // below the floor
+		Assert.Null(AccountSecretPolicy.PrepareGatewayPassword("a-strong-passphrase").Error);
 	}
 
 	[Fact]

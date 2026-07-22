@@ -136,11 +136,22 @@ public sealed class CliUserTests : IDisposable
 	[Fact]
 	public void Set_PlaintextGatewayPassword_IsHashed_WithWarning()
 	{
-		(int exitCode, string stderr, string output) = Run(null, "user", "set", "u2", "Password", "hunter2");
+		// Behaviour change (C6): plaintext gateway passwords now enforce a strength floor, so the
+		// sample is >= the minimum length (was "hunter2", now below the floor and rejected).
+		(int exitCode, string stderr, string output) = Run(null, "user", "set", "u2", "Password", "hunter2-strong");
 		Assert.Equal(0, exitCode);
 		Assert.Contains("shell history", stderr);
 		Assert.Contains("password=***(pbkdf2)", output);
-		Assert.DoesNotContain("hunter2", output);
+		Assert.DoesNotContain("hunter2-strong", output);
+	}
+
+	[Fact]
+	public void Set_WeakGatewayPassword_IsRejected()
+	{
+		// C6: below the shared strength floor — refused identically to the web surfaces.
+		(int exitCode, string stderr, _) = Run(null, "user", "set", "u2", "Password", "hunter2");
+		Assert.Equal(1, exitCode);
+		Assert.Contains("at least", stderr);
 	}
 
 	[Fact]

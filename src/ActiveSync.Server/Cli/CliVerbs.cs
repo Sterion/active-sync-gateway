@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using ActiveSync.Core.Accounts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.Settings;
@@ -194,7 +195,16 @@ internal static class CliVerbs
 			return 1;
 		}
 
-		await Console.Out.WriteLineAsync(GatewayPasswordHasher.Hash(password));
+		// C6: through the shared gateway-password policy so the emitted hash honours the same
+		// strength floor as `eas user password` and the web surfaces.
+		AccountSecretPolicy.SecretResult prepared = AccountSecretPolicy.PrepareGatewayPassword(password);
+		if (prepared.Error is not null)
+		{
+			await Console.Error.WriteLineAsync(prepared.Error);
+			return 1;
+		}
+
+		await Console.Out.WriteLineAsync(prepared.Value);
 		return 0;
 	}
 }

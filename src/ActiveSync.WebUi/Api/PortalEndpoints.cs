@@ -150,9 +150,14 @@ internal static class PortalEndpoints
 			throttle.RecordSuccess(throttleKey);
 			ActiveSyncOptions current = options.CurrentValue;
 			AccountOptions entry = await AccountEditing.LoadStartingEntryAsync(store, current, login, ct);
-			// Stored as a pbkdf2$ hash: this decouples the phone/web password from the mail
-			// backend, exactly like the CLI's `eas user password`.
-			entry.Password = GatewayPasswordHasher.Hash(request.New);
+			// C6: go through the ONE shared gateway-password policy (strength floor, empty/sealed
+			// rejection) instead of hashing directly, so the portal cannot set a weaker password
+			// than the CLI or admin API would accept. Stored as a pbkdf2$ hash, decoupling the
+			// phone/web password from the mail backend exactly like `eas user password`.
+			AccountSecretPolicy.SecretResult prepared = AccountSecretPolicy.PrepareGatewayPassword(request.New);
+			if (prepared.Error is not null)
+				return EndpointHelpers.BadRequest(prepared.Error);
+			entry.Password = prepared.Value;
 			List<string> failures = AccountResolver.ValidateEntry(current, roles, registry, login, entry);
 			if (failures.Count > 0)
 				return EndpointHelpers.BadRequest(string.Join(Environment.NewLine, failures));
