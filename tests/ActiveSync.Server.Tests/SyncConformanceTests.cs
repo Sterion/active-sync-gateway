@@ -142,6 +142,38 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Equal("60", response.Root.Element(AS + "Limit")?.Value);
 	}
 
+	// ---- F6: MIMESupport=2 must select the Type-4 (MIME) body, not downgrade to HTML ----
+	[Fact]
+	public void F6_MimeSupportAlways_SelectsMimeBodyOverHtml()
+	{
+		// The client offers both HTML (2) and MIME (4) and asks for MIME on every message.
+		XElement optionsElement = new(AS + "Options",
+			new XElement(AS + "MIMESupport", "2"),
+			new XElement(ASB + "BodyPreference", new XElement(ASB + "Type", "2")),
+			new XElement(ASB + "BodyPreference", new XElement(ASB + "Type", "4")));
+
+		SyncCollectionOptions resolved = SyncCollectionOptions.Resolve(optionsElement, new CollectionState { CollectionId = "1" });
+
+		// The HTML-first ladder would pick 2 and S/MIME could never be verified on-device.
+		Assert.Equal(4, resolved.BodyType);
+		// The MIMESupport value is threaded through so it persists with the body type.
+		Assert.Equal(2, resolved.MimeSupport);
+	}
+
+	// MIMESupport=0 (never) keeps the historical HTML-first behaviour even when MIME is offered.
+	[Fact]
+	public void F6_MimeSupportNever_KeepsHtmlLadder()
+	{
+		XElement optionsElement = new(AS + "Options",
+			new XElement(ASB + "BodyPreference", new XElement(ASB + "Type", "2")),
+			new XElement(ASB + "BodyPreference", new XElement(ASB + "Type", "4")));
+
+		SyncCollectionOptions resolved = SyncCollectionOptions.Resolve(optionsElement, new CollectionState { CollectionId = "1" });
+
+		Assert.Equal(2, resolved.BodyType);
+		Assert.Equal(0, resolved.MimeSupport);
+	}
+
 	private sealed class StubLifetime : IHostApplicationLifetime
 	{
 		public CancellationToken ApplicationStarted => CancellationToken.None;

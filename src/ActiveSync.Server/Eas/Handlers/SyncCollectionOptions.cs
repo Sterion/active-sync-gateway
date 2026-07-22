@@ -10,7 +10,7 @@ namespace ActiveSync.Server.Eas.Handlers;
 ///   parse-from-request and persist-to-state helpers alongside. Extracted from
 ///   <see cref="SyncHandler" /> so option handling lives in one place.
 /// </summary>
-internal sealed record SyncCollectionOptions(int FilterType, int BodyType, long? TruncationSize)
+internal sealed record SyncCollectionOptions(int FilterType, int BodyType, long? TruncationSize, int MimeSupport = 0)
 {
 	public static readonly SyncCollectionOptions Default = new(0, 2, 200 * 1024);
 
@@ -41,6 +41,9 @@ internal sealed record SyncCollectionOptions(int FilterType, int BodyType, long?
 			return null;
 		int filterType = int.TryParse(optionsElement.Element(AS + "FilterType")?.Value, out int ft) ? ft : 0;
 
+		// MS-ASCMD MIMESupport: 0 = never send MIME, 1 = S/MIME messages only, 2 = always send MIME.
+		int mimeSupport = int.TryParse(optionsElement.Element(AS + "MIMESupport")?.Value, out int ms) ? ms : 0;
+
 		// AirSyncBase body Type codes (MS-ASAIRS): 1 = plain, 2 = HTML, 4 = MIME. When a
 		// client offers several, prefer the richest we render well: HTML (2) > plain (1) >
 		// whatever else it listed first.
@@ -57,13 +60,20 @@ internal sealed record SyncCollectionOptions(int FilterType, int BodyType, long?
 			.ToList();
 		if (preferences.Count > 0)
 		{
-			var chosen = preferences.FirstOrDefault(p => p.Type == 2)
-			             ?? preferences.FirstOrDefault(p => p.Type == 1)
-			             ?? preferences[0];
+			// F6: honour MIMESupport. When the client offers a Type-4 (MIME) BodyPreference and asks
+			// for MIME (always, or S/MIME-only), send raw MIME rather than downgrading to the HTML
+			// ladder — otherwise S/MIME signed/encrypted mail can never be verified or decrypted on
+			// device. Absent a MIME preference, fall back to the richest we render well.
+			var mime = preferences.FirstOrDefault(p => p.Type == 4);
+			var chosen = mimeSupport >= 1 && mime is not null
+				? mime
+				: preferences.FirstOrDefault(p => p.Type == 2)
+				  ?? preferences.FirstOrDefault(p => p.Type == 1)
+				  ?? preferences[0];
 			bodyType = chosen.Type;
 			truncation = chosen.Truncation;
 		}
 
-		return new SyncCollectionOptions(filterType, bodyType, truncation);
+		return new SyncCollectionOptions(filterType, bodyType, truncation, mimeSupport);
 	}
 }
