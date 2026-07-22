@@ -213,7 +213,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 > Move `MergedFreeBusy`/`CollectionDiff` to Protocol; consolidate `Backends.Common`'s three namespaces.
 
 **20. Decompositions** — `F-decomp` `A33` `E27` `E28`
-> NOTE — **Run alone.** `SyncHandler` (826 lines → 6 partials + 2 extracted types), `SyncStateService` (535, 6 responsibilities), `ProgramServer.RunServerAsync` (245), and the duplicated auth prologue. Invalidates line anchors wholesale — update them per protocol step 4.
+> NOTE — `SyncHandler` (826 lines → 6 partials + 2 extracted types), `SyncStateService` (535, 6 responsibilities), `ProgramServer.RunServerAsync` (245), and the duplicated auth prologue. Invalidates line anchors wholesale — update them per protocol step 4.
 
 ## Phase 4 — Correctness
 
