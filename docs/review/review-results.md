@@ -1417,3 +1417,38 @@ Type-4 preference when `MimeSupport >= 1` and a Type-4 offer is present, threads
 - **Orchestration note:** the `.sh` teardown flag is **`-d`**, not `-Down` (the `.ps1` name) — the first
   restart attempt no-op'd on the warm container; a second `stalwart-up.sh -d` + up gave the genuine
   clean-volume backend used for verification. Worth recording for the next Linux-host orchestrator.
+
+## Item 33 — Folder & provision conformance [LIVE]
+
+**Findings:** `F25` `F26` `F27` — three Medium (folder-op conformance)
+**Commits:** `92a98c7` (F25) · `6441011` (F26) · `a31a660` (F27)
+
+**Verification (orchestrator-run):** integrity 56/15/365/365/0 ✓ · cursor → item 34 ✓ · one commit per
+finding with ID in subject ✓ · build 0 warnings ✓ · unit suite Protocol 78/78, Core 601/603 (2 fail),
+WebUi 71/71, Server 206/208 (2 fail), 0 skipped · **integration 141 passed, 0 skipped** (full suite, own
+run, fresh clean-volume Stalwart) ✓
+
+**The 4 unit failures are pre-existing environmental, not item 33 — independently confirmed by bisect.**
+Checked out the pre-item-33 baseline `6d647a6` and ran exactly those four: `SqlitePragmaInterceptorTests`
+(×2, Server — WAL file-DB), `DavReadinessTests.Probe_UntrustedCertificate` (Core — socket reset),
+`DbSettingsLoaderTests.MissingTable` (Core — SQLite temp-file). All four fail identically at baseline
+(2 Core + 2 Server), all in classes item 33 never touched (Windows SQLite handle-lock / socket-reset
+signatures). The worker's step-9 claim holds.
+
+**Notes (worker-flagged):**
+- **F25** behaviour change: `FolderSyncHandler` now accepts `key == FolderSyncKey - 1` and re-emits the
+  full current hierarchy as Adds under the *current* key (no key bump) instead of Status 9 → restart-from-0.
+  A lost FolderSync response no longer forces a full hierarchy resync (parity with item-Sync N−1 replay).
+- **F26** behaviour change: new `FolderOperationException` carries the intended EAS status. Malformed
+  request → **10**; missing folder → **4**; missing create-parent → **5**; any other backend/transport
+  failure → **6** (previously an uncaught HTTP 500). Read-only grants / no-folder-ops stores still → **3**.
+- **F26 judgment call (could have gone the other way):** the detail entry parenthetically suggested
+  mapping "unknown folder" → Status 6. Worker used spec-accurate MS-ASCMD statuses instead (folder-not-found
+  → 4, parent-not-found → 5), reserving 6 for genuine server/transport errors. More conformant, honours the
+  finding's intent (stop collapsing to 3, stop the 500). Reasonable; accepted.
+- **F27** behaviour change: `FolderCreate` reads the requested `Type` and routes to the store for that
+  class (calendar/contacts/tasks → their class; 12/unknown → mail); a class with no store or no folder-ops
+  → Status 3 instead of a silently-misfiled mail folder.
+- Test-only harness additions in `EasHandlerHarness.cs` (`StubSession.SecondaryStore`, settable
+  `RecordingStore.EasClass`/`KeyPrefix`, `RecordingStore.FolderOpFailWith`). No API/contract breaks. No
+  coverage-not-proof tests. No new findings filed.
