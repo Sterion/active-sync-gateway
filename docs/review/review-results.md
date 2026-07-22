@@ -1590,3 +1590,42 @@ and H14's `addressbook-query` exercised live) ✓
 **Judgment call (H25):** batched get uses explicit `ids:[itemKey]` rather than a `#ids` back-reference — `itemKey`
 is known, so equivalent and more robust; one round trip either way. Accepted.
 **No new findings filed.** Landed on `main` (current branch), no branch/push.
+
+## Item 37 — Core & CLI startup
+
+**Findings:** `B7` `B28` `L35` `L41`
+**Commits:** `8f26df9` (B7) · `02f2773` (B28) · `dd7c19f` (L35, B28-strike) · `1925696` (L41) ·
+`12ea8c0` (docs de-backtick for integrity)
+
+**Verification (orchestrator-run):** integrity 56/15/365/365/0 ✓ · cursor → item 38 ✓ · IDs in every
+subject ✓ · build 0 warnings ✓ · unit suite Protocol 78/78, Core 620/622, WebUi 71/71, Server 241/243,
+0 skipped (+8 tests) · **integration 141 passed, 0 skipped** (full suite, own run — B7 touches the
+account-resolution/auth path, so the live run was warranted) ✓ · same 4 pre-existing environmental unit
+failures, unchanged.
+
+**JUDGMENT CALL worth the human's attention — B7 (High) struck on a PARTIAL, core deferred to new High
+`B33`.** The worker landed the two behaviour-preserving cost reductions (memoize `CaPath` on the file's
+content stamp; memoize `ValidateConfiguration` per (provider, role, settings-identity) within a rebuild —
+a real O(N²)→O(N) win in the validation dimension for shared-settings fleets) and **struck B7**, deferring
+the finding's headline concern — the full re-validation of every account on the request thread per
+`AccountsStamp` move, still O(N²) on fleet onboarding, plus the per-rebuild 200k-iteration PBKDF2 — to a
+new High finding **`B33`** (filed in the findings area, full detail, visible; de-backticked on the queue
+line so it isn't miscounted as an assignment). The residual is legitimately larger and auth-path-critical
+(off-thread/incremental rebuild wants its own LIVE-verified item; caching the passphrase-derived key is a
+security trade-off), which is why it was carved off rather than rushed — mirrors item 36's D3 deferral,
+except here the finding was *struck* (item 36 left D3 unstruck). Defensible with B33 visible, but noting
+it: **B7's request-thread O(N²) symptom is only partially mitigated; the real fix lives in B33.**
+
+**Other notes (worker-flagged / orchestrator-checked):**
+- **B7 tests are coverage** (perf, output-identical — no red-first possible), labelled as such; includes a
+  cache-invalidation-on-content-change test so the memo can't go stale on a re-mounted CA file.
+- **L35 (red-first)** scoped deliberately: only the `DatabaseCommand` family reuses the warm host provider
+  (via a `CliHostServices` AsyncLocal published by `/cli`); the lean `config`/`logs`/`tls` commands stay on
+  `TryCreateLeanAsync` because config source-attribution needs a file-only `IConfiguration` without the DB
+  settings layer — routing them through the host would corrupt db/config/default reporting. Sound.
+- **L41 (red-first) behaviour change:** `eas users` now matches state rows (devices/folders/items/blocks)
+  case-insensitively — this is the UsersCommand instance of **L31** (assigned to item 55, Cleanup). A
+  natural consequence of the OrdinalIgnoreCase projection; item 55 should account for it being partly done.
+- **B28 (red-first):** `OrderedRoles` memoized in a lazy backing field; verified no `with`-mutation of
+  `ResolvedAccount` exists that would carry a stale cache.
+- New finding `B33` (High) filed. Landed on `main`, no branch/push.
