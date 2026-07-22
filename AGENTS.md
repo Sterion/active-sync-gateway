@@ -114,13 +114,16 @@ docker compose -f docker/docker-compose.ci.yml run --rm tests        # full suit
 src/ActiveSync.Protocol/    WBXML codec, code pages, MS-ASHTTP query parser, EAS constants.
                             Depends on NOTHING project-wise. No ASP.NET, no MailKit.
 src/ActiveSync.Contracts/   The PLUGIN CONTRACT: the interfaces/records a backend provider
-                            implements + uses (IBackendProvider, IContentStore, IBackendSession
+                            implements + uses (IBackendProvider, IBackendConnection, IContentStore
                             & the capability interfaces, IGatewayPlugin, BackendRole,
                             ProviderSettings, BackendConfigField, SharedCollection, the Backend
                             Models records, DelimitedKey). Namespace ActiveSync.Contracts.
                             Depends only on Protocol + Microsoft.Extensions config/DI abstractions
                             — NOT Crypto, EF Core or Core. THE one package an out-of-repo plugin
-                            references. BackendProviderRegistry (host-only) stays in Core.
+                            references. Host-only types stay in Core: BackendProviderRegistry, and
+                            the composite session + its cache (IBackendSession / CompositeBackendSession,
+                            IBackendSessionFactory / BackendSessionFactory, BackendSessionInfo — a
+                            plugin implements IBackendConnection, never the composite session).
 src/ActiveSync.Crypto/      BCL-only master-key primitives: EncryptionKeyLoader (base64-or-
                             passphrase → 32-byte key), SecretValue (enc:v1: AES-GCM seal of
                             config secrets), LocalCliEnvelope (the sealed /cli request),
