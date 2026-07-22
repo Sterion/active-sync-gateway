@@ -91,6 +91,38 @@ public sealed class MeetingResponseTests : IDisposable
 		Assert.Equal(["imap:INBOX/42"], _harness.Session.Store.Deleted);
 	}
 
+	// F33 — a CollectionId that references a CALENDAR collection (responding to an already-filed
+	// meeting) must read the event from the calendar store, not hand a calendar backend key to the
+	// mail store (which fails). PARTSTAT is written to the calendar the request identified.
+	[Fact]
+	public async Task CalendarCollectionId_RespondsViaCalendarStore()
+	{
+		string ics =
+			"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:evt-cal\r\n" +
+			"ORGANIZER:mailto:organizer@example.test\r\nSUMMARY:Filed meeting\r\n" +
+			"DTSTART:20260801T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+		EasHandlerHarness.RecordingStore calendar = new()
+		{
+			EasClass = EasClass.Calendar, KeyPrefix = "caldav:", RawEvent = ics, RespondHref = "event-href"
+		};
+		_harness.Session.SecondaryStore = calendar;
+		_harness.Session.Calendar = calendar;
+
+		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
+			new BackendFolder("caldav:Cal", "Calendar", null, EasFolderType.Calendar, EasClass.Calendar));
+		UserFolder calFolder = registry.Single();
+		// Map an item href → ServerId so the request's RequestId resolves back to it.
+		string serverId = await _harness.Folders.ComposeServerIdAsync(
+			calFolder, calendar, "event-href", CancellationToken.None);
+
+		XDocument? response = await RunAsync(serverId, calFolder.ServerId);
+
+		Assert.Equal("1", StatusOf(response));
+		// PARTSTAT applied to the request's own calendar, and the iTIP reply went out.
+		Assert.Equal(["caldav:Cal/evt-cal/1"], calendar.Responded);
+		Assert.Single(_harness.Session.Submit.Sent);
+	}
+
 	private static byte[] InviteMime(string uid, string organizer)
 	{
 		MimeMessage message = new();

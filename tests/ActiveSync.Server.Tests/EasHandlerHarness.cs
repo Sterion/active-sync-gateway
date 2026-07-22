@@ -188,7 +188,7 @@ public sealed class EasHandlerHarness : IDisposable
 	}
 
 	/// <summary>Records the mutations a handler asked for, so a test can assert none happened.</summary>
-	public sealed class RecordingStore : IContentStore, IItemMoveOperations, IFolderOperations
+	public sealed class RecordingStore : IContentStore, IItemMoveOperations, IFolderOperations, ICalendarOperations
 	{
 		public List<string> Fetched { get; } = [];
 		public List<string> Moved { get; } = [];
@@ -327,6 +327,34 @@ public sealed class EasHandlerHarness : IDisposable
 			if (WaitForChanges is { } wait)
 				return Task.FromResult(wait(folderBackendKeys));
 			throw new NotSupportedException();
+		}
+
+		// ICalendarOperations — lets this store stand in for a calendar backend (MeetingResponse F33).
+
+		/// <summary>The stored event iCalendar <see cref="GetRawEventAsync" /> returns.</summary>
+		public string? RawEvent { get; set; }
+
+		/// <summary>The calendar item key <see cref="RespondToMeetingAsync" /> returns (null = not found).</summary>
+		public string? RespondHref { get; set; }
+
+		/// <summary>Meeting responses applied: "{folderKey}/{uid}/{userResponse}".</summary>
+		public List<string> Responded { get; } = [];
+
+		public Task<string?> RespondToMeetingAsync(
+			string calendarFolderBackendKey, string eventUid, int userResponse, CancellationToken ct)
+		{
+			Responded.Add($"{calendarFolderBackendKey}/{eventUid}/{userResponse}");
+			return Task.FromResult(RespondHref);
+		}
+
+		public Task<string?> GetRawEventAsync(string folderBackendKey, string itemKey, CancellationToken ct)
+		{
+			return Task.FromResult(RawEvent);
+		}
+
+		public Task<bool> ShouldSendInvitationsAsync(CancellationToken ct)
+		{
+			return Task.FromResult(false);
 		}
 	}
 

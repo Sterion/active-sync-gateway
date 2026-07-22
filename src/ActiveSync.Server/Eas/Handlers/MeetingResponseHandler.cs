@@ -76,33 +76,66 @@ public sealed class MeetingResponseHandler(
 					continue;
 				}
 
-				byte[]? raw = await context.Session.MailStore.GetRawMessageAsync(
-					resolved.Value.Folder.BackendKey, itemKey, ct);
-				if (raw is null)
+				(UserFolder folder, IContentStore store) = resolved.Value;
+
+				// The CollectionId may name either the Inbox message carrying the invite (mail path)
+				// OR the calendar collection holding an already-filed event (calendar path). Branch
+				// on the store class — handing a calendar backend key to the mail store, as the old
+				// single path did, fails the request (F33).
+				string ics;
+				string? organizerFallback = null;
+				string subject = "Meeting";
+				UserFolder? calendarFolder;
+
+				if (store.EasClass == EasClass.Calendar)
 				{
-					results.Add(Result("2"));
-					continue;
+					string? rawEvent = await MeetingInvitationService.CaptureIcsAsync(
+						store, folder.BackendKey, itemKey, logger, ct);
+					if (rawEvent is null)
+					{
+						results.Add(Result("2"));
+						continue;
+					}
+
+					ics = rawEvent;
+					subject = ExtractSummary(ics) ?? subject;
+					// PARTSTAT belongs on the calendar the request identified — not a guessed
+					// "first calendar", which is the wrong one for a multi-calendar user.
+					calendarFolder = folder;
+				}
+				else
+				{
+					byte[]? raw = await context.Session.MailStore.GetRawMessageAsync(
+						folder.BackendKey, itemKey, ct);
+					if (raw is null)
+					{
+						results.Add(Result("2"));
+						continue;
+					}
+
+					using MemoryStream stream = new(raw);
+					MimeMessage message = await MimeMessage.LoadAsync(stream, ct);
+					MimePart? calendarPart = message.BodyParts.OfType<MimePart>()
+						.FirstOrDefault(p => p.ContentType.IsMimeType("text", "calendar"));
+					if (calendarPart?.Content is null)
+					{
+						results.Add(Result("2"));
+						continue;
+					}
+
+					using MemoryStream icsStream = new();
+					await calendarPart.Content.DecodeToAsync(icsStream, ct);
+					ics = Encoding.UTF8.GetString(icsStream.ToArray());
+					organizerFallback = message.From.Mailboxes.FirstOrDefault()?.Address;
+					subject = message.Subject ?? subject;
+					// A mail-filed invite has no folder of its own to point at — fall back to the
+					// user's default calendar for the PARTSTAT write.
+					List<UserFolder> registry = await context.State.GetFoldersAsync(context.Device.UserName, ct);
+					calendarFolder = registry.FirstOrDefault(f => f.Type == EasFolderType.Calendar);
 				}
 
-				using MemoryStream stream = new(raw);
-				MimeMessage message = await MimeMessage.LoadAsync(stream, ct);
-				MimePart? calendarPart = message.BodyParts.OfType<MimePart>()
-					.FirstOrDefault(p => p.ContentType.IsMimeType("text", "calendar"));
-				if (calendarPart?.Content is null)
-				{
-					results.Add(Result("2"));
-					continue;
-				}
-
-				using MemoryStream icsStream = new();
-				await calendarPart.Content.DecodeToAsync(icsStream, ct);
-				string ics = Encoding.UTF8.GetString(icsStream.ToArray());
 				string? uid = ExtractUid(ics);
-
-				// Update PARTSTAT in the user's calendar (if the event landed there already).
 				string? calendarId = null;
-				List<UserFolder> registry = await context.State.GetFoldersAsync(context.Device.UserName, ct);
-				UserFolder? calendarFolder = registry.FirstOrDefault(f => f.Type == EasFolderType.Calendar);
 				// Responding writes the attendee PARTSTAT into the calendar folder; a
 				// read-only grant on it blocks that write the same way global ReadOnly does.
 				if (calendarFolder is not null &&
@@ -127,14 +160,14 @@ public sealed class MeetingResponseHandler(
 				}
 
 				// Send the iTIP reply to the organizer.
-				await SendReplyAsync(context, message, ics, userResponse, ct);
+				await SendReplyAsync(context, ics, organizerFallback, subject, userResponse, ct);
 
-				// Exchange removes the meeting-request mail from the Inbox after a response (that
-				// is why CalendarId points the client at the surviving calendar item); leaving it
-				// shows a stale "respond to this invitation" message. Soft delete (F35).
-				if (resolved.Value.Store.EasClass == EasClass.Email)
-					await resolved.Value.Store.DeleteItemAsync(
-						resolved.Value.Folder.BackendKey, itemKey, permanent: false, ct);
+				// Exchange removes the meeting-request mail from the Inbox after a response (that is
+				// why CalendarId points the client at the surviving calendar item); leaving it shows
+				// a stale "respond to this invitation" message. Only the mail path has an invite mail
+				// to remove (F35).
+				if (store.EasClass == EasClass.Email)
+					await store.DeleteItemAsync(folder.BackendKey, itemKey, permanent: false, ct);
 
 				results.Add(Result("1", calendarId));
 			}
@@ -201,16 +234,23 @@ public sealed class MeetingResponseHandler(
 			: fallbackAddress;
 	}
 
+	/// <summary>The event SUMMARY (unfolded), used as the reply-mail subject on the calendar path.</summary>
+	internal static string? ExtractSummary(string ics)
+	{
+		return Unfold(ics).Split('\n')
+			.FirstOrDefault(l => l.StartsWith("SUMMARY:", StringComparison.OrdinalIgnoreCase))?[8..].Trim();
+	}
+
 	private static async Task SendReplyAsync(
-		EasContext context, MimeMessage invite, string ics, int userResponse, CancellationToken ct)
+		EasContext context, string ics, string? organizerFallback, string subject, int userResponse,
+		CancellationToken ct)
 	{
 		// Prefer the ORGANIZER from the iCalendar payload over the mail From header: the
 		// reply (iTIP REPLY) must go to the meeting organizer, which is not always the
 		// sender. We hand-scan the unfolded ICS line and take everything after "mailto:"
 		// (offset 7) as the address — a deliberately minimal parse (no full iCal property
 		// parsing) that tolerates the CN=/other params some servers add before the value.
-		MailboxAddress? organizer = invite.From.Mailboxes.FirstOrDefault();
-		string? organizerEmail = ExtractOrganizerEmail(ics, organizer?.Address);
+		string? organizerEmail = ExtractOrganizerEmail(ics, organizerFallback);
 		if (organizerEmail is null)
 			return;
 
@@ -236,7 +276,7 @@ public sealed class MeetingResponseHandler(
 			.ToString();
 
 		MimeMessage reply = ImipMailBuilder.Compose(
-			user, [(organizerEmail, null)], $"{verb}: {invite.Subject}", "REPLY", replyIcs);
+			user, [(organizerEmail, null)], $"{verb}: {subject}", "REPLY", replyIcs);
 		using MemoryStream output = new();
 		await reply.WriteToAsync(output, ct);
 		await context.Session.MailSubmit.SendAsync(output.ToArray(), ct);
