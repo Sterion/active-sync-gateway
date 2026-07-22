@@ -19,11 +19,20 @@ public static class WebApplicationExtensions
 	///   upgraded in place (roll-forward, no manual step).
 	/// </summary>
 	public static async Task ApplyMigrationsAsync(
-		this WebApplication app, ILogger logger)
+		this WebApplication app, ILogger logger, CancellationToken ct = default)
 	{
 		await using AsyncServiceScope scope = app.Services.CreateAsyncScope();
 		SyncDbContext db = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
+		await MigrateDatabaseAsync(db, logger, ct).ConfigureAwait(false);
+	}
 
+	/// <summary>
+	///   Creates the migrations-history table and applies any pending migrations. Honours
+	///   <paramref name="ct" /> (E22): a container SIGKILLed during a slow first-boot migration is
+	///   interrupted at the next await instead of running unbounded and being force-killed.
+	/// </summary>
+	internal static async Task MigrateDatabaseAsync(SyncDbContext db, ILogger logger, CancellationToken ct)
+	{
 		// On a fresh database EF probes __EFMigrationsHistory with a try/catch, and the caught
 		// failure is still logged as an error-level DbCommand failure — twice (once for the
 		// pending check, once inside MigrateAsync). Create the empty history table up front so
@@ -31,14 +40,14 @@ public static class WebApplicationExtensions
 		// (safe against concurrent replicas too), and IHistoryRepository.ExistsAsync cannot be
 		// trusted here — the Npgsql provider reports true on a fresh database.
 		IHistoryRepository history = db.GetService<IHistoryRepository>();
-		await db.Database.ExecuteSqlRawAsync(history.GetCreateIfNotExistsScript());
+		await db.Database.ExecuteSqlRawAsync(history.GetCreateIfNotExistsScript(), ct);
 
-		List<string> pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
+		List<string> pending = (await db.Database.GetPendingMigrationsAsync(ct)).ToList();
 		if (pending.Count > 0)
 		{
 			logger.LogInformation("Applying {Count} pending database migration(s): {Migrations}",
 				pending.Count, string.Join(", ", pending));
-			await db.Database.MigrateAsync();
+			await db.Database.MigrateAsync(ct);
 			logger.LogInformation("Database migrations applied.");
 		}
 		else

@@ -304,8 +304,9 @@ public partial class Program
 		app.Services.GetRequiredService<BackendConfigurationValidator>().Validate();
 
 		// Apply EF Core migrations first so the accounts snapshot (and the banner reading it)
-		// can query the database on a fresh install.
-		await app.ApplyMigrationsAsync(startupLogger);
+		// can query the database on a fresh install. Pass ApplicationStopping (E22) so a container
+		// SIGTERMed during a slow first-boot migration is interrupted rather than SIGKILLed.
+		await app.ApplyMigrationsAsync(startupLogger, app.Lifetime.ApplicationStopping);
 
 		// One-time upgrade of pre-role-model account rows (imap/calDav/... JSON shapes) —
 		// without it the deserializer would silently DROP those overrides.
