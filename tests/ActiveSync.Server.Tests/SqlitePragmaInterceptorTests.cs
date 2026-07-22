@@ -23,7 +23,10 @@ public sealed class SqlitePragmaInterceptorTests : IDisposable
 		// persistent property, so it must be issued exactly once, not re-run every open.
 		for (int i = 0; i < 3; i++)
 		{
-			await using SqliteConnection connection = new($"Data Source={_dbPath}");
+			// Pooling=False so the connection releases the file handle on Dispose rather than
+			// returning it to the pool — otherwise Dispose()'s File.Delete races the still-open
+			// -wal/-shm handles and throws IOException on Windows (a unlink-of-open no-op on Linux).
+			await using SqliteConnection connection = new($"Data Source={_dbPath};Pooling=False");
 			await connection.OpenAsync();
 			await interceptor.ApplyAsync(connection, CancellationToken.None);
 
@@ -40,7 +43,7 @@ public sealed class SqlitePragmaInterceptorTests : IDisposable
 	public async Task Wal_PutsFileDatabaseIntoWalMode()
 	{
 		SqlitePragmaInterceptor interceptor = new();
-		await using SqliteConnection connection = new($"Data Source={_dbPath}");
+		await using SqliteConnection connection = new($"Data Source={_dbPath};Pooling=False");
 		await connection.OpenAsync();
 		await interceptor.ApplyAsync(connection, CancellationToken.None);
 

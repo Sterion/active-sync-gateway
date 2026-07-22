@@ -105,10 +105,28 @@ public sealed class DavReadinessTests
 					await using SslStream tls = new(client.GetStream());
 					await tls.AuthenticateAsServerAsync(_cert);
 					// The handshake is what the probe validates; a tiny OPTIONS request needs no
-					// draining before the response is written back.
-					byte[] response = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+					// draining before the response is written back. Connection: close asks the client
+					// to hang up as soon as it has the response.
+					byte[] response = Encoding.ASCII.GetBytes(
+						"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 					await tls.WriteAsync(response);
 					await tls.FlushAsync();
+					// Wait for the client to close its side before we dispose the socket. Closing
+					// immediately after the flush RSTs the loopback connection on Windows, and the
+					// probe's read faults with a socket error before it sees the 200. Reading until
+					// EOF (bounded) lets the response actually reach the client first.
+					try
+					{
+						using CancellationTokenSource drain = new(TimeSpan.FromSeconds(5));
+						byte[] sink = new byte[256];
+						while (await tls.ReadAsync(sink, drain.Token) > 0)
+						{
+						}
+					}
+					catch
+					{
+						// Client closed, or the drain timed out — either way it has the response.
+					}
 				}
 				catch
 				{

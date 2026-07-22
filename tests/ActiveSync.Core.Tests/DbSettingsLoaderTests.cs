@@ -32,7 +32,14 @@ public sealed class DbSettingsLoaderTests
 		string path = Path.Combine(Path.GetTempPath(), $"as-settings-{Guid.NewGuid():N}.sqlite");
 		try
 		{
-			DatabaseOptions database = new() { Provider = "Sqlite", ConnectionString = $"Data Source={path}" };
+			// Pooling=False so the SQLite handle is released when the loader disposes its context,
+			// letting the finally-block File.Delete succeed on Windows (the pool would otherwise keep
+			// the file open — an unlink-of-open no-op on Linux, an IOException here).
+			DatabaseOptions database = new()
+			{
+				Provider = "Sqlite",
+				ConnectionString = $"Data Source={path};Pooling=False"
+			};
 			CapturingLogger logger = new();
 
 			Dictionary<string, string?> result = DbSettingsLoader.TryLoad(database, logger);
