@@ -147,9 +147,8 @@ public partial class Program
 	private static DbSettingsConfigurationSource ConfigureConfiguration(WebApplicationBuilder builder)
 	{
 		// Full configuration shape ({ "ActiveSync": { "Users": ... } }); restart to apply changes.
-		string? usersFile = builder.Configuration["ActiveSync:UsersFile"];
-		if (!string.IsNullOrWhiteSpace(usersFile))
-			builder.Configuration.AddJsonFile(Path.GetFullPath(usersFile), false, false);
+		if (ResolveUsersFilePath(builder.Configuration["ActiveSync:UsersFile"]) is { } usersFilePath)
+			builder.Configuration.AddJsonFile(usersFilePath, false, false);
 
 		DbSettingsConfigurationSource settingsSource = new();
 		DatabaseOptions bootstrapDatabase =
@@ -158,6 +157,24 @@ public partial class Program
 			new Serilog.Extensions.Logging.SerilogLoggerFactory(Log.Logger).CreateLogger("ActiveSync.Settings")));
 		builder.Configuration.Sources.Add(settingsSource);
 		return settingsSource;
+	}
+
+	/// <summary>
+	///   Resolves the optional mounted users file (<c>ActiveSync:UsersFile</c>) to an absolute
+	///   path, or null when the setting is unset. Throws a message naming the setting and the
+	///   resolved absolute path when the file is missing (E19) — otherwise the operator gets a
+	///   raw <see cref="FileNotFoundException" /> from deep in the configuration builder with no
+	///   hint at the typo'd mount path.
+	/// </summary>
+	internal static string? ResolveUsersFilePath(string? usersFile)
+	{
+		if (string.IsNullOrWhiteSpace(usersFile))
+			return null;
+		string resolved = Path.GetFullPath(usersFile);
+		if (!File.Exists(resolved))
+			throw new InvalidOperationException(
+				$"The users file configured by ActiveSync:UsersFile was not found: '{resolved}'.");
+		return resolved;
 	}
 
 	/// <summary>
