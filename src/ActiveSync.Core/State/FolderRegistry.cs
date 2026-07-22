@@ -68,13 +68,15 @@ internal sealed class FolderRegistry(SyncDbContext db)
 				await db.SaveChangesAsync(ct).ConfigureAwait(false);
 				break;
 			}
-			catch (DbUpdateException) when (attempt < maxAttempts)
+			catch (DbUpdateException ex) when (attempt < maxAttempts && DbExceptions.IsUniqueViolation(ex))
 			{
-				// Discard ONLY the folder rows this method staged, so they are re-read on the next
-				// attempt. Detaching the whole change tracker (the old behaviour) also dropped
-				// unrelated tracked mutations sharing this request-scoped context — most damagingly
-				// Device.FolderSyncKey++, leaving the client acked at N+1 while the DB held N and
-				// forcing a full resync (A1).
+				// Only a unique violation is the concurrent-insert race worth re-reading and
+				// retrying; retrying a disk-full/NOT NULL failure four times just delays the same
+				// error (A9). Discard ONLY the folder rows this method staged, so they are re-read
+				// on the next attempt. Detaching the whole change tracker (the old behaviour) also
+				// dropped unrelated tracked mutations sharing this request-scoped context — most
+				// damagingly Device.FolderSyncKey++, leaving the client acked at N+1 while the DB
+				// held N and forcing a full resync (A1).
 				foreach (EntityEntry<UserFolder> entry in db.ChangeTracker.Entries<UserFolder>().ToList())
 					entry.State = EntityState.Detached;
 			}

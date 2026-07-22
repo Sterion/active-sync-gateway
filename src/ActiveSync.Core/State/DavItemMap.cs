@@ -26,9 +26,10 @@ internal sealed class DavItemMap(SyncDbContext db)
 			{
 				await db.SaveChangesAsync(ct).ConfigureAwait(false);
 			}
-			catch (DbUpdateException)
+			catch (DbUpdateException ex) when (DbExceptions.IsUniqueViolation(ex))
 			{
-				// A concurrent request mapped the same href first — re-read the winner.
+				// A concurrent request mapped the same href first — re-read the winner. Only a
+				// unique violation takes this path; any other failure keeps its diagnostic (A9).
 				db.Entry(item).State = EntityState.Detached;
 				item = await db.DavItems
 					.FirstAsync(i => i.UserFolderKey == folder.Id && i.Href == href, ct).ConfigureAwait(false);

@@ -95,10 +95,12 @@ internal sealed class DeviceStore(SyncDbContext db)
 		{
 			await db.SaveChangesAsync(ct).ConfigureAwait(false);
 		}
-		catch (DbUpdateException) when (db.Entry(device).State == EntityState.Added)
+		catch (DbUpdateException ex) when (
+			db.Entry(device).State == EntityState.Added && DbExceptions.IsUniqueViolation(ex))
 		{
 			// A concurrent first request for the same (user, device) inserted the row first.
-			// Re-read the winner and re-apply the touch as an update.
+			// Re-read the winner and re-apply the touch as an update. Only a unique violation
+			// takes this path — any other failure propagates with its diagnostic intact (A9).
 			db.Entry(device).State = EntityState.Detached;
 			device = await db.Devices
 				.FirstAsync(d => d.UserName == userName && d.DeviceId == deviceId, ct).ConfigureAwait(false);

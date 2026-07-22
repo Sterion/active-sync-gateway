@@ -314,6 +314,22 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task GetOrCreateDevice_NonUniqueFailure_PropagatesOriginalError()
+	{
+		// The insert-race catch assumed every DbUpdateException was "someone inserted first" and
+		// re-read with FirstAsync. A non-unique failure (disk full, SQLITE_BUSY, NOT NULL) then
+		// finds no row and throws "Sequence contains no elements", destroying the real
+		// diagnostic. A non-unique failure must surface unchanged (A9).
+		FaultInjectingInterceptor faults = new();
+		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
+		SyncStateService service = new(db);
+
+		faults.ThrowOnNextSave(new DbUpdateException("disk full", new Exception("SQLITE_FULL")));
+		await Assert.ThrowsAsync<DbUpdateException>(() =>
+			service.GetOrCreateDeviceAsync("u@a9", "DEV1", "Phone", CancellationToken.None));
+	}
+
+	[Fact]
 	public async Task DavItemMap_RoundTripsHrefs()
 	{
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@x",

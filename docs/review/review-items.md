@@ -220,7 +220,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **21. Backend session lifetime** — ~~`A2`~~ ~~`A11`~~ ~~`A12`~~ ~~`A13`~~ ~~`A24`~~ ~~`A28`~~ ~~`D27`~~ ~~`D28`~~ ~~`K60`~~ **COMPLETE**
 > One refactor fixes all nine: an `IAsyncDisposable` lease that refcounts use, gates concurrent access (MailKit's `ImapClient` is not thread-safe and clients pipeline), and defers disposal to the last release.
 
-**22. State layer correctness** — ~~`A1`~~ ~~`A5`~~ ~~`A6`~~ ~~`A7`~~ ~~`A8`~~ `A9` `A10` `A17` `A18` `A22`
+**22. State layer correctness** — ~~`A1`~~ ~~`A5`~~ ~~`A6`~~ ~~`A7`~~ ~~`A8`~~ ~~`A9`~~ `A10` `A17` `A18` `A22`
 > `A1` the retry detaches the *entire* change tracker, silently dropping the tracked `FolderSyncKey++` — client acked N+1, DB holds N, guaranteed full resync. Decide the transaction policy here; it settles `A10` and `A18`.
 
 **23. State layer performance & retention** — `A3` `A4` `A19` `A34` `A35`
