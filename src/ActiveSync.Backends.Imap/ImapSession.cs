@@ -19,20 +19,29 @@ public sealed class ImapSession(
 	public const string KeyPrefix = "imap:";
 	private readonly SemaphoreSlim _gate = new(1, 1);
 	private ImapClient? _client;
+	private int _disposed;
 
 	/// <summary>The IMAP login this session authenticates as (for log lines).</summary>
 	public string UserName => credentials.UserName;
 
 	public async ValueTask DisposeAsync()
 	{
-		await _gate.WaitAsync().ConfigureAwait(false);
+		// D28: idempotent — a second dispose (or one racing a store's own teardown) must not hit the
+		// already-disposed gate with an ObjectDisposedException.
+		if (Interlocked.Exchange(ref _disposed, 1) == 1)
+			return;
+
+		// Bounded wait: a wedged in-flight operation must not block eviction forever. If the gate
+		// cannot be taken in time we dispose the client best-effort anyway rather than hang.
+		bool acquired = await _gate.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
 		try
 		{
 			await DisposeClientAsync().ConfigureAwait(false);
 		}
 		finally
 		{
-			_gate.Release();
+			if (acquired)
+				_gate.Release();
 			_gate.Dispose();
 		}
 	}
@@ -52,6 +61,11 @@ public sealed class ImapSession(
 	public async Task<T> RunAsync<T>(
 		Func<ImapClient, Task<T>> action, CancellationToken ct, bool idempotent = true)
 	{
+		// D28: a caller arriving after disposal must fail cleanly, not with an ObjectDisposedException
+		// from the disposed gate.
+		if (Volatile.Read(ref _disposed) == 1)
+			throw new BackendException("IMAP session has been disposed.");
+
 		// Idempotent ops (reads, flag stores, moves, deletes, folder ops) replay on any transient
 		// drop. A non-idempotent op (APPEND: draft create, content-bearing draft edit, save-to-Sent)
 		// replays ONLY on a clean "not connected" — the command never left the client (e.g. the
