@@ -318,6 +318,73 @@ public class ActiveSyncOptionsValidatorTests
 		Assert.True(Validator.Validate(null, options).Succeeded);
 	}
 
+	// B26 — bounds the catalogue enforces on writes were missing from the startup validator, so
+	// file/env values bypassed them. A DefaultWindowSize of 0 starts clean and produces empty Syncs.
+	[Fact]
+	public void Eas_DefaultWindowSizeZero_Fails()
+	{
+		ActiveSyncOptions options = Valid();
+		options.Eas.DefaultWindowSize = 0;
+		ValidateOptionsResult result = Validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains("DefaultWindowSize", string.Join(";", result.Failures!));
+	}
+
+	[Fact]
+	public void Eas_DefaultWindowSizeExceedsMax_Fails()
+	{
+		ActiveSyncOptions options = Valid();
+		options.Eas.MaxWindowSize = 100;
+		options.Eas.DefaultWindowSize = 200;
+		ValidateOptionsResult result = Validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains("DefaultWindowSize", string.Join(";", result.Failures!));
+	}
+
+	[Theory]
+	[InlineData(0)]
+	[InlineData(600)]
+	public void Eas_MaxWindowSizeOutOfRange_Fails(int size)
+	{
+		ActiveSyncOptions options = Valid();
+		options.Eas.MaxWindowSize = size;
+		options.Eas.DefaultWindowSize = 1;
+		Assert.True(Validator.Validate(null, options).Failed);
+	}
+
+	[Fact]
+	public void Eas_DavPollSecondsZero_Fails()
+	{
+		ActiveSyncOptions options = Valid();
+		options.Eas.DavPollSeconds = 0;
+		Assert.True(Validator.Validate(null, options).Failed);
+	}
+
+	[Fact]
+	public void Eas_SessionIdleMinutesZero_Fails()
+	{
+		ActiveSyncOptions options = Valid();
+		options.Eas.SessionIdleMinutes = 0;
+		Assert.True(Validator.Validate(null, options).Failed);
+	}
+
+	[Fact]
+	public void Auth_UpperBounds_AreEnforced()
+	{
+		ActiveSyncOptions options = Valid();
+		options.Auth.SuccessCacheMinutes = 100000;
+		ValidateOptionsResult result = Validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains("SuccessCacheMinutes", string.Join(";", result.Failures!));
+	}
+
+	[Fact]
+	public void Eas_DefaultBounds_StillPass()
+	{
+		// The shipped defaults (Default 100, Max 512, DavPoll 60, SessionIdle 15) must remain valid.
+		Assert.True(Validator.Validate(null, Valid()).Succeeded);
+	}
+
 	[Fact]
 	public void Oidc_Disabled_IsInert_EvenWhenIncomplete()
 	{

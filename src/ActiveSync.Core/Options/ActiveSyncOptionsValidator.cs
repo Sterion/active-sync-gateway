@@ -33,14 +33,27 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 		if (options.Eas.FolderRetentionDays < 0)
 			failures.Add("ActiveSync:Eas:FolderRetentionDays must be 0 (disabled) or greater.");
 
-		if (options.Auth.MaxFailures < 0)
-			failures.Add("ActiveSync:Auth:MaxFailures must be 0 (disabled) or positive.");
-		if (options.Auth.FailureWindowSeconds < 1)
-			failures.Add("ActiveSync:Auth:FailureWindowSeconds must be at least 1.");
-		if (options.Auth.NegativeCacheSeconds < 0)
-			failures.Add("ActiveSync:Auth:NegativeCacheSeconds must be 0 (disabled) or positive.");
-		if (options.Auth.SuccessCacheMinutes < 0)
-			failures.Add("ActiveSync:Auth:SuccessCacheMinutes must be 0 (disabled) or positive.");
+		// B26: mirror the SettingKeys catalogue bounds so file/env values are held to the same range a
+		// CLI/web write is — otherwise a typo (DefaultWindowSize=0 → empty Sync responses) starts clean.
+		if (options.Eas.DavPollSeconds is < 1 or > 86400)
+			failures.Add("ActiveSync:Eas:DavPollSeconds must be between 1 and 86400.");
+		if (options.Eas.MaxWindowSize is < 1 or > 522)
+			failures.Add("ActiveSync:Eas:MaxWindowSize must be between 1 and 522.");
+		if (options.Eas.DefaultWindowSize is < 1 or > 522)
+			failures.Add("ActiveSync:Eas:DefaultWindowSize must be between 1 and 522.");
+		if (options.Eas.DefaultWindowSize > options.Eas.MaxWindowSize)
+			failures.Add("ActiveSync:Eas:DefaultWindowSize must not exceed ActiveSync:Eas:MaxWindowSize.");
+		if (options.Eas.SessionIdleMinutes is < 1 or > 1440)
+			failures.Add("ActiveSync:Eas:SessionIdleMinutes must be between 1 and 1440.");
+
+		if (options.Auth.MaxFailures is < 0 or > 1000000)
+			failures.Add("ActiveSync:Auth:MaxFailures must be between 0 (disabled) and 1000000.");
+		if (options.Auth.FailureWindowSeconds is < 1 or > 86400)
+			failures.Add("ActiveSync:Auth:FailureWindowSeconds must be between 1 and 86400.");
+		if (options.Auth.NegativeCacheSeconds is < 0 or > 86400)
+			failures.Add("ActiveSync:Auth:NegativeCacheSeconds must be between 0 (disabled) and 86400.");
+		if (options.Auth.SuccessCacheMinutes is < 0 or > 1440)
+			failures.Add("ActiveSync:Auth:SuccessCacheMinutes must be between 0 (disabled) and 1440.");
 
 		if (!string.IsNullOrWhiteSpace(options.PublicUrl) &&
 		    (!Uri.TryCreate(options.PublicUrl, UriKind.Absolute, out Uri? publicUri) ||
@@ -60,8 +73,8 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 		if (options.Log.DbMinimumLevel.ToLowerInvariant() is not ("information" or "warning" or "error" or "fatal"))
 			failures.Add($"ActiveSync:Log:DbMinimumLevel '{options.Log.DbMinimumLevel}' is unknown " +
 			             "(use Information, Warning, Error or Fatal).");
-		if (options.Log.RetentionDays < 0)
-			failures.Add("ActiveSync:Log:RetentionDays must be 0 or greater.");
+		if (options.Log.RetentionDays is < 0 or > 3650)
+			failures.Add("ActiveSync:Log:RetentionDays must be between 0 (disabled) and 3650.");
 
 		ValidateEncryption(options.Encryption, failures);
 
