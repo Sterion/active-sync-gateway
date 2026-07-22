@@ -1367,3 +1367,53 @@ Server 189** = 938.
   136/3 and 137/2 both went to 139/0 on a fresh container). A subset-shifting DAV failure is
   environmental until a fresh-container run says otherwise; a real regression fails the *same* tests every
   time.
+
+---
+
+## Item 32 — Sync command conformance [LIVE]
+**Findings:** `F1` `F4` `F5` `F6` `F7` `F8` `F9` `F12` `F22`
+**Commits:** `b23ab21` (F1) · `b77b7da` (F4) · `28e6201` (F5) · `796f34a` (F6) · `f3f190c` (F7) ·
+`292d8da` (F8) · `fd42cf3` (F9) · `458f02e` (F12) · `4112e7d` (F22)
+**Verification:** integrity items=56 live=15 assigned=365 unique=365 dupes=0 encoding=0 ✓ ·
+cursor → item 33 ✓ · one commit per finding, ID in each subject ✓ · build clean (0 warnings) ✓ ·
+unit 954/0/0 (Protocol 78 · Core 603 · WebUi 71 · Server 202) ✓ ·
+integration 141/0/0 on a **fresh clean-volume Stalwart** (`down -v` + up before verify) ✓ ·
+all nine proven red-first (genuine red→green on unmodified code, none coverage-only).
+**Spot-check (fix matches finding, not just compiles):** F4 = `status == "3" ? "0" : clientSyncKey`
+(exactly the recommended "0 for status 3, keep key for 5/12"); F6 parses `MIMESupport`, selects the
+Type-4 preference when `MimeSupport >= 1` and a Type-4 offer is present, threads it through
+`SyncCollectionOptions` — both land on the described defect, not around it.
+
+**Notes:**
+- **Behaviour changes (client-visible, iOS untested — treat with care):**
+  - **F5** — an out-of-range `Wait`/`HeartbeatInterval` now returns top-level **Status 14 + `Limit`**
+    (the taught bound) instead of being silently clamped upward and held; mirrors `PingHandler`. The
+    `Limit` unit matches whichever element was sent (`Wait` minutes / `HeartbeatInterval` seconds).
+  - **F6** — a client offering a Type-4 (MIME) `BodyPreference` with `MIMESupport >= 1` now receives
+    **raw MIME (BodyType 4)** rather than the HTML downgrade. Stores must render Type 4; JMAP/IMAP
+    already do. This is the enabling change for on-device S/MIME.
+  - **F7** — concurrent-edit conflicts now return **Status 7** (server-wins default) and poison the
+    snapshot so the server version is re-pushed, instead of the client blindly overwriting. A `Conflict`
+    option is now parsed.
+  - **F8** — 12.1 Sync responses now carry `<Class>` as the Collection's first child; **14.1+ stays
+    byte-identical** (asserted by the 14.1 gating test).
+  - **F9** — `MoreAvailable` now precedes `Responses`/`Commands` in the wire order (matches
+    Exchange/Z-Push; the worker confirmed against tested clients).
+- **F7 judgment call (could reasonably have gone the other way):** implemented for **all** item classes,
+  not just the calendar example in the finding. The conflict pre-check needs the current backend revision
+  *before* client commands are applied (the diff runs *after*, for echo suppression), so a Sync round
+  **carrying `Change` commands** pays one extra per-collection revision listing; idle polls are unaffected,
+  and the check **degrades to the historical overwrite** if that fetch fails. Server-wins is the default
+  (any non-zero `Conflict` value).
+- **F12 residual edge (documented, narrower than the original bug):** the replay-key rollback is now
+  deferred into the round's commit and is fully atomic for **single-collection** Sync (the common case).
+  In a **multi-collection** request, a later collection's commit can still flush an earlier collection's
+  pending rollback — consistent with the existing per-collection independent-commit policy (A10), and
+  clients tolerate it as churn. Not a regression from baseline; a shrink of the window.
+- **Test-infra (not fixes):** `EasHandlerHarness` gained a configurable `Revisions` map, a recording
+  `UpdateItemAsync`, a `protocolVersion` param on `RunAsync`, and `NewDbContext()` for reading committed
+  state. New state-layer API `SyncStateService.Read/WritePreviousSnapshot` (+ `CollectionStateStore`
+  counterparts) backs F22. No coverage-not-proof tests; no new findings filed.
+- **Orchestration note:** the `.sh` teardown flag is **`-d`**, not `-Down` (the `.ps1` name) — the first
+  restart attempt no-op'd on the warm container; a second `stalwart-up.sh -d` + up gave the genuine
+  clean-volume backend used for verification. Worth recording for the next Linux-host orchestrator.
