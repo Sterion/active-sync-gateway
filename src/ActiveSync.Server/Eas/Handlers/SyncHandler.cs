@@ -97,8 +97,15 @@ public sealed partial class SyncHandler(
 					int.TryParse(c.Element(AS + "WindowSize")?.Value, out int cw) ? cw : null))
 				.Where(c => c.CollectionId.Length > 0)
 				.ToList());
-			context.Device.LastSyncRequestJson = JsonSerializer.Serialize(cache);
-			await context.State.PersistAsync(ct);
+			// F15: the replayable shape is identical across consecutive steady-state polls, so only
+			// write (and flush) the Device row when it actually changed — an idle device polling
+			// every 30 s otherwise generates a redundant write every round on top of LastSeenUtc.
+			string serializedCache = JsonSerializer.Serialize(cache);
+			if (!string.Equals(serializedCache, context.Device.LastSyncRequestJson, StringComparison.Ordinal))
+			{
+				context.Device.LastSyncRequestJson = serializedCache;
+				await context.State.PersistAsync(ct);
+			}
 		}
 		else
 		{

@@ -130,6 +130,30 @@ public sealed class SyncHotPathTests : IDisposable
 		Assert.Equal(sentAdds, addsRecorded); // the metric counts what was sent, not what was diffed
 	}
 
+	// F15: a steady-state poll whose replayable request shape is unchanged must not re-write the
+	// Device row for the cache (the LastSeenUtc write is the only one that should happen).
+	[Fact]
+	public async Task F15_UnchangedReplayShape_DoesNotRewriteTheDeviceRow()
+	{
+		UserFolder inbox = await RegisterInboxAsync();
+		SyncHandler handler = NewSyncHandler();
+
+		// Prime: initial sync (key 0 → 1) caches the request shape once.
+		await _harness.RunAsync(handler, "Sync", SyncRequest(inbox.ServerId, "0"));
+		// A second non-empty Sync with the same shape (idle, no changes) — the cache is identical.
+		await _harness.RunAsync(handler, "Sync", SyncRequest(inbox.ServerId, "1"));
+
+		// Count SaveChanges during a THIRD identical poll. GetOrCreateDevice always writes
+		// LastSeenUtc (one save); the cache write must be elided because the shape is unchanged.
+		int saves = 0;
+		void OnSaved(object? sender, Microsoft.EntityFrameworkCore.SavedChangesEventArgs e) => saves++;
+		_harness.Db.SavedChanges += OnSaved;
+		await _harness.RunAsync(handler, "Sync", SyncRequest(inbox.ServerId, "1"));
+		_harness.Db.SavedChanges -= OnSaved;
+
+		Assert.Equal(1, saves);
+	}
+
 	private sealed class StubLifetime : IHostApplicationLifetime
 	{
 		public CancellationToken ApplicationStarted => CancellationToken.None;

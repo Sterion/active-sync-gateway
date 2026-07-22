@@ -41,6 +41,9 @@ public sealed class EasHandlerHarness : IDisposable
 
 	public SyncStateService State { get; }
 	public FolderService Folders { get; }
+
+	/// <summary>The tracked state DbContext, so a test can observe SaveChanges (write) count (F15).</summary>
+	public SqliteSyncDbContext Db => _db;
 	public StubSession Session { get; } = new();
 	public ActiveSyncOptions Options { get; } = new();
 
