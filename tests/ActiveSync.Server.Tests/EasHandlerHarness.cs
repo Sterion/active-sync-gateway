@@ -152,7 +152,9 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>Address-book operations (GAL search). Null unless a test wires one in.</summary>
 		public IContactOperations? Contacts { get; set; }
 		public ICalendarOperations? Calendar => null;
-		public IOofBackend? Oof => null;
+
+		/// <summary>Out-of-office backend. Null unless a test wires one in (the accept-and-ignore stub).</summary>
+		public IOofBackend? Oof { get; set; }
 
 		public IContentStore? GetStoreForClass(string easClass)
 		{

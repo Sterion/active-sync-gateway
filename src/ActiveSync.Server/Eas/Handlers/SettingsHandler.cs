@@ -87,6 +87,15 @@ public sealed class SettingsHandler(
 					response.Add(new XElement(ST + "DevicePassword", new XElement(ST + "Status", "1")));
 					break;
 				}
+				default:
+				{
+					// An unrecognized/unimplemented section gets its OWN status so the client can
+					// tell it was not applied, instead of a bare top-level Status 1 and complete
+					// silence about the section (F48). Status 2 = not supported.
+					response.Add(new XElement(ST + section.Name.LocalName,
+						new XElement(ST + "Status", "2")));
+					break;
+				}
 			}
 
 		await context.WriteResponseAsync(new XDocument(response));
@@ -126,6 +135,16 @@ public sealed class SettingsHandler(
 	/// </summary>
 	private async Task<XElement> ApplyOofSetAsync(EasContext context, XElement set, CancellationToken ct)
 	{
+		// Arming Oof installs a real server-side auto-reply (ManageSieve) — a far more
+		// externally-visible side effect than the writes ReadOnly already blocks — so a read-only
+		// gateway must refuse it with access-denied (F47), the same as the other mutating handlers.
+		if (options.Value.ReadOnly)
+		{
+			logger.LogInformation("Read-only: rejecting Oof Set for {User}",
+				LogText.Clean(context.Device.UserName, 128));
+			return new XElement(ST + "Oof", new XElement(ST + "Status", "3"));
+		}
+
 		IOofBackend? oof = context.Session.Oof;
 		if (oof is null)
 			return new XElement(ST + "Oof", new XElement(ST + "Status", "1"));

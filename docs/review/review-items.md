@@ -261,7 +261,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **33. Folder & provision conformance** [LIVE] — ~~`F25`~~ ~~`F26`~~ ~~`F27`~~ **COMPLETE**
 > No FolderSync replay generation; every folder-op failure collapses to "system folder"; `FolderCreate` ignores the requested `Type`.
 
-**34. Search, find, recipients & settings** [LIVE] — ~~`F19`~~ ~~`F20`~~ `F32` `F33` `F34` `F35` ~~`F36`~~ ~~`F37`~~ ~~`F38`~~ ~~`F41`~~ ~~`F42`~~ ~~`F45`~~ **(status split done: 6 unresolvable / 2 non-mail / 3 read-only; `DeleteSubFolders` plumbing deferred — it needs a breaking `IMailStoreOperations.EmptyFolderAsync` contract change + IMAP/JMAP recursive-delete support, disproportionate to a Low)** `F47` `F48` ~~`A15`~~ ~~`A16`~~
+**34. Search, find, recipients & settings** [LIVE] — ~~`F19`~~ ~~`F20`~~ `F32` `F33` `F34` `F35` ~~`F36`~~ ~~`F37`~~ ~~`F38`~~ ~~`F41`~~ ~~`F42`~~ ~~`F45`~~ **(status split done: 6 unresolvable / 2 non-mail / 3 read-only; `DeleteSubFolders` plumbing deferred — it needs a breaking `IMailStoreOperations.EmptyFolderAsync` contract change + IMAP/JMAP recursive-delete support, disproportionate to a Low)** ~~`F47`~~ ~~`F48`~~ ~~`A15`~~ ~~`A16`~~
 > `F36` `Total` reports page size so search stops after page 1. `F47` `ReadOnly` doesn't block arming an out-of-office auto-reply. `A15` "no data" outranks "busy" in free/busy merging.
 
 ## Phase 6 — Performance
