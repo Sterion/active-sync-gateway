@@ -1,5 +1,4 @@
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
 using Ical.Net;
 using Ical.Net.Serialization;
 

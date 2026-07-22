@@ -1,5 +1,5 @@
 using System.Text;
-using ActiveSync.Core.Logging;
+using ActiveSync.Contracts;
 using MailKit;
 using Microsoft.Extensions.Logging;
 

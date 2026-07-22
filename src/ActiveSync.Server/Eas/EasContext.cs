@@ -1,7 +1,6 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
-using ActiveSync.Core.Logging;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Http;

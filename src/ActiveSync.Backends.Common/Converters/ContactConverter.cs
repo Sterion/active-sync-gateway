@@ -1,7 +1,6 @@
 using System.Text;
 using System.Xml.Linq;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using FolkerKinzel.VCards;

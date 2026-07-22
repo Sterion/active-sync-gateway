@@ -197,8 +197,8 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 ## Phase 3 — Boundaries
 *Do before the big refactors — everything downstream is easier once the plugin boundary is real. Each item lands on a clean tree.*
 
-**15. `Backends.Common` drops its Core reference** — `S1`
-> Move `WireLog.Payload`, `TransientRetry`, `BackendConfigField` → Contracts. Its *only* real Core usage is one call; the seven `using ActiveSync.Core.Backend;` directives are dead. Cheapest high-leverage change in the list.
+**15. `Backends.Common` drops its Core reference** — ~~`S1`~~ **COMPLETE**
+> Move `WireLog.Payload`, `TransientRetry`, `BackendConfigField` → Contracts. Its *only* real Core usage is one call; the seven `using ActiveSync.Core.Backend;` directives are dead. Cheapest high-leverage change in the list. — Done: `WireLog` + `TransientRetry` moved to `ActiveSync.Contracts`; `BackendConfigField` was already in Contracts. Backends.Common now references Contracts (not Core) and declares `Microsoft.Extensions.Logging.Abstractions` directly (ILogger no longer flows in via Core). Guarded by `DependencyRuleTests.BackendsCommon_DoesNotReferenceCore`.
 
 **16. Crypto namespace realignment** — `S2` `K49`
 > `ActiveSync.Crypto` ships types in `ActiveSync.Core.*` namespaces, so the slim CLI's "doesn't reference Core" property is invisible in its own source. Do it before the package has external consumers.

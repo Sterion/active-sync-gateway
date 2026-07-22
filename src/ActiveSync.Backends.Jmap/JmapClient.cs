@@ -6,7 +6,6 @@ using System.Text.Json;
 using ActiveSync.Backends;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
-using ActiveSync.Core.Logging;
 using ActiveSync.Core.Observability;
 using Microsoft.Extensions.Logging;
 

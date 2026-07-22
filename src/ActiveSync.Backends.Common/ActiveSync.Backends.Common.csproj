@@ -11,13 +11,14 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
+		<ProjectReference Include="..\ActiveSync.Contracts\ActiveSync.Contracts.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="FolkerKinzel.VCards" />
 		<PackageReference Include="Ical.Net" />
 		<PackageReference Include="MailKit" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
 	</ItemGroup>
 
 </Project>

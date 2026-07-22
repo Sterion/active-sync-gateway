@@ -1,6 +1,6 @@
 using System.Text;
 using ActiveSync.Backends.Common;
-using ActiveSync.Core.Logging;
+using ActiveSync.Contracts;
 using MailKit;
 using Microsoft.Extensions.Logging;
 

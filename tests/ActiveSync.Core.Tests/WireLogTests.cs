@@ -1,4 +1,4 @@
-using ActiveSync.Core.Logging;
+using ActiveSync.Contracts;
 
 namespace ActiveSync.Core.Tests;
 

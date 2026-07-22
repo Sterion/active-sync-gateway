@@ -1,5 +1,4 @@
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
 
 namespace ActiveSync.Backends.Common;
 

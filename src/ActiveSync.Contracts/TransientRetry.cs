@@ -1,8 +1,6 @@
 using System.Net;
 
-using ActiveSync.Contracts;
-
-namespace ActiveSync.Core.Backend;
+namespace ActiveSync.Contracts;
 
 /// <summary>
 ///   Bounded, allocation-light transient retry for backend operations. No external resilience

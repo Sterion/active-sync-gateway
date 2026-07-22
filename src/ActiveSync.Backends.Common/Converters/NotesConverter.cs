@@ -1,6 +1,5 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using Ical.Net;
