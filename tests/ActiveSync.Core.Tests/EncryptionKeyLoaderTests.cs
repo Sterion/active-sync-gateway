@@ -35,15 +35,28 @@ public class EncryptionKeyLoaderTests
 	}
 
 	[Fact]
-	public void ShortPassphrase_LoadsSuccessfully()
+	public void Passphrase_AtFloor_LoadsSuccessfully()
 	{
-		// No minimum: even "pass" is accepted (a startup warning is the only pushback).
-		byte[]? key = Load("pass", out string? error);
+		// Behaviour change (K46): there is now a hard minimum passphrase length. A passphrase at or
+		// above the floor (but still under the 12-char warn threshold) loads and is usable — the
+		// warning is the only pushback in that band (was "even 'pass' is accepted").
+		byte[]? key = Load("passpass", out string? error); // 8 chars
 		Assert.Null(error);
 		Assert.NotNull(key);
 		Assert.Equal(32, key.Length);
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(key);
 		Assert.Equal("data", protector.Unprotect(protector.Protect("data", "u", "notes"), "u", "notes"));
+	}
+
+	[Fact]
+	public void ShortPassphrase_BelowFloor_IsRejected()
+	{
+		// K46: a passphrase below the hard minimum is refused (previously it only produced a
+		// startup warning and loaded anyway).
+		byte[]? key = Load("pass", out string? error); // 4 chars
+		Assert.Null(key);
+		Assert.NotNull(error);
+		Assert.Contains("at least", error);
 	}
 
 	[Theory]

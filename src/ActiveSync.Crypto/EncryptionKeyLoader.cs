@@ -15,8 +15,14 @@ namespace ActiveSync.Core.Security;
 /// </summary>
 public static class EncryptionKeyLoader
 {
-	/// <summary>Passphrases shorter than this trigger a startup-banner warning (never an error).</summary>
+	/// <summary>Passphrases shorter than this trigger a startup-banner warning (but still load).</summary>
 	public const int ShortPassphraseLength = 12;
+
+	/// <summary>
+	///   Hard minimum passphrase length (K46): a shorter passphrase is refused, not merely warned
+	///   about. The raw base64-32-byte key path is exempt (it is not a passphrase).
+	/// </summary>
+	public const int MinPassphraseLength = 8;
 
 	private const int KeySize = 32;
 	private const int DerivationIterations = 200_000;
@@ -34,6 +40,15 @@ public static class EncryptionKeyLoader
 		string? material = LoadKeyMaterial(options, out error);
 		if (material is null)
 			return null;
+		// K46: a passphrase (anything that is not a raw base64 32-byte key) must clear a hard length
+		// floor, not merely earn a warning. A too-short passphrase is a refusal.
+		if (TryDecodeRawKey(material) is null && material.Length < MinPassphraseLength)
+		{
+			error = $"ActiveSync:Encryption: the key passphrase must be at least {MinPassphraseLength} " +
+			        "characters, or supply a base64 32-byte key ('openssl rand -base64 32').";
+			return null;
+		}
+
 		return DeriveKey(material, options);
 	}
 

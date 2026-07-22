@@ -159,7 +159,8 @@ a base64 value decoding to exactly 32 bytes is used as the raw 256-bit key, anyt
 is treated as a passphrase and stretched to 256 bits with PBKDF2-SHA256. For maximum
 entropy generate a raw key with `openssl rand -base64 32` (PowerShell:
 `[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))`);
-passphrases shorter than 12 characters work but are called out in the startup banner.
+a passphrase must be at least 8 characters (startup fails below that), and passphrases
+shorter than 12 characters load but are called out in the startup banner.
 
 | Option | Default | Description |
 |--------|---------|-------------|
