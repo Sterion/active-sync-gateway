@@ -616,7 +616,7 @@ public static class CalendarConverter
 				// TakeWhile on the window end is what terminates it.
 				foreach (Occurrence occurrence in evt
 					         .GetOccurrences(new CalDateTime(startUtc, "UTC"))
-					         .TakeWhile(o => ToUtc(o.Period.StartTime) < endUtc))
+					         .TakeWhile(o => ToUtc(o.Period.StartTime) is not { } s || s < endUtc))
 				{
 					DateTime? start = ToUtc(occurrence.Period.StartTime);
 					DateTime? end = ToUtc(occurrence.Period.EffectiveEndTime ?? occurrence.Period.EndTime);
