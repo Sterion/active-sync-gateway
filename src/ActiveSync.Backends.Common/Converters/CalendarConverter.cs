@@ -231,15 +231,20 @@ public static class CalendarConverter
 		string? endRaw = V("EndTime");
 		TimeSpan? tzOffset = TimeZoneBlob.ReadBaseOffset(V("TimeZone"));
 
+		// D12: capture the stored zone BEFORE overwriting so an update keeps a real (non-UTC)
+		// TZID instead of re-anchoring the event — and its recurrences — to a fixed UTC offset.
+		string? storedStartTz = evt.Start?.TzId;
+		string? storedEndTz = evt.End?.TzId;
+
 		if (startRaw is not null && EasDateTime.TryParse(startRaw, out DateTime startUtc))
 			evt.Start = allDay
 				? new CalDateTime(DateOnly.FromDateTime(LocalDate(startUtc, tzOffset)))
-				: new CalDateTime(startUtc, "UTC");
+				: InStoredZone(startUtc, storedStartTz);
 
 		if (endRaw is not null && EasDateTime.TryParse(endRaw, out DateTime endUtc))
 			evt.End = allDay
 				? new CalDateTime(DateOnly.FromDateTime(LocalDate(endUtc, tzOffset)))
-				: new CalDateTime(endUtc, "UTC");
+				: InStoredZone(endUtc, storedEndTz);
 
 		// Presence-guarded: an omitted element means "leave as is", never "reset to default" —
 		// a partial/ghosted Change must not silently flip a PRIVATE event to PUBLIC.
@@ -714,6 +719,21 @@ public static class CalendarConverter
 		{
 			return null;
 		}
+	}
+
+	/// <summary>
+	///   D12: renders a UTC instant as wall-clock in the event's stored timezone when that zone
+	///   is a real, resolvable non-UTC zone; otherwise keeps it in UTC. Recovering a zone from
+	///   the bias-only client TimeZone blob is out of scope, so a fresh event (no stored zone)
+	///   or a UTC-stored one stays UTC — the documented limitation.
+	/// </summary>
+	private static CalDateTime InStoredZone(DateTime utc, string? storedTzId)
+	{
+		TimeZoneInfo? zone = ResolveTimeZone(storedTzId);
+		if (zone is null)
+			return new CalDateTime(utc, "UTC");
+		DateTime wall = TimeZoneInfo.ConvertTimeFromUtc(utc, zone);
+		return new CalDateTime(DateTime.SpecifyKind(wall, DateTimeKind.Unspecified), storedTzId);
 	}
 
 	private static DateTime? ToUtc(CalDateTime? value)
