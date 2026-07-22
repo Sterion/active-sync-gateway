@@ -94,28 +94,69 @@ public interface IBackendConnection : IAsyncDisposable
 }
 
 /// <summary>Ready-made <see cref="IBackendConnection" /> that disposes its owned resources.</summary>
+/// <remarks>
+///   K60: disposal is idempotent (a second call is a no-op), keeps going when one resource throws
+///   (surfacing the failures as an <see cref="AggregateException" /> so no later resource leaks a
+///   live socket), and also disposes any content store that is itself disposable — stores routinely
+///   hold connections, and the provider is no longer required to remember to list them in
+///   <paramref name="ownedResources" />. The parameter stays <c>object</c>-typed because the owned
+///   resources are a mix of <see cref="IAsyncDisposable" /> (ImapSession) and <see cref="IDisposable" />
+///   (WebDavClient, JmapClient), which no single disposable interface covers.
+/// </remarks>
 public sealed class BackendConnection(
 	IReadOnlyList<IContentStore> stores,
 	IMailSubmitOperations? mailSubmit = null,
 	IOofBackend? oof = null,
 	IReadOnlyList<object>? ownedResources = null) : IBackendConnection
 {
+	private bool _disposed;
+
 	public IReadOnlyList<IContentStore> Stores => stores;
 	public IMailSubmitOperations? MailSubmit => mailSubmit;
 	public IOofBackend? Oof => oof;
 
 	public async ValueTask DisposeAsync()
 	{
+		if (_disposed)
+			return;
+		_disposed = true;
+
+		List<Exception>? failures = null;
+
+		// Dispose every owned resource, plus any store that owns a connection — never let one
+		// throwing disposal strand the rest (a live IMAP/HTTP socket leaks otherwise).
 		foreach (object resource in ownedResources ?? [])
-			switch (resource)
+			await SafeDisposeAsync(resource).ConfigureAwait(false);
+		foreach (IContentStore store in stores)
+			// A store explicitly listed as an owned resource is disposed once, above.
+			if (store is not IAsyncDisposable and not IDisposable ||
+			    (ownedResources?.Any(r => ReferenceEquals(r, store)) ?? false))
+				continue;
+			else
+				await SafeDisposeAsync(store).ConfigureAwait(false);
+
+		if (failures is { Count: > 0 })
+			throw new AggregateException("One or more backend resources failed to dispose.", failures);
+
+		async ValueTask SafeDisposeAsync(object resource)
+		{
+			try
 			{
-				case IAsyncDisposable asyncDisposable:
-					await asyncDisposable.DisposeAsync().ConfigureAwait(false);
-					break;
-				case IDisposable disposable:
-					disposable.Dispose();
-					break;
+				switch (resource)
+				{
+					case IAsyncDisposable asyncDisposable:
+						await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+						break;
+					case IDisposable disposable:
+						disposable.Dispose();
+						break;
+				}
 			}
+			catch (Exception ex)
+			{
+				(failures ??= []).Add(ex);
+			}
+		}
 	}
 }
 
