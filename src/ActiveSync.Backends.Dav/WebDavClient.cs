@@ -121,8 +121,8 @@ public sealed class WebDavClient : IDisposable
 			};
 			if (ifNoneMatch)
 				request.Headers.IfNoneMatch.Add(EntityTagHeaderValue.Any);
-			else if (etag is not null && EntityTagHeaderValue.TryParse(etag, out EntityTagHeaderValue? parsed))
-				request.Headers.IfMatch.Add(parsed);
+			else if (etag is not null && BuildIfMatch(etag) is { } ifMatch)
+				request.Headers.IfMatch.Add(ifMatch);
 			return request;
 		}, ct).ConfigureAwait(false);
 
@@ -142,6 +142,26 @@ public sealed class WebDavClient : IDisposable
 
 		await EnsureSuccessAsync(response, "PUT", href, ct).ConfigureAwait(false);
 		return response.Headers.ETag?.Tag;
+	}
+
+	/// <summary>
+	///   Builds an <c>If-Match</c> value from a stored ETag. Servers routinely hand back a bare,
+	///   unquoted ETag; <see cref="EntityTagHeaderValue.TryParse" /> rejects that, so the old code
+	///   silently omitted the header and issued an unconditional PUT — a lost update (H3). A tag
+	///   that already parses is used as-is (preserving weak/strong); otherwise it is normalized to
+	///   a quoted strong (or weak, for a "W/" prefix) tag.
+	/// </summary>
+	internal static EntityTagHeaderValue BuildIfMatch(string etag)
+	{
+		string value = etag.Trim();
+		if (EntityTagHeaderValue.TryParse(value, out EntityTagHeaderValue? parsed))
+			return parsed;
+		bool weak = value.StartsWith("W/", StringComparison.Ordinal);
+		string tag = (weak ? value[2..] : value).Trim();
+		if (tag.Length >= 2 && tag[0] == '"' && tag[^1] == '"')
+			tag = tag[1..^1];
+		tag = tag.Replace("\"", ""); // an entity tag cannot carry a raw quote; drop any stray ones
+		return new EntityTagHeaderValue($"\"{tag}\"", weak);
 	}
 
 	public async Task DeleteAsync(string href, CancellationToken ct)
@@ -310,7 +330,12 @@ public sealed class WebDavClient : IDisposable
 			XElement? okPropstat = responseElement.Elements(DavNs.D + "propstat")
 				.FirstOrDefault(p => p.Element(DavNs.D + "status")?.Value.Contains("200") != false);
 			if (okPropstat is not null)
-				result.Add(new DavResource(Uri.UnescapeDataString(href), okPropstat));
+				// H2: keep the href exactly as the server percent-encoded it. It is used verbatim
+				// as a request path (Resolve → new Uri(base, href)); unescaping it here turned a
+				// resource named "a#b.ics" into path "/…/a" with "#b.ics" as a URI fragment, so
+				// every GET/PUT/DELETE hit the wrong resource. Href comparison against share grants
+				// unescapes on its own side (SharedHrefEquals), so it does not depend on this.
+				result.Add(new DavResource(href, okPropstat));
 		}
 
 		return result;
