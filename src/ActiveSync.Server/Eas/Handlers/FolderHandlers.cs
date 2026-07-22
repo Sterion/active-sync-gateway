@@ -146,10 +146,10 @@ public abstract class FolderModifyHandlerBase(
 			return;
 		}
 
-		string? newServerId;
+		string? newBackendKey;
 		try
 		{
-			newServerId = await ExecuteAsync(context, request.Root, ct);
+			newBackendKey = await ExecuteAsync(context, request.Root, ct);
 		}
 		catch (FolderOperationException ex) // a client error that knows its own EAS status (F26)
 		{
@@ -172,6 +172,10 @@ public abstract class FolderModifyHandlerBase(
 			return;
 		}
 
+		// F28: ONE hierarchy enumeration per FolderCreate. ExecuteAsync used to run its own
+		// Folders.RefreshAsync just to map the new backend key to a ServerId, and this refresh ran
+		// a second — two full multi-backend enumerations. ExecuteAsync now returns the backend key
+		// and the new folder's ServerId is resolved from this single refresh.
 		List<UserFolder> registry = await Folders.RefreshAsync(context.Session, context.Device.UserName, ct);
 		int newKey;
 		try
@@ -184,6 +188,9 @@ public abstract class FolderModifyHandlerBase(
 			return;
 		}
 
+		string? newServerId = newBackendKey is null
+			? null
+			: registry.FirstOrDefault(f => f.BackendKey == newBackendKey)?.ServerId;
 		logger.LogInformation("{Command} \"{Folder}\" for {User}",
 			Command, RequestedFolderName(request.Root), context.Device.UserName);
 		await WriteStatusAsync(context, "1", newKey.ToString(), newServerId);
@@ -195,7 +202,11 @@ public abstract class FolderModifyHandlerBase(
 		return root.Element(FH + "DisplayName")?.Value ?? root.Element(FH + "ServerId")?.Value ?? "?";
 	}
 
-	/// <summary>Performs the backend change; returns the new folder's ServerId for FolderCreate.</summary>
+	/// <summary>
+	///   Performs the backend change. Returns the new folder's BACKEND KEY for FolderCreate (the
+	///   base handler maps it to a ServerId from its own single hierarchy refresh — F28); null for
+	///   Delete/Update, which create nothing.
+	/// </summary>
 	protected abstract Task<string?> ExecuteAsync(EasContext context, XElement root, CancellationToken ct);
 
 	/// <summary>
@@ -274,10 +285,9 @@ public sealed class FolderCreateHandler(
 			// is a write to the shared collection. A missing parent is Status 5, not "system folder".
 			parentBackendKey = (await ResolveWritableAsync(context, parentId, ct, "5")).Folder.BackendKey;
 
-		string backendKey = await folderOps.CreateFolderAsync(parentBackendKey, displayName, ct);
-		// Register so the response can carry the assigned ServerId.
-		List<UserFolder> registry = await Folders.RefreshAsync(context.Session, context.Device.UserName, ct);
-		return registry.FirstOrDefault(f => f.BackendKey == backendKey)?.ServerId;
+		// Return the new folder's backend key; the base handler's single hierarchy refresh (F28)
+		// registers it and resolves the ServerId for the response.
+		return await folderOps.CreateFolderAsync(parentBackendKey, displayName, ct);
 	}
 
 	/// <summary>

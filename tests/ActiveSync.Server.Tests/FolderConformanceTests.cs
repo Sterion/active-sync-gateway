@@ -147,6 +147,23 @@ public sealed class FolderConformanceTests : IDisposable
 		Assert.Single(_harness.Session.Store.CreatedFolders);
 	}
 
+	// F28: a FolderCreate enumerates the whole multi-backend hierarchy exactly ONCE, not twice
+	// (ExecuteAsync used to refresh to map the new key to a ServerId, then HandleAsync refreshed
+	// again to commit).
+	[Fact]
+	public async Task FolderCreate_EnumeratesTheHierarchyOnlyOnce()
+	{
+		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
+			new XDocument(new XElement(FH + "FolderCreate",
+				new XElement(FH + "SyncKey", "0"),
+				new XElement(FH + "ParentId", "0"),
+				new XElement(FH + "Type", EasFolderType.UserMail.ToString()),
+				new XElement(FH + "DisplayName", "Projects"))));
+
+		Assert.Equal("1", response?.Root?.Element(FH + "Status")?.Value);
+		Assert.Equal(1, _harness.Session.Store.ListFoldersCalls);
+	}
+
 	private FolderCreateHandler CreateHandler()
 	{
 		return new FolderCreateHandler(_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),

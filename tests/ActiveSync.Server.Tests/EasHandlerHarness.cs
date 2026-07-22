@@ -234,8 +234,12 @@ public sealed class EasHandlerHarness : IDisposable
 			return backendKey.StartsWith(KeyPrefix, StringComparison.Ordinal);
 		}
 
+		/// <summary>Number of hierarchy enumerations the handler drove (F28 asserts exactly one).</summary>
+		public int ListFoldersCalls { get; private set; }
+
 		public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 		{
+			ListFoldersCalls++;
 			throw new NotSupportedException();
 		}
 
