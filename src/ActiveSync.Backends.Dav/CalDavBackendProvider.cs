@@ -113,8 +113,13 @@ public sealed class CalDavBackendProvider(ILoggerFactory loggerFactory) : IBacke
 	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
 	{
 		ResolvedRole? calendarRole = context.Roles.FirstOrDefault(r => r.Role == BackendRole.Calendar);
-		DavServerOptions clientOptions = (calendarRole ?? context.Roles[0]).Settings.Bind<DavServerOptions>();
-		WebDavClient client = new(new Uri(clientOptions.BaseUrl), context.Roles[0].Credentials,
+		// H21: the shared client's settings (BaseUrl, TLS) and its credentials must come from the
+		// SAME role. The old code took settings from the Calendar role but credentials from
+		// Roles[0] — so when Tasks was listed first with its own per-user credentials, the client
+		// hit the calendar server authenticating as the tasks role.
+		ResolvedRole clientRole = SelectClientRole(context.Roles);
+		DavServerOptions clientOptions = clientRole.Settings.Bind<DavServerOptions>();
+		WebDavClient client = new(new Uri(clientOptions.BaseUrl), clientRole.Credentials,
 			clientOptions.AllowInvalidCertificates, clientOptions.CaCertificatePath, _wireLogger);
 		string partStatIdentity = context.MailAddress ?? context.GatewayCredentials.UserName;
 
@@ -134,6 +139,17 @@ public sealed class CalDavBackendProvider(ILoggerFactory loggerFactory) : IBacke
 			}
 
 		return Task.FromResult<IBackendConnection>(new BackendConnection(stores, ownedResources: [client]));
+	}
+
+	/// <summary>
+	///   The one role whose settings AND credentials build the shared <see cref="WebDavClient" />:
+	///   the Calendar role when present (it carries the connection's BaseUrl/TLS), else the first
+	///   assigned role. Both must come from this single role so the client never authenticates as a
+	///   different role than the one whose endpoint it is talking to (H21).
+	/// </summary>
+	internal static ResolvedRole SelectClientRole(IReadOnlyList<ResolvedRole> roles)
+	{
+		return roles.FirstOrDefault(r => r.Role == BackendRole.Calendar) ?? roles[0];
 	}
 
 	/// <summary>The Tasks role inherits the Calendar section as its base when both are assigned here.</summary>
