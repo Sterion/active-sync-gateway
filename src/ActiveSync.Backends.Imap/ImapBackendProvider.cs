@@ -174,21 +174,29 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		if (!_options.CurrentValue.Eas.UseImapIdle)
 			return null;
 		string key = $"{gatewayLogin}\n{folderFullName}";
-		Lazy<ImapIdleWatcher> lazy = _watchers.GetOrAdd(key,
-			_ => new Lazy<ImapIdleWatcher>(() =>
-				new ImapIdleWatcher(options, credentials, folderFullName, _logger, _wireLogger)));
-		ImapIdleWatcher watcher = lazy.Value;
-		if (watcher.Credentials.Password != credentials.Password)
+
+		Lazy<ImapIdleWatcher> NewWatcherLazy(string _) =>
+			new(() => new ImapIdleWatcher(options, credentials, folderFullName, _logger, _wireLogger));
+
+		Lazy<ImapIdleWatcher> current = _watchers.GetOrAdd(key, NewWatcherLazy);
+		if (current.Value.Credentials.Password == credentials.Password)
+			return current.Value;
+
+		// D27: password rotation — swap the stale lazy for a fresh one with an atomic compare-and-set,
+		// so only the thread that wins the swap disposes the stale watcher, and a loser never
+		// materializes (and thus orphans) a freshly-built watcher outside the map. The replacement
+		// lazy is deferred, so a loser that never installs it builds nothing.
+		Lazy<ImapIdleWatcher> replacement = NewWatcherLazy(key);
+		if (_watchers.TryUpdate(key, replacement, current))
 		{
-			if (_watchers.TryRemove(key, out Lazy<ImapIdleWatcher>? stale) && stale.IsValueCreated)
-				_ = DisposeWatcherAsync(stale.Value);
-			watcher = _watchers.GetOrAdd(key,
-					_ => new Lazy<ImapIdleWatcher>(() =>
-						new ImapIdleWatcher(options, credentials, folderFullName, _logger, _wireLogger)))
-				.Value;
+			if (current.IsValueCreated)
+				_ = DisposeWatcherAsync(current.Value);
+			return replacement.Value;
 		}
 
-		return watcher;
+		// Lost the swap (another thread rebuilt, or the entry was trimmed): use whatever fresh entry
+		// is there now — GetOrAdd returns the winner's, or re-adds one for the current credentials.
+		return _watchers.GetOrAdd(key, NewWatcherLazy).Value;
 	}
 
 	private async Task DisposeWatcherAsync(ImapIdleWatcher watcher)
