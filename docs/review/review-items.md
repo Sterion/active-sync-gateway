@@ -105,6 +105,15 @@ dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration
 
 Baseline at `ce6259c` was 124 passed, **0 skipped**, ~2.5 min; it grows as items add live tests.
 
+**Fresh restart** (clean volume) — for the parallel-restart rule in `fix-review.md`. Run this the
+moment the worker is spawned, so it reprovisions inside the worker's work window and costs no
+wall-clock time:
+
+```powershell
+./scripts/stalwart-up.ps1 -Down   # tear down, discarding the accumulated volume
+./scripts/stalwart-up.ps1         # bring up fresh; probes all four ports before returning
+```
+
 **Environment gotchas:**
 
 - **A skipped suite exits 0 and looks exactly like a passing one.** Every integration test is a

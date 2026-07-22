@@ -29,6 +29,30 @@ Never edits source or tests.
 
 ---
 
+## For the operator — the two ways to start
+
+You (the human) only ever type one of these. Everything after is the machine's contract.
+
+**One item, or a small range, in this session:**
+
+```
+Read docs/review/fix-review.md and docs/review/review-items.md. Implement item 13.
+Follow the working protocol.
+```
+
+**A longer run, hands-off, one fresh subagent per item:**
+
+```
+Read docs/review/fix-review.md, docs/review/review-items.md, and AGENTS.md.
+Work items 13 through 18 as an orchestrator following "Orchestrated mode".
+```
+
+Substitute the item number(s). Add nothing else — the policy (breaking changes, push, the warning
+baseline) lives in `review-items.md`'s Standing context and is read from there, not restated in the
+prompt. If you forget to state something, that is a signal it belongs in the docs, not in the prompt.
+
+---
+
 ## Starting a session
 
 Single item, or a small range in one session:
@@ -94,15 +118,37 @@ verification dump and test summary. One reached 1.5M tokens over four hours and 
 degraded well before any hard limit. Handover is free: the cursor is the state, so a fresh
 orchestrator resumes exactly where the last stopped.
 
-### Keep worker briefs short
+### The worker brief is a constant, not a composition
 
-Name the item and anything **not** in the documents — a resumed item, a stash, an environment quirk.
-Nothing else.
+Spawn **every** worker with exactly this text, substituting only the item number, and add nothing:
 
-Do not paste finding text into the prompt. It looks like a saving and is not: the orchestrator's
-context degrades across a run, so its summaries get worse exactly as the run goes on — a tired
-session briefing a fresh one, which is backwards. And `review-items.md` is live: findings gain notes
-as items land, which a stale paste cannot show.
+```
+You are a Worker. Read docs/review/fix-review.md, docs/review/review-items.md, and AGENTS.md,
+in that order, and follow them exactly. Implement item N and only item N. Report back per the
+protocol: each finding ID with its commit and how it was proven (red-first / coverage / N/A),
+the full unit-suite counts, every behaviour or breaking change, any coverage-not-proof test,
+any judgment call, and any new findings filed.
+```
+
+**Do not compose a brief.** The instinct is to help the fresh worker by front-loading it with
+context you just read — the dependency direction, the policy, per-finding notes. Resist it, because
+it fails three ways:
+
+- **It restates what the worker already reads.** Findings, commands, the dependency rule, the
+  standing policy (breaking changes, push, warning baseline) — all of it is in the two docs and
+  `AGENTS.md`, which the brief already points at. Restating is pure redundancy.
+- **It drifts.** Your context degrades across a run, so your paraphrase gets worse exactly as the run
+  goes on — a tired session briefing a fresh one, which is backwards. The docs are live; a paste
+  from earlier cannot show notes added since.
+- **It hides missing state in the wrong place.** If you find yourself wanting to tell the worker
+  something genuinely useful and *not* in the docs — "this finding's fix is breaking", "helper X now
+  exists from a prior item" — that is a **signal the docs are incomplete**, not a licence to pad the
+  brief. Put the durable fact where it belongs (the finding's own text; standing context) so *every*
+  future run sees it, then leave the brief a constant.
+
+The one exception is a **live anomaly the worker cannot derive from the git tree or the docs** — an
+active stash, a half-finished item, a backend mid-restart. For that, and only that, add one line:
+`Situational: <the fact>`. Nothing else.
 
 ---
 
@@ -240,7 +286,36 @@ to start it.
 **The marked list is a floor, not the whole rule.** Also run the live suite for any item that lands a
 schema migration, changes authentication or session policy, or alters the request pipeline — marked
 or not. One unmarked item's cookie-policy fix broke 23 integration tests while every unit suite
-stayed green; undetected it would have surfaced eighteen items later.
+stayed green; undetected it would have surfaced eighteen items later. When the worker *does* run a
+live suite for such an item it may narrow to the relevant test classes with `--filter`; **the
+orchestrator's independent verification runs the full suite** — an auth or pipeline change's blast
+radius is non-obvious (that is the whole reason the rule exists), so scoping it down defeats the
+point.
+
+### Restart the live backend fresh, in parallel with the worker
+
+A long-lived backend container accumulates state across runs — orphaned DAV items, async indexes
+that lag under load — until a *single* full suite starts failing a **shifting** subset of tests.
+That is indistinguishable at a glance from a real regression, and chasing it is expensive: it can
+cost a five-run bisect to prove "environmental."
+
+Kill it structurally. For any item that will run a live suite, the orchestrator restarts the backend
+from a **clean volume** the moment it spawns the worker:
+
+```
+spawn worker  →  (backend restarts from clean volume, in the background)  →  wait for worker  →  confirm healthy  →  verify
+```
+
+The restart runs *inside* the worker's 5–15-minute work window, so it costs **zero** wall-clock time,
+and it lands the container fresh for both the worker's own live run and the orchestrator's
+verification. Three rules: it must be a **clean-volume** restart (a plain restart keeps the state);
+**confirm the container is healthy** before verifying rather than trusting the timing; and do it
+**only for items that will run a live suite** — no point reprovisioning for an item that never
+touches the backend. The exact command is in `review-items.md`'s Project commands.
+
+A green live run is still trusted without a restart-and-retry — degradation only ever makes items
+*fail to appear* (false failures), never falsely pass — so this is about eliminating the false
+*failure*, not doubting a pass.
 
 ---
 

@@ -9,6 +9,27 @@ back to something the review left implicit.
 
 ---
 
+## For the operator — how to start a review
+
+You (the human) type one prompt — a pointer, not the instructions themselves:
+
+```
+Read docs/review/conduct-review.md and AGENTS.md, then conduct a complete source review of all
+production code in this repository as that document describes. Produce docs/review/review-items.md.
+```
+
+Everything the reviewer needs — the fan-out, the per-agent prompt anatomy, the output template, the
+mechanical coverage check — is in this document, which the prompt points at. Do not restate it.
+
+Decide one thing before you send it, and state it in the prompt if you already know it: **are
+breaking changes acceptable, and why?** (plus the push policy and the build-warning baseline). The
+reviewer records these as *standing state* in `review-items.md`, where the execution phase reads them
+and never re-litigates them. If you do not state it, the reviewer must ask — it cannot be left to
+each fix-session to guess, or a worker refuses a breaking fix it should take, or takes one it should
+not. See "Standing context" below.
+
+---
+
 # PART A — What the request actually needs to specify
 
 The original request was:
@@ -311,13 +332,28 @@ verified *nothing* exits 0 and looks identical to one that passed. Say explicitl
 passed/skipped counts, not the exit code. Better, make the tooling refuse to run — a pre-flight
 probe that fails loudly beats a documented instruction nobody reads.
 
-## Standing context — state these or they get guessed
+## Standing context — capture it as state, once
 
-- Are breaking changes acceptable? (Determines whether API-surface items can be taken at all.)
+These are **project policy**, not per-session choices. The reviewer establishes them with the human
+and writes them into `review-items.md`'s Standing context section, where the execution phase reads
+them. The whole point is that they travel as *state*, not in prompts — a policy in a prompt drifts,
+is forgotten, or is stated inconsistently across sessions, and the failure is silent (a worker
+refuses a breaking fix it should take, or takes one it should not).
+
+- **Are breaking changes acceptable, and why?** The single most important one — it determines
+  whether API-surface items can be taken at all, and it is the one most likely to be wrongly assumed.
 - Push, or commit only?
-- What is the build warning baseline? Zero warnings across a large solution is unusual enough that
-  an agent will not assume it — say it, or a new warning slips in unnoticed.
+- What is the build-warning baseline? Zero warnings across a large solution is unusual enough that an
+  agent will not assume it — say it, or a new warning slips in unnoticed.
 - Which settings/paths are off limits?
+
+**A finding whose fix is inherently breaking says so in its own text.** The general policy above
+answers "may I take breaking changes"; the *finding* must answer "is this one of them, and what
+breaks." Write that into the finding when you author it — e.g. "changes the derived key for
+passphrase-stretched keys, so any persisted `enc:v1:` value re-seals; breaking." Then the worker
+learns it from the durable record every run, and no orchestrator has to improvise the warning into a
+brief (which is exactly where it does not belong — see `fix-review.md`, "The worker brief is a
+constant").
 
 ## Orchestrated mode
 
