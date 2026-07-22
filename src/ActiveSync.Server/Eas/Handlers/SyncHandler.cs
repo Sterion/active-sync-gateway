@@ -45,14 +45,16 @@ public sealed partial class SyncHandler(
 		int globalWindow = options.Value.Eas.DefaultWindowSize;
 		List<XElement> collectionElements;
 
-		if (request?.Root is { } root)
+		// A request carrying real <Collection> elements is a full request; a body that is just the
+		// <Sync/> root with no collections is the same "repeat my previous request" idiom as a
+		// zero-length body (F1) — both take the replay path below, and Status 13 is reserved for
+		// "no cache available".
+		List<XElement>? requested = request?.Root?
+			.Element(AS + "Collections")?.Elements(AS + "Collection").ToList();
+		if (requested is { Count: > 0 })
 		{
-			collectionElements = root.Element(AS + "Collections")?.Elements(AS + "Collection").ToList() ?? [];
-			if (collectionElements.Count == 0)
-			{
-				await WriteStatusAsync(context, "13");
-				return;
-			}
+			XElement root = request!.Root!;
+			collectionElements = requested;
 
 			if (int.TryParse(root.Element(AS + "Wait")?.Value, out int waitMinutes))
 				waitSeconds = waitMinutes * 60;

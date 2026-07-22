@@ -155,6 +155,13 @@ public sealed class EasHandlerHarness : IDisposable
 	{
 		public List<string> Fetched { get; } = [];
 		public List<string> Moved { get; } = [];
+
+		/// <summary>
+		///   The backend revision map returned by <see cref="GetItemRevisionsAsync" /> — the
+		///   server→client diff source. Left empty (the default), a getChanges round reports no
+		///   changes; populate it to drive Add/Change/Delete emission through the Sync collection loop.
+		/// </summary>
+		public Dictionary<string, string> Revisions { get; } = new(StringComparer.Ordinal);
 		public List<string> DeletedFolders { get; } = [];
 		public List<string> RenamedFolders { get; } = [];
 		public List<string> CreatedFolders { get; } = [];
@@ -181,7 +188,8 @@ public sealed class EasHandlerHarness : IDisposable
 		public Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
 			string folderBackendKey, ContentFilter filter, CancellationToken ct)
 		{
-			throw new NotSupportedException();
+			return Task.FromResult<IReadOnlyDictionary<string, string>>(
+				new Dictionary<string, string>(Revisions, StringComparer.Ordinal));
 		}
 
 		public Task<BackendItem?> GetItemAsync(
