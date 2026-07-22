@@ -82,8 +82,10 @@ public sealed class ReadOnlyFolderTests : IDisposable
 				new XElement(IO + "EmptyFolderContents",
 					new XElement(AS + "CollectionId", shared.ServerId)))));
 
+		// F45 split the collapsed status 2 into distinct causes: a read-only grant is now 3
+		// (access-denied), leaving 2 to mean "not a mail folder".
 		XElement? result = response?.Root?.Element(IO + "Response")?.Element(IO + "EmptyFolderContents");
-		Assert.Equal("2", result?.Element(IO + "Status")?.Value);
+		Assert.Equal("3", result?.Element(IO + "Status")?.Value);
 		Assert.Empty(_harness.Session.Mail.Emptied);
 	}
 

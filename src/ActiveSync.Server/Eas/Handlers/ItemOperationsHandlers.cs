@@ -186,12 +186,17 @@ public sealed class ItemOperationsHandler(
 		string collectionId = operation.Element(AS + "CollectionId")?.Value ?? "";
 		(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
 			context.Session, context.Device.UserName, collectionId, ct);
-		// Emptying is a bulk delete: a read-only grant on the folder blocks it just like
-		// global ReadOnly mode does.
-		if (resolved is null || resolved.Value.Store.EasClass != EasClass.Email ||
-		    WritePermission.IsBlocked(context, options.Value, resolved.Value.Folder))
+		// Distinct statuses for distinct causes so the client can tell them apart: 6 unresolvable,
+		// 2 not a mail folder, 3 read-only/access-denied (emptying is a bulk delete, so a read-only
+		// grant on the folder blocks it just like global ReadOnly mode does).
+		string? failure =
+			resolved is null ? "6"
+			: resolved.Value.Store.EasClass != EasClass.Email ? "2"
+			: WritePermission.IsBlocked(context, options.Value, resolved.Value.Folder) ? "3"
+			: null;
+		if (failure is not null)
 			return new XElement(IO + "EmptyFolderContents",
-				new XElement(IO + "Status", "2"),
+				new XElement(IO + "Status", failure),
 				new XElement(AS + "CollectionId", collectionId));
 		await context.Session.MailStore.EmptyFolderAsync(resolved.Value.Folder.BackendKey, ct);
 		return new XElement(IO + "EmptyFolderContents",
