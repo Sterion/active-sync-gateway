@@ -6,6 +6,7 @@ using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol.Http;
 using ActiveSync.Protocol.Wbxml;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 
@@ -35,6 +36,19 @@ public static class EasEndpoint
 		"FolderUpdate,MoveItems,GetItemEstimate,MeetingResponse,Search,Settings,Ping,ItemOperations," +
 		"Provision,ResolveRecipients,Find";
 
+	/// <summary>
+	///   Case-insensitive map from any casing of a client-supplied Cmd to the canonical command
+	///   name, which is also the DI key each handler is registered under (see
+	///   <see cref="Setup.ServiceCollectionExtensions.AddEasHandlers" />). MS-ASHTTP treats the
+	///   command case-insensitively; keyed DI does exact-match, so the request command is mapped
+	///   to its canonical form before resolving the handler.
+	/// </summary>
+	private static readonly Dictionary<string, string> CanonicalCommands =
+		ProtocolCommands.Split(',').ToDictionary(c => c, c => c, StringComparer.OrdinalIgnoreCase);
+
+	/// <summary>The canonical EAS command names this endpoint advertises and dispatches.</summary>
+	public static IReadOnlyList<string> AdvertisedCommands { get; } = ProtocolCommands.Split(',');
+
 	public static void Map(WebApplication app)
 	{
 		app.MapMethods(Path, ["OPTIONS"], HandleOptions);
@@ -53,7 +67,6 @@ public static class EasEndpoint
 		HttpContext http,
 		IBackendSessionFactory sessionFactory,
 		SyncStateService state,
-		IEnumerable<IEasCommandHandler> handlers,
 		AuthThrottle authThrottle,
 		IOptionsMonitor<ActiveSyncOptions> options,
 		BackendRolesProvider rolesProvider,
@@ -172,8 +185,13 @@ public static class EasEndpoint
 			return;
 		}
 
+		// Resolve exactly the one handler this command needs (keyed scoped) instead of
+		// constructing every handler and picking one. The incoming command is canonicalized to
+		// its registered key first (case-insensitive, per MS-ASHTTP) so "ping" finds "Ping".
 		IEasCommandHandler? handler =
-			handlers.FirstOrDefault(h => h.Command.Equals(parameters.Command, StringComparison.OrdinalIgnoreCase));
+			CanonicalCommands.TryGetValue(parameters.Command, out string? canonical)
+				? http.RequestServices.GetKeyedService<IEasCommandHandler>(canonical)
+				: null;
 		if (handler is null)
 		{
 			logger.LogWarning("Unsupported EAS command {Command}", LogText.Clean(parameters.Command, 32));

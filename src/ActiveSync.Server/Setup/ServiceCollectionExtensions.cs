@@ -129,29 +129,47 @@ public static class ServiceCollectionExtensions
 		return services;
 	}
 
-	/// <summary>Registers one scoped <see cref="IEasCommandHandler" /> per supported EAS command.</summary>
+	/// <summary>
+	///   Registers one <see cref="IEasCommandHandler" /> per supported EAS command, KEYED by its
+	///   command name so <see cref="EasEndpoint" /> resolves exactly the handler a request needs.
+	///   The old non-keyed <c>IEnumerable&lt;IEasCommandHandler&gt;</c> injection materialized all
+	///   ~19 scoped handlers (and their dependency graphs) per request and discarded 18 — the
+	///   largest allocation source on the polling hot path (E4).
+	/// </summary>
 	public static IServiceCollection AddEasHandlers(this IServiceCollection services)
 	{
 		services.AddSingleton<MeetingInvitationService>();
-		services.AddScoped<IEasCommandHandler, FolderSyncHandler>();
-		services.AddScoped<IEasCommandHandler, FolderCreateHandler>();
-		services.AddScoped<IEasCommandHandler, FolderDeleteHandler>();
-		services.AddScoped<IEasCommandHandler, FolderUpdateHandler>();
-		services.AddScoped<IEasCommandHandler, SyncHandler>();
-		services.AddScoped<IEasCommandHandler, PingHandler>();
-		services.AddScoped<IEasCommandHandler, GetItemEstimateHandler>();
-		services.AddScoped<IEasCommandHandler, ItemOperationsHandler>();
-		services.AddScoped<IEasCommandHandler, GetAttachmentHandler>();
-		services.AddScoped<IEasCommandHandler, SendMailHandler>();
-		services.AddScoped<IEasCommandHandler, SmartReplyHandler>();
-		services.AddScoped<IEasCommandHandler, SmartForwardHandler>();
-		services.AddScoped<IEasCommandHandler, MoveItemsHandler>();
-		services.AddScoped<IEasCommandHandler, SearchHandler>();
-		services.AddScoped<IEasCommandHandler, FindHandler>();
-		services.AddScoped<IEasCommandHandler, SettingsHandler>();
-		services.AddScoped<IEasCommandHandler, MeetingResponseHandler>();
-		services.AddScoped<IEasCommandHandler, ResolveRecipientsHandler>();
-		services.AddScoped<IEasCommandHandler, ProvisionHandler>();
+		foreach ((string command, Type handler) in EasHandlerRegistrations)
+			services.AddKeyedScoped(typeof(IEasCommandHandler), command, handler);
 		return services;
 	}
+
+	/// <summary>
+	///   The command-name → handler-type map used to register (and dispatch) EAS handlers. The
+	///   key MUST equal the handler's <see cref="IEasCommandHandler.Command" /> and appear in
+	///   <see cref="EasEndpoint" />'s advertised command set — <c>EasHandlerRegistrationTests</c>
+	///   locks both correspondences so a typo here surfaces as a test failure, not a 501 in prod.
+	/// </summary>
+	public static readonly IReadOnlyList<(string Command, Type Handler)> EasHandlerRegistrations =
+	[
+		("FolderSync", typeof(FolderSyncHandler)),
+		("FolderCreate", typeof(FolderCreateHandler)),
+		("FolderDelete", typeof(FolderDeleteHandler)),
+		("FolderUpdate", typeof(FolderUpdateHandler)),
+		("Sync", typeof(SyncHandler)),
+		("Ping", typeof(PingHandler)),
+		("GetItemEstimate", typeof(GetItemEstimateHandler)),
+		("ItemOperations", typeof(ItemOperationsHandler)),
+		("GetAttachment", typeof(GetAttachmentHandler)),
+		("SendMail", typeof(SendMailHandler)),
+		("SmartReply", typeof(SmartReplyHandler)),
+		("SmartForward", typeof(SmartForwardHandler)),
+		("MoveItems", typeof(MoveItemsHandler)),
+		("Search", typeof(SearchHandler)),
+		("Find", typeof(FindHandler)),
+		("Settings", typeof(SettingsHandler)),
+		("MeetingResponse", typeof(MeetingResponseHandler)),
+		("ResolveRecipients", typeof(ResolveRecipientsHandler)),
+		("Provision", typeof(ProvisionHandler)),
+	];
 }
