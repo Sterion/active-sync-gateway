@@ -249,6 +249,26 @@ live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
     plus `|kw1,kw2` (sorted category keywords) ONLY when the message carries any — the
     non-empty-only rule keeps unkeyworded messages byte-identical across the upgrade.
   - DAV: itemKey = href, revision = ETag.
+- **Full enumeration is the deliberate posture — NOT incremental `/changes`/`sync-collection`
+  (decision, H16).** Every `IContentStore.GetItemRevisionsAsync` enumerates the *whole*
+  collection and the engine diffs it against the stored snapshot; the JMAP `state` string and
+  the DAV `sync-token` are used only as coarse change *sentinels* for Ping/Sync waits, never to
+  fetch an incremental delta. This is chosen for correctness (a full enumeration can never go
+  stale or desync — no `cannotCalculateChanges` / `DAV:valid-sync-token` recovery path to get
+  wrong) and for being backend-agnostic across all six test stacks, which differ in their
+  state-token semantics. The known cost is O(collection) per sync round; it is bounded by the
+  mitigations already landed rather than by a delta protocol — **H8** (page mail listing at
+  `min(500, maxObjectsInGet)`), **H12** (one `Depth:1` ctag PROPFIND per home set, not per
+  folder), **H13** (create without a full pre/post enumeration), **H14** (`addressbook-query`
+  GAL, not an N+1 GET), **H15/H25** (JMAP wait tokens via `*/changes`, batched sets). The posture
+  holds to a few thousand items per collection; past that, the future path — deferred, not
+  rejected — is an OPTIONAL incremental capability *added to the plugin contract under a future
+  `ContractVersion`* (a `Backends.md`-scale change owned by the Contracts surface, not retrofitted
+  ad hoc): persist a per-collection state token on `CollectionState`, call `Foo/changes` (JMAP) or
+  RFC 6578 `sync-collection` (DAV) with it, and fall back to this full enumeration on
+  `cannotCalculateChanges` / an invalid sync-token. Do not add a delta path to a single store
+  without that contract change — a store that silently returns partial revision maps breaks the
+  diff engine's "the map is the whole truth" invariant.
 - **Windowing:** items beyond WindowSize are left OUT of the persisted snapshot so they
   surface on the next round; `MoreAvailable` is emitted. Deletes are never windowed.
 - **SyncKey lifecycle** (`SyncStateService.ValidateSyncKeyAsync`): keys are per-device,
