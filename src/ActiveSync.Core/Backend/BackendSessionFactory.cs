@@ -36,6 +36,10 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	// CreateConnectionAsync), so the per-(user, device) cache holds a Lazy<Task<...>> — concurrent
 	// callers await the one shared build instead of racing to construct duplicate sessions.
 	private readonly ConcurrentDictionary<string, Lazy<Task<CompositeBackendSession>>> _sessions = new();
+	// A28: held in fields so DisposeAsync can detach them — the resolver/roles-provider are
+	// singletons that outlive this factory (notably across test fixtures), and a leaked handler
+	// keeps a disposed factory reachable and fires on its cleared state.
+	private readonly Action _onSnapshotChanged;
 
 	public BackendSessionFactory(
 		IOptionsMonitor<ActiveSyncOptions> options,
@@ -55,11 +59,12 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
 		// Account edits (eas user ...) must apply on the next request, not after the auth
 		// cache TTL — a rebuilt snapshot resets both verdict caches.
-		_resolver.SnapshotChanged += () =>
+		_onSnapshotChanged = () =>
 		{
 			_authCache.Clear();
 			_authNegativeCache.Clear();
 		};
+		_resolver.SnapshotChanged += _onSnapshotChanged;
 		// A live global backend-settings change (eas config set Backends:...) recycles every
 		// session so the next request rebuilds connections against the new host/port/settings.
 		_rolesProvider.Changed += RecycleAll;
@@ -74,6 +79,9 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 
 	public async ValueTask DisposeAsync()
 	{
+		// A28: detach the event handlers first — the resolver/roles-provider outlive this factory.
+		_resolver.SnapshotChanged -= _onSnapshotChanged;
+		_rolesProvider.Changed -= RecycleAll;
 		await _evictionTimer.DisposeAsync().ConfigureAwait(false);
 		foreach ((string _, Lazy<Task<CompositeBackendSession>> lazy) in _sessions)
 			await DisposeLazyAsync(lazy).ConfigureAwait(false);

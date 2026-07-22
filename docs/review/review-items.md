@@ -217,7 +217,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 
 ## Phase 4 — Correctness
 
-**21. Backend session lifetime** — ~~`A2`~~ ~~`A11`~~ ~~`A12`~~ `A13` `A24` `A28` `D27` `D28` ~~`K60`~~
+**21. Backend session lifetime** — ~~`A2`~~ ~~`A11`~~ ~~`A12`~~ `A13` `A24` ~~`A28`~~ `D27` `D28` ~~`K60`~~
 > One refactor fixes all nine: an `IAsyncDisposable` lease that refcounts use, gates concurrent access (MailKit's `ImapClient` is not thread-safe and clients pipeline), and defers disposal to the last release.
 
 **22. State layer correctness** — `A1` `A5` `A6` `A7` `A8` `A9` `A10` `A17` `A18` `A22`

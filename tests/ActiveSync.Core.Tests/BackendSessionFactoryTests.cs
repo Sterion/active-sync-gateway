@@ -94,7 +94,43 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		Assert.Equal(afterBuild, counting.Created); // no further DB reads for the cache hits
 	}
 
+	[Fact]
+	public async Task DisposedFactory_UnsubscribesFromSettingsEvents()
+	{
+		// A28: the factory subscribed to BackendRolesProvider.Changed / AccountResolver.SnapshotChanged
+		// but never unsubscribed. After disposal it must detach both handlers, otherwise the disposed
+		// (dead) factory stays reachable and its handlers keep firing on cleared state.
+		FakeMailProvider provider = new();
+		IOptionsMonitor<ActiveSyncOptions> monitor = TestOptionsMonitor.Of(new ActiveSyncOptions
+		{
+			Encryption = new EncryptionOptions { AllowPlaintext = true }, Eas = new EasOptions()
+		});
+		BackendRolesProvider roles = RolesProvider();
+		BackendProviderRegistry registry = new([provider], NullLogger<BackendProviderRegistry>.Instance);
+		AccountResolver resolver = new(monitor, roles, registry);
+		BackendSessionFactory factory = new(monitor, resolver, roles, _dbFactory, registry,
+			NullLogger<BackendSessionFactory>.Instance);
+
+		// Both events carry a handler that targets the factory while it is alive (the resolver also
+		// subscribes to roles.Changed for itself — so we check specifically for the factory's handler).
+		Assert.True(HasHandlerTargeting(roles, "Changed", factory));
+		Assert.True(HasHandlerTargeting(resolver, "SnapshotChanged", factory));
+
+		await factory.DisposeAsync();
+
+		Assert.False(HasHandlerTargeting(roles, "Changed", factory));
+		Assert.False(HasHandlerTargeting(resolver, "SnapshotChanged", factory));
+	}
+
 	// ---------- harness ----------
+
+	private static bool HasHandlerTargeting(object eventSource, string eventName, object handlerTarget)
+	{
+		Delegate? backing = (Delegate?)eventSource.GetType()
+			.GetField(eventName, BindingFlags.NonPublic | BindingFlags.Instance)!
+			.GetValue(eventSource);
+		return backing?.GetInvocationList().Any(d => ReferenceEquals(d.Target, handlerTarget)) ?? false;
+	}
 
 	private static void InvokeEvictIdleSessions(BackendSessionFactory factory) =>
 		typeof(BackendSessionFactory)
