@@ -585,17 +585,84 @@ a fresh-container run before blaming the item.**
 
 ---
 
-## Next: item 14 — Credential & key handling
+## Item 14 — Credential & key handling
 
-Item 13 (unified redactor) is done, so its ordering precondition for item 14 is satisfied — item 14 can
-now *apply* the redactor where it needs to (`K56` `BackendCredentials.ToString()`). Neither item is
-[LIVE]; the orchestrator runs integration regardless. Current green baseline: **integration 139 / 0
-skipped** (fresh container), unit **Protocol 63 · Core 441 · WebUi 70 · Server 151**.
+**Findings:** `K56` `B4` `B5` `B18` `B19` `C6` `K9` `K14` `K45` `K46` `K47`
+**Commits:** `d139295` (K56) · `a5bd145` (B19) · `87ac9cd` (B18) · `0be0e0b` (C6) · `9df6ca1` (B4) ·
+`4e47960` (B5) · `c886584` (K9) · `43b9618` (K14) · `41a476d` (K45) · `e1ad54b` (K46) · `bbacce5` (K47)
 
-**Two standing lessons for the item-14 run:**
-- **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/session
-  change can pass every unit check and still break integration (items 5–8). Item 14 touches credential
-  and key handling and `B19` changes gateway-password verification — run integration after it.
-- **Start from a fresh backend and distrust warm-container DAV flakiness** (item 13's near-miss above):
-  `down -v` first; a subset-shifting DAV round-trip failure on a warm container is environmental until a
-  fresh-container run says otherwise.
+**Verification (orchestrator-run):** integrity 56/15/365/365/0, encoding 0 ✓ · cursor → item 15 ✓ ·
+one commit per finding with ID in subject ✓ · build **0 warnings** ✓ · unit **Protocol 63 · Core 452
+(was 441) · WebUi 70 · Server 156 (was 151) — 0 failed, 0 skipped** ✓ · integration **139 / 0 skipped**
+on a **fresh** container (`down -v` first, per item 13's lesson) ✓.
+
+**K45/K46 breaking-change blast radius independently checked and cleared.** `GatewayFixture.TestEncryptionKey`
+= `AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=`, which is base64-of-32-bytes → used as the **raw** key,
+never PBKDF2-stretched. So the new per-deployment salt (`K45`) and the hard 8-char passphrase floor
+(`K46`) cannot touch the fixture, and integration confirms it: 139/0. Any deployment using a base64-32
+key is likewise unaffected; only passphrase-derived keys change.
+
+**K56 contract change verified.** `d139295` overrides `PrintMembers` on the `BackendCredentials` record to
+render `Password` as `***`, with the mask token as a **local literal** — Contracts depends only on
+Protocol + MS.Extensions abstractions and cannot reference `Core.Administration.SecretRedaction` across the
+dependency rule (AGENTS.md). Nested records (`ResolvedRole`/`BackendConnectionContext`) inherit the
+redaction via their own synthesized `ToString()` calling this one. Correct boundary call.
+
+**B19 verified as a real auth bypass, now closed.** `GatewayPasswordHasher.Verify(Hash(""), "")` returned
+true, so an account with an empty gateway `Password` authenticated locally against a hash of the empty
+string and the backend was never probed — a phone presenting an empty Basic-auth password got in.
+`PrepareGatewayPassword` now refuses empty/whitespace; *clearing* the field (fall through to the backend)
+stays the way to remove a gateway password.
+
+**Notes (worker-flagged):**
+- **Breaking / behaviour changes:**
+  - **`K45` (opt-in, documented in `docs/configuration.md`).** New `Encryption:KeyDerivationSalt` makes
+    the passphrase-derived key per-deployment. **Judgment call:** a *stored random* salt is impossible
+    here because the gateway **and the slim `eas` client** both derive from config alone with no shared
+    DB, so operator config is the only deterministic per-deployment entropy. The fixed app salt is kept
+    for the *unset* case (no gratuitous break); residual — an unset-salt passphrase deployment still
+    shares the app salt, mitigated by setting a unique salt or using a raw base64 key. Reasonable people
+    could argue for forcing a uniform break instead.
+  - **`K46`.** Passphrases < 8 chars are now **rejected at startup** (was warn-only). Rewrote the loader
+    test and one `ActiveSyncOptionsValidatorTests` case that used shorter samples.
+  - **`C6`.** Plaintext gateway passwords < 8 chars are now rejected on **every** write surface (portal,
+    `eas user password`, `eas hash-password`) via the shared `PrepareGatewayPassword` + a new
+    `MinGatewayPasswordLength = 8`. Rewrote 2 unit tests that used shorter samples.
+- **Coverage-not-proof (struck on the strength of the fix), all labelled in test + note:** `K9` (zero the
+  unencrypted PKCS#12 key buffers), `K14` (zero the TLS master key; also stops discarding the loader
+  error), `K47` (feed the passphrase to PBKDF2 as a zeroed byte buffer). None has an external handle to
+  observe the zeroing, so each carries a regression guard (sign/verify or derived-key-determinism)
+  instead of a red-first assertion.
+- **`K9` judgment call:** deliberately did **not** switch the serving cert to `EphemeralKeySet` —
+  Kestrel/Schannel rejects an ephemeral-key server cert on Windows, and the store's certs are already
+  disposed by callers. Zeroing the intermediate buffers was the bounded fix.
+- **`B5` unified the two secret-sealing paths:** `eas config set` stored catalogue secrets in **plaintext**
+  while the web UI sealed them; extracted `AccountSecretPolicy.PrepareCatalogueSecret` +
+  `SettingKeys.IsCatalogueKey` so both surfaces seal identically (the CLI path also gained the `B4`
+  broken-key refusal).
+- **No new findings filed.**
+
+---
+
+## Next: item 15 — `Backends.Common` drops its Core reference (Phase 3 — Boundaries)
+
+Phase 2 (Security) is complete through item 14. **Item 15 begins Phase 3 (structural/boundary work),
+which changes the verification profile:** these items *execute the architecture document* — moving types
+between assemblies, changing the plugin contract. AGENTS.md § *Solution layout and dependency rule* and
+`docs/plugins.md` are now **hard gates**, not background reading, and the orchestrator must read them
+before judging a worker's result in scope. Line anchors drift wholesale once types move (item 20
+especially) — locate findings by symbol. Item 17 is an intentional **breaking Contracts** change bundled
+into one major bump; item 20 must run **alone**.
+
+Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 452 ·
+WebUi 70 · Server 156**.
+
+**Standing lessons that carried this run (items 13–14):**
+- **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/contract
+  change can pass every unit check and still break integration (items 5–8). Run integration after any
+  structural item too — a moved type can break the DI graph.
+- **Start integration from a fresh backend (`down -v`).** A warm, long-lived Stalwart flakes DAV
+  round-trip tests non-deterministically under accumulated state (item 13's near-miss: a warm-container
+  136/3 and 137/2 both went to 139/0 on a fresh container). A subset-shifting DAV failure is
+  environmental until a fresh-container run says otherwise; a real regression fails the *same* tests every
+  time.
