@@ -45,10 +45,10 @@ public sealed class SieveBackendProvider(ILoggerFactory loggerFactory) : IBacken
 		       $"cert={BackendDescription.DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
 	}
 
-	public IBackendConnection CreateConnection(BackendConnectionContext context)
+	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
 	{
 		ResolvedRole role = context.Roles.Single(r => r.Role == BackendRole.Oof);
 		SieveOofBackend oof = new(role.Settings.Bind<SieveOptions>(), role.Credentials, _wireLogger);
-		return new BackendConnection([], oof: oof);
+		return Task.FromResult<IBackendConnection>(new BackendConnection([], oof: oof));
 	}
 }

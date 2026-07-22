@@ -50,13 +50,13 @@ public sealed class CardDavBackendProvider(ILoggerFactory loggerFactory) : IBack
 		return DavReadiness.ProbeAsync(settings.Bind<DavServerOptions>().BaseUrl, ct);
 	}
 
-	public IBackendConnection CreateConnection(BackendConnectionContext context)
+	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
 	{
 		ResolvedRole role = context.Roles.Single(r => r.Role == BackendRole.Contacts);
 		DavServerOptions options = role.Settings.Bind<DavServerOptions>();
 		WebDavClient client = new(new Uri(options.BaseUrl), role.Credentials,
 			options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger);
 		CardDavStore store = new(client, options, role.Credentials, _logger);
-		return new BackendConnection([store], ownedResources: [client]);
+		return Task.FromResult<IBackendConnection>(new BackendConnection([store], ownedResources: [client]));
 	}
 }

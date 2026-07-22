@@ -35,7 +35,7 @@ public sealed class LocalBackendProvider(
 		return "gateway database (encrypted at rest)";
 	}
 
-	public IBackendConnection CreateConnection(BackendConnectionContext context)
+	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
 	{
 		BackendCredentials gateway = context.GatewayCredentials;
 		string partStatIdentity = context.MailAddress ?? gateway.UserName;
@@ -49,6 +49,6 @@ public sealed class LocalBackendProvider(
 				BackendRole.Notes => new LocalNotesStore(dbFactory, notifier, gateway, protector),
 				_ => throw new InvalidOperationException($"local cannot serve the {role.Role} role.")
 			});
-		return new BackendConnection(stores);
+		return Task.FromResult<IBackendConnection>(new BackendConnection(stores));
 	}
 }

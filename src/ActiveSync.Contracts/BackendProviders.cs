@@ -131,8 +131,13 @@ public interface IBackendProvider
 
 	IReadOnlySet<BackendRole> SupportedRoles { get; }
 
-	/// <summary>One connection serving ALL roles assigned to this provider for one account.</summary>
-	IBackendConnection CreateConnection(BackendConnectionContext context);
+	/// <summary>
+	///   One connection serving ALL roles assigned to this provider for one account.
+	///   K61: async — a provider opens its transport here (a TCP/TLS connect, an auth round-trip),
+	///   and the rest of the contract is async end-to-end. Landed as the async shape while the
+	///   plugin ecosystem was still empty, so no out-of-repo provider had to be rewritten later.
+	/// </summary>
+	Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct);
 
 	/// <summary>
 	///   Validates one effective role section (the provider binds its own options). Called for

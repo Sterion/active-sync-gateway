@@ -32,7 +32,10 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	private readonly BackendProviderRegistry _registry;
 	private readonly AccountResolver _resolver;
 	private readonly BackendRolesProvider _rolesProvider;
-	private readonly ConcurrentDictionary<string, Lazy<CompositeBackendSession>> _sessions = new();
+	// K61: CompositeBackendSession is now built asynchronously (providers open their transport in
+	// CreateConnectionAsync), so the per-(user, device) cache holds a Lazy<Task<...>> — concurrent
+	// callers await the one shared build instead of racing to construct duplicate sessions.
+	private readonly ConcurrentDictionary<string, Lazy<Task<CompositeBackendSession>>> _sessions = new();
 
 	public BackendSessionFactory(
 		IOptionsMonitor<ActiveSyncOptions> options,
@@ -63,7 +66,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// Per-user live-count gauge. Keys are "user\ndevice"; only materialized Lazy
 		// values count (an unrealized slot is not a live connection).
 		GatewayMetrics.SetSessionsObserver(() => _sessions
-			.Where(pair => pair.Value.IsValueCreated)
+			.Where(pair => IsBuilt(pair.Value))
 			.GroupBy(pair => pair.Key.Split('\n')[0], StringComparer.OrdinalIgnoreCase)
 			.Select(g => new Measurement<long>(g.Count(),
 				new KeyValuePair<string, object?>("user", GatewayMetrics.PerUserLabels ? g.Key : "-"))));
@@ -72,9 +75,8 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	public async ValueTask DisposeAsync()
 	{
 		await _evictionTimer.DisposeAsync().ConfigureAwait(false);
-		foreach ((string _, Lazy<CompositeBackendSession> lazy) in _sessions)
-			if (lazy.IsValueCreated)
-				await DisposeSessionAsync(lazy.Value).ConfigureAwait(false);
+		foreach ((string _, Lazy<Task<CompositeBackendSession>> lazy) in _sessions)
+			await DisposeLazyAsync(lazy).ConfigureAwait(false);
 		_sessions.Clear();
 	}
 
@@ -129,15 +131,17 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	public IReadOnlyList<BackendSessionInfo> SnapshotSessions()
 	{
 		List<BackendSessionInfo> sessions = new();
-		foreach ((string key, Lazy<CompositeBackendSession> lazy) in _sessions)
+		foreach ((string key, Lazy<Task<CompositeBackendSession>> lazy) in _sessions)
 		{
-			if (!lazy.IsValueCreated)
+			// Only a materialized, successfully-built session is a live connection — an unrealized
+			// slot or one still building (or faulted) is not.
+			if (!IsBuilt(lazy))
 				continue;
 			int separator = key.IndexOf('\n');
 			sessions.Add(new BackendSessionInfo(
 				separator < 0 ? key : key[..separator],
 				separator < 0 ? "" : key[(separator + 1)..],
-				lazy.Value.LastUsedUtc));
+				Built(lazy).LastUsedUtc));
 		}
 
 		return sessions;
@@ -162,13 +166,20 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// config-static (restart to apply changes).
 		string key = $"{credentials.UserName}\n{deviceId}";
 		bool created = false;
-		Lazy<CompositeBackendSession> lazy = _sessions.GetOrAdd(key, _ => new Lazy<CompositeBackendSession>(() =>
-		{
-			created = true;
-			return new CompositeBackendSession(
-				_registry, credentials, account.MailAddress, roles, sharedCalendars);
-		}));
-		CompositeBackendSession session = lazy.Value;
+
+		// The build is SHARED across every concurrent caller for this (user, device), so it runs
+		// uncancellable (CancellationToken.None): one request cancelling must not fault the session
+		// the others are awaiting. This matches the pre-K61 synchronous, uncancellable build.
+		Lazy<Task<CompositeBackendSession>> NewLazy() =>
+			MakeLazy(() =>
+			{
+				created = true;
+				return CompositeBackendSession.CreateAsync(
+					_registry, credentials, account.MailAddress, roles, sharedCalendars, CancellationToken.None);
+			});
+
+		Lazy<Task<CompositeBackendSession>> lazy = _sessions.GetOrAdd(key, _ => NewLazy());
+		CompositeBackendSession session = await Build(lazy).ConfigureAwait(false);
 		if (created)
 			_logger.LogInformation("Opened backend session for {User} (device {DeviceId})",
 				credentials.UserName, deviceId);
@@ -176,13 +187,10 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// Credentials changed (e.g. password rotation): rebuild the session.
 		if (session.Credentials.Password != credentials.Password)
 		{
-			if (_sessions.TryRemove(key, out Lazy<CompositeBackendSession>? stale) && stale.IsValueCreated)
-				_ = DisposeSessionAsync(stale.Value);
-			lazy = _sessions.GetOrAdd(key,
-				_ => new Lazy<CompositeBackendSession>(() =>
-					new CompositeBackendSession(
-						_registry, credentials, account.MailAddress, roles, sharedCalendars)));
-			session = lazy.Value;
+			if (_sessions.TryRemove(key, out Lazy<Task<CompositeBackendSession>>? stale))
+				_ = DisposeLazyAsync(stale);
+			lazy = _sessions.GetOrAdd(key, _ => NewLazy());
+			session = await lazy.Value.ConfigureAwait(false);
 		}
 
 		session.LastUsedUtc = DateTime.UtcNow;
@@ -233,8 +241,8 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	{
 		_logger.LogInformation("Backend settings changed — recycling all backend sessions");
 		foreach (string key in _sessions.Keys.ToList())
-			if (_sessions.TryRemove(key, out Lazy<CompositeBackendSession>? removed) && removed.IsValueCreated)
-				_ = DisposeSessionAsync(removed.Value);
+			if (_sessions.TryRemove(key, out Lazy<Task<CompositeBackendSession>>? removed))
+				_ = DisposeLazyAsync(removed);
 		_authCache.Clear();
 		_authNegativeCache.Clear();
 		// With no live sessions left, every provider's per-user resources (IDLE watchers) are trimmed.
@@ -246,13 +254,12 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	private void EvictIdleSessions()
 	{
 		DateTime cutoff = DateTime.UtcNow.AddMinutes(-_options.CurrentValue.Eas.SessionIdleMinutes);
-		foreach ((string key, Lazy<CompositeBackendSession> lazy) in _sessions)
-			if (lazy.IsValueCreated && lazy.Value.LastUsedUtc < cutoff &&
-			    _sessions.TryRemove(key, out Lazy<CompositeBackendSession>? removed))
+		foreach ((string key, Lazy<Task<CompositeBackendSession>> lazy) in _sessions)
+			if (IsBuilt(lazy) && Built(lazy).LastUsedUtc < cutoff &&
+			    _sessions.TryRemove(key, out Lazy<Task<CompositeBackendSession>>? removed))
 			{
 				_logger.LogDebug("Evicting idle backend session {Key}", key.Replace('\n', '/'));
-				if (removed.IsValueCreated)
-					_ = DisposeSessionAsync(removed.Value);
+				_ = DisposeLazyAsync(removed);
 			}
 
 		// Expired auth-cache entries are dead weight; drop them so the caches stay
@@ -273,6 +280,46 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			if (provider is IPerUserResourceOwner owner)
 				owner.TrimUserResources(activeUsers);
 	}
+
+	/// <summary>
+	///   Awaits a lazily-built session (K61) and disposes it. A never-materialized slot owns
+	///   nothing; a build that faulted left no session to dispose.
+	/// </summary>
+	private async Task DisposeLazyAsync(Lazy<Task<CompositeBackendSession>> lazy)
+	{
+		if (!lazy.IsValueCreated)
+			return;
+		CompositeBackendSession session;
+		try
+		{
+			session = await Build(lazy).ConfigureAwait(false);
+		}
+		catch
+		{
+			return;
+		}
+
+		await DisposeSessionAsync(session).ConfigureAwait(false);
+	}
+
+	// K61: the per-(user, device) cache holds a Lazy<Task<CompositeBackendSession>> — the standard
+	// async-lazy idiom (Stephen Toub's). The value factory returns the hot Task from
+	// CompositeBackendSession.CreateAsync, which yields at its first await, so `.Value` returns that
+	// Task WITHOUT ever blocking a thread — the VSTHRD011 "blocking value factory" deadlock case does
+	// not apply. Result is only read below through Built(), always guarded by IsBuilt(), so the task
+	// is already completed and `.Result` returns synchronously (VSTHRD002). These three accessors are
+	// the single, justified place those suppressions live.
+#pragma warning disable VSTHRD002, VSTHRD011
+	private static Lazy<Task<CompositeBackendSession>> MakeLazy(Func<Task<CompositeBackendSession>> factory) =>
+		new(factory);
+
+	private static Task<CompositeBackendSession> Build(Lazy<Task<CompositeBackendSession>> lazy) => lazy.Value;
+
+	private static bool IsBuilt(Lazy<Task<CompositeBackendSession>> lazy) =>
+		lazy.IsValueCreated && lazy.Value.IsCompletedSuccessfully;
+
+	private static CompositeBackendSession Built(Lazy<Task<CompositeBackendSession>> lazy) => lazy.Value.Result;
+#pragma warning restore VSTHRD002, VSTHRD011
 
 	private async Task DisposeSessionAsync(CompositeBackendSession session)
 	{

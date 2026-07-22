@@ -76,7 +76,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		       $"cert={BackendDescription.DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
 	}
 
-	public IBackendConnection CreateConnection(BackendConnectionContext context)
+	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
 	{
 		ResolvedRole role = context.Roles.Single(r => r.Role == BackendRole.MailStore);
 		ImapOptions options = role.Settings.Bind<ImapOptions>();
@@ -91,7 +91,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		}
 
 		ImapMailBackend backend = new(session, context.MailAddress, WatcherProvider, _logger);
-		return new BackendConnection([backend], ownedResources: [session]);
+		return Task.FromResult<IBackendConnection>(new BackendConnection([backend], ownedResources: [session]));
 	}
 
 	public async Task<bool> VerifyCredentialsAsync(ResolvedRole role, CancellationToken ct)

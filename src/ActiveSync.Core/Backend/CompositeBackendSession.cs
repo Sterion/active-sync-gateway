@@ -14,17 +14,28 @@ public sealed class CompositeBackendSession : IBackendSession
 	private readonly List<IBackendConnection> _connections = [];
 	private readonly List<IContentStore> _stores = [];
 
-	public CompositeBackendSession(
-		BackendProviderRegistry registry,
-		BackendCredentials gatewayCredentials,
-		string? mailAddress,
-		IReadOnlyList<ResolvedRole> roles,
-		IReadOnlyList<SharedCollection> sharedCollections)
+	private CompositeBackendSession(BackendCredentials gatewayCredentials, string? mailAddress)
 	{
 		// The gateway credentials are the IDENTITY (DB scoping, encryption AAD, cache keys);
 		// each backend authenticates with its role's resolved credentials.
 		Credentials = gatewayCredentials;
 		MailAddress = mailAddress;
+	}
+
+	/// <summary>
+	///   Opens one connection per provider (K61: <see cref="IBackendProvider.CreateConnectionAsync" />
+	///   is async — the composite awaits each provider's transport open) and aggregates the resulting
+	///   stores and side operations.
+	/// </summary>
+	public static async Task<CompositeBackendSession> CreateAsync(
+		BackendProviderRegistry registry,
+		BackendCredentials gatewayCredentials,
+		string? mailAddress,
+		IReadOnlyList<ResolvedRole> roles,
+		IReadOnlyList<SharedCollection> sharedCollections,
+		CancellationToken ct)
+	{
+		CompositeBackendSession session = new(gatewayCredentials, mailAddress);
 
 		IMailSubmitOperations? mailSubmit = null;
 		IOofBackend? oof = null;
@@ -35,21 +46,23 @@ public sealed class CompositeBackendSession : IBackendSession
 			List<ResolvedRole> assigned = group.ToList();
 			foreach (ResolvedRole role in assigned)
 				registry.GetFor(group.Key, role.Role); // validates every assigned role
-			IBackendConnection connection = provider.CreateConnection(new BackendConnectionContext(
-				gatewayCredentials, mailAddress, assigned, sharedCollections));
-			_connections.Add(connection);
-			_stores.AddRange(connection.Stores);
+			IBackendConnection connection = await provider.CreateConnectionAsync(
+				new BackendConnectionContext(gatewayCredentials, mailAddress, assigned, sharedCollections), ct)
+				.ConfigureAwait(false);
+			session._connections.Add(connection);
+			session._stores.AddRange(connection.Stores);
 			mailSubmit ??= connection.MailSubmit;
 			oof ??= connection.Oof;
 		}
 
-		MailStore = GetStoreForClass(EasClass.Email) as IMailStoreOperations
+		session.MailStore = session.GetStoreForClass(EasClass.Email) as IMailStoreOperations
 			?? throw new InvalidOperationException("No provider filled the MailStore role for this session.");
-		MailSubmit = mailSubmit
+		session.MailSubmit = mailSubmit
 			?? throw new InvalidOperationException("No provider filled the MailSubmit role for this session.");
-		Calendar = GetStoreForClass(EasClass.Calendar) as ICalendarOperations;
-		Contacts = GetStoreForClass(EasClass.Contacts) as IContactOperations;
-		Oof = oof;
+		session.Calendar = session.GetStoreForClass(EasClass.Calendar) as ICalendarOperations;
+		session.Contacts = session.GetStoreForClass(EasClass.Contacts) as IContactOperations;
+		session.Oof = oof;
+		return session;
 	}
 
 	internal DateTime LastUsedUtc { get; set; } = DateTime.UtcNow;
@@ -57,11 +70,11 @@ public sealed class CompositeBackendSession : IBackendSession
 	public BackendCredentials Credentials { get; }
 	public string? MailAddress { get; }
 	public IReadOnlyList<IContentStore> Stores => _stores;
-	public IMailStoreOperations MailStore { get; }
-	public IMailSubmitOperations MailSubmit { get; }
-	public IContactOperations? Contacts { get; }
-	public ICalendarOperations? Calendar { get; }
-	public IOofBackend? Oof { get; }
+	public IMailStoreOperations MailStore { get; private set; } = null!;
+	public IMailSubmitOperations MailSubmit { get; private set; } = null!;
+	public IContactOperations? Contacts { get; private set; }
+	public ICalendarOperations? Calendar { get; private set; }
+	public IOofBackend? Oof { get; private set; }
 
 	public IContentStore? GetStoreForClass(string easClass)
 	{

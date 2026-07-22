@@ -231,7 +231,7 @@ public class BackendSchemaTests
 		public string Name => "schemaless";
 		public IReadOnlySet<BackendRole> SupportedRoles => new HashSet<BackendRole> { BackendRole.Contacts };
 
-		public IBackendConnection CreateConnection(BackendConnectionContext context)
+		public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
 		{
 			throw new NotSupportedException();
 		}

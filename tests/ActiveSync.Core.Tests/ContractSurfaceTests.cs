@@ -56,6 +56,19 @@ public sealed class ContractSurfaceTests
 		Assert.False(typeof(BackendException).IsSealed);
 	}
 
+	// K61: CreateConnection was synchronous in an otherwise fully async contract — a provider that
+	// opens a TCP/TLS connection could not do it without blocking. It is now
+	// Task<IBackendConnection> CreateConnectionAsync(context, ct); the synchronous method is gone.
+	[Fact]
+	public void CreateConnection_IsAsync_WithCancellationTokenLast()
+	{
+		Assert.Null(typeof(IBackendProvider).GetMethod("CreateConnection"));
+
+		MethodInfo method = typeof(IBackendProvider).GetMethod("CreateConnectionAsync")!;
+		Assert.Equal(typeof(Task<IBackendConnection>), method.ReturnType);
+		Assert.Equal(typeof(CancellationToken), method.GetParameters()[^1].ParameterType);
+	}
+
 	// K57: the published plugin surface (ActiveSync.Contracts) must carry only what a plugin
 	// actually builds against. IBackendSession / IBackendSessionFactory / BackendSessionInfo are
 	// the HOST's composite session, its cache/factory and the dashboard projection of that cache —

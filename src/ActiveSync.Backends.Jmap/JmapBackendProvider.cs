@@ -70,7 +70,7 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 		       $"(cert={BackendDescription.DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
 	}
 
-	public IBackendConnection CreateConnection(BackendConnectionContext context)
+	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
 	{
 		// One session serves every jmap role assigned to this account; anchor it on the
 		// MailStore role's settings/credentials when present (the auth identity), else the
@@ -112,7 +112,7 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 					break;
 			}
 
-		return new BackendConnection(stores, submit, oof, ownedResources: [client]);
+		return Task.FromResult<IBackendConnection>(new BackendConnection(stores, submit, oof, ownedResources: [client]));
 	}
 
 	public async Task<bool> VerifyCredentialsAsync(ResolvedRole role, CancellationToken ct)

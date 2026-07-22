@@ -40,7 +40,7 @@ internal sealed class InternalTestBackendProvider : IBackendProvider
 
 	public string DescribeRole(BackendRole role, ProviderSettings settings) => "internal test plugin provider";
 
-	public IBackendConnection CreateConnection(BackendConnectionContext context) =>
+	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct) =>
 		throw new NotSupportedException("The internal test plugin provider does not open connections.");
 }
 
@@ -63,6 +63,6 @@ public sealed class TestBackendProvider : IBackendProvider
 	public string DescribeRole(BackendRole role, ProviderSettings settings) =>
 		$"test plugin provider (dep: {PluginPrivateLib.PrivateDependency.LoadedFrom})";
 
-	public IBackendConnection CreateConnection(BackendConnectionContext context) =>
+	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct) =>
 		throw new NotSupportedException("The test plugin provider does not open connections.");
 }

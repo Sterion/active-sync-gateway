@@ -36,17 +36,17 @@ public class BackendProviderTests
 	}
 
 	[Fact]
-	public void Session_GroupsRolesByProvider_AndAggregatesStores()
+	public async Task Session_GroupsRolesByProvider_AndAggregatesStores()
 	{
 		FakeProvider mail = new("mail", [BackendRole.MailStore, BackendRole.MailSubmit]);
 		FakeProvider rest = new("rest", [BackendRole.Calendar, BackendRole.Contacts]);
-		CompositeBackendSession session = new(Registry(mail, rest), Gateway, "user@x",
+		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(mail, rest), Gateway, "user@x",
 			[
 				new ResolvedRole(BackendRole.MailStore, "mail", ProviderSettings.Empty, Gateway),
 				new ResolvedRole(BackendRole.MailSubmit, "mail", ProviderSettings.Empty, Gateway),
 				new ResolvedRole(BackendRole.Calendar, "rest", ProviderSettings.Empty, Gateway),
 				new ResolvedRole(BackendRole.Contacts, "rest", ProviderSettings.Empty, Gateway)
-			], []);
+			], [], CancellationToken.None);
 
 		// One connection per provider, carrying exactly the roles assigned to it.
 		Assert.Equal(1, mail.Connections);
@@ -67,27 +67,27 @@ public class BackendProviderTests
 	}
 
 	[Fact]
-	public void Session_RequiresBothMailRoles()
+	public async Task Session_RequiresBothMailRoles()
 	{
 		FakeProvider store = new("store", [BackendRole.MailStore]);
 		FakeProvider submit = new("submit", [BackendRole.MailSubmit]);
-		Assert.Throws<InvalidOperationException>(() => new CompositeBackendSession(
+		await Assert.ThrowsAsync<InvalidOperationException>(() => CompositeBackendSession.CreateAsync(
 			Registry(store, submit), Gateway, null,
-			[new ResolvedRole(BackendRole.MailStore, "store", ProviderSettings.Empty, Gateway)], []));
-		Assert.Throws<InvalidOperationException>(() => new CompositeBackendSession(
+			[new ResolvedRole(BackendRole.MailStore, "store", ProviderSettings.Empty, Gateway)], [], CancellationToken.None));
+		await Assert.ThrowsAsync<InvalidOperationException>(() => CompositeBackendSession.CreateAsync(
 			Registry(store, submit), Gateway, null,
-			[new ResolvedRole(BackendRole.MailSubmit, "submit", ProviderSettings.Empty, Gateway)], []));
+			[new ResolvedRole(BackendRole.MailSubmit, "submit", ProviderSettings.Empty, Gateway)], [], CancellationToken.None));
 	}
 
 	[Fact]
 	public async Task Session_Dispose_DisposesEveryConnectionResource()
 	{
 		FakeProvider mail = new("mail", [BackendRole.MailStore, BackendRole.MailSubmit]);
-		CompositeBackendSession session = new(Registry(mail), Gateway, null,
+		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(mail), Gateway, null,
 			[
 				new ResolvedRole(BackendRole.MailStore, "mail", ProviderSettings.Empty, Gateway),
 				new ResolvedRole(BackendRole.MailSubmit, "mail", ProviderSettings.Empty, Gateway)
-			], []);
+			], [], CancellationToken.None);
 		await session.DisposeAsync();
 		Assert.True(mail.LastResource!.Disposed);
 	}
@@ -107,7 +107,7 @@ public class BackendProviderTests
 
 		public string DescribeRole(BackendRole role, ProviderSettings settings) => $"{name} fake";
 
-		public IBackendConnection CreateConnection(BackendConnectionContext context)
+		public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
 		{
 			Connections++;
 			LastAssignedRoles = context.Roles.Select(r => r.Role).ToList();
@@ -116,10 +116,10 @@ public class BackendProviderTests
 				.Where(r => r.Role is not (BackendRole.MailSubmit or BackendRole.Oof))
 				.Select(IContentStore (r) => new FakeStore($"{name}-{r.Role}", r.Role.ToString()))
 				.ToList();
-			return new BackendConnection(
+			return Task.FromResult<IBackendConnection>(new BackendConnection(
 				stores,
 				context.Roles.Any(r => r.Role == BackendRole.MailSubmit) ? new FakeSubmit() : null,
-				ownedResources: [LastResource]);
+				ownedResources: [LastResource]));
 		}
 	}
 

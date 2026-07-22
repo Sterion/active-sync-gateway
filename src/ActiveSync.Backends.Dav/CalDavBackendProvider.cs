@@ -108,7 +108,7 @@ public sealed class CalDavBackendProvider(ILoggerFactory loggerFactory) : IBacke
 		return DavReadiness.ProbeAsync(settings.Bind<DavServerOptions>().BaseUrl, ct);
 	}
 
-	public IBackendConnection CreateConnection(BackendConnectionContext context)
+	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
 	{
 		ResolvedRole? calendarRole = context.Roles.FirstOrDefault(r => r.Role == BackendRole.Calendar);
 		DavServerOptions clientOptions = (calendarRole ?? context.Roles[0]).Settings.Bind<DavServerOptions>();
@@ -131,7 +131,7 @@ public sealed class CalDavBackendProvider(ILoggerFactory loggerFactory) : IBacke
 					throw new InvalidOperationException($"caldav cannot serve the {role.Role} role.");
 			}
 
-		return new BackendConnection(stores, ownedResources: [client]);
+		return Task.FromResult<IBackendConnection>(new BackendConnection(stores, ownedResources: [client]));
 	}
 
 	/// <summary>The Tasks role inherits the Calendar section as its base when both are assigned here.</summary>

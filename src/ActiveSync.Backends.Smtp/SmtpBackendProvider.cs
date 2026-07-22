@@ -48,11 +48,11 @@ public sealed class SmtpBackendProvider(ILoggerFactory loggerFactory) : IBackend
 		       $"cert={BackendDescription.DescribeCert(options.AllowInvalidCertificates, options.CaCertificatePath)})";
 	}
 
-	public IBackendConnection CreateConnection(BackendConnectionContext context)
+	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
 	{
 		ResolvedRole role = context.Roles.Single(r => r.Role == BackendRole.MailSubmit);
 		SmtpSubmitBackend submit = new(
 			role.Settings.Bind<SmtpOptions>(), role.Credentials, context.MailAddress, _logger, _wireLogger);
-		return new BackendConnection([], submit);
+		return Task.FromResult<IBackendConnection>(new BackendConnection([], submit));
 	}
 }
