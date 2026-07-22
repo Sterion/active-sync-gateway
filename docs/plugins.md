@@ -21,10 +21,14 @@ when configured) — pin the **exact minor** you target (see *Versioning* below)
   tiny assembly that pulls in only `ActiveSync.Protocol` (EAS constants) and the
   Microsoft.Extensions config/DI abstractions — **not** Core, Crypto or EF Core.
 
-Optionally, if your provider speaks MIME/iCalendar/vCard, also reference:
+Optionally, also reference:
 
 - `ActiveSync.Backends.Common` — the MIME/iCalendar/vCard converters and TLS/wire-logging
-  helpers. Nothing else needs it.
+  helpers. Only needed if your provider speaks MIME/iCalendar/vCard.
+- `ActiveSync.Crypto` — the master-key sealing primitive (`SecretValue`). Only needed if your
+  provider seals a secret of its **own** at rest; the host already seals and unseals the role
+  credential for you (see *Describing your settings* below). Contracts deliberately carries no
+  crypto, so this is an explicit, separate reference.
 
 A plugin assembly contains:
 
@@ -129,6 +133,17 @@ Field types: `String`, `Int` (with optional `Min`/`Max`), `Bool`, `Enum` (with `
 `Url`, `Secret` (masked, never echoed back) and `StringList` (repeated `Name:0`, `Name:1` keys —
 give the list root as `Name`). `Default` must be the string form of your options class's own
 default, since it is what the UI shows as the dimmed placeholder.
+
+**What `Secret` does and does not do.** A `Secret` field is masked in every editor, never echoed
+back in an API response, and redacted from logs and the startup banner — that is the whole of what
+the type governs. It is **not** at-rest field encryption. The one secret the gateway seals in its
+state database is the role's own credential: you declare it through the host-reserved `Password`
+per-user key (not a `Secret` field of your own), and the host seals it on write and **unseals it
+before your provider sees it**, handing it to you in plaintext as
+`context.Roles[…].Credentials.Password`. Any other `Secret` field you declare is stored as entered
+and bound to your options in plaintext. If your provider needs to seal an *additional* secret of its
+own at rest, reference **`ActiveSync.Crypto`** (`SecretValue`) alongside `ActiveSync.Contracts` —
+Contracts carries no crypto on purpose, so sealing is always an explicit, separate dependency.
 
 `SelfServiceEditable` decides whether a **non-admin** account holder may set the field for their
 own account in the user portal. It defaults to `false`, so your provider is administration-only
