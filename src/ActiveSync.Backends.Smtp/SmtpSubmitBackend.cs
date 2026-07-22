@@ -61,7 +61,20 @@ public sealed class SmtpSubmitBackend(
 		}).ConfigureAwait(false);
 
 		await smtp.SendAsync(message, ct).ConfigureAwait(false); // NOT retried — submission is not idempotent
-		await smtp.DisconnectAsync(true, ct).ConfigureAwait(false);
+
+		// The mail is accepted at this point. The QUIT teardown must NOT be able to fail the
+		// operation: pass CancellationToken.None (a cancelled request must not make an already-sent
+		// message look like a send failure) and swallow any disconnect error — otherwise the client
+		// retries and the recipient gets it twice (D9).
+		try
+		{
+			await smtp.DisconnectAsync(true, CancellationToken.None).ConfigureAwait(false);
+		}
+		catch (Exception ex)
+		{
+			logger.LogWarning(ex, "SMTP disconnect after a successful send failed for {User}", credentials.UserName);
+		}
+
 		logger.LogInformation("Sent message {MessageId} for {User}", message.MessageId, credentials.UserName);
 	}
 
