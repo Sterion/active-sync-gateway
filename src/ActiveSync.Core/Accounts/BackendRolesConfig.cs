@@ -60,7 +60,7 @@ public sealed class BackendRolesConfig
 				continue;
 			}
 
-			if (!assignments.TryAdd(role, new RoleAssignment(role, provider.Trim(), new ProviderSettings(section))))
+			if (!assignments.TryAdd(role, new RoleAssignment(role, provider.Trim(), Materialize(section))))
 				failures.Add($"ActiveSync:Backends declares the {role} role twice (keys are case-insensitive).");
 		}
 
@@ -74,5 +74,20 @@ public sealed class BackendRolesConfig
 			assignments.TryAdd(content, new RoleAssignment(content, "local", ProviderSettings.Empty));
 
 		return new BackendRolesConfig(assignments);
+	}
+
+	/// <summary>
+	///   Snapshots a role section's leaf values into a materialized <see cref="ProviderSettings" />
+	///   rather than wrapping the LIVE <see cref="IConfigurationSection" /> (B14). A live section keeps
+	///   reflecting later edits, so a REJECTED rebuild's settings would still read through the
+	///   last-good assignment; a snapshot means only an ACCEPTED rebuild changes what a provider sees.
+	/// </summary>
+	private static ProviderSettings Materialize(IConfigurationSection section)
+	{
+		Dictionary<string, string?> flat = new(StringComparer.OrdinalIgnoreCase);
+		foreach ((string key, string? value) in section.AsEnumerable(makePathsRelative: true))
+			if (!string.IsNullOrEmpty(key) && value is not null)
+				flat[key] = value;
+		return ProviderSettings.FromFlat(flat);
 	}
 }

@@ -1,3 +1,5 @@
+using ActiveSync.Contracts;
+using ActiveSync.Core.Backend;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
@@ -17,14 +19,19 @@ namespace ActiveSync.Core.Accounts;
 public sealed class BackendRolesProvider : IDisposable
 {
 	private readonly IConfiguration _config;
+	private readonly BackendProviderRegistry? _registry;
 	private readonly ILogger<BackendRolesProvider>? _logger;
 	private readonly IDisposable? _reloadSubscription;
 	private volatile BackendRolesConfig _current;
 	private string _signature;
 
-	public BackendRolesProvider(IConfiguration config, ILogger<BackendRolesProvider>? logger = null)
+	public BackendRolesProvider(
+		IConfiguration config,
+		BackendProviderRegistry? registry = null,
+		ILogger<BackendRolesProvider>? logger = null)
 	{
 		_config = config;
+		_registry = registry;
 		_logger = logger;
 		List<string> failures = new();
 		BackendRolesConfig loaded = BackendRolesConfig.Load(config, failures);
@@ -56,6 +63,13 @@ public sealed class BackendRolesProvider : IDisposable
 
 		List<string> failures = new();
 		BackendRolesConfig rebuilt = BackendRolesConfig.Load(_config, failures);
+		// Shape is not enough: the startup path also runs each provider's own ValidateConfiguration,
+		// but the live rebuild skipped it — so a live edit blanking Host, or switching Provider to one
+		// the stored settings don't satisfy, became the running config and only failed at next restart
+		// (the same delayed brick B1 fixes for host options). Run it here too and keep the last-good
+		// configuration on any failure, honouring the doc's "a bad edit can't take the gateway down".
+		if (failures.Count == 0 && _registry is not null)
+			ValidateProviders(rebuilt, failures);
 		if (failures.Count > 0)
 		{
 			_logger?.LogWarning(
@@ -68,6 +82,25 @@ public sealed class BackendRolesProvider : IDisposable
 		_current = rebuilt;
 		_logger?.LogInformation("Backend role configuration reloaded from a settings change");
 		Changed?.Invoke();
+	}
+
+	/// <summary>
+	///   Runs each assigned provider's own <see cref="IBackendProvider.ValidateConfiguration" /> over
+	///   the rebuilt assignments, mirroring the startup <c>BackendConfigurationValidator</c>. An
+	///   unknown/unsuitable provider or a rejected setting is collected as a failure.
+	/// </summary>
+	private void ValidateProviders(BackendRolesConfig rebuilt, List<string> failures)
+	{
+		foreach ((BackendRole role, RoleAssignment assignment) in rebuilt.Assignments)
+			try
+			{
+				_registry!.GetFor(assignment.ProviderName, role)
+					.ValidateConfiguration(role, assignment.Settings, failures);
+			}
+			catch (InvalidOperationException ex)
+			{
+				failures.Add($"ActiveSync:Backends:{role}: {ex.Message}");
+			}
 	}
 
 	/// <summary>Flattened, sorted ActiveSync:Backends subtree — changes exactly when a backend setting does.</summary>

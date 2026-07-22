@@ -1,8 +1,13 @@
+using ActiveSync.Backends.Imap;
+using ActiveSync.Backends.Local;
+using ActiveSync.Backends.Smtp;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.Settings;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Core.Tests;
 
@@ -31,6 +36,32 @@ public sealed class BackendRolesProviderTests
 
 	private static string? Host(BackendRolesProvider provider, BackendRole role) =>
 		provider.Current.Assignments[role].Settings.Section["Host"];
+
+	private static BackendProviderRegistry Registry() =>
+		new(
+		[
+			new ImapBackendProvider(TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
+			new SmtpBackendProvider(NullLoggerFactory.Instance),
+			// The content roles fall back to "local", so the rebuild validates it too — like real DI.
+			// Only ValidateConfiguration is exercised, so the null connection deps are never touched.
+			new LocalBackendProvider(null!, null!, null!),
+		], NullLogger<BackendProviderRegistry>.Instance);
+
+	private static (BackendRolesProvider Provider, DbSettingsConfigurationProvider Db) BuildWithRegistry()
+	{
+		DbSettingsConfigurationSource dbSource = new();
+		IConfigurationRoot config = new ConfigurationBuilder()
+			.AddInMemoryCollection(new Dictionary<string, string?>
+			{
+				["ActiveSync:Backends:MailStore:Provider"] = "imap",
+				["ActiveSync:Backends:MailStore:Host"] = "imap.old",
+				["ActiveSync:Backends:MailSubmit:Provider"] = "smtp",
+				["ActiveSync:Backends:MailSubmit:Host"] = "smtp.old",
+			})
+			.Add(dbSource)
+			.Build();
+		return (new BackendRolesProvider(config, Registry()), dbSource.Provider);
+	}
 
 	[Fact]
 	public void BackendChange_RebuildsCurrent_AndRaisesChanged()
@@ -98,6 +129,47 @@ public sealed class BackendRolesProviderTests
 		// keeps the last-good configuration rather than taking the gateway down.
 		db.SetData(new Dictionary<string, string?> { ["ActiveSync:Backends:MailStore:Provider"] = "" });
 		Assert.Equal(0, changed);
+		Assert.Equal("imap.old", Host(provider, BackendRole.MailStore));
+	}
+
+	// B14 — the live rebuild now runs each provider's ValidateConfiguration, not just shape parsing.
+	// Blanking a Host is shape-valid but semantically invalid (imap RequiredHost), so it must be
+	// rejected and the last-good configuration kept — the same delayed-brick class B1 fixes.
+	[Fact]
+	public void LiveEdit_ThatFailsProviderValidation_IsRejected_KeepsLastGood()
+	{
+		(BackendRolesProvider provider, DbSettingsConfigurationProvider db) = BuildWithRegistry();
+		int changed = 0;
+		provider.Changed += () => changed++;
+
+		db.SetData(new Dictionary<string, string?> { ["ActiveSync:Backends:MailStore:Host"] = "" });
+		Assert.Equal(0, changed);
+		Assert.Equal("imap.old", Host(provider, BackendRole.MailStore));
+	}
+
+	// A live edit the provider accepts still applies (validation is a gate, not a wall).
+	[Fact]
+	public void LiveEdit_ThatPassesProviderValidation_IsApplied()
+	{
+		(BackendRolesProvider provider, DbSettingsConfigurationProvider db) = BuildWithRegistry();
+		int changed = 0;
+		provider.Changed += () => changed++;
+
+		db.SetData(new Dictionary<string, string?> { ["ActiveSync:Backends:MailStore:Host"] = "imap.new" });
+		Assert.Equal(1, changed);
+		Assert.Equal("imap.new", Host(provider, BackendRole.MailStore));
+	}
+
+	// B14 (compounding) — a materialized snapshot means a REJECTED rebuild's settings never read
+	// through: Host stays the last-good value even though the live section now holds the bad one.
+	[Fact]
+	public void RejectedRebuild_SettingsDoNotReadThrough_TheLiveSection()
+	{
+		(BackendRolesProvider provider, DbSettingsConfigurationProvider db) = BuildWithRegistry();
+
+		// A change that fails validation (blank Host) — the assignment must keep the old snapshot,
+		// not the live section which would now surface the empty value.
+		db.SetData(new Dictionary<string, string?> { ["ActiveSync:Backends:MailStore:Host"] = "" });
 		Assert.Equal("imap.old", Host(provider, BackendRole.MailStore));
 	}
 }
