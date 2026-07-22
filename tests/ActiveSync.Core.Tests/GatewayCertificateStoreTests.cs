@@ -114,6 +114,25 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 		Assert.Equal(replacement.Thumbprint, reloaded.Thumbprint);
 	}
 
+	[Fact]
+	public async Task GeneratedCertificate_PrivateKeyStaysUsable_AfterPfxIsZeroed()
+	{
+		// K9 COVERAGE (not proof): the fix zeroes the unencrypted PKCS#12 byte buffers after they
+		// are loaded/sealed — there is no external handle to observe the wipe itself, so this test
+		// is a regression guard that zeroing the buffer after LoadPkcs12 does not corrupt the loaded
+		// private key. A sign/verify round-trip proves the key survived.
+		using LocalContentProtector protector = Protector();
+		using X509Certificate2 certificate = await Store(protector).GetOrCreateAsync(
+			"eas.example.com", NullLogger.Instance, CancellationToken.None);
+
+		Assert.True(certificate.HasPrivateKey);
+		using RSA priv = certificate.GetRSAPrivateKey()!;
+		using RSA pub = certificate.GetRSAPublicKey()!;
+		byte[] data = [1, 2, 3, 4, 5];
+		byte[] signature = priv.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+		Assert.True(pub.VerifyData(data, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+	}
+
 	[Theory]
 	[InlineData(null, "activesync-gateway")]
 	[InlineData("not a url", "activesync-gateway")]

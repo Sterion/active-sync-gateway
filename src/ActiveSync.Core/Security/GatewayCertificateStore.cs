@@ -106,7 +106,16 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 		try
 		{
 			byte[] pfx = Convert.FromBase64String(protector.Unprotect(pfxProtected, AadUser, AadCollection));
-			return X509CertificateLoader.LoadPkcs12(pfx, null);
+			// K9: the decoded PKCS#12 carries the unencrypted private key. Zero it once LoadPkcs12
+			// has parsed it — the finally runs after the return value is materialized.
+			try
+			{
+				return X509CertificateLoader.LoadPkcs12(pfx, null);
+			}
+			finally
+			{
+				CryptographicOperations.ZeroMemory(pfx);
+			}
 		}
 		catch (Exception ex) when (ex is BackendException or FormatException or CryptographicException)
 		{
@@ -138,7 +147,17 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 		DateTimeOffset now = DateTimeOffset.UtcNow;
 		using X509Certificate2 generated = request.CreateSelfSigned(now.AddHours(-1), now.AddYears(20));
 		byte[] pfx = generated.Export(X509ContentType.Pkcs12);
-		string sealedPfx = protector.Protect(Convert.ToBase64String(pfx), AadUser, AadCollection);
-		return (X509CertificateLoader.LoadPkcs12(pfx, null), sealedPfx);
+		// K9: the exported PKCS#12 holds the unencrypted private key — zero it once it has been
+		// sealed and reloaded. (The base64 string handed to the protector is transient and out of
+		// reach to wipe; the byte buffer is the high-value copy we can clear.)
+		try
+		{
+			string sealedPfx = protector.Protect(Convert.ToBase64String(pfx), AadUser, AadCollection);
+			return (X509CertificateLoader.LoadPkcs12(pfx, null), sealedPfx);
+		}
+		finally
+		{
+			CryptographicOperations.ZeroMemory(pfx);
+		}
 	}
 }
