@@ -69,4 +69,57 @@ public sealed class BackendKeyValidatorTests
 		Assert.NotNull(BackendKeyValidator.Validate(
 			Registry(), effective, "ActiveSync:Backends:MailStore:Provider", "smtp"));
 	}
+
+	// B25 — the provider's schema is authoritative for secret masking, both ways: a Secret-typed field
+	// whose NAME the heuristic would miss is masked; a String field whose name the heuristic would
+	// (wrongly) flag is not.
+	[Fact]
+	public void IsSecretLeaf_ConsultsTheProviderSchema_NotJustTheNameHeuristic()
+	{
+		BackendProviderRegistry registry = new(
+			[new SchemaProvider("plug", BackendRole.MailStore)], NullLogger<BackendProviderRegistry>.Instance);
+		IConfiguration effective = Config(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:MailStore:Provider"] = "plug",
+		});
+
+		// Schema says secret even though "AuthBlob" matches no heuristic marker.
+		Assert.True(BackendKeyValidator.IsSecretLeaf(registry, effective, "ActiveSync:Backends:MailStore:AuthBlob"));
+		// Schema says NOT secret even though "Token" matches the heuristic.
+		Assert.False(BackendKeyValidator.IsSecretLeaf(registry, effective, "ActiveSync:Backends:MailStore:Token"));
+	}
+
+	[Fact]
+	public void IsSecretLeaf_FallsBackToTheNameHeuristic_WhenNoFieldClaimsTheLeaf()
+	{
+		BackendProviderRegistry registry = new(
+			[new SchemaProvider("plug", BackendRole.MailStore)], NullLogger<BackendProviderRegistry>.Instance);
+		IConfiguration effective = Config(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:MailStore:Provider"] = "plug",
+		});
+
+		// No field named "ClientSecret" in the schema → heuristic decides, and it is a secret name.
+		Assert.True(BackendKeyValidator.IsSecretLeaf(registry, effective, "ActiveSync:Backends:MailStore:ClientSecret"));
+		Assert.False(BackendKeyValidator.IsSecretLeaf(registry, effective, "ActiveSync:Backends:MailStore:Folder"));
+	}
+
+	/// <summary>A minimal provider whose only interesting surface is a self-describing schema.</summary>
+	private sealed class SchemaProvider(string name, params BackendRole[] roles) : IBackendProvider
+	{
+		public string Name => name;
+		public IReadOnlySet<BackendRole> SupportedRoles { get; } = new HashSet<BackendRole>(roles);
+
+		public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role) =>
+		[
+			new BackendConfigField("AuthBlob", "Auth blob", BackendFieldType.Secret),
+			new BackendConfigField("Token", "Token", BackendFieldType.String),
+		];
+
+		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures) { }
+		public string DescribeRole(BackendRole role, ProviderSettings settings) => $"{name} fake";
+
+		public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct) =>
+			throw new NotSupportedException();
+	}
 }

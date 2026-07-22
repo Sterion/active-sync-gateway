@@ -57,6 +57,41 @@ internal static class BackendKeyValidator
 		return BackendConfigValidation.CheckValue(field, value)?.Message;
 	}
 
+	/// <summary>
+	///   Whether a backend leaf key holds a secret, for masking in `eas config list/get`. The
+	///   provider's own schema is authoritative (B25) — a declared <see cref="BackendFieldType.Secret" />
+	///   field, whatever its name — with the <see cref="SecretRedaction.IsSecretName" /> name heuristic
+	///   as the fallback when no field claims the leaf (a plugin describing part or none of its surface).
+	/// </summary>
+	internal static bool IsSecretLeaf(BackendProviderRegistry registry, IConfiguration effective, string key)
+	{
+		string[] parts = key.Split(':');
+		if (parts.Length < 4 ||
+		    !parts[0].Equals("ActiveSync", StringComparison.OrdinalIgnoreCase) ||
+		    !parts[1].Equals("Backends", StringComparison.OrdinalIgnoreCase) ||
+		    !Enum.TryParse(parts[2], true, out BackendRole role))
+			return SecretRedaction.IsSecretName(parts[^1]);
+
+		string leaf = string.Join(':', parts[3..]);
+		string? providerName = effective[$"ActiveSync:Backends:{role}:{BackendRolesConfig.ProviderKey}"];
+		if (!string.IsNullOrWhiteSpace(providerName))
+			try
+			{
+				BackendConfigField? field = registry.GetFor(providerName, role)
+					.DescribeConfiguration(role)
+					.FirstOrDefault(f => f.Name.Equals(
+						BackendConfigValidation.ListRoot(leaf), StringComparison.OrdinalIgnoreCase));
+				if (field is not null)
+					return field.Type == BackendFieldType.Secret;
+			}
+			catch (InvalidOperationException)
+			{
+				// Unusable provider assignment — fall back to the name heuristic below.
+			}
+
+		return SecretRedaction.IsSecretName(parts[^1]);
+	}
+
 	private static string? ProviderError(
 		BackendProviderRegistry registry, IConfiguration effective, BackendRole role, string value)
 	{

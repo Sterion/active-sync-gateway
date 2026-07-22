@@ -61,6 +61,18 @@ internal abstract class SettingsCommandBase<TSettings>(IAnsiConsole terminal) : 
 	protected static string Mask(SettingKeys.SettingKey? definition, string value)
 		=> definition is { Secret: true } && value != "(unset)" ? SecretRedaction.Mask : value;
 
+	/// <summary>Masks a value when the key is a secret; unset values stay readable.</summary>
+	protected static string Mask(bool secret, string value)
+		=> secret && value != "(unset)" ? SecretRedaction.Mask : value;
+
+	/// <summary>The effective configuration (file/env under the database overrides) for schema lookups.</summary>
+	protected static IConfiguration EffectiveConfig(
+		IReadOnlyDictionary<string, string?> dbValues, IConfiguration fileConfig) =>
+		new ConfigurationBuilder()
+			.AddConfiguration(fileConfig)
+			.AddInMemoryCollection(dbValues)
+			.Build();
+
 	// Markup for the source/tier so they pop when the terminal supports colour (and render as the
 	// plain word otherwise). These are fixed tokens, so the markup is safe to embed unescaped.
 	protected static string SourceTag(string source) => source switch
@@ -105,11 +117,14 @@ internal sealed class ConfigListCommand(IAnsiConsole terminal) : SettingsCommand
 			extra.Add(dbKey);
 		extra.ExceptWith(shown);
 
+		IConfiguration effective = EffectiveConfig(db, fileConfig);
 		foreach (string key in extra)
 		{
 			(string value, string source) = Effective(key, null, db, fileConfig);
 			SettingKeys.SettingKey? definition = SettingKeys.Find(key);
-			table.AddRow(new Text(key), new Text(Mask(definition, value)),
+			// A backend leaf's secrecy comes from its provider's schema (B25), not just a name match.
+			bool secret = BackendKeyValidator.IsSecretLeaf(Registry, effective, key);
+			table.AddRow(new Text(key), new Text(Mask(secret, value)),
 				new Markup(SourceTag(source)), new Markup(TierTag(definition?.Tier ?? "live")));
 		}
 
@@ -142,9 +157,15 @@ internal sealed class ConfigGetCommand(IAnsiConsole terminal) : SettingsCommandB
 			return 1;
 		}
 
+		// A backend leaf's secrecy is authoritative from its provider's schema (B25); catalogue keys
+		// carry their own Secret flag.
+		bool secret = SettingKeys.IsCatalogueKey(settings.Key)
+			? definition is { Secret: true }
+			: BackendKeyValidator.IsSecretLeaf(Registry, EffectiveConfig(db, fileConfig), settings.Key);
+
 		// Colour the source/tier tokens; escape the (user-controlled) key + value so their contents
 		// can't be read as markup. Renders plain when the terminal has no colour.
-		Terminal.MarkupLine($"{Markup.Escape(settings.Key)} = {Markup.Escape(Mask(definition, value))}  (source: {SourceTag(source)}"
+		Terminal.MarkupLine($"{Markup.Escape(settings.Key)} = {Markup.Escape(Mask(secret, value))}  (source: {SourceTag(source)}"
 		                    + (definition is not null ? $"; tier: {TierTag(definition.Tier)}" : "") + ")");
 		return 0;
 	}
