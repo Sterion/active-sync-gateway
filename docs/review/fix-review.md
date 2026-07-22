@@ -10,13 +10,14 @@ certainly belongs in `review-items.md` instead.
 
 ---
 
-## The three files
+## The files
 
 | File | Changes? | Contains |
 |---|---|---|
 | `conduct-review.md` | never | how to *produce* a review |
 | **`fix-review.md`** (this) | never | how to *execute* one |
-| `review-items.md` | constantly | the findings, the queue, the project's commands and invariants |
+| `review-items.md` | constantly | the findings index, the queue, the project's commands and invariants |
+| `review-items-detail.md` | as findings land | the **full technical write-up** of each finding — the exact symptom, the offending expression, and (often) a recommended fix. The queue and index in `review-items.md` are deliberately terse; the detail file is where the actual engineering guidance lives. **Read a finding's detail entry before implementing it.** |
 
 ## The roles
 
@@ -74,7 +75,10 @@ slate.
 names). It does not write code, but it *decides* — what a repair subagent's brief says, whether a
 result is in scope, whether a finding contradicts the architecture — and every one of those decisions
 can go wrong without the architecture in front of it. It should know the dependency rule and the
-invariants as well as any worker does.
+invariants as well as any worker does. **It also reads `review-items-detail.md` for the item it is
+verifying** — the queue line is terse, and the detail entry (symptom, offending expression,
+recommended fix) is what lets the orchestrator judge whether a worker's result actually matches the
+finding rather than merely compiling and passing.
 
 > Read `fix-review.md`, `review-items.md`, and the orientation documents `review-items.md` names
 > (`AGENTS.md` first). Work **items N through M** as an orchestrator.
@@ -141,7 +145,11 @@ Spawn **every** worker with exactly this text, substituting only the item number
 
 ```
 You are a Worker. Read docs/review/fix-review.md, docs/review/review-items.md, and AGENTS.md,
-in that order, and follow them exactly. Implement item N and only item N. Report back per the
+in that order, and follow them exactly. Before implementing each finding, read its full entry in
+docs/review/review-items-detail.md — that is where the technical detail and recommended fix live.
+Implement item N and only item N. Commit onto the current branch — NEVER create, switch, or rename a
+git branch, and never push. Prove every finding red-first: write the failing test and watch it fail on
+UNMODIFIED code BEFORE you touch the fix (never fix-then-revert-to-see-red). Report back per the
 protocol: each finding ID with its commit and how it was proven (red-first / coverage / N/A),
 the full unit-suite counts, every behaviour or breaking change, any coverage-not-proof test,
 any judgment call, and any new findings filed.
@@ -197,6 +205,12 @@ two is wrong and that is a decision for a human.
 
 ## Working protocol — follow this for every item
 
+**0. Read the finding's full detail entry before you implement it.** `review-items.md` gives only a
+one-line index entry per finding; the real write-up — exact symptom, the offending expression, and
+often a recommended fix — is in `review-items-detail.md` (Areas A–W; Area S is self-contained in
+`review-items.md`). Locate the entry by its ID (e.g. `B3.`) and work from it. Skipping it is how a
+worker "fixes" something other than what the finding actually describes.
+
 **1. Work findings in the order listed.** Honour any sequencing constraint stated on the item.
 
 **2. Commit after each finding**, or each tight cluster, with the ID in the subject:
@@ -207,6 +221,14 @@ fix(imap): scope EXPUNGE to the deleted UID (D1)
 
 Small commits are the point — they make the work resumable and each finding independently
 revertible. Do not batch an item into one commit.
+
+**Never create, switch, or rename a git branch. Commit onto whatever branch you are already on.**
+The orchestrator runs workers strictly sequentially on one branch precisely so their commits form a
+single resumable line; a worker that does `git checkout -b review/item-N` strands its work on a branch
+the orchestrator and every other worker cannot see, and the next item builds on a `main` that is
+missing it. Branch, push, PR and merge decisions belong to the **human**, never the worker — see step
+7 and the Standing context. If the working tree is not where you expect, **stop and report**; do not
+"tidy up" with a branch.
 
 **3. Mark the finding in the same commit — on the item's line in the work queue.** That line is the
 cursor: resume finds the lowest-numbered item with un-struck findings. A finding marked only in the
@@ -242,20 +264,37 @@ dozen times per item — an 8-finding item can spend over an hour executing test
 work, and the fourteenth run checks nothing the second did not. Regression protection comes from the
 final run.
 
-**6. Write the failing test first.** Red, then fix, then green:
+**6. Write the failing test FIRST — this is the single most-violated rule. The ORDER is the proof.**
 
-1. Write the reproducer against **unmodified** code and run it. Watch it fail with the described
-   symptom.
-2. Only then apply the fix.
-3. Re-run — it passes, and so does the rest of the suite.
+The only valid sequence, per finding, no exceptions:
 
-A test that passes with *and* without the fix documents behaviour but proves nothing, and a finding
-struck through on it is a false record. Writing it first makes that impossible to miss.
+1. Write the reproducer. **Do not touch the production code yet.**
+2. Run it against the **unmodified** code and **watch it fail with the finding's described symptom.**
+   Keep that red output — it is the evidence you report.
+3. **Only now** apply the fix.
+4. Re-run — the same test passes, and so does the rest of the suite.
 
-**Do not write the fix first and verify by reverting.** Both failure modes have been observed: a
-reproducer written after the fix passed without it (it threw on a different error before reaching the
-bug), and another fix could not be reverted at all — it had changed a signature, so the revert did
-not compile and the proof had to be simulated.
+**The forbidden sequence — do NOT do this (it is exactly what has gone wrong repeatedly):**
+
+> ❌ write the fix and the test together → run → see green → revert the code → see red → re-apply the fix.
+
+That is **not** red-first and does **not** count as proof, even though the diff looks identical at the
+end. Three concrete reasons it is banned, all observed in practice:
+
+- **A test written alongside the fix is shaped by the fix.** It asserts what the new code does, not the
+  symptom the finding describes. Written first, against code you have not yet changed, it is forced to
+  target the *bug*.
+- **Reverting often doesn't cleanly reproduce.** A fix that changed a signature, a helper, or a test
+  seam cannot be reverted in isolation — the revert doesn't compile, so the "red" has to be *simulated*,
+  which is not evidence of anything. One observed reproducer, written after the fix, threw on an
+  unrelated earlier error and "passed" without the fix at all.
+- **It is self-deception disguised as rigour.** The ceremony of watching red-then-green happened, so it
+  feels proven — but the red you saw came from code you already wrote and then removed, not from the
+  original defect. A finding struck through on this is a **false record**.
+
+If you catch yourself about to write the fix and the test in the same pass, **stop and write only the
+test.** A test that passes with *and* without the fix proves nothing; the ordering is the only thing
+that makes that impossible to fake.
 
 When a finding genuinely cannot be reproduced — a race with no deterministic trigger, a symptom the
 test environment does not exhibit — keep the test as **coverage**, label it as such in both the test
