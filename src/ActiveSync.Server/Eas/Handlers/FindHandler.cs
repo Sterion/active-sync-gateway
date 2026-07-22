@@ -102,11 +102,24 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 		IReadOnlyList<(string FolderBackendKey, string ItemKey)> hits =
 			await context.Session.MailStore.SearchAsync(folderBackendKey, freeText, null, fetch, ct);
 
-		List<XElement> results = new();
-		foreach ((string hitFolderKey, string itemKey) in hits.Skip(start).Take(pageSize))
+		// Fetch the page's bodies in ONE batched call per folder rather than a sequential
+		// GetItemAsync per hit (F40).
+		BodyPreference bodyPreference = new(1, 1024, false, true);
+		List<(string FolderKey, string ItemKey)> page = hits.Skip(start).Take(pageSize).ToList();
+		Dictionary<(string, string), BackendItem?> fetched = new();
+		foreach (IGrouping<string, (string FolderKey, string ItemKey)> group in page.GroupBy(h => h.FolderKey))
 		{
-			BackendItem? item = await mailStore.GetItemAsync(
-				hitFolderKey, itemKey, new BodyPreference(1, 1024, false, true), ct);
+			IReadOnlyList<string> keys = group.Select(h => h.ItemKey).ToList();
+			IReadOnlyDictionary<string, BackendItem?> items =
+				await mailStore.GetItemsAsync(group.Key, keys, bodyPreference, ct);
+			foreach ((string folderKey, string itemKey) in group)
+				fetched[(folderKey, itemKey)] = items.GetValueOrDefault(itemKey);
+		}
+
+		List<XElement> results = new();
+		foreach ((string hitFolderKey, string itemKey) in page)
+		{
+			BackendItem? item = fetched.GetValueOrDefault((hitFolderKey, itemKey));
 			if (item is null)
 				continue;
 

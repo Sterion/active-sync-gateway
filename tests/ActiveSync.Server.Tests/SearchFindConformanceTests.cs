@@ -77,6 +77,28 @@ public sealed class SearchFindConformanceTests : IDisposable
 		Assert.Equal("4", store?.Element(S + "Total")?.Value);
 	}
 
+	// F40 — a Search page of several same-folder hits is fetched in ONE batched call, not a
+	// sequential GetItemAsync per hit.
+	[Fact]
+	public async Task Search_FetchesThePageInOneBatch_NotPerHit()
+	{
+		await InboxAsync();
+		SeedHits(3);
+
+		XDocument? response = await _harness.RunAsync(NewSearch(), "Search",
+			new XDocument(new XElement(S + "Search",
+				new XElement(S + "Store",
+					new XElement(S + "Name", "Mailbox"),
+					new XElement(S + "Query", new XElement(S + "FreeText", "hello")),
+					new XElement(S + "Options", new XElement(S + "Range", "0-2"))))));
+
+		Assert.Equal(3, response?.Root?.Element(S + "Response")?.Element(S + "Store")?
+			.Elements(S + "Result").Count());
+		// One batched fetch covering the whole page's three keys.
+		Assert.Single(_harness.Session.Store.BatchFetched);
+		Assert.Equal(["1", "2", "3"], _harness.Session.Store.BatchFetched[0].OrderBy(k => k));
+	}
+
 	// F36 — Find Total must not overreport past the end of the hit set. With 3 hits, a request for
 	// offset 5 serves nothing; Total must be the 3 found, not start (5).
 	[Fact]
