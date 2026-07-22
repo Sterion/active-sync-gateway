@@ -277,17 +277,23 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 	private async Task<Dictionary<string, string>> TokensAsync(
 		string account, IReadOnlyList<string> folderBackendKeys, CancellationToken ct)
 	{
-		List<JsonElement> events = await GetAllEventsAsync(account, ct).ConfigureAwait(false);
+		// H15: the wait token is the account-level CalendarEvent state instead of a SHA-256 over the
+		// full JSCalendar body of every event, which used to be re-downloaded on every poll tick for
+		// the whole heartbeat. CalendarEvent/get with an empty id list returns just the current state;
+		// it advances on ANY event create/update/destroy. The state is account-wide, so a change in
+		// one calendar shifts every watched calendar's token — the wait over-notifies rather than
+		// misses (the safe direction; the client resyncs and finds nothing new). Mirrors the mail
+		// store's H19 token.
+		using JmapResponse response = await client.CallAsync(Cap, "CalendarEvent/get", new Dictionary<string, object?>
+		{
+			["accountId"] = account,
+			["ids"] = Array.Empty<string>()
+		}, ct).ConfigureAwait(false);
+		JsonElement args = response.Arguments("0");
+		string state = args.TryGetProperty("state", out JsonElement s) ? s.GetString() ?? "" : "";
 		Dictionary<string, string> tokens = new(StringComparer.Ordinal);
 		foreach (string folderKey in folderBackendKeys)
-		{
-			string calId = FromKey(folderKey);
-			string joined = string.Join(";", events.Where(e => InCalendar(e, calId))
-				.Select(e => $"{e.GetProperty("id").GetString()}={Revision(e)}")
-				.OrderBy(s => s, StringComparer.Ordinal));
-			tokens[folderKey] = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(joined)), 0, 8);
-		}
-
+			tokens[folderKey] = state;
 		return tokens;
 	}
 

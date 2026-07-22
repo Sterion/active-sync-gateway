@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using ActiveSync.Backends.Jmap;
 using ActiveSync.Contracts;
 
@@ -54,6 +55,42 @@ public sealed class JmapCalendarStoreUnitTests
 		Assert.Contains("REC", revs.Keys);          // recurring — never dropped on a date filter
 	}
 
+	// H15: the Ping/Sync wait token re-downloaded the FULL JSCalendar body of every event on every
+	// poll tick (CalendarEvent/get ids:null) and SHA-256'd it. The token must instead be the
+	// account-level CalendarEvent state (a tiny CalendarEvent/get ids:[] call), so a change is
+	// detected without pulling any event body. Proven by advancing ONLY the state between polls
+	// (the event list is unchanged) and asserting no ids:null full fetch happened.
+	[Fact]
+	public async Task WaitForChanges_DetectsViaState_WithoutDownloadingEvents()
+	{
+		int apiCalls = 0;
+		bool sawFullFetch = false;
+		StateHandler stub = new(request =>
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			apiCalls++;
+			string body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+			using JsonDocument doc = JsonDocument.Parse(body);
+			JsonElement call = doc.RootElement.GetProperty("methodCalls")[0];
+			bool idsNull = call[1].TryGetProperty("ids", out JsonElement ids) && ids.ValueKind == JsonValueKind.Null;
+			if (idsNull)
+				sawFullFetch = true;
+			string state = apiCalls <= 1 ? "s1" : "s2";
+			// The event list is identical across polls; only the state advances.
+			string list = idsNull ? "{\"id\":\"E1\",\"calendarIds\":{\"C1\":true},\"start\":\"2024-01-01T09:00:00\"}" : "";
+			return Json($"{{\"methodResponses\":[[\"CalendarEvent/get\",{{\"accountId\":\"c\",\"state\":\"{state}\",\"list\":[{list}]}},\"0\"]],\"sessionState\":\"x\"}}");
+		});
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapCalendarStore store = new(client, "u@example.test", pollSeconds: 1);
+
+		IReadOnlyList<string> changed = await store.WaitForChangesAsync(
+			["jmap-cal:C1"], TimeSpan.FromSeconds(4), CancellationToken.None);
+
+		Assert.Contains("jmap-cal:C1", changed);
+		Assert.False(sawFullFetch); // the poll must not pull full event bodies
+	}
+
 	private static HttpResponseMessage Json(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)
@@ -63,6 +100,15 @@ public sealed class JmapCalendarStoreUnitTests
 	}
 
 	private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
+	{
+		protected override Task<HttpResponseMessage> SendAsync(
+			HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			return Task.FromResult(responder(request));
+		}
+	}
+
+	private sealed class StateHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
 	{
 		protected override Task<HttpResponseMessage> SendAsync(
 			HttpRequestMessage request, CancellationToken cancellationToken)

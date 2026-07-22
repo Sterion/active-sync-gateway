@@ -240,18 +240,22 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 	private async Task<Dictionary<string, string>> TokensAsync(
 		string account, IReadOnlyList<string> folderBackendKeys, CancellationToken ct)
 	{
-		// Per-folder change token = a hash of that book's (id:revision) set from the full get.
-		List<JsonElement> cards = await GetAllCardsAsync(account, ct).ConfigureAwait(false);
+		// H15: the wait token is the account-level ContactCard state instead of a SHA-256 over the
+		// full body of every card, which used to be re-downloaded on every poll tick. ContactCard/get
+		// with an empty id list returns just the current state; it advances on ANY card create/update/
+		// destroy. The state is account-wide, so a change in one address book shifts every watched
+		// book's token — the wait over-notifies rather than misses (the safe direction). Mirrors the
+		// mail store's H19 token.
+		using JmapResponse response = await client.CallAsync(Cap, "ContactCard/get", new Dictionary<string, object?>
+		{
+			["accountId"] = account,
+			["ids"] = Array.Empty<string>()
+		}, ct).ConfigureAwait(false);
+		JsonElement args = response.Arguments("0");
+		string state = args.TryGetProperty("state", out JsonElement s) ? s.GetString() ?? "" : "";
 		Dictionary<string, string> tokens = new(StringComparer.Ordinal);
 		foreach (string folderKey in folderBackendKeys)
-		{
-			string bookId = FromKey(folderKey);
-			string joined = string.Join(";", cards.Where(c => InBook(c, bookId))
-				.Select(c => $"{c.GetProperty("id").GetString()}={Revision(c)}")
-				.OrderBy(s => s, StringComparer.Ordinal));
-			tokens[folderKey] = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(joined)), 0, 8);
-		}
-
+			tokens[folderKey] = state;
 		return tokens;
 	}
 
