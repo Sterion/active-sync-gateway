@@ -59,7 +59,7 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 		}
 
 		await store.UpsertAsync(login, entry, ct);
-		Terminal.WriteLine($"{login}  {StartupSummary.DescribeUser(new MergedAccount(entry, true, options.Users?.ContainsKey(login) == true))}");
+		Terminal.WriteLine($"{login}  {StartupSummary.DescribeUser(new MergedAccount(entry, true, AccountEditing.FindConfigUser(options, login) is not null))}");
 		Terminal.WriteLine(PickupNote(options));
 		return 0;
 	}
@@ -87,7 +87,7 @@ internal sealed class UserShowCommand(IAnsiConsole terminal) : UserCommandBase<U
 		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
 		AccountOptions? fromDb = await store.GetAsync(settings.Login, cancellationToken);
-		AccountOptions? fromConfig = options.Users?.GetValueOrDefault(settings.Login);
+		AccountOptions? fromConfig = AccountEditing.FindConfigUser(options, settings.Login);
 		if (fromDb is null && fromConfig is null)
 		{
 			await Console.Error.WriteLineAsync($"No declared user '{settings.Login}' (config or database).");

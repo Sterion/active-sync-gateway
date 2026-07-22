@@ -1,5 +1,6 @@
 using ActiveSync.Core.Accounts;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
@@ -205,6 +206,23 @@ public sealed class AccountStoreTests : IDisposable
 
 		Assert.Equal("config@x", resolver.Resolve(new BackendCredentials("phone1", "pw")).MailAddress);
 		Assert.False(resolver.MergedUsers["phone1"].FromDatabase);
+	}
+
+	[Fact]
+	public async Task LoadStartingEntry_FindsConfigUser_CaseInsensitively()
+	{
+		// B8: ActiveSyncOptions.Users is bound with the default ORDINAL comparer, so editing a
+		// differently-cased login missed the config entry, started from an empty overlay, and —
+		// since a DB row REPLACES the whole config entry — the write discarded every override.
+		ActiveSyncOptions options = new()
+		{
+			// Ordinal comparer, exactly what ConfigurationBinder produces.
+			Users = new Dictionary<string, AccountOptions> { ["phone1"] = new() { MailAddress = "config@x" } },
+		};
+
+		AccountOptions starting = await AccountEditing.LoadStartingEntryAsync(
+			_store, options, "PHONE1", CancellationToken.None);
+		Assert.Equal("config@x", starting.MailAddress);
 	}
 
 	[Fact]

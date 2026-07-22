@@ -128,7 +128,7 @@ internal static class UsersEndpoints
 			await resolver.EnsureFreshAsync(true, ct);
 			return Results.Ok(new
 			{
-				user = ToDto(login, new MergedAccount(entry, true, current.Users?.ContainsKey(login) == true)),
+				user = ToDto(login, new MergedAccount(entry, true, AccountEditing.FindConfigUser(current, login) is not null)),
 				warning = SelfEditWarning(principal, login, request.Admin == true, request.Enabled != false)
 			});
 		});
@@ -153,7 +153,7 @@ internal static class UsersEndpoints
 			{
 				login,
 				// The config entry (if any) is active again — the row only ever shadowed it.
-				configFallback = options.CurrentValue.Users?.ContainsKey(login) == true
+				configFallback = AccountEditing.FindConfigUser(options.CurrentValue, login) is not null
 			});
 		});
 
@@ -228,7 +228,7 @@ internal static class UsersEndpoints
 		await resolver.EnsureFreshAsync(true, ct);
 		return Results.Ok(new
 		{
-			user = ToDto(login, new MergedAccount(entry, true, current.Users?.ContainsKey(login) == true)),
+			user = ToDto(login, new MergedAccount(entry, true, AccountEditing.FindConfigUser(current, login) is not null)),
 			warning = SelfEditWarning(principal, login, entry.Admin == true, enable)
 		});
 	}
