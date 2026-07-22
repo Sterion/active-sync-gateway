@@ -110,15 +110,32 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 			return 0;
 		}
 
+		// L41: project each per-login list into an OrdinalIgnoreCase lookup ONCE, so the render loop is
+		// O(users) point-reads instead of O(users × rows) repeated FirstOrDefault/Any/Count scans (tens
+		// of millions of comparisons on a large fleet). Case-insensitive keys also line up state rows
+		// recorded under a casing that differs from the login — the old ordinal `==` scans missed those.
+		Dictionary<string, (AccountOptions Options, bool Valid)> dbByUser = new(StringComparer.OrdinalIgnoreCase);
+		foreach ((string userName, AccountOptions options_, DateTime _, bool valid) in dbEntries)
+			dbByUser.TryAdd(userName, (options_, valid));
+		Dictionary<string, (int Count, DateTime LastSeen)> devicesByUser = deviceStats
+			.GroupBy(s => s.User, StringComparer.OrdinalIgnoreCase)
+			.ToDictionary(g => g.Key, g => (g.Sum(s => s.Count), g.Max(s => s.LastSeen)),
+				StringComparer.OrdinalIgnoreCase);
+		Dictionary<string, int> foldersByUser = folderStats
+			.GroupBy(s => s.User, StringComparer.OrdinalIgnoreCase)
+			.ToDictionary(g => g.Key, g => g.Sum(s => s.Count), StringComparer.OrdinalIgnoreCase);
+		ILookup<string, (string Collection, int Count)> itemsByUser = itemStats
+			.ToLookup(s => s.UserName, s => (s.Collection, s.Count), StringComparer.OrdinalIgnoreCase);
+		ILookup<string, LoginBlock> blocksByUser =
+			blocks.ToLookup(b => b.UserName, StringComparer.OrdinalIgnoreCase);
+
 		Table table = new Table().Border(TableBorder.Rounded);
 		table.AddColumns("User", "Origin", "Mail", "Admin", "Gateway pw", "Overrides",
 			"Devices", "Last seen (UTC)", "Folders", "Contacts", "Calendar", "Tasks", "Notes", "Blocked");
 		foreach (string user in users)
 		{
 			// Declared attributes — null when the login only has state (a pass-through user).
-			var dbEntry = dbEntries.FirstOrDefault(
-				e => string.Equals(e.UserName, user, StringComparison.OrdinalIgnoreCase));
-			bool inDb = dbEntry.UserName is not null;
+			bool inDb = dbByUser.TryGetValue(user, out (AccountOptions Options, bool Valid) dbEntry);
 			bool inConfig = configUsers.ContainsKey(user);
 			AccountOptions? declared = inDb ? dbEntry.Options : inConfig ? configUsers[user] : null;
 			// B15: a row whose JSON does not parse is surfaced FLAGGED, not omitted, so the
@@ -142,14 +159,15 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 						: roleName.ToLowerInvariant());
 
 			// State attributes.
-			var devices = deviceStats.FirstOrDefault(s => s.User == user);
-			int folders = folderStats.FirstOrDefault(s => s.User == user)?.Count ?? 0;
+			bool hasDevices = devicesByUser.TryGetValue(user, out (int Count, DateTime LastSeen) devices);
+			int folders = foldersByUser.GetValueOrDefault(user);
 			int ItemCount(string collection) =>
-				itemStats.FirstOrDefault(s => s.UserName == user && s.Collection == collection)?.Count ?? 0;
-			int deviceBlocks = blocks.Count(b => b.UserName == user && b.DeviceId is not null);
+				itemsByUser[user].Where(i => i.Collection == collection).Sum(i => i.Count);
+			IEnumerable<LoginBlock> userBlocks = blocksByUser[user];
+			int deviceBlocks = userBlocks.Count(b => b.DeviceId is not null);
 			string blocked = declared?.Enabled == false
 				? "disabled"
-				: blocks.Any(b => b.UserName == user && b.DeviceId is null)
+				: userBlocks.Any(b => b.DeviceId is null)
 					? "yes"
 					: deviceBlocks > 0
 						? $"{deviceBlocks} device(s)"
@@ -158,8 +176,8 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 			AddRow(table, user, origin, declared?.MailAddress ?? "-",
 				declared?.Admin == true ? "yes" : "-", password,
 				overrides.Count > 0 ? string.Join(", ", overrides) : "-",
-				(devices?.Count ?? 0).ToString(),
-				devices is null ? "-" : Utc(devices.LastSeen),
+				(hasDevices ? devices.Count : 0).ToString(),
+				hasDevices ? Utc(devices.LastSeen) : "-",
 				folders.ToString(),
 				ItemCount("contacts").ToString(),
 				ItemCount("calendar").ToString(),

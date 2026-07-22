@@ -171,6 +171,37 @@ public sealed class CliInspectTests : IDisposable
 	}
 
 	[Fact]
+	public void Users_MatchesStateRowsCaseInsensitively()
+	{
+		// L41 (item 37): projecting the per-login state (devices, blocks, ...) into OrdinalIgnoreCase
+		// lookups also fixes the case-sensitive matching the old O(n²) FirstOrDefault scans used. Seed
+		// a device and a user-level block whose login casing DIFFERS; the block must show against the
+		// (lower-cased) device login. On the unmodified ordinal `==` scan it reads "-".
+		using (SqliteSyncDbContext seed = new(new DbContextOptionsBuilder<SqliteSyncDbContext>()
+			       .UseSqlite($"Data Source={_dbPath}").Options))
+		{
+			seed.Devices.Add(new Device
+			{
+				UserName = "caseuser@x", DeviceId = "DEVCASE01", DeviceType = "iPhone",
+				CreatedUtc = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc),
+				LastSeenUtc = new DateTime(2026, 7, 16, 0, 0, 0, DateTimeKind.Utc),
+			});
+			seed.LoginBlocks.Add(new LoginBlock
+			{
+				UserName = "CASEUSER@X", DeviceId = null,
+				CreatedUtc = new DateTime(2026, 7, 16, 0, 0, 0, DateTimeKind.Utc),
+			});
+			seed.SaveChanges();
+		}
+
+		(int exitCode, _, _, string output) = Run("users");
+		Assert.Equal(0, exitCode);
+
+		string row = output.Split('\n').Single(line => line.Contains("caseuser@x"));
+		Assert.Contains("yes", row); // blocked, matched across casing
+	}
+
+	[Fact]
 	public void Folders_ListsLocalFolderWithItemCount()
 	{
 		(int exitCode, _, _, string output) = Run("folders", "user1@x");
