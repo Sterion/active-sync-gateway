@@ -1,6 +1,7 @@
 using System.Linq;
 
 using ActiveSync.Backends.Common;
+using ActiveSync.Contracts;
 using ActiveSync.Crypto;
 
 namespace ActiveSync.Core.Tests;
@@ -42,5 +43,34 @@ public sealed class DependencyRuleTests
 			.ToArray();
 
 		Assert.DoesNotContain("ActiveSync.Core", referenced);
+	}
+
+	// S4: MergedFreeBusy builds the MS-ASCMD digit string — pure protocol logic with no EF/Core-state
+	// dependency, so it does not belong in Core. Its one project dependency is BusyPeriod, a Contracts
+	// capability model, so it moves to Contracts (the lowest layer the dependency rule permits it to
+	// sit in). The finding named ActiveSync.Protocol, but Protocol references nothing project-wise and
+	// cannot see BusyPeriod; relocating BusyPeriod there would be a breaking plugin-contract change
+	// owned by item 17. Contracts honours the finding's intent — out of Core, into a fuzzable leaf.
+	[Fact]
+	public void MergedFreeBusy_MovedFromCoreToContracts()
+	{
+		System.Reflection.Assembly core = typeof(Core.Backend.BackendProviderRegistry).Assembly;
+		System.Reflection.Assembly contracts = typeof(BusyPeriod).Assembly;
+
+		Assert.Null(core.GetType("ActiveSync.Core.Backend.MergedFreeBusy"));
+		Assert.NotNull(contracts.GetType("ActiveSync.Contracts.MergedFreeBusy"));
+	}
+
+	// S4: CollectionDiff is the differential-sync windowing algorithm — pure protocol logic depending
+	// on nothing but BCL types and its own records. It belongs in ActiveSync.Protocol, where it is also
+	// easier to fuzz in isolation from the Core host graph.
+	[Fact]
+	public void CollectionDiff_MovedFromCoreToProtocol()
+	{
+		System.Reflection.Assembly core = typeof(Core.Backend.BackendProviderRegistry).Assembly;
+		System.Reflection.Assembly protocol = typeof(ActiveSync.Protocol.Wbxml.WbxmlEncoder).Assembly;
+
+		Assert.Null(core.GetType("ActiveSync.Core.Sync.CollectionDiff"));
+		Assert.NotNull(protocol.GetType("ActiveSync.Protocol.Sync.CollectionDiff"));
 	}
 }

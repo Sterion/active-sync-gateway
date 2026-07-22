@@ -1,4 +1,4 @@
-using ActiveSync.Core.Sync;
+using ActiveSync.Protocol.Sync;
 
 namespace ActiveSync.Core.Tests;
 

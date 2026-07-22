@@ -209,8 +209,8 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **18. WebUi → Core services** — ~~`S3`~~ ~~`C18`~~ **COMPLETE**
 > Extract `DeviceAdminService`, `ShareAdminService`, `LogQueryService` so CLI and WebUi share one validated path. Removes the second write path to the same tables.
 
-**19. Structural guardrails** — `S4` `S8`
-> Move `MergedFreeBusy`/`CollectionDiff` to Protocol; consolidate `Backends.Common`'s three namespaces.
+**19. Structural guardrails** — ~~`S4`~~ `S8`
+> Move `MergedFreeBusy`/`CollectionDiff` to Protocol; consolidate `Backends.Common`'s three namespaces. — `S4`: `CollectionDiff` → `ActiveSync.Protocol.Sync` (pure BCL logic, moved as specified). `MergedFreeBusy` → `ActiveSync.Contracts` (NOT Protocol): it consumes `BusyPeriod`, a Contracts capability model, and Protocol references nothing project-wise — moving `BusyPeriod` down to Protocol would be a breaking plugin-contract change owned by item 17. Contracts is the lowest layer the dependency rule permits and honours the finding's intent (out of Core, fuzzable leaf). Guarded by `DependencyRuleTests.{MergedFreeBusy_MovedFromCoreToContracts,CollectionDiff_MovedFromCoreToProtocol}`.
 
 **20. Decompositions** — `F-decomp` `A33` `E27` `E28`
 > NOTE — `SyncHandler` (826 lines → 6 partials + 2 extracted types), `SyncStateService` (535, 6 responsibilities), `ProgramServer.RunServerAsync` (245), and the duplicated auth prologue. Invalidates line anchors wholesale — update them per protocol step 4.

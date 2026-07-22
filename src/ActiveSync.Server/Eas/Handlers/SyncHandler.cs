@@ -4,8 +4,8 @@ using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
-using ActiveSync.Core.Sync;
 using ActiveSync.Protocol;
+using ActiveSync.Protocol.Sync;
 using ActiveSync.Protocol.Wbxml;
 using Microsoft.Extensions.Options;
 

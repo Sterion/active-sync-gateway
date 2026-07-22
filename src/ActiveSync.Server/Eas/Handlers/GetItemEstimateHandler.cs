@@ -2,7 +2,7 @@ using System.Xml.Linq;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.State;
-using ActiveSync.Core.Sync;
+using ActiveSync.Protocol.Sync;
 using ActiveSync.Protocol.Wbxml;
 
 namespace ActiveSync.Server.Eas.Handlers;

@@ -1,4 +1,4 @@
-namespace ActiveSync.Core.Sync;
+namespace ActiveSync.Protocol.Sync;
 
 public sealed record ItemChange(string ServerId, string Revision);
 
