@@ -234,6 +234,26 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task FolderDiff_ReportsTypeChange()
+	{
+		// A folder whose EAS Type changes (e.g. IMAP folder gaining \Sent, 12 -> 5) but keeps its
+		// name and parent was never issued an Update, so the client rendered it in the wrong class
+		// forever (A8).
+		Device device = await _service.GetOrCreateDeviceAsync("u@a8", "DEV1", "Phone", CancellationToken.None);
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@a8",
+			[new BackendFolder("imap:Archive", "Archive", null, 12, "Email")], CancellationToken.None);
+		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
+
+		registry = await _service.RefreshFolderRegistryAsync("u@a8",
+			[new BackendFolder("imap:Archive", "Archive", null, 5, "Email")], CancellationToken.None);
+		FolderHierarchyDiff diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
+
+		Assert.Empty(diff.Adds);
+		Assert.Single(diff.Updates);
+		Assert.Equal(5, diff.Updates[0].Type);
+	}
+
+	[Fact]
 	public async Task CommitFolderHierarchy_UnchangedCommit_KeepsRowIdentity()
 	{
 		// The commit reconciled by deleting the whole hierarchy and reinserting it, so one

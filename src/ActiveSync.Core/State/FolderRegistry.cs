@@ -127,7 +127,8 @@ internal sealed class FolderRegistry(SyncDbContext db)
 			FolderChange change = new(f.ServerId, f.DisplayName, ParentServerId(f), f.Type);
 			if (!knownById.TryGetValue(f.ServerId, out DeviceFolder? k))
 				adds.Add(change);
-			else if (k.DisplayName != f.DisplayName || (k.ParentServerId ?? "0") != change.ParentServerId)
+			else if (k.DisplayName != f.DisplayName || (k.ParentServerId ?? "0") != change.ParentServerId ||
+			         k.Type != f.Type) // a class change (e.g. 12 -> 5) must re-render the folder (A8)
 				updates.Add(change);
 		}
 
