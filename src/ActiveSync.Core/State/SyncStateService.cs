@@ -51,13 +51,24 @@ public sealed record FolderHierarchyDiff(
 ///   single scoped entry point (<c>EasContext.State</c>) and delegates to them; because they all
 ///   share the one request-scoped <see cref="SyncDbContext" />, the change tracker is unified and
 ///   <see cref="PersistAsync" /> flushes mutations made through any of them.
+///   <para>
+///     TRANSACTION POLICY (A10): each EAS command commits its collaborators' mutations through the
+///     shared context, and each collection commits independently — no single transaction spans a
+///     multi-collection Sync. That is deliberate and safe: the SyncKey design already makes
+///     per-collection commits atomic units — a collection whose commit does not land keeps its old
+///     key, and the client's next Sync (or the N−1 replay) reconciles it on its own. The one thing
+///     that must NOT ride the request's context is a self-contained id allocation that commits
+///     mid-round: <see cref="DavItemMap" /> therefore takes its own short-lived context (via the
+///     injected <see cref="ISyncDbContextFactory" />) so it never flushes — or, on a re-read,
+///     poisons — a half-mutated <see cref="CollectionState" />.
+///   </para>
 /// </summary>
-public sealed class SyncStateService(SyncDbContext db)
+public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? dbContextFactory = null)
 {
 	private readonly DeviceStore _devices = new(db);
 	private readonly FolderRegistry _folders = new(db);
 	private readonly CollectionStateStore _collections = new(db);
-	private readonly DavItemMap _davItems = new(db);
+	private readonly DavItemMap _davItems = new(db, dbContextFactory);
 
 	// ---------- Device partnerships, login/session gates, policy & wipe ----------
 

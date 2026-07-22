@@ -330,6 +330,34 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task GetOrAddDavItemId_DoesNotFlushUnrelatedTrackedMutations()
+	{
+		// The DAV id allocation runs its own commit mid-Sync; sharing the request-scoped context
+		// meant it flushed everything tracked — including a half-mutated CollectionState, bumping
+		// its ConcurrencyToken before the round was known good. With a factory it runs on its own
+		// context and leaves the request's unsaved state untouched (A10).
+		TestDbContextFactory factory = new(_connection);
+		SyncStateService service = new(_db, factory);
+
+		List<UserFolder> registry = await service.RefreshFolderRegistryAsync("u@a10",
+			[new BackendFolder("carddav:/ab/", "Contacts", null, 9, "Contacts")], CancellationToken.None);
+		UserFolder folder = registry[0];
+		Device device = await service.GetOrCreateDeviceAsync("u@a10", "DEV1", "Phone", CancellationToken.None);
+		(_, CollectionState state) =
+			await service.ValidateSyncKeyAsync(device, folder.ServerId, "0", CancellationToken.None);
+		await service.CommitCollectionStateAsync(state, [], 0, CancellationToken.None);
+
+		// Mutate the snapshot in memory but do NOT persist it.
+		state.SnapshotJson = "{\"dirty\":\"1\"}";
+		await service.GetOrAddDavItemIdAsync(folder, "/ab/x.vcf", CancellationToken.None);
+
+		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
+		CollectionState persisted = await verify.CollectionStates.AsNoTracking()
+			.FirstAsync(c => c.DeviceKey == device.Id && c.CollectionId == folder.ServerId);
+		Assert.DoesNotContain("dirty", persisted.SnapshotJson);
+	}
+
+	[Fact]
 	public async Task DavItemMap_RoundTripsHrefs()
 	{
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@x",

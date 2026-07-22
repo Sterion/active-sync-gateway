@@ -57,3 +57,9 @@ internal static class StateTestSupport
 		return new SqliteSyncDbContext(builder.Options);
 	}
 }
+
+/// <summary>Hands out short-lived contexts over the test's shared in-memory connection.</summary>
+internal sealed class TestDbContextFactory(SqliteConnection connection) : ISyncDbContextFactory
+{
+	public SyncDbContext CreateDbContext() => StateTestSupport.NewContext(connection);
+}
