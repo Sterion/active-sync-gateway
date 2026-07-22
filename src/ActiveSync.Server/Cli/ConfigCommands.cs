@@ -189,9 +189,7 @@ internal sealed class ConfigSetCommand(IAnsiConsole terminal) : SettingsCommandB
 			.AddInMemoryCollection(stored)
 			.Build();
 		string? error = SettingKeys.Validate(definition, settings.Value) ??
-		                BackendKeyValidator.Validate(Registry,
-			                key => stored.TryGetValue(key, out string? v) ? v : fileConfig[key],
-			                settings.Key, settings.Value) ??
+		                BackendKeyValidator.Validate(Registry, effective, settings.Key, settings.Value) ??
 		                (SettingKeys.IsCatalogueKey(definition.Key)
 			                ? SettingKeys.ValidateStartupImpact(effective, definition.Key, settings.Value)
 			                : null);
