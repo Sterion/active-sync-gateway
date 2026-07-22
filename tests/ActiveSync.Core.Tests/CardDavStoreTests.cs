@@ -54,7 +54,7 @@ public sealed class CardDavStoreTests
 		StubHandler stub = new(_ => Xml(multistatus));
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance);
+		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
 
 		IReadOnlyList<BackendFolder> folders = await store.ListFoldersAsync(CancellationToken.None);
 
@@ -138,7 +138,7 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance);
+		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
 
 		IReadOnlyList<IReadOnlyList<XElement>> results =
 			await store.SearchGalAsync("Alice", 25, null, CancellationToken.None);

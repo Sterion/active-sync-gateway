@@ -45,8 +45,8 @@ public class AccountResolverTests
 			new ImapBackendProvider(
 				TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
 			new SmtpBackendProvider(NullLoggerFactory.Instance),
-			new CalDavBackendProvider(NullLoggerFactory.Instance),
-			new CardDavBackendProvider(NullLoggerFactory.Instance),
+			new CalDavBackendProvider(TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
+			new CardDavBackendProvider(TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
 			new SieveBackendProvider(NullLoggerFactory.Instance),
 			// Only ValidateConfiguration/DescribeRole are exercised here — no connections.
 			new LocalBackendProvider(null!, null!, null!)

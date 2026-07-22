@@ -12,8 +12,9 @@ public sealed class CardDavStore(
 	WebDavClient dav,
 	DavServerOptions options,
 	BackendCredentials credentials,
-	ILogger logger)
-	: DavStoreBase(dav, options, credentials, logger), IContactOperations
+	ILogger logger,
+	int pollSeconds)
+	: DavStoreBase(dav, options, credentials, logger, pollSeconds), IContactOperations
 {
 	public const string KeyPrefix = "carddav:";
 

@@ -14,8 +14,9 @@ public sealed class CalDavStore(
 	BackendCredentials credentials,
 	string partStatIdentity,
 	ILogger logger,
+	int pollSeconds,
 	IReadOnlyList<SharedCollection>? sharedCollections = null)
-	: DavStoreBase(dav, options, credentials, logger),
+	: DavStoreBase(dav, options, credentials, logger, pollSeconds),
 		ICalendarOperations, ICalendarAttachmentSource, IFreeBusySource, IReadOnlyCollectionSource
 {
 	public const string KeyPrefix = "caldav:";

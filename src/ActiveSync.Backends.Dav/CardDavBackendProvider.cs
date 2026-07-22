@@ -3,11 +3,14 @@ using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Backends.Dav;
 
 /// <summary>The "carddav" provider: fills the Contacts role with <see cref="CardDavStore" />.</summary>
-public sealed class CardDavBackendProvider(ILoggerFactory loggerFactory) : IBackendProvider, IReadinessSource
+public sealed class CardDavBackendProvider(
+	IOptionsMonitor<ActiveSyncOptions> hostOptions, ILoggerFactory loggerFactory)
+	: IBackendProvider, IReadinessSource
 {
 	private static readonly IReadOnlySet<BackendRole> Roles = new HashSet<BackendRole> { BackendRole.Contacts };
 
@@ -58,7 +61,8 @@ public sealed class CardDavBackendProvider(ILoggerFactory loggerFactory) : IBack
 		DavServerOptions options = role.Settings.Bind<DavServerOptions>();
 		WebDavClient client = new(new Uri(options.BaseUrl), role.Credentials,
 			options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger);
-		CardDavStore store = new(client, options, role.Credentials, _logger);
+		CardDavStore store = new(client, options, role.Credentials, _logger,
+			hostOptions.CurrentValue.Eas.DavPollSeconds);
 		return Task.FromResult<IBackendConnection>(new BackendConnection([store], ownedResources: [client]));
 	}
 }

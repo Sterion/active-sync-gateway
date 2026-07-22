@@ -17,7 +17,8 @@ public abstract class DavStoreBase(
 	WebDavClient dav,
 	DavServerOptions options,
 	BackendCredentials credentials,
-	ILogger logger) : IContentStore
+	ILogger logger,
+	int pollSeconds) : IContentStore
 {
 	private string? _homeSet;
 
@@ -139,8 +140,10 @@ public abstract class DavStoreBase(
 	public Task<IReadOnlyList<string>> WaitForChangesAsync(
 		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
 	{
+		// H11: hand the operator's Eas:DavPollSeconds to the poller instead of the old hardcoded 60 s.
 		return DavDiscovery.PollCtagsAsync(
-			dav, folderBackendKeys, FromBackendKey, timeout, logger, CtagLabel, credentials.UserName, ct);
+			dav, folderBackendKeys, FromBackendKey, timeout, pollSeconds, logger, CtagLabel,
+			credentials.UserName, ct);
 	}
 
 	protected abstract IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference);

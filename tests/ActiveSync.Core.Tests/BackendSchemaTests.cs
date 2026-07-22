@@ -33,8 +33,8 @@ public class BackendSchemaTests
 		(new ImapBackendProvider(TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
 			s => s.Bind<ImapOptions>()),
 		(new SmtpBackendProvider(NullLoggerFactory.Instance), s => s.Bind<SmtpOptions>()),
-		(new CalDavBackendProvider(NullLoggerFactory.Instance), s => s.Bind<DavServerOptions>()),
-		(new CardDavBackendProvider(NullLoggerFactory.Instance), s => s.Bind<DavServerOptions>()),
+		(new CalDavBackendProvider(TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance), s => s.Bind<DavServerOptions>()),
+		(new CardDavBackendProvider(TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance), s => s.Bind<DavServerOptions>()),
 		(new JmapBackendProvider(TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
 			s => s.Bind<JmapOptions>()),
 		(new SieveBackendProvider(NullLoggerFactory.Instance), s => s.Bind<SieveOptions>())
@@ -120,7 +120,7 @@ public class BackendSchemaTests
 	[Fact]
 	public void RequiredFieldWithoutAValueIsRejected_ButAnUnsetOptionalOneIsNot()
 	{
-		IBackendProvider caldav = new CalDavBackendProvider(NullLoggerFactory.Instance);
+		IBackendProvider caldav = new CalDavBackendProvider(TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance);
 		IReadOnlyList<BackendConfigField> fields = caldav.DescribeConfiguration(BackendRole.Calendar);
 
 		Assert.Contains(BackendConfigValidation.ValidateFields(fields, new Dictionary<string, string?>()),
@@ -162,7 +162,7 @@ public class BackendSchemaTests
 	[Fact]
 	public void ValidateAlsoRunsTheProvidersOwnChecks()
 	{
-		IBackendProvider caldav = new CalDavBackendProvider(NullLoggerFactory.Instance);
+		IBackendProvider caldav = new CalDavBackendProvider(TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance);
 		// Shape is fine (an absolute URL), but the provider rejects the shared-collection entry.
 		IReadOnlyList<BackendFieldError> errors = BackendConfigValidation.Validate(
 			caldav, BackendRole.Calendar, new Dictionary<string, string?>

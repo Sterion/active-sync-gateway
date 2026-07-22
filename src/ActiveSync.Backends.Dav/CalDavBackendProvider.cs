@@ -4,6 +4,7 @@ using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Backends.Dav;
 
@@ -14,7 +15,9 @@ namespace ActiveSync.Backends.Dav;
 ///   connection inherits the Calendar section's settings (BaseUrl etc.) as its base — it
 ///   typically only sets TaskFolder.
 /// </summary>
-public sealed class CalDavBackendProvider(ILoggerFactory loggerFactory) : IBackendProvider, IReadinessSource
+public sealed class CalDavBackendProvider(
+	IOptionsMonitor<ActiveSyncOptions> hostOptions, ILoggerFactory loggerFactory)
+	: IBackendProvider, IReadinessSource
 {
 	private static readonly IReadOnlySet<BackendRole> Roles =
 		new HashSet<BackendRole> { BackendRole.Calendar, BackendRole.Tasks };
@@ -122,6 +125,7 @@ public sealed class CalDavBackendProvider(ILoggerFactory loggerFactory) : IBacke
 		WebDavClient client = new(new Uri(clientOptions.BaseUrl), clientRole.Credentials,
 			clientOptions.AllowInvalidCertificates, clientOptions.CaCertificatePath, _wireLogger);
 		string partStatIdentity = context.MailAddress ?? context.GatewayCredentials.UserName;
+		int pollSeconds = hostOptions.CurrentValue.Eas.DavPollSeconds;
 
 		List<IContentStore> stores = new();
 		foreach (ResolvedRole role in context.Roles)
@@ -129,10 +133,11 @@ public sealed class CalDavBackendProvider(ILoggerFactory loggerFactory) : IBacke
 			{
 				case BackendRole.Calendar:
 					stores.Add(new CalDavStore(client, BindFor(role, calendarRole), role.Credentials,
-						partStatIdentity, _logger, MergeSharedCollections(clientOptions, context)));
+						partStatIdentity, _logger, pollSeconds, MergeSharedCollections(clientOptions, context)));
 					break;
 				case BackendRole.Tasks:
-					stores.Add(new CalDavTaskStore(client, BindFor(role, calendarRole), role.Credentials, _logger));
+					stores.Add(new CalDavTaskStore(client, BindFor(role, calendarRole), role.Credentials,
+						_logger, pollSeconds));
 					break;
 				default:
 					throw new InvalidOperationException($"caldav cannot serve the {role.Role} role.");

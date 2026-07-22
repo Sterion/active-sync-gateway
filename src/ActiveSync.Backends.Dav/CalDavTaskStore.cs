@@ -17,8 +17,9 @@ public sealed class CalDavTaskStore(
 	WebDavClient dav,
 	DavServerOptions options,
 	BackendCredentials credentials,
-	ILogger logger)
-	: DavStoreBase(dav, options, credentials, logger)
+	ILogger logger,
+	int pollSeconds)
+	: DavStoreBase(dav, options, credentials, logger, pollSeconds)
 {
 	public const string KeyPrefix = "caldav-tasks:";
 

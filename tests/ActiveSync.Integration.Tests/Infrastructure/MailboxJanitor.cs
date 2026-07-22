@@ -56,8 +56,8 @@ public static class MailboxJanitor
 
 		using WebDavClient calClient = new(new Uri(davUrl), credentials);
 		using WebDavClient cardClient = new(new Uri(davUrl), credentials);
-		CalDavStore calendar = new(calClient, options, credentials, user, NullLogger.Instance);
-		CardDavStore contacts = new(cardClient, options, credentials, NullLogger.Instance);
+		CalDavStore calendar = new(calClient, options, credentials, user, NullLogger.Instance, pollSeconds: 60);
+		CardDavStore contacts = new(cardClient, options, credentials, NullLogger.Instance, pollSeconds: 60);
 
 		foreach (IContentStore store in new IContentStore[] { calendar, contacts })
 			try

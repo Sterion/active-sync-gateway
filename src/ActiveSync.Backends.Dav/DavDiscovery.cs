@@ -58,17 +58,24 @@ public static class DavDiscovery
 		}
 	}
 
-	/// <summary>Polls collection ctags/sync-tokens until one changes or the timeout elapses.</summary>
+	/// <summary>
+	///   Polls collection ctags/sync-tokens until one changes or the timeout elapses. The interval
+	///   between polls is <paramref name="pollSeconds" /> (the operator's <c>Eas:DavPollSeconds</c>) —
+	///   H11: it was hardcoded to 60 s here, so the configured value was documented and settable but
+	///   never actually shortened DAV change detection.
+	/// </summary>
 	public static async Task<IReadOnlyList<string>> PollCtagsAsync(
 		WebDavClient dav,
 		IReadOnlyList<string> folderBackendKeys,
 		Func<string, string> hrefFromKey,
 		TimeSpan timeout,
+		int pollSeconds,
 		ILogger logger,
 		string protocol,
 		string userName,
 		CancellationToken ct)
 	{
+		int interval = Math.Max(1, pollSeconds);
 		DateTime deadline = DateTime.UtcNow + timeout;
 		(Dictionary<string, string?> Map, HashSet<string> Failed) baseline =
 			await SnapshotAsync().ConfigureAwait(false);
@@ -76,7 +83,7 @@ public static class DavDiscovery
 		while (DateTime.UtcNow < deadline)
 		{
 			TimeSpan remaining = deadline - DateTime.UtcNow;
-			await Task.Delay(TimeSpan.FromSeconds(Math.Min(60, Math.Max(1, remaining.TotalSeconds))), ct)
+			await Task.Delay(TimeSpan.FromSeconds(Math.Min(interval, Math.Max(1, remaining.TotalSeconds))), ct)
 				.ConfigureAwait(false);
 			(Dictionary<string, string?> Map, HashSet<string> Failed) current =
 				await SnapshotAsync().ConfigureAwait(false);
