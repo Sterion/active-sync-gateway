@@ -70,24 +70,25 @@ public static class DavDiscovery
 		CancellationToken ct)
 	{
 		DateTime deadline = DateTime.UtcNow + timeout;
-		Dictionary<string, string?> baseline = await SnapshotAsync().ConfigureAwait(false);
+		(Dictionary<string, string?> Map, HashSet<string> Failed) baseline =
+			await SnapshotAsync().ConfigureAwait(false);
 
 		while (DateTime.UtcNow < deadline)
 		{
 			TimeSpan remaining = deadline - DateTime.UtcNow;
 			await Task.Delay(TimeSpan.FromSeconds(Math.Min(60, Math.Max(1, remaining.TotalSeconds))), ct)
 				.ConfigureAwait(false);
-			Dictionary<string, string?> current = await SnapshotAsync().ConfigureAwait(false);
-			List<string> changed = folderBackendKeys
-				.Where(k => baseline.GetValueOrDefault(k) != current.GetValueOrDefault(k))
-				.ToList();
+			(Dictionary<string, string?> Map, HashSet<string> Failed) current =
+				await SnapshotAsync().ConfigureAwait(false);
+			List<string> changed = DetectChanges(
+				folderBackendKeys, baseline.Map, current.Map, baseline.Failed, current.Failed);
 			if (changed.Count > 0)
 			{
 				foreach (string key in changed)
 					logger.LogInformation(
 						"{Protocol} poll: {Collection} changed for {User} (ctag {Baseline} -> {Current})",
 						protocol, key, userName,
-						baseline.GetValueOrDefault(key) ?? "?", current.GetValueOrDefault(key) ?? "?");
+						baseline.Map.GetValueOrDefault(key) ?? "?", current.Map.GetValueOrDefault(key) ?? "?");
 				return changed;
 			}
 		}
@@ -96,9 +97,10 @@ public static class DavDiscovery
 			protocol, string.Join(", ", folderBackendKeys), userName);
 		return [];
 
-		async Task<Dictionary<string, string?>> SnapshotAsync()
+		async Task<(Dictionary<string, string?> Map, HashSet<string> Failed)> SnapshotAsync()
 		{
 			Dictionary<string, string?> map = new(StringComparer.Ordinal);
+			HashSet<string> failed = new(StringComparer.Ordinal);
 			foreach (string key in folderBackendKeys)
 				try
 				{
@@ -110,10 +112,33 @@ public static class DavDiscovery
 				}
 				catch (BackendException)
 				{
-					map[key] = "error";
+					// H12: a transient read failure is "unknown", NOT "changed". Track it so the diff
+					// skips this key — the old code stuffed the sentinel "error" into the map, which
+					// then compared unequal to the real baseline ctag and forced a full re-sync on
+					// every DAV hiccup.
+					failed.Add(key);
 				}
 
-			return map;
+			return (map, failed);
 		}
+	}
+
+	/// <summary>
+	///   Collections whose ctag/sync-token changed between two poll snapshots. A key that failed to
+	///   read in either snapshot is treated as unknown (never changed): the Ping entry check and the
+	///   watchdog re-check are the correctness guarantee, so a transient DAV error must not masquerade
+	///   as a change and trigger a full re-sync (H12).
+	/// </summary>
+	internal static List<string> DetectChanges(
+		IReadOnlyList<string> folderBackendKeys,
+		IReadOnlyDictionary<string, string?> baseline,
+		IReadOnlyDictionary<string, string?> current,
+		IReadOnlySet<string> baselineFailed,
+		IReadOnlySet<string> currentFailed)
+	{
+		return folderBackendKeys
+			.Where(k => !baselineFailed.Contains(k) && !currentFailed.Contains(k)
+			            && baseline.GetValueOrDefault(k) != current.GetValueOrDefault(k))
+			.ToList();
 	}
 }
