@@ -1166,14 +1166,47 @@ live tests over the 139 baseline — D9 SmtpSubmitTeardown, H18 DavCreatePutRepl
 
 ---
 
-## Next: item 27 — Long-poll & push reliability [LIVE] (Phase 4 — Correctness)
+## Item 27 — Long-poll & push reliability [LIVE]
+**Findings:** `E7` `E8` `F11` `F16` `F17` `F18` `H17` `H19`
+**Commits:** `e4c17bf` (E7) · `8e68605` (E8) · `c10aabb` (F11) · `95126d4` (F16) · `a21aab9` (F17) · `f645605` (F18) ·
+`f8f1e1d` (H17) · `5547365` (H19)
+**Verification:** integrity items=56 live=15 assigned=365 unique=365 dupes=0 encoding=0 ✓ · cursor → item 28 ✓ ·
+one commit per finding, ID in subject ✓ · build clean 0 warnings ✓ · unit **Protocol 63 · WebUi 70 · Core 566 ·
+Server 166 = 865 / 0 skipped** ✓ · **integration 141 / 0 skipped** (full suite, fresh clean-volume backend) ✓
+**Notes:**
+- **New config option `ActiveSync:Eas:MaxPingFolders`** (default 200, 0 disables) — added to `EasOptions`,
+  `SettingKeys`, `docs/configuration.md`. Not breaking (new, defaulted). F18 returns Ping Status 6 + MaxFolders when a
+  client asks to monitor more than the cap.
+- **`LongPollWatchdog.RaceAsync` signature gained a `DateTime deadline` param** (internal type, both callers updated) —
+  and the E7 red proof therefore could not use a clean signature-revert; the worker proved red by disabling *only*
+  the idle block (returned ~7ms vs the required ~400ms) and reported that transparently rather than simulating. Legit.
+- **H19 over-notification (judgment call, safe direction):** the JMAP `Email` state is account-wide, so folding it
+  into the mail change token means a change in *any* folder now shifts *every* watched folder's Ping token — Ping
+  over-notifies across folders rather than missing a flag-only change. Chosen deliberately (client resyncs, finds
+  nothing new); a per-folder-precise alternative costs extra JMAP round trips. Reasonable; watch for chattier Pings on
+  multi-folder JMAP accounts.
+- **H17 is split proof:** the response-**leak** on the SSE error path is red-first (`OpenEventSource_OnErrorStatus_
+  DisposesTheResponse`); the **timeout** half (100s `HttpClient.Timeout` killing a long SSE stream → infinite timeout
+  on the watcher's dedicated client) is **coverage/reasoning, not red-first** — not deterministically unit-testable in
+  real time; correctly labelled. Judgment call: the watcher client's now-infinite timeout means first-session
+  discovery is bounded only by the watcher's cancellation token (session cached after first success) — acceptable for
+  a background accelerator with a poll backstop.
+- **F11 is a Nit/doc-only** (no behaviour change) — documents the "empty response ⇒ still waitable / re-processing"
+  long-poll invariant. Struck N/A-for-red.
+- Test infra: extended `EasHandlerHarness.RecordingStore` with a configurable `WaitForChanges` delegate (default still
+  throws, existing consumers unaffected). New files: `LongPollWatchdogTests`, `PingHandlerTests`, `JmapMailStoreTests`.
 
-Cursor is at **item 27** (`E7` `E8` `F11` `F16` `F17` `F18` `H17` `H19`). [LIVE] — restart clean-volume in parallel
-with the worker, run the **full** integration suite. Ping/long-poll changes alter the HTTP request lifecycle; blast
-radius is non-obvious (a watcher/heartbeat regression can hang or 500 a poll live while unit stays green).
+---
 
-Current green baseline: **integration 141 / 0 skipped** (fresh container), unit **Protocol 63 · WebUi 70 · Core 564 ·
-Server 161** = 858.
+## Next: item 28 — DAV & JMAP request correctness [LIVE] (Phase 4 — Correctness)
+
+Cursor is at **item 28** (`H1` `H2` `H3` `H10` `H20` `H21` `H22` `H26` `H27` `H28` `H29` `H31`). [LIVE] — restart
+clean-volume in parallel, run the **full** integration suite. `H1` disables TLS validation on the DAV probe, `H2`
+percent-decoded hrefs fetch the wrong resource, `H3` drops `If-Match` (lost update) — all live DAV/JMAP round-trip
+behaviour a unit test can't fully exercise. The item also extracts a shared `BackendHttpClientFactory`.
+
+Current green baseline: **integration 141 / 0 skipped** (fresh container), unit **Protocol 63 · WebUi 70 · Core 566 ·
+Server 166** = 865.
 
 **Standing lessons that carried this run (items 13–14):**
 - **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/contract
