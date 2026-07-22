@@ -1,16 +1,17 @@
 using ActiveSync.Core.Accounts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.State;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore;
 
 namespace ActiveSync.WebUi.Api;
 
 /// <summary>
 ///   Shared-calendar grants — the web face of `eas share`. Same semantics: a grant applies
 ///   when the user's backend session is next built (idle recycle or restart); adding an
-///   existing grant just re-modes it.
+///   existing grant just re-modes it. The DB work lives in <see cref="ShareAdminService" />,
+///   shared with the CLI.
 /// </summary>
 internal static class SharesEndpoints
 {
@@ -21,23 +22,20 @@ internal static class SharesEndpoints
 	internal static void Map(RouteGroupBuilder api)
 	{
 		api.MapGet("shares", async (
-			string? user, int? limit, int? offset, SyncDbContext db, CancellationToken ct) =>
+			string? user, int? limit, int? offset, ShareAdminService shares, CancellationToken ct) =>
 		{
-			IQueryable<SharedCalendarGrant> query = db.SharedCalendarGrants.AsNoTracking()
-				.Where(g => user == null || g.UserName == user);
 			// Bounded like /logs and /devices — see C10.
-			int total = await query.CountAsync(ct);
-			List<ShareDto> grants = await query
-				.OrderBy(g => g.UserName).ThenBy(g => g.CollectionHref)
-				.Skip(Math.Max(offset ?? 0, 0))
-				.Take(Math.Clamp(limit ?? 200, 1, 500))
-				.Select(g => new ShareDto(g.UserName, g.CollectionHref, g.ReadOnly, g.CreatedUtc))
-				.ToListAsync(ct);
-			return Results.Ok(new { total, entries = grants });
+			ShareAdminService.SharePage page = await shares.ListAsync(
+				user, Math.Max(offset ?? 0, 0), Math.Clamp(limit ?? 200, 1, 500), ct);
+			return Results.Ok(new
+			{
+				total = page.Total,
+				entries = page.Grants.Select(g => new ShareDto(g.UserName, g.CollectionHref, g.ReadOnly, g.CreatedUtc))
+			});
 		});
 
 		api.MapPost("shares", async (
-			ShareRequest request, SyncDbContext db, AccountResolver resolver, CancellationToken ct) =>
+			ShareRequest request, ShareAdminService shares, AccountResolver resolver, CancellationToken ct) =>
 		{
 			if (AdminIdentifiers.LoginProblem(request.User) is { } loginError)
 				return EndpointHelpers.BadRequest(loginError);
@@ -50,47 +48,22 @@ internal static class SharesEndpoints
 			await resolver.EnsureFreshAsync(false, ct);
 			bool knownUser = resolver.MergedUsers.ContainsKey(user);
 
-			SharedCalendarGrant? existing = await db.SharedCalendarGrants.FirstOrDefaultAsync(
-				g => g.UserName == user && g.CollectionHref == href, ct);
-			if (existing is not null)
-			{
-				existing.ReadOnly = request.ReadOnly;
-				await db.SaveChangesAsync(ct);
-			}
-			else
-			{
-				// DbSet.Add is synchronous and local (no I/O) — AddAsync exists only for async
-				// value generators, which this project doesn't use.
-#pragma warning disable VSTHRD103
-				db.SharedCalendarGrants.Add(new SharedCalendarGrant
-				{
-					UserName = user,
-					CollectionHref = href,
-					ReadOnly = request.ReadOnly,
-					CreatedUtc = DateTime.UtcNow,
-				});
-#pragma warning restore VSTHRD103
-				await db.SaveChangesAsync(ct);
-			}
-
+			ShareAdminService.ShareUpsert result = await shares.AddOrUpdateAsync(user, href, request.ReadOnly, ct);
 			return Results.Ok(new
 			{
 				user, collectionHref = href, request.ReadOnly,
-				createdUtc = existing?.CreatedUtc ?? DateTime.UtcNow,
+				createdUtc = result.CreatedUtc,
 				knownUser
 			});
 		});
 
-		api.MapDelete("shares", async (string user, string collectionHref, SyncDbContext db, CancellationToken ct) =>
+		api.MapDelete("shares", async (
+			string user, string collectionHref, ShareAdminService shares, CancellationToken ct) =>
 		{
 			string href = collectionHref.Trim();
-			SharedCalendarGrant? existing = await db.SharedCalendarGrants.FirstOrDefaultAsync(
-				g => g.UserName == user && g.CollectionHref == href, ct);
-			if (existing is null)
-				return Results.NotFound();
-			db.SharedCalendarGrants.Remove(existing);
-			await db.SaveChangesAsync(ct);
-			return Results.Ok(new { user, collectionHref = href });
+			return await shares.RemoveAsync(user, href, ct)
+				? Results.Ok(new { user, collectionHref = href })
+				: Results.NotFound();
 		});
 	}
 }

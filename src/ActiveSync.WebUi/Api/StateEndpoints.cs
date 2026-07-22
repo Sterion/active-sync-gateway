@@ -1,12 +1,11 @@
 using ActiveSync.Core.Accounts;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Observability;
-using ActiveSync.Core.State;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore;
 
 namespace ActiveSync.WebUi.Api;
 
@@ -43,21 +42,22 @@ internal static class StateEndpoints
 			});
 		});
 
-		api.MapGet("summary", async (SyncDbContext db, AccountResolver resolver, CancellationToken ct) =>
+		api.MapGet("summary", async (
+			DeviceAdminService devices, LogQueryService logs, AccountResolver resolver, CancellationToken ct) =>
 		{
 			await resolver.EnsureFreshAsync(false, ct);
 			DateTime hourAgo = DateTime.UtcNow.AddHours(-1);
+			DeviceAdminService.SummaryCounts counts = await devices.SummaryAsync(ct);
+			LogQueryService.LogCounts logCounts = await logs.CountsSinceAsync(hourAgo, ct);
 			return Results.Ok(new
 			{
 				declaredUsers = resolver.MergedUsers.Count,
-				deviceUsers = await db.Devices.Select(d => d.UserName).Distinct().CountAsync(ct),
-				devices = await db.Devices.CountAsync(ct),
-				blocks = await db.LoginBlocks.CountAsync(ct),
-				pendingWipes = await db.Devices.CountAsync(d => d.PendingAccountWipe, ct),
-				errorsLastHour = await db.LogEntries.CountAsync(
-					e => e.TimestampUtc >= hourAgo && (e.Level == "Error" || e.Level == "Fatal"), ct),
-				warningsLastHour = await db.LogEntries.CountAsync(
-					e => e.TimestampUtc >= hourAgo && e.Level == "Warning", ct)
+				deviceUsers = counts.DeviceUsers,
+				devices = counts.Devices,
+				blocks = counts.Blocks,
+				pendingWipes = counts.PendingWipes,
+				errorsLastHour = logCounts.ErrorsAndFatal,
+				warningsLastHour = logCounts.Warnings
 			});
 		});
 	}
