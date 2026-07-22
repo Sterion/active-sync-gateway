@@ -129,6 +129,13 @@ public sealed class MeetingResponseHandler(
 				// Send the iTIP reply to the organizer.
 				await SendReplyAsync(context, message, ics, userResponse, ct);
 
+				// Exchange removes the meeting-request mail from the Inbox after a response (that
+				// is why CalendarId points the client at the surviving calendar item); leaving it
+				// shows a stale "respond to this invitation" message. Soft delete (F35).
+				if (resolved.Value.Store.EasClass == EasClass.Email)
+					await resolved.Value.Store.DeleteItemAsync(
+						resolved.Value.Folder.BackendKey, itemKey, permanent: false, ct);
+
 				results.Add(Result("1", calendarId));
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException)

@@ -5,6 +5,7 @@ using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using ActiveSync.Server.Eas.Handlers;
 using Microsoft.Extensions.Logging.Abstractions;
+using MimeKit;
 
 namespace ActiveSync.Server.Tests;
 
@@ -73,5 +74,39 @@ public sealed class MeetingResponseTests : IDisposable
 		XDocument? response = await RunAsync("imap:9999:42", "imap:9999");
 
 		Assert.Equal("2", StatusOf(response));
+	}
+
+	// F35 — after a successful response the invitation mail must be removed from the Inbox (as
+	// Exchange does), so the user is not left with a stale "respond to this invitation" message.
+	[Fact]
+	public async Task SuccessfulResponse_RemovesInvitationMail()
+	{
+		UserFolder inbox = await InboxAsync();
+		_harness.Session.Mail.RawMessage = InviteMime("evt-1", "organizer@example.test");
+
+		XDocument? response = await RunAsync($"{inbox.ServerId}:42", inbox.ServerId);
+
+		Assert.Equal("1", StatusOf(response));
+		Assert.Single(_harness.Session.Submit.Sent); // the iTIP reply went out
+		Assert.Equal(["imap:INBOX/42"], _harness.Session.Store.Deleted);
+	}
+
+	private static byte[] InviteMime(string uid, string organizer)
+	{
+		MimeMessage message = new();
+		message.From.Add(new MailboxAddress("Organizer", organizer));
+		message.To.Add(new MailboxAddress("User", EasHandlerHarness.UserName));
+		message.Subject = "Project sync";
+
+		string ics =
+			"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\n" +
+			$"UID:{uid}\r\nORGANIZER:mailto:{organizer}\r\nDTSTART:20260801T100000Z\r\n" +
+			"SUMMARY:Project sync\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+		TextPart calendar = new("calendar") { Text = ics };
+		message.Body = calendar;
+
+		using MemoryStream stream = new();
+		message.WriteTo(stream);
+		return stream.ToArray();
 	}
 }
