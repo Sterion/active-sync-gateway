@@ -37,4 +37,26 @@ public sealed class LongPollWatchdogTests
 		Assert.True(sw.ElapsedMilliseconds >= 300,
 			$"expected the race to idle to the deadline (~400ms), returned after {sw.ElapsedMilliseconds}ms");
 	}
+
+	// E8: a watcher whose task faults (a backend exception on the wait path) must be swallowed —
+	// it must not propagate out of RaceAsync and turn the whole Ping into a 500.
+	[Fact]
+	public async Task RaceAsync_WhenAWatcherFaults_DoesNotAbortThePoll()
+	{
+		using CancellationTokenSource linked = new();
+		DateTime deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(100);
+		Task<bool> faulting = Task.FromException<bool>(new InvalidOperationException("backend blew up"));
+
+		// No throw here is the assertion: the fault is absorbed and the poll returns "no change".
+		LongPollWatchdog.Outcome<bool> outcome = await LongPollWatchdog.RaceAsync(
+			[faulting],
+			watchdog: null,
+			isPositive: changed => changed,
+			none: false,
+			deadline,
+			linked,
+			CancellationToken.None);
+
+		Assert.False(outcome.Result);
+	}
 }

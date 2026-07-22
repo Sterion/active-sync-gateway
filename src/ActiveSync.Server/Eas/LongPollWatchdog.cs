@@ -16,6 +16,13 @@ namespace ActiveSync.Server.Eas;
 /// </summary>
 internal static class LongPollWatchdog
 {
+	/// <summary>
+	///   Upper bound on the post-cancellation drain. Watchers self-cancel within milliseconds of
+	///   the linked token firing, so this is only ever hit by a misbehaving one — which must not
+	///   pin the request (and its connection) open indefinitely.
+	/// </summary>
+	private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(10);
+
 	/// <param name="watchers">Backend-change waiters, already started with the linked token.</param>
 	/// <param name="watchdog">Periodic exact re-check task, or null when disabled.</param>
 	/// <param name="isPositive">Decides whether a task's result counts as "changed".</param>
@@ -48,7 +55,23 @@ internal static class LongPollWatchdog
 			{
 				Task<T> finished = await Task.WhenAny(pending);
 				pending.Remove(finished);
-				T value = await finished;
+				T value;
+				try
+				{
+					value = await finished;
+				}
+				catch (OperationCanceledException) when (!requestAborted.IsCancellationRequested)
+				{
+					throw; // host shutdown — the outer handler ends the poll gracefully
+				}
+				catch
+				{
+					// E8: a single watcher faulting must not abort the whole long-poll into a 500.
+					// The watcher self-logs its failure; treat it as "no change from this watcher"
+					// and keep racing the rest (and the watchdog, the real correctness backstop).
+					continue;
+				}
+
 				if (isPositive(value))
 				{
 					result = value;
@@ -77,16 +100,17 @@ internal static class LongPollWatchdog
 		finally
 		{
 			await linkedCts.CancelAsync();
-			// Drain whatever is still running: the removed tasks were already awaited above.
-			foreach (Task<T> task in pending)
-				try
-				{
-					await task;
-				}
-				catch
-				{
-					// cancelled or already-logged failure
-				}
+			// Drain whatever is still running (the removed tasks were already awaited above),
+			// but bound it: a well-behaved watcher self-cancels within milliseconds of the token
+			// firing — a misbehaving one must not hang the request indefinitely (E8).
+			try
+			{
+				await Task.WhenAll(pending).WaitAsync(DrainTimeout);
+			}
+			catch
+			{
+				// cancelled, timed out, or an already-logged watcher failure
+			}
 		}
 
 		return new Outcome<T>(result, foundByWatchdog);
