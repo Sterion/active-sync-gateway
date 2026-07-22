@@ -15,7 +15,7 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 {
 	private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
-	public async Task<(SyncKeyValidation Validation, CollectionState State)> ValidateSyncKeyAsync(
+	public async Task<(SyncKeyValidation Validation, CollectionState? State)> ValidateSyncKeyAsync(
 		Device device, string collectionId, string clientSyncKey, CancellationToken ct)
 	{
 		CollectionState? state = await db.CollectionStates
@@ -43,12 +43,10 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 			return (SyncKeyValidation.Initial, state);
 		}
 
+		// Invalid returns a null state — never a detached, never-added synthesized entity a
+		// caller might mistake for real state (A17).
 		if (state is null || !int.TryParse(clientSyncKey, out int key))
-			return (SyncKeyValidation.Invalid, state ?? new CollectionState
-			{
-				DeviceKey = device.Id,
-				CollectionId = collectionId
-			});
+			return (SyncKeyValidation.Invalid, null);
 
 		if (key == state.SyncKey)
 			return (SyncKeyValidation.Current, state);
@@ -66,7 +64,7 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 			return (SyncKeyValidation.Replay, state);
 		}
 
-		return (SyncKeyValidation.Invalid, state);
+		return (SyncKeyValidation.Invalid, null);
 	}
 
 	/// <summary>

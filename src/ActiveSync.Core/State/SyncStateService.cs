@@ -120,7 +120,7 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 
 	// ---------- Collection sync state ----------
 
-	public Task<(SyncKeyValidation Validation, CollectionState State)> ValidateSyncKeyAsync(
+	public Task<(SyncKeyValidation Validation, CollectionState? State)> ValidateSyncKeyAsync(
 		Device device, string collectionId, string clientSyncKey, CancellationToken ct)
 		=> _collections.ValidateSyncKeyAsync(device, collectionId, clientSyncKey, ct);
 

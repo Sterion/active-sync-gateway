@@ -30,9 +30,9 @@ public sealed partial class SyncHandler
 			return new CollectionResult(Error("12"), true, null); // folder hierarchy out of date
 
 		(UserFolder folder, IContentStore store) = resolved.Value;
-		(SyncKeyValidation validation, CollectionState state) = await context.State.ValidateSyncKeyAsync(
+		(SyncKeyValidation validation, CollectionState? state) = await context.State.ValidateSyncKeyAsync(
 			context.Device, collectionId, clientSyncKey, ct);
-		if (validation == SyncKeyValidation.Invalid)
+		if (validation == SyncKeyValidation.Invalid || state is null)
 			return new CollectionResult(Error("3"), true, null);
 
 		// Persisted or supplied options
