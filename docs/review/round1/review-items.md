@@ -53,10 +53,10 @@ carry constraints the code does not state and a reasonable change will violate s
 
 | Document | Read before touching | Contains |
 |---|---|---|
-| [`AGENTS.md`](../../AGENTS.md) | **any structural work** (items 15–20) | Solution layout and the dependency rule; per-layer invariants; coding conventions; decisions already taken and why |
-| [`README.md`](../../README.md) | first item in an unfamiliar area | what the project is, how the pieces fit |
-| [`docs/testing.md`](../testing.md) | any [LIVE] item | backend stacks, how the suites skip, which runner to use |
-| [`docs/plugins.md`](../plugins.md) | items 15–17 | the published plugin contract |
+| [`AGENTS.md`](../../../AGENTS.md) | **any structural work** (items 15–20) | Solution layout and the dependency rule; per-layer invariants; coding conventions; decisions already taken and why |
+| [`README.md`](../../../README.md) | first item in an unfamiliar area | what the project is, how the pieces fit |
+| [`docs/testing.md`](../../testing.md) | any [LIVE] item | backend stacks, how the suites skip, which runner to use |
+| [`docs/plugins.md`](../../plugins.md) | items 15–17 | the published plugin contract |
 
 **Hard gates:**
 
