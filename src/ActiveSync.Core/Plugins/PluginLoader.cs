@@ -56,7 +56,10 @@ public static class PluginLoader
 			return;
 		}
 
-		Version hostContractVersion = typeof(IGatewayPlugin).Assembly.GetName().Version ?? new Version(0, 0);
+		// The host contract version is the authoritative ContractVersion constant (kept in lockstep
+		// with the assembly version a plugin references — ContractSurfaceTests guards the match), so
+		// the major a plugin is gated against is the one plugin authors read, not a reflected default.
+		Version hostContractVersion = ContractVersion.Current;
 		int loaded = 0;
 		foreach (string pluginDir in Directory.EnumerateDirectories(directory).OrderBy(d => d, StringComparer.Ordinal))
 		{
