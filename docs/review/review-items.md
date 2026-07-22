@@ -246,7 +246,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 > `E16` behaviour change: `/readyz` now returns the `components` map only to loopback/local callers; anonymous remote callers get a bare `{status}` + the HTTP code. Local probes (k8s node, TestServer where RemoteIpAddress is null) are unaffected, so the integration assertions on `"database":true`/`"mailstore":true` still hold.
 > `E9` is worst — its failure mode is *the loss of the diagnostic channel itself*. Adopt one policy: log the first occurrence and every Nth after, to `SelfLog` where the logger is suspect.
 
-**30. Timezone & date handling** [LIVE] — `W15` `W16` `D5` `D12` `D24` `D33` `H30`
+**30. Timezone & date handling** [LIVE] — ~~`W15`~~ `W16` `D5` `D12` `D24` `D33` `H30`
 > `W15` `EasDateTime` shifts `DateTimeKind.Unspecified` by the machine offset — invisible in UTC CI, wrong in production. `D12` recurring events drift an hour across DST.
 
 **31. Hosting & startup correctness** — `E1` `E12` `E13` `E17` `E19` `E20` `E22` `E25`
