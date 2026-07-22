@@ -56,6 +56,28 @@ public sealed class EasHandlerHarness : IDisposable
 		return State.RefreshFolderRegistryAsync(UserName, folders, CancellationToken.None);
 	}
 
+	/// <summary>
+	///   Builds a bare <see cref="EasContext" /> (no request body) for tests that drive an internal
+	///   handler method directly — e.g. <c>SyncHandler.ApplyClientCommandAsync</c> — rather than a
+	///   whole command through <see cref="RunAsync" />.
+	/// </summary>
+	public async Task<EasContext> NewContextAsync(string command = "Sync")
+	{
+		DefaultHttpContext http = new();
+		http.Response.Body = new MemoryStream();
+		Device device = await State.GetOrCreateDeviceAsync(UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+		return new EasContext
+		{
+			Http = http,
+			Parameters = new EasRequestParameters { Command = command, DeviceId = device.DeviceId },
+			Credentials = new BackendCredentials(UserName, "pw"),
+			Session = Session,
+			Device = device,
+			State = State,
+			WireLogger = NullLogger.Instance
+		};
+	}
+
 	/// <summary>Runs one command and returns the decoded response document (null for an empty body).</summary>
 	public async Task<XDocument?> RunAsync(IEasCommandHandler handler, string command, XDocument request)
 	{
@@ -96,11 +118,13 @@ public sealed class EasHandlerHarness : IDisposable
 		public RecordingStore Store { get; } = new();
 		public RecordingMailOperations Mail { get; } = new();
 
+		public RecordingMailSubmit Submit { get; } = new();
+
 		public BackendCredentials Credentials => new(UserName, "pw");
 		public string? MailAddress => UserName;
 		public IReadOnlyList<IContentStore> Stores => [Store];
 		public IMailStoreOperations MailStore => Mail;
-		public IMailSubmitOperations MailSubmit => throw new NotSupportedException();
+		public IMailSubmitOperations MailSubmit => Submit;
 		public IContactOperations? Contacts => null;
 		public ICalendarOperations? Calendar => null;
 		public IOofBackend? Oof => null;
@@ -210,14 +234,45 @@ public sealed class EasHandlerHarness : IDisposable
 		}
 	}
 
+	/// <summary>Outbound submission; records each SendAsync and can be told to fail (F10/F30).</summary>
+	public sealed class RecordingMailSubmit : IMailSubmitOperations
+	{
+		/// <summary>The MIME blobs actually submitted — a duplicate submit shows up as two entries.</summary>
+		public List<byte[]> Sent { get; } = [];
+
+		/// <summary>When set, SendAsync throws this instead of recording (a genuine send failure).</summary>
+		public Func<Exception>? FailWith { get; set; }
+
+		public Task SendAsync(byte[] mime, CancellationToken ct)
+		{
+			if (FailWith is { } fail)
+				throw fail();
+			Sent.Add(mime);
+			return Task.CompletedTask;
+		}
+	}
+
 	/// <summary>Mail-store side operations; records the folders a handler asked to empty.</summary>
 	public sealed class RecordingMailOperations : IMailStoreOperations
 	{
 		public List<string> Emptied { get; } = [];
 
+		/// <summary>MIME blobs successfully filed to Sent.</summary>
+		public List<byte[]> Saved { get; } = [];
+
+		/// <summary>When true, SaveToSentAsync throws — the post-submit "best-effort" failure (F10/F30).</summary>
+		public bool SaveToSentShouldThrow { get; set; }
+
+		/// <summary>True once SaveToSentAsync was reached (whether or not it was told to throw).</summary>
+		public bool SaveToSentAttempted { get; private set; }
+
 		public Task SaveToSentAsync(byte[] mime, CancellationToken ct)
 		{
-			throw new NotSupportedException();
+			SaveToSentAttempted = true;
+			if (SaveToSentShouldThrow)
+				throw new BackendException("save to Sent failed");
+			Saved.Add(mime);
+			return Task.CompletedTask;
 		}
 
 		public Task<byte[]?> GetRawMessageAsync(string folderBackendKey, string itemKey, CancellationToken ct)

@@ -153,7 +153,20 @@ public sealed partial class SyncHandler
 				    store.EasClass.Equals(EasClass.Email, StringComparison.OrdinalIgnoreCase))
 				{
 					await SubmitDraftAsync(context, appData, folder.BackendKey, itemKey, ct);
-					await store.DeleteItemAsync(folder.BackendKey, itemKey, true, ct);
+					// The draft is already sent; deleting it from Drafts is best-effort cleanup. A
+					// failure here must not report failure for a sent message (the client would
+					// resend and duplicate it) — worst case the draft reappears via the next diff (F10).
+					try
+					{
+						await store.DeleteItemAsync(folder.BackendKey, itemKey, true, ct);
+					}
+					catch (Exception ex) when (ex is not OperationCanceledException)
+					{
+						logger.LogWarning(ex,
+							"Draft {ServerId} submitted for {User} but removing it from Drafts failed",
+							serverId, context.Device.UserName);
+					}
+
 					snapshot.Remove(itemKey);
 					ledger.RecordChange(serverId, new AppliedClientChange(itemKey, null));
 					return null;
@@ -275,7 +288,7 @@ public sealed partial class SyncHandler
 	}
 
 	/// <summary>16.x draft submit (email2:Send): merge with the stored draft, SMTP-send, file to Sent.</summary>
-	private static async Task SubmitDraftAsync(
+	private async Task SubmitDraftAsync(
 		EasContext context, XElement appData, string? folderBackendKey, string? itemKey, CancellationToken ct)
 	{
 		MimeKit.MimeMessage? original = null;
@@ -294,9 +307,21 @@ public sealed partial class SyncHandler
 		using MemoryStream buffer = new();
 		await message.WriteToAsync(buffer, ct);
 		byte[] mime = buffer.ToArray();
+
+		// The SMTP submit is the point of no return: a failure here MUST surface (nothing was sent,
+		// so the client is free to resend). Everything after it is best-effort and swallowed —
+		// filing to Sent must never turn an already-sent message into a reported failure, or the
+		// client resends and the recipient gets it twice (F10).
 		await context.Session.MailSubmit.SendAsync(mime, ct);
-		await context.Session.MailStore.SaveToSentAsync(mime, ct);
 		Core.Observability.GatewayMetrics.RecordMailSent(context.Device.UserName, "draft_submit");
+		try
+		{
+			await context.Session.MailStore.SaveToSentAsync(mime, ct);
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			logger.LogWarning(ex, "Draft submitted for {User} but filing to Sent failed", context.Device.UserName);
+		}
 	}
 
 	private static XElement ClientCommandStatus(XElement command, string status)
