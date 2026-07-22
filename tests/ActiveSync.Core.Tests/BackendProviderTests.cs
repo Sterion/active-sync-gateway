@@ -91,7 +91,27 @@ public class BackendProviderTests
 		Assert.True(mail.LastResource!.Disposed);
 	}
 
-	private sealed class FakeProvider(string name, BackendRole[] roles) : IBackendProvider
+	[Fact]
+	public async Task Session_Dispose_ContinuesPastAThrowingConnection_AndAggregates()
+	{
+		// A12: a provider whose connection throws on dispose (e.g. IMAP LOGOUT on a dead socket)
+		// must not strand the other providers' connections — they still hold live sockets.
+		FakeProvider bad = new("bad", [BackendRole.MailStore, BackendRole.MailSubmit], throwOnDispose: true);
+		FakeProvider good = new("good", [BackendRole.Calendar]);
+		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(bad, good), Gateway, null,
+			[
+				new ResolvedRole(BackendRole.MailStore, "bad", ProviderSettings.Empty, Gateway),
+				new ResolvedRole(BackendRole.MailSubmit, "bad", ProviderSettings.Empty, Gateway),
+				new ResolvedRole(BackendRole.Calendar, "good", ProviderSettings.Empty, Gateway)
+			], [], CancellationToken.None);
+
+		await Assert.ThrowsAsync<AggregateException>(async () => await session.DisposeAsync());
+		Assert.True(bad.LastResource!.Disposed);  // the throwing connection was attempted
+		Assert.True(good.LastResource!.Disposed); // and the later connection still got disposed
+	}
+
+	private sealed class FakeProvider(string name, BackendRole[] roles, bool throwOnDispose = false)
+		: IBackendProvider
 	{
 		public int Connections { get; private set; }
 		public IReadOnlyList<BackendRole>? LastAssignedRoles { get; private set; }
@@ -110,7 +130,7 @@ public class BackendProviderTests
 		{
 			Connections++;
 			LastAssignedRoles = context.Roles.Select(r => r.Role).ToList();
-			LastResource = new FakeResource();
+			LastResource = new FakeResource(throwOnDispose);
 			List<IContentStore> stores = context.Roles
 				.Where(r => r.Role is not (BackendRole.MailSubmit or BackendRole.Oof))
 				.Select(IContentStore (r) => new FakeStore($"{name}-{r.Role}", r.Role.ToString()))
@@ -122,13 +142,15 @@ public class BackendProviderTests
 		}
 	}
 
-	private sealed class FakeResource : IAsyncDisposable
+	private sealed class FakeResource(bool throwOnDispose = false) : IAsyncDisposable
 	{
 		public bool Disposed { get; private set; }
 
 		public ValueTask DisposeAsync()
 		{
 			Disposed = true;
+			if (throwOnDispose)
+				throw new InvalidOperationException("connection dispose failed");
 			return ValueTask.CompletedTask;
 		}
 	}

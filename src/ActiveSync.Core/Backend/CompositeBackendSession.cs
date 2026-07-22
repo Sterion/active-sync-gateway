@@ -94,7 +94,21 @@ public sealed class CompositeBackendSession : IBackendSession
 
 	public async ValueTask DisposeAsync()
 	{
+		// A12: one throwing connection (e.g. an IMAP LOGOUT on a dead socket) must not abort the
+		// loop and strand the remaining connections' live sockets — dispose them all, then surface
+		// the failures together.
+		List<Exception>? failures = null;
 		foreach (IBackendConnection connection in _connections)
-			await connection.DisposeAsync().ConfigureAwait(false);
+			try
+			{
+				await connection.DisposeAsync().ConfigureAwait(false);
+			}
+			catch (Exception ex)
+			{
+				(failures ??= []).Add(ex);
+			}
+
+		if (failures is { Count: > 0 })
+			throw new AggregateException("One or more backend connections failed to dispose.", failures);
 	}
 }
