@@ -322,7 +322,10 @@ jobs:
 
       # Download bundles for people who prefer a zip over a container: framework-dependent
       # publishes WITH the native launcher binaries, one per platform, named after the tag or
-      # branch. Published + zipped inside a container from the test image.
+      # branch. Published inside a container from the test image; the zipping runs on the
+      # ubuntu-latest host (which already ships `zip`) after the copy-out, so the step no longer
+      # does a per-run `apt-get install zip` inside the SDK image — that network fetch had begun
+      # stalling for many minutes when the Debian mirrors behind the rolling base image were slow.
       - name: Package download zips
         id: package
         run: |
@@ -332,7 +335,6 @@ jobs:
             -e VERSION='${{ needs.test.outputs.version }}' -e LABEL="$label" \
             -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
             "$TEST_IMAGE" sh -ec '
-              apt-get update -qq && apt-get install -y -qq zip >/dev/null
               publish() {
                 dotnet publish src/ActiveSync.Server/ActiveSync.Server.csproj -c Release \
                   -o "/out/$1" -r "$1" --self-contained false \
@@ -352,13 +354,15 @@ jobs:
               publish linux-x64 Linux ./ActiveSync.Server
               publish linux-arm64 Linux-arm64 ./ActiveSync.Server
               publish win-x64 Windows ActiveSync.Server.exe
-              (cd /out/linux-x64 && zip -qr "/out/eas-gateway-linux-x64-$LABEL.zip" .)
-              (cd /out/linux-arm64 && zip -qr "/out/eas-gateway-linux-arm64-$LABEL.zip" .)
-              (cd /out/win-x64 && zip -qr "/out/eas-gateway-windows-x64-$LABEL.zip" .)
             '
           mkdir -p dist
           docker cp as-ci-pkg:/out/. dist/
           docker rm as-ci-pkg
+          # Zip on the host runner, not inside the container: ubuntu-latest ships `zip`, so this
+          # avoids the fragile per-run apt-get in the SDK image.
+          (cd dist/linux-x64 && zip -qr "../eas-gateway-linux-x64-$label.zip" .)
+          (cd dist/linux-arm64 && zip -qr "../eas-gateway-linux-arm64-$label.zip" .)
+          (cd dist/win-x64 && zip -qr "../eas-gateway-windows-x64-$label.zip" .)
           ls -l dist/*.zip
 
       - name: Upload Linux artifact
