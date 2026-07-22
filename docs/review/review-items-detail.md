@@ -48,7 +48,7 @@ A17. **[Low]** `ValidateSyncKeyAsync` returns a detached never-added `Collection
 
 A18. **[Low]** `CommitCollectionStateAsync` leaves entity mutated+tracked after concurrency failure — `SyncStateService.cs:382-404`. Failed values stay in `CurrentValues`, entry stays Modified → later `SaveChangesAsync` on same request retries doomed UPDATE from an unrelated call site. FIX: `await db.Entry(state).ReloadAsync(ct)` in the catch before rethrow.
 
-A19. **[Low]** Read-only queries use tracking — `SyncStateService.cs:196, 209-211, 449-451`. `ComputeFolderDiffAsync` loads every `DeviceFolder` tracked purely to compare, then `CommitFolderHierarchyAsync` re-queries and deletes them. FIX: `.AsNoTracking()` at 196, 210, 450.
+A19. **[Low]** Read-only queries use tracking — `SyncStateService.cs:196, 209-211, 449-451`. `ComputeFolderDiffAsync` loads every `DeviceFolder` tracked purely to compare, then `CommitFolderHierarchyAsync` re-queries and deletes them. FIX: `.AsNoTracking()` at 196, 210, 450. — Done: `FolderRegistry.ComputeFolderDiffAsync`'s `DeviceFolders` load (was 196) is now `AsNoTracking`, and `DavItemMap.ResolveDavHrefAsync` (was 450) got it under A3. The `CommitFolderHierarchyAsync` load (was 210) deliberately stays tracked: A7 (item 22) rewrote it to reconcile the rows in place (mutate + Remove) rather than delete-all+reinsert, so those entities must be tracked — the finding's premise for 210 no longer holds.
 
 A20. **[Low]** `CollectionDiff.Compute` has two unreachable branches — `CollectionDiff.cs:78-82`. `else more = true` only runs when `more` already true; line 81 dead (both loops set `more` exactly on early break). FIX: delete both; extract the two identical budget loops into one `Drain` local.
 

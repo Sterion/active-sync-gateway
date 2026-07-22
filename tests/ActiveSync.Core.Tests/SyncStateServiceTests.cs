@@ -262,6 +262,27 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task FolderDiff_DoesNotTrackTheDeviceFoldersItOnlyCompares()
+	{
+		// ComputeFolderDiffAsync loads every DeviceFolder purely to compare against the registry;
+		// tracking them is pure overhead on the request-scoped context (A19).
+		Device device = await _service.GetOrCreateDeviceAsync("u@a19", "DEV1", "Phone", CancellationToken.None);
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@a19",
+			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
+			 new BackendFolder("imap:Sent", "Sent", null, 5, "Email")], CancellationToken.None);
+		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
+
+		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
+		SyncStateService service2 = new(db2);
+		Device device2 = await db2.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.UserName == "u@a19");
+		List<UserFolder> registry2 = await service2.GetFoldersAsync("u@a19", CancellationToken.None);
+
+		await service2.ComputeFolderDiffAsync(device2, registry2, CancellationToken.None);
+
+		Assert.Empty(db2.ChangeTracker.Entries<DeviceFolder>());
+	}
+
+	[Fact]
 	public async Task FolderDiff_ReportsTypeChange()
 	{
 		// A folder whose EAS Type changes (e.g. IMAP folder gaining \Sent, 12 -> 5) but keeps its

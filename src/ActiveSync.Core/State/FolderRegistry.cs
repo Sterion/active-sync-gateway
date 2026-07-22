@@ -108,7 +108,7 @@ internal sealed class FolderRegistry(SyncDbContext db)
 		// so diffing against them would return Count=0 and leave the client with no folders.
 		List<DeviceFolder> known = initial
 			? []
-			: await db.DeviceFolders
+			: await db.DeviceFolders.AsNoTracking()
 				.Where(f => f.DeviceKey == device.Id)
 				.ToListAsync(ct).ConfigureAwait(false);
 		Dictionary<string, DeviceFolder> knownById = known.ToDictionary(f => f.ServerId, StringComparer.Ordinal);
