@@ -780,17 +780,189 @@ Parse now returns read-only unless an explicit `|rw`, and the cross-host guard f
 
 ---
 
-## Next: item 18 — WebUi → Core services (Phase 3 — Boundaries)
+## Item 18 — WebUi → Core services (Phase 3 — Boundaries)
 
-**Items 18–19 remain in Phase 3 (structural/boundary work):** they *execute the architecture document*.
-AGENTS.md § *Solution layout and dependency rule* and the Web UI layer notes are **hard gates**. Item 18
-extracts `DeviceAdminService`/`ShareAdminService`/`LogQueryService` so CLI and WebUi share one validated
-write path (removes the second write path to the same tables) — touches admin write + shares, which feed
-shared-calendar grants into session building, so the integration run still matters. Item 20 (decompositions)
-must run **alone** and is not in this orchestrator's range.
+**Findings:** `S3` (= `C18`) — one Medium, two IDs (cross-cutting `S3` and WebUi-area `C18` are the same defect: two write paths to the device/share/log tables)
+**Commits:** `3bb1a4f` (extract the three Core services + `AdminIdentifiers` + DI extension) · `71071ee`
+(rewire WebUi endpoints) · `a89c522` (rewire CLI + queue strike) — all carry `S3/C18` in the subject.
 
-Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 476 ·
-WebUi 70 · Server 156**.
+**Verification (orchestrator-run):** integrity 56/15/365/365/0, encoding 0 ✓ · cursor → item 19 ✓ ·
+finding ID in every subject ✓ (one finding across three commits, split by surface — extract / WebUi /
+CLI — a legitimate tight cluster, not an item batched into one) · **clean `-t:Rebuild` 0 warnings** ✓ ·
+unit **Protocol 63 · Core 487 (was 476) · WebUi 70 · Server 157 (was 156) = 777 passed, 0 failed, 0
+skipped** ✓ · integration **139 / 0 skipped** on a **fresh** container (clean-volume restart run in
+parallel with the worker; all four ports OK + Healthy confirmed before verifying) ✓.
+
+Item 18 is **not [LIVE]**, but integration was run anyway — it rewires the admin write path and the
+share store, and shares feed shared-calendar grants into session building, so a DI-graph or write-path
+break is exactly the silent-failure class the standing lesson names. Clean: no regression, no test
+needed changing.
+
+**Independently confirmed the extraction actually landed and both surfaces share it.** `3bb1a4f` adds
+`DeviceAdminService`/`ShareAdminService`/`LogQueryService` (+ `AdminIdentifiers`) under
+`ActiveSync.Core.Administration`; `71071ee` deletes the WebUi-local `AdminIdentifiers` and routes
+`DevicesEndpoints`/`SharesEndpoints`/`LogsEndpoints`/`StateEndpoints` through them; `a89c522` routes the
+`eas device`/`share`/`block`/`unblock`/`purge`/`logs` commands the same way. So the C16 identifier
+checks now run once, on both surfaces.
+
+**Notes (worker-flagged):**
+- **`S3`/`C18` is a structural finding struck on the strength of the refactor**, not a red-first
+  reproducer — two paths to one table has no runtime symptom. Proof is (a) the unchanged HTTP-level and
+  CLI suites passing against the rewired code, and (b) `AdminServicesTests` (11 cases) as **coverage**
+  pinning the extracted behaviour; both labelled coverage-not-proof in the test file. This matches the
+  items 15/16/17 structural-guard pattern.
+- **One genuine red-first rides along, and it is a real behaviour change: `eas share add` now rejects
+  `..` segments and control-character hrefs.** Unifying the CLI onto `AdminIdentifiers.HrefProblem`
+  strengthened the CLI, which previously checked only `StartsWith('/')` and accepted `/dav/../evil/`
+  (exit 0). This is C16 parity — the intended consequence of one validated path — and the only
+  observable behaviour change; every other CLI/WebUi output is byte-preserved.
+- **Judgment call — pagination clamp stayed at the HTTP seam, not in the service.** `ListAsync`/
+  `ListSharesAsync` take nullable `skip`/`take` (null = unbounded); the WebUi endpoints keep the C10
+  `Math.Clamp(…,1,500)`, the CLI passes `take: null` to preserve its unbounded terminal listing. Folding
+  the clamp into the service would have silently capped CLI listings at 500 — a regression — so the
+  duplicated *query* moved while the clamp stayed an HTTP-pagination concern. Open to revision.
+- **Judgment call — scope held to the four endpoint files + their CLI mirrors.**
+  `DevicePasswordCommand`/`FoldersCommand`/`ItemsCommand`/`ShowCommand`/`UsersCommand` stay on direct EF:
+  they are CLI-only reads with no WebUi counterpart, so outside the "two paths to the same table" defect.
+- **Judgment call — `AddAdministrationServices()` mirrored into the `WebUiHost` test harness** rather
+  than folded into `AddWebUi()`, keeping layering clean (these are Core services the CLI uses without
+  WebUi). A legitimate harness accommodation — no source assertion was weakened; the endpoints genuinely
+  require the services now.
+- **No new findings filed.**
+
+---
+
+## Item 19 — Structural guardrails (Phase 3 — Boundaries)
+
+**Findings:** `S4` `S8` — one Low, one Nit (pure relocations)
+**Commits:** `d4f1ed3` (S4 — `CollectionDiff` → Protocol, `MergedFreeBusy` → Contracts) · `fef4511`
+(S8 — `ServerCertificateValidator` → `Backends.Common` namespace) — each carries its ID in the subject.
+
+**Verification (orchestrator-run):** integrity 56/15/365/365/0, encoding 0 ✓ · cursor → item 20 ✓ ·
+one commit per finding with ID in subject ✓ · **clean `-t:Rebuild` 0 warnings** ✓ · unit **Protocol 63 ·
+Core 490 (was 487; +3 structural guards) · WebUi 70 · Server 157 = 780 passed, 0 failed, 0 skipped** ✓ ·
+integration **139 / 0 skipped** on a **fresh** container (clean-volume restart in parallel with the
+worker; all four ports OK + Healthy before verifying) ✓.
+
+Not [LIVE], but integration was run: a cross-assembly type move can break the DI graph — the standing
+structural-item lesson. Clean, no regression, no test needed changing.
+
+**Moves independently confirmed at HEAD:** `CollectionDiff` (+ `ItemChange`/`CollectionChanges`) is in
+`src/ActiveSync.Protocol/Sync/CollectionDiff.cs` under `namespace ActiveSync.Protocol.Sync`;
+`MergedFreeBusy` is in `src/ActiveSync.Contracts/MergedFreeBusy.cs`; `ServerCertificateValidator` is in
+`src/ActiveSync.Backends.Common/ServerCertificateValidator.cs` under `namespace
+ActiveSync.Backends.Common`. **`ActiveSync.Protocol.csproj` still has 0 `ProjectReference`s** — the
+dependency-rule hard gate ("Protocol depends on NOTHING project-wise") is intact after the move.
+
+**Judgment call — accepted, and it is the headline of this item.** `S4` says move **both** to
+`ActiveSync.Protocol`. `CollectionDiff` went there (pure BCL logic). `MergedFreeBusy` went to
+**Contracts**, not Protocol, because it consumes `BusyPeriod` — a plugin-capability model in Contracts
+(`IFreeBusySource`) — and Protocol references nothing project-wise (verified: 0 ProjectReferences), so it
+literally cannot see `BusyPeriod`. The only ways to satisfy the finding's *literal* target would be to
+relocate `BusyPeriod` down into Protocol — a **breaking plugin-contract change owned by item 17, already
+COMPLETE and shipped as the one major bump** — which item 19 must not reopen. Contracts is the lowest
+layer the dependency rule permits and where `BusyPeriod` already lives, so it honours the finding's stated
+intent (out of Core, into a fuzzable leaf assembly) without violating the rule. **Orchestrator ruling:
+this is a resolvable placement with exactly one architecturally-valid target, not a doc-vs-finding
+contradiction requiring a stop** — a human deciding it would reach the same answer. Fully disclosed in the
+`S4` commit, the queue note, and the finding entry.
+
+**S8 scope call:** only the genuinely-anomalous bare-`ActiveSync.Backends` file was consolidated;
+`ActiveSync.Backends.Converters` was deliberately left as a coherent purpose-grouping. The finding names
+`ServerCertificateValidator` as "the odd one out," so two sanctioned namespaces (not one) satisfy it;
+collapsing `.Converters` too would touch every converter consumer across seven assemblies for a Nit.
+
+**Both guard tests are genuine red-first structural proofs, not coverage** —
+`DependencyRuleTests.{MergedFreeBusy_MovedFromCoreToContracts, CollectionDiff_MovedFromCoreToProtocol,
+BackendsCommon_TypesUseCoherentNamespaces}` each failed against unmodified source (types still in their
+old namespace) then passed after the move.
+
+**Process note (worker-flagged, verified clean):** the worker's first `git add -A` swept the
+orchestrator-owned `review-results.md` into the `S4` commit; it soft-reset, unstaged the file, and
+re-committed with explicit paths. Independently confirmed: neither `d4f1ed3` nor `fef4511` contains
+`review-results.md`, it is modified-but-unstaged in the tree, and the item-18 entry is intact.
+
+**No new findings filed.**
+
+---
+
+## Item 20 — Decompositions (Phase 3 — Boundaries) · large structural item
+
+**Findings:** `F-decomp` `A33` `E27` `E28` — all Nit decompositions, no intended behaviour change
+**Commits:** `f29bef1` (F-decomp — `SyncHandler` → 6 partials + `SyncCollectionOptions` +
+`ClientCommandLedger`) · `6b54315` (A33 — seal `SyncStateService`, extract 4 stores) · `abc7b50` (E27 —
+`RunServerAsync` → 4 phases) · `1ef0489` (E28 — `EndpointAuth` prologue) — one per finding, ID in subject.
+
+**Verification (orchestrator-run):** integrity 56/15/365/365/0, encoding 0 ✓ · cursor → item 21 ✓ ·
+one commit per finding with ID in subject ✓ · **clean `-t:Rebuild` 0 warnings** ✓ · unit **Protocol 63 ·
+Core 490 · WebUi 70 · Server 157 = 780 passed, 0 failed, 0 skipped** ✓ · integration **139 / 0 skipped**
+on a **fresh** container (clean-volume restart in parallel; Healthy + all four ports before verifying) ✓.
+
+**This was the highest-risk item in the range** — it invalidates line anchors wholesale and `E28` touches
+the EAS/Autodiscover auth path — so integration was mandatory and is the decisive check. Clean.
+
+**Structure independently confirmed at HEAD:** `SyncHandler.{Cache,ClientCommands,Collection,LongPoll,
+ServerCommands}.cs` partials exist alongside `SyncHandler.cs`; `SyncCollectionOptions.cs` +
+`ClientCommandLedger.cs` are extracted; `SyncStateService` is `public sealed class` delegating to the four
+new `DeviceStore`/`FolderRegistry`/`CollectionStateStore`/`DavItemMap`; `EndpointAuth.cs` is present.
+
+**Line endings checked and cleared.** New `.cs` files are LF-only *in the git blob* — but that is correct
+normalization, not a house-style miss: `.gitattributes` is `* text=auto eol=crlf`, so git stores every
+`.cs` (including the pre-existing `EasEndpoint.cs`) as LF internally and checks it out CRLF on Windows.
+`git check-attr` confirms `eol: crlf` applies to the new files. (The worker's "committed blobs are CRLF"
+phrasing was imprecise; the outcome is right. Minor cosmetic residue: the worker's own working-tree copies
+are still `w/lf` until a renormalize/checkout — harmless, self-healing, and never committed as CRLF-wrong.)
+
+**All four are coverage-proven, not red-first — the correct mode for a pure refactor** (no behaviour to
+red-test). Proof is the full unit suite + 139-test integration staying green across the decomposition,
+plus the new `DisabledAccount_IsAlsoRefusedByAutodiscover` integration test for `E28`'s shared refusal.
+
+**Two judgment calls, both accepted:**
+- **`A33` landed as a composing facade, not four injected services.** `SyncStateService` is
+  `EasContext.State` — used by every handler, WebUi and tests, with static snapshot readers called across
+  production and tests. A literal "replace with four services" split would ripple through the whole
+  handler layer for a Nit. The worker extracted four named single-responsibility stores and kept
+  `SyncStateService` as the sealed scoped facade delegating to them, over the one shared scoped
+  `SyncDbContext` — separating responsibilities while leaving every call site and the DI registration
+  untouched. OOF + `PersistAsync` stay on the facade (the finding named no store for them); the three
+  static readers keep their call sites via thin forwarders. Could reasonably have gone the full-split
+  way; minimal blast radius chosen. **Orchestrator ruling: in scope** — the finding's core ask (6
+  responsibilities → separated) is met; the facade is a smaller-radius realization, not a dodge.
+- **`E28` did not fold EAS wholesale into `TryAuthorizeAsync`.** Doing so would reorder EAS's pre-auth
+  metrics label, its query/device-id parsing (400-vs-429 precedence) and the pass-through provisioner
+  (which must run *between* auth and the block check) — all real behaviour changes. The worker unified
+  only the specific disabled/blocked decision that `E14` left drifting (`CheckLoginRefusalAsync`, now
+  shared by both endpoints) and had Autodiscover — which has no interleaving — adopt the full method.
+  **Orchestrator ruling: correct** — `E28`'s defect was the *drift* item 10's `E14` explicitly left open
+  ("a third check added to EAS needs adding to Autodiscover too until item 20 lands"), and that exact gap
+  is now closed. Merging more would have exceeded the finding into behaviour change.
+
+**One observable-but-non-behavioural change:** Autodiscover's unconfigured-503 **log line** wording moved
+from "Autodiscover request refused…" to "Request refused…" (now emitted by the shared prologue). Status
+codes, response bodies and ordering unchanged.
+
+**No new findings filed.**
+
+---
+--- END OF PHASE 3 (Boundaries). Items 21–31 are Phase 4 (Correctness). ---
+---
+
+## Next: item 21 — Backend session lifetime (Phase 4 — Correctness) · run stopped here
+
+**The orchestrated run stopped at the end of Phase 3.** Items 18–20 are complete, committed and verified
+above. The item-21 worker was interrupted by an Anthropic session limit mid-item (resets 07:00
+Europe/Copenhagen) and **its uncommitted work was reverted**, so item 21 is **un-started**: no finding
+commits exist for `A2`/`A11`/`A12`/`A13`/`A24`/`A28`/`D27`/`D28`/`K60`, and the queue line is un-struck.
+The cursor resumes cleanly at item 21 — a fresh worker starts it from scratch, losing nothing.
+
+Item 21 is one refactor to an `IAsyncDisposable` lease that refcounts use, gates concurrent access
+(MailKit's `ImapClient` is not thread-safe and clients pipeline), and defers disposal to the last release.
+`A13` is a process-death bug (an unguarded timer callback whose escaping exception terminates the process).
+It reshapes `BackendSessionFactory`/`CompositeBackendSession` — session lifetime and concurrency — so run
+integration even though it is not marked [LIVE].
+
+Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 490 ·
+WebUi 70 · Server 157**.
 
 **Standing lessons that carried this run (items 13–14):**
 - **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/contract
