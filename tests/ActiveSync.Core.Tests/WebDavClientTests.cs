@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Xml.Linq;
 using ActiveSync.Backends.Dav;
+using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Core.Tests;
 
@@ -71,6 +72,65 @@ public sealed class WebDavClientTests
 		Assert.Equal("\"12345\"", ifMatch);
 	}
 
+	// H27: a per-resource failure inside an otherwise-207 multistatus (here a 403 on b.ics) used to
+	// vanish without a trace, hiding a permission problem behind a short listing. It must be logged;
+	// the successful sibling is still returned.
+	[Fact]
+	public async Task Multistatus_PartialFailure_IsLoggedNotSilentlyDropped()
+	{
+		string multistatus =
+			"""
+			<D:multistatus xmlns:D="DAV:">
+			  <D:response>
+			    <D:href>/dav/cal/a.ics</D:href>
+			    <D:propstat><D:status>HTTP/1.1 200 OK</D:status>
+			      <D:prop><D:getetag>"e1"</D:getetag></D:prop>
+			    </D:propstat>
+			  </D:response>
+			  <D:response>
+			    <D:href>/dav/cal/b.ics</D:href>
+			    <D:propstat><D:status>HTTP/1.1 403 Forbidden</D:status>
+			      <D:prop><D:getetag/></D:prop>
+			    </D:propstat>
+			  </D:response>
+			</D:multistatus>
+			""";
+		RecordingHandler stub = new(_ => Xml(multistatus));
+		CapturingLogger logger = new();
+		using WebDavClient client = new(Base, new HttpClient(stub), logger);
+
+		List<DavResource> resources = await client.PropfindAsync("/dav/cal/", 1,
+			new XElement(XName.Get("propfind", "DAV:")), CancellationToken.None);
+
+		Assert.Equal("/dav/cal/a.ics", Assert.Single(resources).Href);
+		Assert.Contains(logger.Messages, m => m.Contains("failure response"));
+	}
+
+	// H27: the old Contains("200") match dropped any legitimate 2xx that was not literally "200"
+	// (e.g. 204). The status code is now parsed as a number in the 2xx range.
+	[Fact]
+	public async Task Multistatus_Non200SuccessStatus_IsAccepted()
+	{
+		string multistatus =
+			"""
+			<D:multistatus xmlns:D="DAV:">
+			  <D:response>
+			    <D:href>/dav/cal/c.ics</D:href>
+			    <D:propstat><D:status>HTTP/1.1 204 No Content</D:status>
+			      <D:prop><D:getetag>"e2"</D:getetag></D:prop>
+			    </D:propstat>
+			  </D:response>
+			</D:multistatus>
+			""";
+		RecordingHandler stub = new(_ => Xml(multistatus));
+		using WebDavClient client = new(Base, new HttpClient(stub));
+
+		List<DavResource> resources = await client.PropfindAsync("/dav/cal/", 1,
+			new XElement(XName.Get("propfind", "DAV:")), CancellationToken.None);
+
+		Assert.Equal("/dav/cal/c.ics", Assert.Single(resources).Href);
+	}
+
 	private static HttpResponseMessage Ok(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)
@@ -97,6 +157,20 @@ public sealed class WebDavClientTests
 			if (request.Content is not null)
 				await request.Content.ReadAsStringAsync(cancellationToken);
 			return responder(request);
+		}
+	}
+
+	private sealed class CapturingLogger : ILogger
+	{
+		public List<string> Messages { get; } = new();
+
+		public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+		public bool IsEnabled(LogLevel logLevel) => true;
+
+		public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+			Func<TState, Exception?, string> formatter)
+		{
+			Messages.Add(formatter(state, exception));
 		}
 	}
 }

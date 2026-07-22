@@ -296,7 +296,7 @@ public sealed class WebDavClient : IDisposable
 			Encoding.UTF8, "application/xml");
 	}
 
-	private static async Task<List<DavResource>> ReadMultiStatusAsync(
+	private async Task<List<DavResource>> ReadMultiStatusAsync(
 		HttpResponseMessage response, CancellationToken ct)
 	{
 		if (response.StatusCode is HttpStatusCode.NotFound)
@@ -322,13 +322,17 @@ public sealed class WebDavClient : IDisposable
 		}
 
 		List<DavResource> result = new();
+		int droppedFailures = 0;
 		foreach (XElement responseElement in doc.Descendants(DavNs.D + "response"))
 		{
 			string? href = responseElement.Element(DavNs.D + "href")?.Value;
 			if (href is null)
 				continue;
+			// H27: select the propstat by its actual 2xx status code, not a fragile
+			// substring match on "200" (which also treated a status-less propstat as OK and
+			// dropped a legitimate 2xx such as 204).
 			XElement? okPropstat = responseElement.Elements(DavNs.D + "propstat")
-				.FirstOrDefault(p => p.Element(DavNs.D + "status")?.Value.Contains("200") != false);
+				.FirstOrDefault(p => IsOkStatus(p.Element(DavNs.D + "status")?.Value));
 			if (okPropstat is not null)
 				// H2: keep the href exactly as the server percent-encoded it. It is used verbatim
 				// as a request path (Resolve → new Uri(base, href)); unescaping it here turned a
@@ -336,9 +340,31 @@ public sealed class WebDavClient : IDisposable
 				// every GET/PUT/DELETE hit the wrong resource. Href comparison against share grants
 				// unescapes on its own side (SharedHrefEquals), so it does not depend on this.
 				result.Add(new DavResource(href, okPropstat));
+			else
+				// H27: a <response> with no 2xx propstat is a per-resource failure inside an
+				// otherwise-207 multistatus (403/404/507…). It used to vanish without a trace,
+				// hiding a permission/quota problem behind a "shorter than expected" listing.
+				// Log the status codes only — the href can carry PII.
+				droppedFailures++;
 		}
 
+		if (droppedFailures > 0)
+			_wireLogger?.LogDebug(
+				"DAV multistatus carried {DroppedCount} per-resource failure response(s) with no 2xx propstat; " +
+				"they were omitted from the {ReturnedCount} returned resource(s)", droppedFailures, result.Count);
+
 		return result;
+	}
+
+	/// <summary>True when a DAV propstat status line ("HTTP/1.1 200 OK") reports a 2xx code.</summary>
+	private static bool IsOkStatus(string? statusLine)
+	{
+		if (string.IsNullOrWhiteSpace(statusLine))
+			return false;
+		foreach (string token in statusLine.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+			if (token.Length == 3 && int.TryParse(token, out int code))
+				return code is >= 200 and < 300;
+		return false;
 	}
 
 	private static async Task EnsureSuccessAsync(
