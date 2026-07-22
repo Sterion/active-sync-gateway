@@ -1,6 +1,7 @@
 using System.ComponentModel;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.State;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -25,25 +26,15 @@ internal sealed class BlockCommand(IAnsiConsole terminal) : DatabaseCommand<Bloc
 	protected override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, BlockSettings settings, CancellationToken cancellationToken)
 	{
-		LoginBlock? existing = await db.LoginBlocks.FirstOrDefaultAsync(
-			b => b.UserName == settings.User && b.DeviceId == settings.DeviceId, cancellationToken);
+		DeviceAdminService devices = services.GetRequiredService<DeviceAdminService>();
+		LoginBlock? existing = await devices.FindBlockAsync(settings.User, settings.DeviceId, cancellationToken);
 		if (existing is not null)
 		{
 			Terminal.WriteLine($"Already blocked: {settings.Scope} (since {Utc(existing.CreatedUtc)} UTC).");
 			return 0;
 		}
 
-		// DbSet.Add is synchronous and local (no I/O) — AddAsync exists only to support
-		// async value generators (e.g. HiLo/Cosmos), which this project doesn't use.
-#pragma warning disable VSTHRD103
-		db.LoginBlocks.Add(new LoginBlock
-		{
-			UserName = settings.User,
-			DeviceId = settings.DeviceId,
-			CreatedUtc = DateTime.UtcNow,
-		});
-#pragma warning restore VSTHRD103
-		await db.SaveChangesAsync(cancellationToken);
+		await devices.BlockAsync(settings.User, settings.DeviceId, cancellationToken);
 		Terminal.WriteLine($"Blocked {settings.Scope} — the gateway now answers its logins with 403.");
 		return 0;
 	}
@@ -54,20 +45,17 @@ internal sealed class UnblockCommand(IAnsiConsole terminal) : DatabaseCommand<Bl
 	protected override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, BlockSettings settings, CancellationToken cancellationToken)
 	{
-		LoginBlock? existing = await db.LoginBlocks.FirstOrDefaultAsync(
-			b => b.UserName == settings.User && b.DeviceId == settings.DeviceId, cancellationToken);
-		if (existing is null)
+		DeviceAdminService devices = services.GetRequiredService<DeviceAdminService>();
+		DeviceAdminService.UnblockResult result =
+			await devices.UnblockAsync(settings.User, settings.DeviceId, cancellationToken);
+		if (!result.Removed)
 		{
 			Terminal.WriteLine($"No block exists for {settings.Scope} — nothing to remove.");
 			return 0;
 		}
 
-		db.LoginBlocks.Remove(existing);
-		await db.SaveChangesAsync(cancellationToken);
-
-		int remaining = await db.LoginBlocks.CountAsync(b => b.UserName == settings.User, cancellationToken);
 		Terminal.WriteLine($"Unblocked {settings.Scope}."
-			+ (remaining > 0 ? $" {remaining} other block(s) for this user remain." : ""));
+			+ (result.RemainingForUser > 0 ? $" {result.RemainingForUser} other block(s) for this user remain." : ""));
 		return 0;
 	}
 }

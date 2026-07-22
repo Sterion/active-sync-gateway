@@ -206,7 +206,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **17. Contracts surface** — ~~`K57`~~ ~~`K58`~~ ~~`K59`~~ ~~`K61`~~ ~~`K62`~~ ~~`K64`~~ ~~`K67`~~ ~~`K69`~~ ~~`K71`~~ **COMPLETE**
 > NOTE — **Breaking — bundle into one major version bump.** Move host-only types out, split `IContentStore` into optional capabilities, make `CreateConnection` async, fix fail-open `SharedCollection.Parse`, add `ContractVersion`.
 
-**18. WebUi → Core services** — `S3` `C18`
+**18. WebUi → Core services** — ~~`S3`~~ ~~`C18`~~ **COMPLETE**
 > Extract `DeviceAdminService`, `ShareAdminService`, `LogQueryService` so CLI and WebUi share one validated path. Removes the second write path to the same tables.
 
 **19. Structural guardrails** — `S4` `S8`

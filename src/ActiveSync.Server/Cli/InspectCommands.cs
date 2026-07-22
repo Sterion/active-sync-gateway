@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Globalization;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
@@ -171,13 +172,9 @@ internal sealed class DevicesCommand(IAnsiConsole terminal) : DatabaseCommand<De
 	protected override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, Settings settings, CancellationToken cancellationToken)
 	{
-		IQueryable<Device> query = db.Devices;
-		if (settings.User is not null)
-			query = query.Where(d => d.UserName == settings.User);
-		List<Device> devices = await query
-			.OrderBy(d => d.UserName).ThenBy(d => d.DeviceId)
-			.ToListAsync(cancellationToken);
-		if (devices.Count == 0)
+		DeviceAdminService admin = services.GetRequiredService<DeviceAdminService>();
+		DeviceAdminService.DevicePage page = await admin.ListAsync(settings.User, 0, null, cancellationToken);
+		if (page.Devices.Count == 0)
 		{
 			Terminal.WriteLine(settings.User is null
 				? "No devices are registered."
@@ -185,17 +182,12 @@ internal sealed class DevicesCommand(IAnsiConsole terminal) : DatabaseCommand<De
 			return 0;
 		}
 
-		List<LoginBlock> blocks = await db.LoginBlocks.ToListAsync(cancellationToken);
-
 		Table table = new Table().Border(TableBorder.Rounded);
 		table.AddColumns("User", "Device id", "Type", "Created (UTC)", "Last seen (UTC)", "Folder sync key", "Blocked");
-		foreach (Device device in devices)
+		foreach (DeviceAdminService.DeviceListing listing in page.Devices)
 		{
-			string blocked = blocks.Any(b => b.UserName == device.UserName && b.DeviceId is null)
-				? "user"
-				: blocks.Any(b => b.UserName == device.UserName && b.DeviceId == device.DeviceId)
-					? "yes"
-					: "-";
+			Device device = listing.Device;
+			string blocked = listing.UserBlocked ? "user" : listing.Blocked ? "yes" : "-";
 			AddRow(table, device.UserName, device.DeviceId,
 				device.DeviceType.Length > 0 ? device.DeviceType : "-",
 				Utc(device.CreatedUtc), Utc(device.LastSeenUtc),

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
@@ -90,8 +91,9 @@ internal sealed class DeviceWipeCommand(IAnsiConsole terminal)
 	protected override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, Settings settings, CancellationToken cancellationToken)
 	{
-		Device? device = await db.Devices.FirstOrDefaultAsync(
-			d => d.UserName == settings.User && d.DeviceId == settings.DeviceId, cancellationToken);
+		DeviceAdminService devices = services.GetRequiredService<DeviceAdminService>();
+		Device? device = await devices.SetPendingWipeAsync(
+			settings.User, settings.DeviceId, !settings.Cancel, cancellationToken);
 		if (device is null)
 		{
 			await Console.Error.WriteLineAsync($"No device '{settings.DeviceId}' for '{settings.User}'.");
@@ -100,14 +102,10 @@ internal sealed class DeviceWipeCommand(IAnsiConsole terminal)
 
 		if (settings.Cancel)
 		{
-			device.PendingAccountWipe = false;
-			await db.SaveChangesAsync(cancellationToken);
 			Terminal.WriteLine($"Pending account wipe for {settings.User} ({settings.DeviceId}) cancelled.");
 			return 0;
 		}
 
-		device.PendingAccountWipe = true;
-		await db.SaveChangesAsync(cancellationToken);
 		Terminal.WriteLine(
 			$"Account wipe armed for {settings.User} ({settings.DeviceId}): the device receives the " +
 			"directive on its next request and is blocked once it acknowledges.");

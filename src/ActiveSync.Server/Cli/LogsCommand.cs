@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.State;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -45,7 +45,7 @@ internal sealed class LogsCommand(IAnsiConsole terminal) : AsyncCommand<LogsComm
 		string[]? accepted = null;
 		if (!string.IsNullOrWhiteSpace(settings.Level))
 		{
-			accepted = LevelsAtOrAbove(settings.Level);
+			accepted = LogQueryService.LevelsAtOrAbove(settings.Level);
 			if (accepted.Length == 0)
 			{
 				await Console.Error.WriteLineAsync(
@@ -59,20 +59,12 @@ internal sealed class LogsCommand(IAnsiConsole terminal) : AsyncCommand<LogsComm
 		if (services is null)
 			return 1;
 		await using ServiceProvider _ = services;
-		await using AsyncServiceScope scope = services.CreateAsyncScope();
-		SyncDbContext db = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
+		LogQueryService logs = services.GetRequiredService<LogQueryService>();
 
 		DateTime cutoff = DateTime.UtcNow - window;
-		IQueryable<LogEntry> query = db.LogEntries.AsNoTracking().Where(e => e.TimestampUtc >= cutoff);
-		if (!string.IsNullOrWhiteSpace(settings.User))
-			query = query.Where(e => e.User == settings.User);
-		if (accepted is not null)
-			query = query.Where(e => accepted.Contains(e.Level));
-
-		List<LogEntry> rows = await query
-			.OrderByDescending(e => e.TimestampUtc)
-			.Take(limit)
-			.ToListAsync(ct);
+		LogQueryService.LogPage page = await logs.QueryAsync(
+			new LogQueryService.LogQuery(cutoff, null, accepted, settings.User, null, null, null, limit), ct);
+		List<LogEntry> rows = [.. page.Entries];
 		rows.Reverse(); // print chronologically (oldest first)
 
 		Table table = new Table().AddColumns("Time (UTC)", "Level", "User", "Source", "Message");
@@ -119,15 +111,6 @@ internal sealed class LogsCommand(IAnsiConsole terminal) : AsyncCommand<LogsComm
 		};
 		return window > TimeSpan.Zero;
 	}
-
-	private static string[] LevelsAtOrAbove(string level) => level.ToLowerInvariant() switch
-	{
-		"information" or "info" => ["Information", "Warning", "Error", "Fatal"],
-		"warning" or "warn" => ["Warning", "Error", "Fatal"],
-		"error" => ["Error", "Fatal"],
-		"fatal" or "critical" => ["Fatal"],
-		_ => []
-	};
 
 	private static string ShortSource(string? source) =>
 		string.IsNullOrEmpty(source) ? "-" : source.Split('.')[^1];

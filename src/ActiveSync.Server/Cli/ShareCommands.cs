@@ -1,6 +1,7 @@
 using System.ComponentModel;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.State;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -30,45 +31,32 @@ internal sealed class ShareAddCommand(IAnsiConsole terminal) : DatabaseCommand<S
 	protected override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, ShareAddSettings settings, CancellationToken cancellationToken)
 	{
-		string href = settings.CollectionHref.Trim();
-		if (!href.StartsWith('/'))
+		// The same identifier rules the web admin and every other write path apply (C16) — the CLI
+		// used to check only that the href started with '/'.
+		if (AdminIdentifiers.LoginProblem(settings.User) is { } loginError)
 		{
-			Terminal.MarkupLine("[red]The collection must be an absolute path starting with '/'.[/]");
+			Terminal.MarkupLine($"[red]{Markup.Escape(loginError)}[/]");
+			return 1;
+		}
+		if (AdminIdentifiers.HrefProblem(settings.CollectionHref) is { } hrefError)
+		{
+			Terminal.MarkupLine($"[red]{Markup.Escape(hrefError)}[/]");
 			return 1;
 		}
 
-		SharedCalendarGrant? existing = await db.SharedCalendarGrants.FirstOrDefaultAsync(
-			g => g.UserName == settings.User && g.CollectionHref == href, cancellationToken);
+		string href = settings.CollectionHref.Trim();
 		string mode = settings.ReadOnly ? "read-only" : "read-write";
-		if (existing is not null)
-		{
-			if (existing.ReadOnly == settings.ReadOnly)
-			{
-				Terminal.WriteLine($"'{settings.User}' already has {href} ({mode}).");
-				return 0;
-			}
+		ShareAdminService shares = services.GetRequiredService<ShareAdminService>();
+		ShareAdminService.ShareUpsert result =
+			await shares.AddOrUpdateAsync(settings.User, href, settings.ReadOnly, cancellationToken);
 
-			existing.ReadOnly = settings.ReadOnly;
-			await db.SaveChangesAsync(cancellationToken);
-			Terminal.WriteLine($"Changed {href} for '{settings.User}' to {mode}.");
-			return 0;
-		}
-
-		// DbSet.Add is synchronous and local (no I/O) — AddAsync exists only to support
-		// async value generators (e.g. HiLo/Cosmos), which this project doesn't use.
-#pragma warning disable VSTHRD103
-		db.SharedCalendarGrants.Add(new SharedCalendarGrant
+		Terminal.WriteLine(result.Kind switch
 		{
-			UserName = settings.User,
-			CollectionHref = href,
-			ReadOnly = settings.ReadOnly,
-			CreatedUtc = DateTime.UtcNow,
+			ShareAdminService.UpsertKind.Unchanged => $"'{settings.User}' already has {href} ({mode}).",
+			ShareAdminService.UpsertKind.Remoded => $"Changed {href} for '{settings.User}' to {mode}.",
+			_ => $"Granted {href} to '{settings.User}' ({mode}). " +
+				"Applies when the user's backend session is next built (idle recycle or restart)."
 		});
-#pragma warning restore VSTHRD103
-		await db.SaveChangesAsync(cancellationToken);
-		Terminal.WriteLine(
-			$"Granted {href} to '{settings.User}' ({mode}). " +
-			"Applies when the user's backend session is next built (idle recycle or restart).");
 		return 0;
 	}
 }
@@ -79,16 +67,13 @@ internal sealed class ShareRemoveCommand(IAnsiConsole terminal) : DatabaseComman
 		IServiceProvider services, SyncDbContext db, ShareGrantSettings settings, CancellationToken cancellationToken)
 	{
 		string href = settings.CollectionHref.Trim();
-		SharedCalendarGrant? existing = await db.SharedCalendarGrants.FirstOrDefaultAsync(
-			g => g.UserName == settings.User && g.CollectionHref == href, cancellationToken);
-		if (existing is null)
+		ShareAdminService shares = services.GetRequiredService<ShareAdminService>();
+		if (!await shares.RemoveAsync(settings.User, href, cancellationToken))
 		{
 			Terminal.WriteLine($"'{settings.User}' has no grant for {href} — nothing to remove.");
 			return 0;
 		}
 
-		db.SharedCalendarGrants.Remove(existing);
-		await db.SaveChangesAsync(cancellationToken);
 		Terminal.WriteLine($"Removed {href} from '{settings.User}'. " +
 		                   "The folder disappears when the user's backend session is next built.");
 		return 0;
@@ -107,11 +92,9 @@ internal sealed class ShareListCommand(IAnsiConsole terminal) : DatabaseCommand<
 	protected override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, ShareListSettings settings, CancellationToken cancellationToken)
 	{
-		List<SharedCalendarGrant> grants = await db.SharedCalendarGrants.AsNoTracking()
-			.Where(g => settings.User == null || g.UserName == settings.User)
-			.OrderBy(g => g.UserName).ThenBy(g => g.CollectionHref)
-			.ToListAsync(cancellationToken);
-		if (grants.Count == 0)
+		ShareAdminService shares = services.GetRequiredService<ShareAdminService>();
+		ShareAdminService.SharePage page = await shares.ListAsync(settings.User, 0, null, cancellationToken);
+		if (page.Grants.Count == 0)
 		{
 			Terminal.WriteLine(settings.User is null
 				? "No shared-calendar grants."
@@ -120,7 +103,7 @@ internal sealed class ShareListCommand(IAnsiConsole terminal) : DatabaseCommand<
 		}
 
 		Table table = new Table().AddColumns("User", "Collection", "Mode", "Granted (UTC)");
-		foreach (SharedCalendarGrant grant in grants)
+		foreach (SharedCalendarGrant grant in page.Grants)
 			table.AddRow(
 				Markup.Escape(grant.UserName),
 				Markup.Escape(grant.CollectionHref),

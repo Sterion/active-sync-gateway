@@ -93,4 +93,15 @@ public sealed class CliShareTests : IDisposable
 		Assert.Equal(1, result.ExitCode);
 		Assert.Empty(Grants());
 	}
+
+	// Item 18 routed the CLI through the SAME AdminIdentifiers checks the web admin runs (C16),
+	// which previously lived only on the web side: `eas share add` used to check only that the
+	// href started with '/', so a '..' segment persisted as a grant that can never match.
+	[Fact]
+	public void ShareAdd_RejectsDotDotSegment()
+	{
+		CommandAppResult result = CreateTester().Run("share", "add", "alice@x", "/dav/../evil/");
+		Assert.Equal(1, result.ExitCode);
+		Assert.Empty(Grants());
+	}
 }
