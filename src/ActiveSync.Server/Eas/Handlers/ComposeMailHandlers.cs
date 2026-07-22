@@ -44,47 +44,79 @@ public abstract class ComposeMailHandlerBase(
 			return;
 		}
 
+		// Building the outgoing bytes and the submit itself are the only steps whose failure means
+		// the mail did NOT go out — they alone map to Status 120. Everything after the submit is
+		// best-effort: once the mail is accepted, reporting a failure would make the client resend
+		// and the recipient receive it twice (F30).
+		byte[]? outgoing;
 		try
 		{
-			byte[]? outgoing = await BuildOutgoingAsync(context, request, ct);
-			if (outgoing is null)
-			{
-				// The client referenced a source item (reply-to / forward-of) that no longer
-				// resolves — a stale ServerId, a moved or re-listed item. Sending the typed text
-				// alone would silently drop the quote/forwarded message, so fail the command.
-				logger.LogWarning(
-					"{Command} for {User}: the referenced source item could not be resolved; not sending a degraded message",
-					Command, context.Device.UserName);
-				await WriteErrorAsync(context, "150"); // MS-ASCMD: the referenced original item was not found
-				return;
-			}
+			outgoing = await BuildOutgoingAsync(context, request, ct);
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			logger.LogError(ex, "{Command}: building the outgoing message failed for {User}",
+				Command, context.Device.UserName);
+			await WriteErrorAsync(context, "120"); // mail submission failed
+			return;
+		}
 
-			if (outgoing.Length == 0)
-			{
-				await WriteErrorAsync(context, "103");
-				return;
-			}
+		if (outgoing is null)
+		{
+			// The client referenced a source item (reply-to / forward-of) that no longer resolves —
+			// a stale ServerId, a moved or re-listed item. Sending the typed text alone would
+			// silently drop the quote/forwarded message, so fail the command (F29).
+			logger.LogWarning(
+				"{Command} for {User}: the referenced source item could not be resolved; not sending a degraded message",
+				Command, context.Device.UserName);
+			await WriteErrorAsync(context, "150"); // MS-ASCMD: the referenced original item was not found
+			return;
+		}
 
+		if (outgoing.Length == 0)
+		{
+			await WriteErrorAsync(context, "103");
+			return;
+		}
+
+		try
+		{
 			await context.Session.MailSubmit.SendAsync(outgoing, ct);
-			Core.Observability.GatewayMetrics.RecordMailSent(context.Device.UserName, Command switch
-			{
-				"SmartReply" => "smart_reply",
-				"SmartForward" => "smart_forward",
-				_ => "send"
-			});
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			logger.LogError(ex, "{Command} failed for {User}", Command, context.Device.UserName);
+			await WriteErrorAsync(context, "120"); // mail submission failed
+			return;
+		}
+
+		Core.Observability.GatewayMetrics.RecordMailSent(context.Device.UserName, Command switch
+		{
+			"SmartReply" => "smart_reply",
+			"SmartForward" => "smart_forward",
+			_ => "send"
+		});
+
+		// Past the submit the mail is out. Filing to Sent and flagging the source are best-effort;
+		// a failure (including a cancellation of the now-pointless follow-up) must NOT turn a sent
+		// message into a reported failure. Swallow everything and always return the success 200.
+		try
+		{
 			(string to, string subject) = await PeekHeadersAsync(outgoing, ct);
 			logger.LogInformation("{Command} by {User}: to {To}, subject {Subject}",
 				Command, context.Device.UserName, to, subject);
 			if (request.SaveInSent)
 				await context.Session.MailStore.SaveToSentAsync(outgoing, ct);
 			await MarkSourceAsync(context, request, ct);
-			await context.WriteEmptyAsync(); // success = empty 200
 		}
-		catch (Exception ex) when (ex is not OperationCanceledException)
+		catch (Exception ex)
 		{
-			logger.LogError(ex, "{Command} failed for {User}", Command, context.Device.UserName);
-			await WriteErrorAsync(context, "120"); // mail submission failed
+			logger.LogWarning(ex,
+				"{Command} sent for {User} but a post-submit step (file to Sent / flag source) failed",
+				Command, context.Device.UserName);
 		}
+
+		await context.WriteEmptyAsync(); // success = empty 200
 	}
 
 	/// <summary>Extracts To/Subject from a MIME blob for log headlines; never throws.</summary>

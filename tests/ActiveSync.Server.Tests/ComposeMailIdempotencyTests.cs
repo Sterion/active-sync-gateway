@@ -50,6 +50,29 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		Assert.Empty(_harness.Session.Submit.Sent);
 	}
 
+	[Fact]
+	public async Task SendMail_WhenFilingToSentFails_ReportsSuccessAndDoesNotResend()
+	{
+		// The submit succeeds; filing to Sent — a best-effort follow-up — fails.
+		_harness.Session.Mail.SaveToSentShouldThrow = true;
+
+		XDocument request = new(new XElement(CM + "SendMail",
+			new XElement(CM + "SaveInSentItems"),
+			OpaqueMime("From: u@example.test\r\nTo: dest@example.com\r\nSubject: hi\r\n\r\nbody\r\n")));
+
+		SendMailHandler handler = new(
+			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<SendMailHandler>.Instance);
+
+		XDocument? response = await _harness.RunAsync(handler, "SendMail", request);
+
+		// Success for SendMail is an empty 200 — not the Status 120 the old single catch emitted.
+		Assert.Null(response);
+		// The mail went out exactly once, and the file-to-Sent failure was reached and swallowed.
+		Assert.Single(_harness.Session.Submit.Sent);
+		Assert.True(_harness.Session.Mail.SaveToSentAttempted);
+	}
+
 	private static XElement OpaqueMime(string mime)
 	{
 		XElement element = new(CM + "Mime", Convert.ToBase64String(Encoding.UTF8.GetBytes(mime)));
