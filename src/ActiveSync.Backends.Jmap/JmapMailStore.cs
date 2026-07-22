@@ -600,19 +600,37 @@ public sealed class JmapMailStore(
 	{
 		if (mailboxIds.Length == 0)
 			return new Dictionary<string, string>();
-		using JmapResponse response = await client.CallAsync(CapMail, "Mailbox/get", new Dictionary<string, object?>
-		{
-			["accountId"] = account,
-			["ids"] = mailboxIds,
-			["properties"] = new[] { "id", "totalEmails", "unreadEmails" }
-		}, ct).ConfigureAwait(false);
+		// Mailbox counts (total:unread) alone miss a flag-only change (e.g. $flagged/$answered/a
+		// category, which move no counter) and an equal add+delete (the counts net out). The
+		// account-level Email state advances on ANY email create/update/destroy, so fold it into
+		// every folder's token to catch those (H19). Both are fetched in one request; Email/get with
+		// an empty id list returns just the current state. NOTE: the state is account-wide, so a
+		// change in one folder shifts every watched folder's token - Ping over-notifies rather than
+		// misses, which is the safe direction (the client resyncs and finds nothing new).
+		IReadOnlyList<JmapCall> calls =
+		[
+			new JmapCall("Mailbox/get", new Dictionary<string, object?>
+			{
+				["accountId"] = account,
+				["ids"] = mailboxIds,
+				["properties"] = new[] { "id", "totalEmails", "unreadEmails" }
+			}, "0"),
+			new JmapCall("Email/get", new Dictionary<string, object?>
+			{
+				["accountId"] = account,
+				["ids"] = Array.Empty<string>()
+			}, "1")
+		];
+		using JmapResponse response = await client.InvokeAsync(CapMail, calls, ct).ConfigureAwait(false);
+		JsonElement emailArgs = response.Arguments("1");
+		string emailState = emailArgs.TryGetProperty("state", out JsonElement es) ? es.GetString() ?? "" : "";
 		Dictionary<string, string> tokens = new(StringComparer.Ordinal);
 		foreach (JsonElement mailbox in response.Arguments("0").GetProperty("list").EnumerateArray())
 		{
 			string id = mailbox.GetProperty("id").GetString()!;
 			long total = mailbox.TryGetProperty("totalEmails", out JsonElement t) ? t.GetInt64() : 0;
 			long unread = mailbox.TryGetProperty("unreadEmails", out JsonElement u) ? u.GetInt64() : 0;
-			tokens[id] = $"{total}:{unread}";
+			tokens[id] = $"{total}:{unread}:{emailState}";
 		}
 
 		return tokens;
