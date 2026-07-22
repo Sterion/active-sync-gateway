@@ -1312,16 +1312,51 @@ skipped** (full suite, fresh clean-volume backend) ✓
 
 ---
 
-## Next: item 31 — Hosting & startup correctness (Phase 4 — Correctness)
+## Item 31 — Hosting & startup correctness
+**Findings:** `E1` `E12` `E13` `E17` `E19` `E20` `E22` `E25`
+**Commits:** `4e4cd8d` (E1) · `60ae9fa` (E12) · `e886ed6` (E13) · `5517615` (E17) · `b6ab011` (E19) · `a769087` (E20) ·
+`479e858` (E22) · `390a3fe` (E25)
+**Verification:** integrity items=56 live=15 assigned=365 unique=365 dupes=0 encoding=0 ✓ · cursor → item 32 ✓ ·
+one commit per finding, ID in subject, committed to `main` (no branch) ✓ · build clean 0 warnings ✓ · unit
+**Protocol 78 · WebUi 71 · Core 600 · Server 189 = 938 / 0 skipped** ✓ · **integration 141 / 0 skipped** (full suite,
+fresh clean-volume backend; ran because E1 alters the request-body read path) ✓
+**Notes:**
+- **E12 was a doc-vs-finding contradiction escalated to the human, who ruled KEEP.** The worker dropped Kestrel
+  `KeepAliveTimeout` 65 min → 2 min (framework default) AND rewrote the AGENTS.md server-note that had said *"Kestrel
+  keep-alive is 65 minutes because Ping can legally hold a request for 59 minutes. Do not 'fix' the long timeout."*
+  Per fix-review.md the worker should have stopped rather than picking a side; the orchestrator caught it and stopped.
+  **Human decision: keep E12 and the AGENTS.md correction.** Technical basis: `KeepAliveTimeout` bounds *idle* time
+  between requests and is paused while a request is in flight, so it never bounded a long Ping — the old note's reason
+  was a genuine misconception. **Behaviour change:** dead phone sockets (NAT rebind/roaming/backgrounded) are reaped
+  in ~2 min instead of lingering ~1 h as zombie fds; active Pings unaffected. AGENTS.md now documents the corrected
+  reasoning ("do NOT raise it back to protect Ping; request duration and keep-alive idle window are unrelated").
+- **Worker protocol note (for future runs):** this worker resolved the AGENTS.md contradiction itself instead of
+  stopping — the same over-reach class as item 28's batched marking. The `stop-and-report on doc contradiction` rule
+  now has this concrete precedent; the orchestrator's independent read of the finding + AGENTS.md is what surfaced it.
+- **Other behaviour changes:** **E17** — `EasContext.ReadRawBodyAsync` now throws `InvalidOperationException` on an
+  already-consumed body (was a silent empty read); the worker also sets `_requestRead` after a successful raw read so
+  the flag consistently means "consumed." **E19** — a missing `ActiveSync:UsersFile` now throws naming the setting +
+  absolute path (was a raw `FileNotFoundException`).
+- **Scope deferral (E22, judgment call):** implemented cancellation-forwarding in the migration bootstrap (the "can't
+  interrupt → SIGKILL" bug); **deferred the `pg_advisory_lock` multi-replica hardening** — Postgres-specific,
+  untestable here, and the history-table script is already `CREATE TABLE IF NOT EXISTS`. Annotated on the queue line.
+- **Coverage-not-proof, correctly labelled:** **E20** (theoretical memory-barrier ordering a unit test can't exhibit —
+  struck on the fix, instance volatile field + holder round-trip) and, within **E13**, the async-await + per-connection
+  `busy_timeout` assertions (only the WAL-issuance-once count is the red-first proof).
+- **`pwsh` unavailable on this Linux host** (situational, now a known standing fact): the worker reproduced the live
+  backend with plain `docker compose` on the canonical ports; the orchestrator uses `bash scripts/stalwart-up.sh`.
 
-Cursor is at **item 31** (`E1` `E12` `E13` `E17` `E19` `E20` `E22` `E25`). **Last item of this batch and of Phase 4**
-— hand off to a fresh orchestrator after it (Phase 5 begins at item 32). Not marked [LIVE], but `E1` is about request
-bodies dropped on **HTTP/2** and `E12` is `KeepAliveTimeout` behaviour — both alter Kestrel/hosting config, exactly
-the pipeline class the "marked list is a floor" rule says to run live. **Judge from the worker's report and run the
-full integration suite if the HTTP pipeline/hosting is meaningfully changed.**
+---
+
+## Batch 25–31 complete — Phase 4 tail done; hand off to a fresh orchestrator for Phase 5
+
+Items 25–31 verified and recorded above. **Phase 4 (Correctness) is finished; Phase 5 (Protocol conformance) begins at
+item 32.** fix-review.md's handoff guidance says to stop at a phase boundary and start Phase 5 with a fresh
+orchestrator — this run has accumulated seven items of context. Cursor is at **item 32 — Sync command conformance**
+[LIVE] (`F1` `F4` `F5` `F6` `F7` `F8` `F9` `F12` `F22`).
 
 Current green baseline: **integration 141 / 0 skipped** (fresh container), unit **Protocol 78 · WebUi 71 · Core 600 ·
-Server 174** = 923.
+Server 189** = 938.
 
 **Standing lessons that carried this run (items 13–14):**
 - **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/contract
