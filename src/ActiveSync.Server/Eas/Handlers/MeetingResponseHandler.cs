@@ -133,8 +133,11 @@ public sealed class MeetingResponseHandler(
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException)
 			{
+				// A transient backend failure is a server error — status 4 (retryable), not
+				// status 2 "invalid meeting request", which tells the client the request was
+				// malformed. The explicit 2s above stay for genuinely bad input (F34).
 				logger.LogError(ex, "MeetingResponse failed for {RequestId}", requestId);
-				results.Add(Result("2"));
+				results.Add(Result("4"));
 			}
 		}
 
