@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using ActiveSync.Crypto;
@@ -78,19 +79,41 @@ try
 				Console.Error.Write(result.Stderr);
 			return result.ExitCode;
 		}
+
+		// A 2xx with an unreadable body: the command RAN server-side (success status), so re-running
+		// it locally could repeat a mutating verb. Report and fail, don't fall back.
+		Console.Error.WriteLine(
+			"eas: the gateway returned an unreadable response; the command may have already run — do not simply retry it.");
+		return 1;
 	}
-	// 404 (endpoint disabled, non-loopback, or a rejected envelope) or unparsable body → run locally.
+
+	// ONLY 404 proves the request never reached the CLI pipeline (endpoint disabled, non-loopback,
+	// or a rejected envelope) — nothing ran, so local execution is safe. Any other status (a 5xx
+	// especially) means the command may have started server-side and even completed its DB writes;
+	// re-running it here would risk a live double-execution (L36).
+	if (response.StatusCode == HttpStatusCode.NotFound)
+		return RunLocal(arguments, stdin);
+
+	Console.Error.WriteLine(
+		$"eas: the gateway returned {(int)response.StatusCode} {response.ReasonPhrase}; the command " +
+		"may have already run server-side, so it is not being retried locally.");
+	return 1;
 }
 catch (HttpRequestException)
 {
-	// No gateway listening (server stopped, or repairing an unconfigured one) → run locally.
+	// No gateway listening (server stopped, or repairing an unconfigured one) → nothing ran, so run
+	// locally.
+	return RunLocal(arguments, stdin);
 }
 catch (TaskCanceledException)
 {
-	// Request timed out → run locally rather than leave the operator without an answer.
+	// The 5-minute client timeout fired: the command is very likely still running server-side, so
+	// re-running it locally would double-execute it. Report and fail instead (L36).
+	Console.Error.WriteLine(
+		"eas: the gateway did not respond within the timeout; the command may still be running " +
+		"server-side, so it is not being retried locally.");
+	return 1;
 }
-
-return RunLocal(arguments, stdin);
 
 static bool Eq(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
