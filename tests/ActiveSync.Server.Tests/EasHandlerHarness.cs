@@ -50,6 +50,18 @@ public sealed class EasHandlerHarness : IDisposable
 		_connection.Dispose();
 	}
 
+	/// <summary>
+	///   A second context over the same in-memory database, for reading what was actually PERSISTED
+	///   (committed to the shared SQLite connection) independently of <see cref="State" />'s tracked,
+	///   possibly-unsaved entities.
+	/// </summary>
+	public SqliteSyncDbContext NewDbContext()
+	{
+		DbContextOptions<SqliteSyncDbContext> dbOptions = new DbContextOptionsBuilder<SqliteSyncDbContext>()
+			.UseSqlite(_connection).Options;
+		return new SqliteSyncDbContext(dbOptions);
+	}
+
 	/// <summary>Registers folders and returns the live registry (ServerIds assigned by the store).</summary>
 	public Task<List<UserFolder>> RegisterFoldersAsync(params BackendFolder[] folders)
 	{

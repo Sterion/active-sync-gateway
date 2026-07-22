@@ -57,10 +57,15 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 			// LastClientAddsJson/LastClientChangesJson are deliberately KEPT — they describe
 			// the commands of the discarded generation, which are exactly the ones the client
 			// is about to re-send.
+			// F12: the rollback is applied to the tracked entity only, NOT SaveChanges'd here.
+			// Persisting it immediately meant a subsequent CommitCollectionStateAsync failure left
+			// the collection rolled back with no replay generation, so the client's next attempt
+			// with the same key validated as Current against the rolled-back snapshot and re-sent
+			// already-delivered items. Deferring it lets the round's own commit persist the
+			// rollback and the new generation atomically — or, if the round never commits, discard it.
 			state.SyncKey = key;
 			state.SnapshotCompressed = state.PreviousSnapshotCompressed;
 			state.PreviousSnapshotCompressed = null;
-			await db.SaveChangesAsync(ct).ConfigureAwait(false);
 			return (SyncKeyValidation.Replay, state);
 		}
 

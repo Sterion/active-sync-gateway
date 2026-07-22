@@ -5,6 +5,7 @@ using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using ActiveSync.Server.Eas;
 using ActiveSync.Server.Eas.Handlers;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -299,6 +300,40 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.True(commandsAt >= 0, "Commands should be present");
 		// Exchange/Z-Push emit MoreAvailable immediately after Status; order matters for strict parsers.
 		Assert.True(moreAt < commandsAt, $"MoreAvailable (index {moreAt}) must precede Commands (index {commandsAt})");
+	}
+
+	// ---- F12: the replay rollback must not be persisted until the request commits ----
+	[Fact]
+	public async Task F12_ReplayRollback_IsNotPersistedBeforeCommit()
+	{
+		UserFolder inbox = await RegisterInboxAsync();
+		Device device = await _harness.State.GetOrCreateDeviceAsync(
+			EasHandlerHarness.UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+
+		// Advance the collection to SyncKey 2 with a live previous (SyncKey-1) generation.
+		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
+			device, inbox.ServerId, "0", CancellationToken.None);
+		await _harness.State.CommitCollectionStateAsync(
+			state!, new Dictionary<string, string> { ["a"] = "1" }, 0, CancellationToken.None);
+		await _harness.State.CommitCollectionStateAsync(
+			state!, new Dictionary<string, string> { ["a"] = "1", ["b"] = "1" }, 0, CancellationToken.None);
+
+		// The client re-sends the one-behind key → Replay. The rollback must live only in the
+		// tracked entity; nothing is persisted until the round's own commit lands.
+		(SyncKeyValidation validation, _) = await _harness.State.ValidateSyncKeyAsync(
+			device, inbox.ServerId, "1", CancellationToken.None);
+		Assert.Equal(SyncKeyValidation.Replay, validation);
+
+		// Read what is actually committed to the database, independently of the tracked entity.
+		await using SqliteSyncDbContext fresh = _harness.NewDbContext();
+		CollectionState persisted = await fresh.CollectionStates.AsNoTracking()
+			.SingleAsync(c => c.CollectionId == inbox.ServerId);
+
+		// Before the fix, ValidateSyncKeyAsync SaveChanges'd the rollback immediately: the DB would
+		// show SyncKey 1 with the replay generation already discarded. A commit failure after that
+		// leaves the client's key re-validating as Current against the rolled-back snapshot.
+		Assert.Equal(2, persisted.SyncKey);
+		Assert.NotNull(persisted.PreviousSnapshotCompressed);
 	}
 
 	private sealed class StubLifetime : IHostApplicationLifetime
