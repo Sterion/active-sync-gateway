@@ -41,9 +41,13 @@ public sealed class AccountResolver
 	private readonly SemaphoreSlim _refreshGate = new(1, 1);
 	private readonly Settings.ChangeStampRefreshGate _gate = new();
 	private volatile Snapshot _snapshot;
+	// _lastStamp is a Guid? (cannot be `volatile`) but is only ever touched inside _refreshGate,
+	// whose SemaphoreSlim Wait/Release are full memory barriers. _lastDbUsers is the one field read
+	// OUTSIDE that gate — OnRolesChanged runs on the config-reload thread — so it must be volatile to
+	// avoid compiling a rebuild against a stale reference (B23).
 	private Guid? _lastStamp;
-	private Dictionary<string, AccountOptions>? _lastDbUsers;
-	private bool _refreshErrorLogged;
+	private volatile Dictionary<string, AccountOptions>? _lastDbUsers;
+	private volatile bool _refreshErrorLogged;
 
 	/// <summary>Raised after the snapshot was rebuilt from a database change (caches should reset).</summary>
 	public event Action? SnapshotChanged;

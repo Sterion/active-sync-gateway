@@ -23,7 +23,9 @@ public sealed class BackendRolesProvider : IDisposable
 	private readonly ILogger<BackendRolesProvider>? _logger;
 	private readonly IDisposable? _reloadSubscription;
 	private volatile BackendRolesConfig _current;
-	private string _signature;
+	// Both are read/written from the config-reload callback; keep _signature volatile to match the
+	// already-volatile _current so the pair cannot be observed half-updated (B23).
+	private volatile string _signature;
 
 	public BackendRolesProvider(
 		IConfiguration config,

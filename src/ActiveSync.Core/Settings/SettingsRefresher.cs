@@ -21,9 +21,11 @@ public sealed class SettingsRefresher(
 {
 	private readonly SemaphoreSlim _refreshGate = new(1, 1);
 	private readonly ChangeStampRefreshGate _gate = new();
+	// _lastStamp (Guid?) cannot be `volatile`; it is only touched inside _refreshGate (a full
+	// barrier). The bool flags are volatile so a reader outside the gate cannot see a stale value (B23).
 	private Guid? _lastStamp;
-	private bool _hasLoaded;
-	private bool _refreshErrorLogged;
+	private volatile bool _hasLoaded;
+	private volatile bool _refreshErrorLogged;
 
 	/// <summary>Raised after the settings snapshot changed (for consumers beyond IOptions, e.g. session recycle).</summary>
 	public event Action? Changed;
