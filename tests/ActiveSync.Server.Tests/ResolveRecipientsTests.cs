@@ -61,9 +61,51 @@ public sealed class ResolveRecipientsTests : IDisposable
 		Assert.Equal("1", resp?.Element(RR + "Status")?.Value);
 	}
 
+	// F43 (coverage) — the per-To lookups now run concurrently (Task.WhenAll). The observable
+	// contract that must survive that change is ORDER: each To's Response stays in request order and
+	// carries its own match. (The concurrency itself is not unit-observable with synchronous stubs.)
+	[Fact]
+	public async Task MultipleTos_ResponsesStayInRequestOrderWithTheirOwnMatch()
+	{
+		_harness.Session.Contacts = new QueryContacts(new Dictionary<string, IReadOnlyList<XElement>>
+		{
+			["alice"] = Hit("Alice", "alice@example.test"),
+			["bob"] = Hit("Bob", "bob@example.test"),
+			["carol"] = Hit("Carol", "carol@example.test")
+		});
+
+		XDocument? response = await _harness.RunAsync(
+			new ResolveRecipientsHandler(NullLogger<ResolveRecipientsHandler>.Instance),
+			"ResolveRecipients",
+			new XDocument(new XElement(RR + "ResolveRecipients",
+				new XElement(RR + "To", "alice"),
+				new XElement(RR + "To", "bob"),
+				new XElement(RR + "To", "carol"))));
+
+		List<XElement> resps = response!.Root!.Elements(RR + "Response").ToList();
+		Assert.Equal(["alice", "bob", "carol"], resps.Select(r => r.Element(RR + "To")!.Value));
+		Assert.Equal("alice@example.test",
+			resps[0].Element(RR + "Recipient")!.Element(RR + "EmailAddress")!.Value);
+		Assert.Equal("carol@example.test",
+			resps[2].Element(RR + "Recipient")!.Element(RR + "EmailAddress")!.Value);
+	}
+
 	private static IReadOnlyList<XElement> Hit(string display, string email)
 	{
 		return [new XElement(GAL + "DisplayName", display), new XElement(GAL + "EmailAddress", email)];
+	}
+
+	/// <summary>A GAL that answers each query with its own configured match set.</summary>
+	private sealed class QueryContacts(Dictionary<string, IReadOnlyList<XElement>> byQuery) : IContactOperations
+	{
+		public Task<IReadOnlyList<IReadOnlyList<XElement>>> SearchGalAsync(
+			string query, int maxResults, GalPhotoRequest? photos, CancellationToken ct)
+		{
+			IReadOnlyList<IReadOnlyList<XElement>> page = byQuery.TryGetValue(query, out IReadOnlyList<XElement>? hit)
+				? [hit]
+				: [];
+			return Task.FromResult(page);
+		}
 	}
 
 	private sealed class StubContacts(params IReadOnlyList<XElement>[] hits) : IContactOperations

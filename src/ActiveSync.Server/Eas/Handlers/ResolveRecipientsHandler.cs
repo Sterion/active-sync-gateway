@@ -46,76 +46,93 @@ public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> l
 		    windowEnd > windowStart)
 			availabilityWindow = (windowStart, windowEnd);
 
-		List<XElement> responses = new();
-
-		foreach (string to in tos)
-		{
-			List<XElement> recipients = new();
-			int galHits = 0;
-			if (context.Session.Contacts is not null)
-			{
-				IReadOnlyList<IReadOnlyList<XElement>> hits =
-					await context.Session.Contacts.SearchGalAsync(to, maxAmbiguous, photos, ct);
-				galHits = hits.Count;
-				foreach (IReadOnlyList<XElement> hit in hits)
-				{
-					string display = hit.FirstOrDefault(e => e.Name == GAL + "DisplayName")?.Value ?? to;
-					string? email = hit.FirstOrDefault(e => e.Name == GAL + "EmailAddress")?.Value;
-					if (email is null)
-						continue;
-					XElement recipient = new(RR + "Recipient",
-						new XElement(RR + "Type", "2"),
-						new XElement(RR + "DisplayName", display),
-						new XElement(RR + "EmailAddress", email));
-					// The GAL photo element translates into the RR-namespace shape.
-					if (hit.FirstOrDefault(e => e.Name == GAL + "Picture") is XElement galPicture)
-					{
-						XElement rrPicture = new(RR + "Picture",
-							new XElement(RR + "Status", galPicture.Element(GAL + "Status")?.Value ?? "173"));
-						if (galPicture.Element(GAL + "Data") is XElement data)
-							rrPicture.Add(new XElement(RR + "Data", data.Value));
-						recipient.Add(rrPicture);
-					}
-
-					if (availabilityWindow is { } window)
-						recipient.Add(await BuildAvailabilityAsync(context, email, window, ct));
-
-					recipients.Add(recipient);
-				}
-			}
-
-			if (recipients.Count == 0 && to.Contains('@'))
-			{
-				// Echo back a plain SMTP address as a resolved recipient.
-				XElement echoed = new(RR + "Recipient",
-					new XElement(RR + "Type", "2"),
-					new XElement(RR + "DisplayName", to),
-					new XElement(RR + "EmailAddress", to));
-				if (availabilityWindow is { } window)
-					echoed.Add(await BuildAvailabilityAsync(context, to, window, ct));
-				recipients.Add(echoed);
-			}
-
-			// MS-ASCMD status: 1 = single match, 4 = no match, and for ambiguity 2 = more matches
-			// than returned (the GAL truncated at the cap) vs 3 = all matches returned. Reporting
-			// 1 for a many-way match makes the client pick one arbitrarily instead of prompting.
-			string status = recipients.Count switch
-			{
-				0 => "4",
-				1 => "1",
-				_ => galHits >= maxAmbiguous ? "2" : "3"
-			};
-			responses.Add(new XElement(RR + "Response",
-				new XElement(RR + "To", to),
-				new XElement(RR + "Status", status),
-				new XElement(RR + "RecipientCount", recipients.Count.ToString()),
-				recipients));
-		}
+		// F43: each To is independent; run them concurrently rather than one SearchGalAsync (and its
+		// nested free/busy fetches) after another while a user watches a compose screen. Task.WhenAll
+		// preserves input order, so the responses still line up with the To list.
+		XElement[] responses = await Task.WhenAll(
+			tos.Select(to => ProcessToAsync(context, to, maxAmbiguous, photos, availabilityWindow, ct)));
 
 		await context.WriteResponseAsync(new XDocument(
 			new XElement(RR + "ResolveRecipients",
 				new XElement(RR + "Status", "1"),
 				responses)));
+	}
+
+	private async Task<XElement> ProcessToAsync(
+		EasContext context, string to, int maxAmbiguous, GalPhotoRequest? photos,
+		(DateTime StartUtc, DateTime EndUtc)? availabilityWindow, CancellationToken ct)
+	{
+		List<XElement> recipients = new();
+		int galHits = 0;
+		if (context.Session.Contacts is not null)
+		{
+			IReadOnlyList<IReadOnlyList<XElement>> hits =
+				await context.Session.Contacts.SearchGalAsync(to, maxAmbiguous, photos, ct);
+			galHits = hits.Count;
+
+			// Build the recipient skeletons first, collecting the email of each so the free/busy
+			// lookups for the whole match set can run concurrently rather than one after another.
+			List<(XElement Recipient, string Email)> built = new();
+			foreach (IReadOnlyList<XElement> hit in hits)
+			{
+				string display = hit.FirstOrDefault(e => e.Name == GAL + "DisplayName")?.Value ?? to;
+				string? email = hit.FirstOrDefault(e => e.Name == GAL + "EmailAddress")?.Value;
+				if (email is null)
+					continue;
+				XElement recipient = new(RR + "Recipient",
+					new XElement(RR + "Type", "2"),
+					new XElement(RR + "DisplayName", display),
+					new XElement(RR + "EmailAddress", email));
+				// The GAL photo element translates into the RR-namespace shape.
+				if (hit.FirstOrDefault(e => e.Name == GAL + "Picture") is XElement galPicture)
+				{
+					XElement rrPicture = new(RR + "Picture",
+						new XElement(RR + "Status", galPicture.Element(GAL + "Status")?.Value ?? "173"));
+					if (galPicture.Element(GAL + "Data") is XElement data)
+						rrPicture.Add(new XElement(RR + "Data", data.Value));
+					recipient.Add(rrPicture);
+				}
+
+				built.Add((recipient, email));
+			}
+
+			if (availabilityWindow is { } window)
+			{
+				XElement[] availabilities = await Task.WhenAll(
+					built.Select(b => BuildAvailabilityAsync(context, b.Email, window, ct)));
+				for (int i = 0; i < built.Count; i++)
+					built[i].Recipient.Add(availabilities[i]);
+			}
+
+			recipients.AddRange(built.Select(b => b.Recipient));
+		}
+
+		if (recipients.Count == 0 && to.Contains('@'))
+		{
+			// Echo back a plain SMTP address as a resolved recipient.
+			XElement echoed = new(RR + "Recipient",
+				new XElement(RR + "Type", "2"),
+				new XElement(RR + "DisplayName", to),
+				new XElement(RR + "EmailAddress", to));
+			if (availabilityWindow is { } window)
+				echoed.Add(await BuildAvailabilityAsync(context, to, window, ct));
+			recipients.Add(echoed);
+		}
+
+		// MS-ASCMD status: 1 = single match, 4 = no match, and for ambiguity 2 = more matches
+		// than returned (the GAL truncated at the cap) vs 3 = all matches returned. Reporting
+		// 1 for a many-way match makes the client pick one arbitrarily instead of prompting.
+		string status = recipients.Count switch
+		{
+			0 => "4",
+			1 => "1",
+			_ => galHits >= maxAmbiguous ? "2" : "3"
+		};
+		return new XElement(RR + "Response",
+			new XElement(RR + "To", to),
+			new XElement(RR + "Status", status),
+			new XElement(RR + "RecipientCount", recipients.Count.ToString()),
+			recipients);
 	}
 
 	/// <summary>
