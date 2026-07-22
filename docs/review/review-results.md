@@ -1452,3 +1452,44 @@ signatures). The worker's step-9 claim holds.
 - Test-only harness additions in `EasHandlerHarness.cs` (`StubSession.SecondaryStore`, settable
   `RecordingStore.EasClass`/`KeyPrefix`, `RecordingStore.FolderOpFailWith`). No API/contract breaks. No
   coverage-not-proof tests. No new findings filed.
+
+## Item 34 — Search, find, recipients & settings [LIVE]
+
+**Findings:** `F19` `F20` `F32` `F33` `F34` `F35` `F36` `F37` `F38` `F41` `F42` `F45` `F47` `F48`
+`A15` `A16` — one Medium-heavy conformance batch across GetItemEstimate, MeetingResponse, Search/Find,
+ResolveRecipients, ItemOperations, Settings, and MergedFreeBusy (Contracts).
+**Commits:** `24d716c` (A15 A16) · `2193c8e` (F19 F20) · `5ef328e` (F36 F37 F38 F41) · `02000d9` (F42) ·
+`ff5a7b1` (F45) + `f01e8ad` (F45 warning follow-up) · `7026035` (F47 F48) · `2bea990` (F32) ·
+`412655a` (F34) · `0cfc3bd` (F35) · `ec472cb` (F33)
+
+**Verification (orchestrator-run):** integrity 56/15/365/365/0 ✓ · cursor → item 35 ✓ · IDs in every
+subject ✓ · build 0 warnings ✓ · unit suite Protocol 78/78, Core 605/607, WebUi 71/71, Server 229/231,
+0 skipped · **integration 141 passed, 0 skipped** (full suite, own run, fresh clean-volume Stalwart) ✓
+
+**The 4 unit failures are the same pre-existing environmental set already bisected under item 33** —
+`DavReadinessTests.Probe_UntrustedCertificate`, `DbSettingsLoaderTests.MissingTable`,
+`SqlitePragmaInterceptorTests.Wal_AppliedOnce`/`Wal_PutsFileDatabaseIntoWalMode`. All fail identically at
+the pre-review baseline `6d647a6`; none are in classes item 34 touched. (The worker's report miscounted
+the split as SqlitePragma×2 + DbSettings×2; the authoritative failing set is these four.)
+
+**Notes (worker-flagged, orchestrator-checked against the detail entries):**
+- **F45 behaviour change + partial:** EmptyFolderContents now returns distinct statuses — **2** non-mail
+  class, **3** read-only/access-denied, **6** unresolvable (was blanket 2). `ReadOnlyFolderTests` updated
+  for the 2→3 shift. The `DeleteSubFolders` half of the finding is **deferred** (noted on the queue line):
+  wiring it needs a breaking `IMailStoreOperations.EmptyFolderAsync` contract change + IMAP/JMAP recursive
+  delete — item-17 territory, disproportionate to a Low. The named status-conflation defect is fixed.
+- **F47 behaviour change + judgment call:** Oof Set is now refused with Status 3 under ReadOnly (installing
+  a server-side Sieve auto-reply is a real external side effect). DeviceInformation Set and DevicePassword
+  escrow stay writable — they only touch our own state DB, the documented ReadOnly carve-out. Only Oof is
+  blocked because only Oof has an external effect. Reasonable; matches the finding's intent.
+- **F33 internal API change:** `SendReplyAsync` now takes organizer-fallback + subject instead of the invite
+  `MimeMessage`; MeetingResponse reads a calendar-collection CollectionId's event via `CaptureIcsAsync` and
+  writes PARTSTAT to the request's calendar (was: calendar CollectionId fed to the mail store → Status 2).
+  `ExtractUid`/`ExtractOrganizerEmail`/`ExtractSummary`/`Unfold` are internal test seams.
+- **A16 partial (judgment call):** the two correctness parts are done — inverted window throws, malformed
+  `Kind` skipped. The suggested log-on-clamp of the >683-day window is **not** implemented: `MergedFreeBusy`
+  is a Contracts-layer static helper with no logger, and the clamp is a legitimate spec cap. Sound.
+- **F42:** ResolveRecipients now reports ambiguity status (1 single / 2-or-3 ambiguous by cap) instead of a
+  flat Status 1, honouring the configured ambiguous-recipient cap.
+- No coverage-not-proof tests (every finding red-first). No new findings filed. No API/contract breaks
+  beyond the internal `SendReplyAsync` signature. Landed on `main` (current branch), no branch/push.
