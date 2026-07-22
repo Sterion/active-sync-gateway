@@ -70,8 +70,13 @@ internal sealed class FolderRegistry(SyncDbContext db)
 			}
 			catch (DbUpdateException) when (attempt < maxAttempts)
 			{
-				foreach (EntityEntry entry in db.ChangeTracker.Entries().ToList())
-					entry.State = EntityState.Detached; // discard and re-read on the next attempt
+				// Discard ONLY the folder rows this method staged, so they are re-read on the next
+				// attempt. Detaching the whole change tracker (the old behaviour) also dropped
+				// unrelated tracked mutations sharing this request-scoped context — most damagingly
+				// Device.FolderSyncKey++, leaving the client acked at N+1 while the DB held N and
+				// forcing a full resync (A1).
+				foreach (EntityEntry<UserFolder> entry in db.ChangeTracker.Entries<UserFolder>().ToList())
+					entry.State = EntityState.Detached;
 			}
 		}
 

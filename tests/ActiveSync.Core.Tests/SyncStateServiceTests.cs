@@ -149,6 +149,29 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task RefreshFolderRegistry_RetryDetach_PreservesUnrelatedTrackedMutations()
+	{
+		// A concurrent first-sync insert makes the reconcile retry; the retry must discard only
+		// the folder rows it re-reads, never an unrelated tracked mutation (here the device's
+		// FolderSyncKey bump) that shares the same request-scoped context (A1).
+		FaultInjectingInterceptor faults = new();
+		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
+		SyncStateService service = new(db);
+		Device device = await service.GetOrCreateDeviceAsync("u@a1", "DEV1", "Phone", CancellationToken.None);
+
+		device.FolderSyncKey = 99; // tracked, unsaved — belongs to the same context
+
+		faults.ThrowOnNextSave(new DbUpdateException("dup",
+			new SqliteException("UNIQUE constraint failed", 19, 2067)));
+		await service.RefreshFolderRegistryAsync("u@a1",
+			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email")], CancellationToken.None);
+
+		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
+		Device saved = await verify.Devices.FirstAsync(d => d.DeviceId == "DEV1");
+		Assert.Equal(99, saved.FolderSyncKey); // detach-all discarded it, leaving the client acked N+1 over DB N
+	}
+
+	[Fact]
 	public async Task FolderDiff_ReportsAddsUpdatesDeletes()
 	{
 		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
