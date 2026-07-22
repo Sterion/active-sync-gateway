@@ -74,6 +74,13 @@ public class UserFolder
 	/// <summary>Soft-delete marker for folders that disappeared from the backend.</summary>
 	public bool Deleted { get; set; }
 
+	/// <summary>
+	///   When the folder was first soft-deleted (stamped once, on the Deleted false→true
+	///   transition; cleared if it reappears). Drives the retention sweep that eventually
+	///   reclaims the row and its dependent DAV/collection state so the tables stop growing (A35).
+	/// </summary>
+	public DateTime? DeletedUtc { get; set; }
+
 	/// <summary>EAS ServerId (CollectionId) exposed to clients.</summary>
 	public string ServerId => Id.ToString();
 

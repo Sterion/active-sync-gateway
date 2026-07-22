@@ -184,6 +184,7 @@ supported yet.
 | `DefaultWindowSize` | `100` | Items per Sync response when the client sends no `WindowSize`. |
 | `MaxWindowSize` | `512` | Hard cap on the client-requested window size. |
 | `SessionIdleMinutes` | `15` | Idle backend sessions (and with them the user's shared IDLE watchers) are evicted after this long. |
+| `FolderRetentionDays` | `30` | Days a folder that vanished from the backend is kept soft-deleted before a background sweep reclaims its row and dependent DAV/collection state. A folder that reappears within the window keeps its ServerId; `0` disables the sweep. |
 | `UseImapIdle` | `true` | Persistent per-(user, folder) IMAP IDLE watcher for the priority pinged folder (sub-second push). Degrades to STATUS polling when disabled or unsupported by the server. |
 | `WatchdogSeconds` | `60` | Interval of the exact pending-change re-check that backstops the IDLE/STATUS watchers during waits. `0` disables the periodic ticks (the check at Ping start always runs); minimum otherwise 15. |
 

@@ -41,6 +41,7 @@ internal sealed class FolderRegistry(SyncDbContext db)
 					row.Type = bf.EasType;
 					row.EasClass = bf.EasClass;
 					row.Deleted = false;
+					row.DeletedUtc = null; // reappeared: restart the retention clock (A35)
 				}
 				else
 				{
@@ -61,7 +62,10 @@ internal sealed class FolderRegistry(SyncDbContext db)
 
 			foreach (UserFolder row in existing)
 				if (!seen.Contains(row.BackendKey))
+				{
 					row.Deleted = true;
+					row.DeletedUtc ??= DateTime.UtcNow; // stamp once; keep the original delete time (A35)
+				}
 
 			try
 			{

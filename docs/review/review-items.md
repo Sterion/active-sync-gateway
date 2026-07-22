@@ -223,7 +223,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **22. State layer correctness** — ~~`A1`~~ ~~`A5`~~ ~~`A6`~~ ~~`A7`~~ ~~`A8`~~ ~~`A9`~~ ~~`A10`~~ ~~`A17`~~ ~~`A18`~~ ~~`A22`~~ **COMPLETE**
 > `A1` the retry detaches the *entire* change tracker, silently dropping the tracked `FolderSyncKey++` — client acked N+1, DB holds N, guaranteed full resync. Decide the transaction policy here; it settles `A10` and `A18`.
 
-**23. State layer performance & retention** — ~~`A3`~~ ~~`A4`~~ ~~`A19`~~ ~~`A34`~~ **N/A** — subsumed by A4: both `PeekSyncKeyAsync` branches now read through the single `SnapshotCodec.Decompress` (the shared reader A34 asked for), so the duplicated deserialization no longer exists. `A35`
+**23. State layer performance & retention** — ~~`A3`~~ ~~`A4`~~ ~~`A19`~~ ~~`A34`~~ **N/A** — subsumed by A4: both `PeekSyncKeyAsync` branches now read through the single `SnapshotCodec.Decompress` (the shared reader A34 asked for), so the duplicated deserialization no longer exists. ~~`A35`~~ **COMPLETE**
 > `A4` rewrites the full snapshot JSON twice per round — 2–3 MB per request on a 50k mailbox, the dominant steady-state cost.
 
 **24. Config validation unification** — `B1` `B9` `B10` `B11` `B12` `B14` `B24` `B25` `B26` `A14`

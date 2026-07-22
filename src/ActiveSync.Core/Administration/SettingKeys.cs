@@ -61,6 +61,8 @@ internal static class SettingKeys
 			"Default Sync window size.", Min: 1, Max: 522),
 		new("ActiveSync:Eas:SessionIdleMinutes", ValueType.Int, false, "15",
 			"Idle backend session eviction time.", Min: 1, Max: 1440),
+		new("ActiveSync:Eas:FolderRetentionDays", ValueType.Int, false, "30",
+			"Days a vanished folder is kept before its state is reclaimed (0 disables the sweep).", Min: 0, Max: 3650),
 		new("ActiveSync:Eas:UseImapIdle", ValueType.Bool, false, "true",
 			"Use a dedicated IMAP IDLE connection for push."),
 		new("ActiveSync:Eas:WatchdogSeconds", ValueType.Int, false, "60",

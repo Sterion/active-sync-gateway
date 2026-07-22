@@ -36,6 +36,14 @@ public sealed class EasOptions
 	public int SessionIdleMinutes { get; set; } = 15;
 
 	/// <summary>
+	///   Days a folder that vanished from the backend is kept soft-deleted before a background
+	///   sweep reclaims its row and dependent DAV/collection state. A folder that reappears within
+	///   the window keeps its ServerId; past it, reappearance is a fresh folder. 0 disables the
+	///   sweep (rows are kept forever).
+	/// </summary>
+	public int FolderRetentionDays { get; set; } = 30;
+
+	/// <summary>
 	///   Use a dedicated IMAP IDLE connection for the priority mail folder during Ping/Sync
 	///   waits (sub-30 s push). Falls back to STATUS polling when disabled or unsupported.
 	/// </summary>

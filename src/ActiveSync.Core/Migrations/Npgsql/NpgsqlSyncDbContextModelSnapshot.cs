@@ -506,6 +506,9 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.Property<bool>("Deleted")
                         .HasColumnType("boolean");
 
+                    b.Property<DateTime?>("DeletedUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("DisplayName")
                         .IsRequired()
                         .HasColumnType("text");

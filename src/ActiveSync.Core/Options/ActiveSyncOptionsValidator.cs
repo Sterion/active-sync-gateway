@@ -30,6 +30,8 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 
 		if (options.Eas.WatchdogSeconds is < 0 or > 0 and < 15)
 			failures.Add("ActiveSync:Eas:WatchdogSeconds must be 0 (disabled) or at least 15.");
+		if (options.Eas.FolderRetentionDays < 0)
+			failures.Add("ActiveSync:Eas:FolderRetentionDays must be 0 (disabled) or greater.");
 
 		if (options.Auth.MaxFailures < 0)
 			failures.Add("ActiveSync:Auth:MaxFailures must be 0 (disabled) or positive.");

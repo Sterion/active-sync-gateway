@@ -216,6 +216,35 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task SoftDelete_StampsDeletedUtcOnce_AndClearsOnReappearance()
+	{
+		// The retention sweep can only reclaim a folder whose DeletedUtc is set, and the clock must
+		// start when it first vanished, not reset every sync; a reappearance clears it (A35).
+		List<BackendFolder> both =
+		[
+			new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
+			new BackendFolder("imap:Old", "Old", null, 12, "Email")
+		];
+		await _service.RefreshFolderRegistryAsync("u@a35s", both, CancellationToken.None);
+
+		// "Old" disappears → soft-deleted with a stamp.
+		await _service.RefreshFolderRegistryAsync("u@a35s", [both[0]], CancellationToken.None);
+		UserFolder Row() => _db.UserFolders.AsNoTracking().Single(f => f.BackendKey == "imap:Old");
+		DateTime? firstStamp = Row().DeletedUtc;
+		Assert.True(Row().Deleted);
+		Assert.NotNull(firstStamp);
+
+		// Still gone on the next refresh → the original stamp is kept, not bumped.
+		await _service.RefreshFolderRegistryAsync("u@a35s", [both[0]], CancellationToken.None);
+		Assert.Equal(firstStamp, Row().DeletedUtc);
+
+		// Reappears → un-deleted and the retention clock is cleared.
+		await _service.RefreshFolderRegistryAsync("u@a35s", both, CancellationToken.None);
+		Assert.False(Row().Deleted);
+		Assert.Null(Row().DeletedUtc);
+	}
+
+	[Fact]
 	public async Task FolderDiff_ReportsAddsUpdatesDeletes()
 	{
 		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
