@@ -59,7 +59,8 @@ public abstract class LocalStoreBase(
 		string folderBackendKey, ContentFilter filter, CancellationToken ct)
 	{
 		await using SyncDbContext db = dbFactory.CreateDbContext();
-		IQueryable<LocalItem> query = Rows(db);
+		// D19: AsNoTracking — a read-only revision listing must not populate the change tracker.
+		IQueryable<LocalItem> query = Rows(db).AsNoTracking();
 		if (filter.SinceUtc is { } since)
 			query = query.Where(i => i.ItemDateUtc == null || i.ItemDateUtc >= since);
 		var rows = await query.Select(i => new { i.Id, i.Version }).ToListAsync(ct).ConfigureAwait(false);

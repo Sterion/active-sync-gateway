@@ -30,20 +30,24 @@ public sealed class LocalContactStore(
 		string query, int maxResults, GalPhotoRequest? photos, CancellationToken ct)
 	{
 		await using SyncDbContext db = DbFactory.CreateDbContext();
-		List<string> contents = await Rows(db).Select(i => i.Content).ToListAsync(ct).ConfigureAwait(false);
 		List<IReadOnlyList<XElement>> results = new();
 		int photosGranted = 0;
-		foreach (string stored in contents)
+		// D19: stream the rows (AsAsyncEnumerable) so the maxResults break stops pulling and
+		// decrypting rows once enough matches are found, instead of ToListAsync materializing the
+		// entire collection up front; AsNoTracking because this is a pure read; and parse each card
+		// ONCE via BuildGalEntry rather than three times (ToGalEntry + AppendGalPicture re-parsed).
+		await foreach (string stored in Rows(db).AsNoTracking().Select(i => i.Content)
+			               .AsAsyncEnumerable().WithCancellation(ct).ConfigureAwait(false))
 		{
 			if (results.Count >= maxResults)
 				break;
 			string vcf = Protector.Unprotect(stored, Credentials.UserName, "contacts");
-			List<XElement>? gal = ContactConverter.ToGalEntry(vcf, query);
+			List<XElement>? gal = ContactConverter.BuildGalEntry(
+				vcf, query, photos is not null, photos?.MaxSizeBytes,
+				photosGranted >= (photos?.MaxCount ?? int.MaxValue), out bool granted);
 			if (gal is null)
 				continue;
-			if (photos is not null &&
-			    ContactConverter.AppendGalPicture(gal, vcf, photos.MaxSizeBytes,
-				    photosGranted >= (photos.MaxCount ?? int.MaxValue)))
+			if (granted)
 				photosGranted++;
 			results.Add(gal);
 		}
@@ -152,7 +156,9 @@ public sealed class LocalCalendarStore(
 			return null;
 
 		await using SyncDbContext db = DbFactory.CreateDbContext();
-		List<string> contents = await Rows(db).Select(i => i.Content).ToListAsync(ct).ConfigureAwait(false);
+		// D19: AsNoTracking — a pure read; no need to snapshot every event into the change tracker.
+		List<string> contents = await Rows(db).AsNoTracking().Select(i => i.Content).ToListAsync(ct)
+			.ConfigureAwait(false);
 		return CalendarConverter.BusyPeriodsFromEvents(
 			contents.Select(c => Protector.Unprotect(c, Credentials.UserName, "calendar")),
 			startUtc, endUtc);

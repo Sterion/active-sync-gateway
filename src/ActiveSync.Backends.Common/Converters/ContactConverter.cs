@@ -313,10 +313,30 @@ public static class ContactConverter
 	/// <summary>Matches a vCard against a GAL query; returns Gal-namespace properties if it matches.</summary>
 	public static List<XElement>? ToGalEntry(string vcf, string query)
 	{
-		VCard? vcard = Vcf.Parse(vcf).FirstOrDefault();
-		if (vcard is null)
-			return null;
+		return Vcf.Parse(vcf).FirstOrDefault() is { } vcard ? ToGalEntry(vcard, query) : null;
+	}
 
+	/// <summary>
+	///   D19: parses the vCard ONCE and produces the GAL entry plus (optionally) its photo, so a
+	///   matching contact is not parsed three times (ToGalEntry + AppendGalPicture each used to
+	///   re-parse). Returns null when the card is unparsable or does not match the query.
+	/// </summary>
+	public static List<XElement>? BuildGalEntry(
+		string vcf, string query, bool wantPhoto, int? maxPhotoBytes, bool photoLimitReached, out bool photoGranted)
+	{
+		photoGranted = false;
+		if (Vcf.Parse(vcf).FirstOrDefault() is not { } vcard)
+			return null;
+		List<XElement>? entry = ToGalEntry(vcard, query);
+		if (entry is null)
+			return null;
+		if (wantPhoto)
+			photoGranted = AppendGalPicture(entry, vcard, maxPhotoBytes, photoLimitReached);
+		return entry;
+	}
+
+	private static List<XElement>? ToGalEntry(VCard vcard, string query)
+	{
 		string display = vcard.DisplayNames?.FirstOrDefault(d => d is not null)?.Value ?? "";
 		string email = vcard.EMails.OrderByPref().FirstOrDefault(e => e?.Value is not null)?.Value ?? "";
 		Name? name = vcard.NameViews?.FirstOrDefault(n => n is not null)?.Value;
@@ -352,14 +372,18 @@ public static class ContactConverter
 	/// </summary>
 	public static bool AppendGalPicture(List<XElement> entry, string vcf, int? maxSizeBytes, bool limitReached)
 	{
+		return AppendGalPicture(entry, Vcf.Parse(vcf).FirstOrDefault(), maxSizeBytes, limitReached);
+	}
+
+	private static bool AppendGalPicture(List<XElement> entry, VCard? vcard, int? maxSizeBytes, bool limitReached)
+	{
 		if (limitReached)
 		{
 			entry.Add(new XElement(Gal + "Picture", new XElement(Gal + "Status", "175")));
 			return false;
 		}
 
-		byte[]? photo = Vcf.Parse(vcf).FirstOrDefault()?
-			.Photos?.FirstOrDefault(p => p is not null)?.Value?.Bytes;
+		byte[]? photo = vcard?.Photos?.FirstOrDefault(p => p is not null)?.Value?.Bytes;
 		if (photo is not { Length: > 0 })
 		{
 			entry.Add(new XElement(Gal + "Picture", new XElement(Gal + "Status", "173")));

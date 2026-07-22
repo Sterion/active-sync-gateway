@@ -269,7 +269,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **35. Server request hot path** — ~~`E4`~~ ~~`E5`~~ ~~`E6`~~ ~~`E18`~~ ~~`E31`~~ ~~`E35`~~ ~~`F13`~~ **(seam only: batch GetItemsAsync default + handler routing + the ServerId DB batching already landed by A3; per-backend FETCH-set/multiget overrides deferred to a LIVE item — see new finding D38)** ~~`F14`~~ ~~`F15`~~ ~~`F28`~~ ~~`F40`~~ ~~`F43`~~ **(per-To GAL + per-recipient free/busy now run via Task.WhenAll, order preserved; the multi-principal free/busy overload — a contract change needing a live backend — is deferred as H33)** **COMPLETE**
 > `E4` every request constructs all 20 handlers and discards 19. Biggest single allocation win for a polling fleet.
 
-**36. Backend round trips** [LIVE] — `D3` `D14` `D19` `D32` `H13` ~~`H14`~~ `H15` ~~`H24`~~ ~~`H25`~~
+**36. Backend round trips** [LIVE] — `D3` `D14` ~~`D19`~~ **(coverage — behaviour-preserving perf; parse-once/stream/AsNoTracking not output-observable)** `D32` `H13` ~~`H14`~~ `H15` ~~`H24`~~ ~~`H25`~~
 > `D3` every mail fetch pulls the full message and decodes every attachment just to read its length — while holding the per-user IMAP gate.
 
 **37. Core & CLI startup** — `B7` `B28` `L35` `L41`
