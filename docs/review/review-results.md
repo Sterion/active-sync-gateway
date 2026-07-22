@@ -1198,15 +1198,53 @@ Server 166 = 865 / 0 skipped** ✓ · **integration 141 / 0 skipped** (full suit
 
 ---
 
-## Next: item 28 — DAV & JMAP request correctness [LIVE] (Phase 4 — Correctness)
+## Item 28 — DAV & JMAP request correctness [LIVE]
+**Findings:** `H1` `H2` `H3` `H10` `H20` `H21` `H22` `H26` `H27` `H28` `H29` `H31`
+**Commits:** `cbffd1e` (factory extraction, structural prereq — no finding ID) · `6dbe3a4` (H1) · `a7e360d` (H26) ·
+`3a8b99d` (H2+H3, clustered) · `77ed111` (H22) · `4209683` (H21) · `08ca4a3` (H27) · `1460153` (H28) · `30a6ea2`
+(H10) · `8d03a43` (H20) · `0fe34ca` (H29) · `d4166d6` (H31) · `098b4ea` (queue-line strikethroughs — see process note)
+**Verification:** integrity items=56 live=15 assigned=365 unique=365 dupes=0 encoding=0 ✓ · cursor → item 29 ✓ ·
+each finding ID in a fix-commit subject ✓ · build clean 0 warnings ✓ · unit **Protocol 63 · WebUi 70 · Core 579 ·
+Server 166 = 878 / 0 skipped** ✓ · **integration 141 / 0 skipped** (full suite, fresh clean-volume backend) ✓
+**Notes:**
+- **PROCESS DEVIATION (worker, not a correctness defect):** this worker did *not* mark each finding's strikethrough
+  inside that finding's fix commit (the house pattern, protocol step 3). It made all 12 fixes leaving `review-items.md`
+  untouched, then struck every finding in one final commit `098b4ea`. The cursor still advanced and every finding ID
+  is in its fix-commit subject, so `git log --grep` resumability holds and the item is correctly COMPLETE — the risk
+  the per-finding rule guards against (cursor not advancing / item redone) did not occur because the item completed
+  atomically. Flagged so a future orchestrator watches this worker's protocol adherence; had it stopped mid-item, all
+  progress would have read as un-struck.
+- **Structural extraction (the item's stated ask):** new `BackendHttpClientFactory` in `Backends.Common` now builds
+  every DAV/JMAP client and pools probe handlers per TLS shape; `WebDavClient` + `JmapClient` route through it,
+  removing the duplication that let a TLS/timeout fix land in one client and not the other. `InternalsVisibleTo
+  ActiveSync.Core.Tests` added to the Dav csproj (WebDavClient gained a `HttpClient` test seam mirroring JmapClient).
+- **H2 is a one-time DAV-key behaviour change:** for resources whose href carried a percent-encoded special char, the
+  snapshot sub-key (ServerId) is now the raw-encoded href, not the decoded one → a one-time re-identify (Delete+Add)
+  for such items on upgrade. Normal ASCII hrefs unaffected; share-grant matching unescapes on its own side, untouched.
+- **H1/H10/H20 change verdicts:** H1 — the DAV readiness probe now honours operator TLS settings instead of
+  unconditionally disabling validation. H10/H20 — JMAP delete/update/empty-folder now **throw** where they used to
+  report silent success (`EmptyFolderAsync` also no longer risks an infinite loop on a refused destroy). Deliberate.
+- **Judgment calls (safe direction):** H29 — the JMAP calendar ContentFilter is applied in-memory and deliberately
+  **over-includes** (recurring events never dropped, unparseable start kept, local-vs-UTC comparison has ≤ tz-offset
+  slop, same coarseness as CalDAV's time-range) → worst case a few extra old events, never a dropped one. H21 —
+  extracted `SelectClientRole` (Calendar else `Roles[0]`) to make the credential-source fix unit-testable; a
+  Tasks-only caldav deployment with different creds than an absent calendar role is unchanged.
+- **Coverage-not-proof, correctly labelled:** H26 (probe-handler pooling — not unit-observable, struck on fix) and
+  H28 (XXE — DTD already rejected by the framework default; the test pins it). H31 is a Nit (dead `response` locals),
+  N/A-for-red.
 
-Cursor is at **item 28** (`H1` `H2` `H3` `H10` `H20` `H21` `H22` `H26` `H27` `H28` `H29` `H31`). [LIVE] — restart
-clean-volume in parallel, run the **full** integration suite. `H1` disables TLS validation on the DAV probe, `H2`
-percent-decoded hrefs fetch the wrong resource, `H3` drops `If-Match` (lost update) — all live DAV/JMAP round-trip
-behaviour a unit test can't fully exercise. The item also extracts a shared `BackendHttpClientFactory`.
+---
 
-Current green baseline: **integration 141 / 0 skipped** (fresh container), unit **Protocol 63 · WebUi 70 · Core 566 ·
-Server 166** = 865.
+## Next: item 29 — Silent failure & diagnostics (Phase 4 — Correctness)
+
+Cursor is at **item 29** (`E9` `E10` `E11` `E16` `E24` `E34` `C11` `K2` `K3` `K4` `K5` `H12`). Not marked [LIVE].
+Mostly diagnostics/logging policy (log first + every Nth), but `H12` touches JMAP and the E-findings sit in the
+server pipeline — **judge from the worker's report whether the request pipeline is meaningfully changed and run the
+full integration suite if so** (the "marked list is a floor" rule). Backend is warm from item 28 if a live check is
+warranted.
+
+Current green baseline: **integration 141 / 0 skipped** (fresh container), unit **Protocol 63 · WebUi 70 · Core 579 ·
+Server 166** = 878.
 
 **Standing lessons that carried this run (items 13–14):**
 - **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/contract
