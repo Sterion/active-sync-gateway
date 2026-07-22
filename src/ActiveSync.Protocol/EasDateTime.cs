@@ -1,4 +1,5 @@
 using System.Globalization;
+using ActiveSync.Protocol.Wbxml;
 
 namespace ActiveSync.Protocol;
 
@@ -36,19 +37,36 @@ public static class EasDateTime
 		};
 	}
 
+	private static readonly string[] Formats =
+	[
+		"yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
+		"yyyy-MM-dd'T'HH:mm:ss'Z'",
+		"yyyyMMdd'T'HHmmss'Z'",
+		"yyyyMMdd'T'HHmmssfff'Z'",
+		"yyyyMMdd'T'HHmmss" // basic form without the trailing Z (MS-ASDTYPE tolerant)
+	];
+
+	/// <summary>
+	///   Parses an MS-ASDTYPE date/time using only the exact spec formats — no loose
+	///   <see cref="DateTime.Parse(string)" /> fallback (which accepted culture-dependent forms
+	///   like "3/4/2026" and made failure locale-dependent). Returns UTC.
+	/// </summary>
+	public static bool TryParse(string? value, out DateTime result)
+	{
+		return DateTime.TryParseExact(value, Formats, CultureInfo.InvariantCulture,
+			DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out result);
+	}
+
+	/// <summary>
+	///   Parses client-supplied date text. Throws <see cref="WbxmlException" /> on anything the
+	///   exact formats reject — these values come from untrusted phone payloads, so an
+	///   uncontrolled <see cref="FormatException" /> (which would surface as HTTP 500) is
+	///   converted to the same protocol-error channel the WBXML decoder uses for a 400.
+	/// </summary>
 	public static DateTime Parse(string value)
 	{
-		string[] formats =
-		[
-			"yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
-			"yyyy-MM-dd'T'HH:mm:ss'Z'",
-			"yyyyMMdd'T'HHmmss'Z'",
-			"yyyyMMdd'T'HHmmssfff'Z'"
-		];
-		if (DateTime.TryParseExact(value, formats, CultureInfo.InvariantCulture,
-			    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTime result))
+		if (TryParse(value, out DateTime result))
 			return result;
-		return DateTime.Parse(value, CultureInfo.InvariantCulture,
-			DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+		throw new WbxmlException($"'{value}' is not a valid MS-ASDTYPE date/time.");
 	}
 }

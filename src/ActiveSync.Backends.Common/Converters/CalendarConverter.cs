@@ -562,18 +562,24 @@ public static class CalendarConverter
 				string[] parts = period.Trim().Split('/');
 				if (parts.Length != 2)
 					continue;
-				DateTime start, end;
-				try
-				{
-					start = EasDateTime.Parse(parts[0]);
-					// The second half is either an end time or an ISO 8601 duration.
-					end = parts[1].StartsWith('P') || parts[1].StartsWith("+P", StringComparison.Ordinal)
-						? start + System.Xml.XmlConvert.ToTimeSpan(parts[1].TrimStart('+'))
-						: EasDateTime.Parse(parts[1]);
-				}
-				catch (FormatException)
-				{
+				if (!EasDateTime.TryParse(parts[0], out DateTime start))
 					continue; // a malformed period must not sink the whole answer
+				DateTime end;
+				// The second half is either an end time or an ISO 8601 duration.
+				if (parts[1].StartsWith('P') || parts[1].StartsWith("+P", StringComparison.Ordinal))
+				{
+					try
+					{
+						end = start + System.Xml.XmlConvert.ToTimeSpan(parts[1].TrimStart('+'));
+					}
+					catch (FormatException)
+					{
+						continue;
+					}
+				}
+				else if (!EasDateTime.TryParse(parts[1], out end))
+				{
+					continue;
 				}
 
 				if (end > start)
