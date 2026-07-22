@@ -63,4 +63,34 @@ public sealed class ConfigWriteValidationTests
 		IConfiguration broken = EffectiveWith(("ActiveSync:PublicUrl", "not a url"));
 		Assert.Null(SettingKeys.ValidateStartupImpact(broken, "ActiveSync:ReadOnly", "true"));
 	}
+
+	// B10 — a Number setting accepted NaN/Infinity (NumberStyles.Float parses them), which then
+	// degrades the refreshers to a point-read on every request.
+	[Theory]
+	[InlineData("NaN")]
+	[InlineData("Infinity")]
+	[InlineData("-Infinity")]
+	public void NumberSetting_NonFinite_IsRejected(string value)
+	{
+		SettingKeys.SettingKey key = SettingKeys.Find("ActiveSync:Auth:UsersRefreshSeconds")!;
+		Assert.NotNull(SettingKeys.Validate(key, value));
+	}
+
+	[Theory]
+	[InlineData("1")]
+	[InlineData("0")]
+	[InlineData("0.5")]
+	public void NumberSetting_FiniteWithinBounds_IsAccepted(string value)
+	{
+		SettingKeys.SettingKey key = SettingKeys.Find("ActiveSync:Auth:UsersRefreshSeconds")!;
+		Assert.Null(SettingKeys.Validate(key, value));
+	}
+
+	// B10 — the Number branch now honours the key's Max (it ignored Min/Max entirely before).
+	[Fact]
+	public void NumberSetting_AboveMax_IsRejected()
+	{
+		SettingKeys.SettingKey key = SettingKeys.Find("ActiveSync:Auth:UsersRefreshSeconds")!;
+		Assert.NotNull(SettingKeys.Validate(key, "999999999"));
+	}
 }

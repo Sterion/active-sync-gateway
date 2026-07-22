@@ -226,7 +226,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **23. State layer performance & retention** — ~~`A3`~~ ~~`A4`~~ ~~`A19`~~ ~~`A34`~~ **N/A** — subsumed by A4: both `PeekSyncKeyAsync` branches now read through the single `SnapshotCodec.Decompress` (the shared reader A34 asked for), so the duplicated deserialization no longer exists. ~~`A35`~~ **COMPLETE**
 > `A4` rewrites the full snapshot JSON twice per round — 2–3 MB per request on a 50k mailbox, the dominant steady-state cost.
 
-**24. Config validation unification** — ~~`B1`~~ ~~`B9`~~ `B10` `B11` `B12` `B14` `B24` `B25` `B26` `A14`
+**24. Config validation unification** — ~~`B1`~~ ~~`B9`~~ ~~`B10`~~ `B11` `B12` `B14` `B24` `B25` `B26` `A14`
 > `B1` a CLI-settable value passes validation, persists, runs — then **blocks the next startup**. One fix collapses most of the item: make the write path run the same validator startup runs.
 
 **25. Account resolution & storage casing** — `B2` `B3` `B6` `B8` `B13` `B15` `B16` `B17` `B21` `B23`

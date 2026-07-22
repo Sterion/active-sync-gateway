@@ -80,7 +80,7 @@ internal static class SettingKeys
 		new("ActiveSync:Auth:SuccessCacheMinutes", ValueType.Int, false, "5",
 			"Good-credential cache TTL (0 disables).", Min: 0, Max: 1440),
 		new("ActiveSync:Auth:UsersRefreshSeconds", ValueType.Number, false, "1",
-			"Database change-stamp poll cadence (0 = every request; negative = load once)."),
+			"Database change-stamp poll cadence (0 = every request; negative = load once).", Max: 86400),
 
 		new("ActiveSync:Log:Mode", ValueType.Enum, true, "Standard",
 			"Console line shape.", EnumValues: ["Simple", "Standard", "Extended"]),
@@ -296,9 +296,18 @@ internal static class SettingKeys
 					? null
 					: $"'{value}' is not one of: {string.Join(", ", key.EnumValues!)}.";
 			case ValueType.Number:
-				return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _)
-					? null
-					: $"'{value}' is not a number.";
+				if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double number))
+					return $"'{value}' is not a number.";
+				// NumberStyles.Float accepts "NaN"/"Infinity"; both slip past every downstream guard
+				// (Math.Max(NaN,0)=NaN, (long)NaN=0, NaN<0=false) and degrade the refreshers to a
+				// point-read on every request (B10).
+				if (!double.IsFinite(number))
+					return $"'{value}' is not a finite number.";
+				if (key.Min is { } nmin && number < nmin)
+					return $"{value} is below the minimum {nmin} for {key.Key}.";
+				if (key.Max is { } nmax && number > nmax)
+					return $"{value} is above the maximum {nmax} for {key.Key}.";
+				return null;
 			case ValueType.Int:
 				if (!long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsed))
 					return $"'{value}' is not an integer.";
