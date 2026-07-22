@@ -46,7 +46,19 @@ public abstract class ComposeMailHandlerBase(
 
 		try
 		{
-			byte[] outgoing = await BuildOutgoingAsync(context, request, ct);
+			byte[]? outgoing = await BuildOutgoingAsync(context, request, ct);
+			if (outgoing is null)
+			{
+				// The client referenced a source item (reply-to / forward-of) that no longer
+				// resolves — a stale ServerId, a moved or re-listed item. Sending the typed text
+				// alone would silently drop the quote/forwarded message, so fail the command.
+				logger.LogWarning(
+					"{Command} for {User}: the referenced source item could not be resolved; not sending a degraded message",
+					Command, context.Device.UserName);
+				await WriteErrorAsync(context, "150"); // MS-ASCMD: the referenced original item was not found
+				return;
+			}
+
 			if (outgoing.Length == 0)
 			{
 				await WriteErrorAsync(context, "103");
@@ -93,8 +105,13 @@ public abstract class ComposeMailHandlerBase(
 		}
 	}
 
-	/// <summary>Transforms the client MIME (e.g. appends the original for SmartForward).</summary>
-	protected abstract Task<byte[]> BuildOutgoingAsync(EasContext context, ComposeRequest request, CancellationToken ct);
+	/// <summary>
+	///   Transforms the client MIME (e.g. appends the original for SmartForward). Returns
+	///   <c>null</c> when the request REFERENCED a source item (SmartReply/SmartForward) that
+	///   could not be resolved — the caller then fails the command rather than send a degraded
+	///   message (a reply with no quote, a forward with nothing forwarded).
+	/// </summary>
+	protected abstract Task<byte[]?> BuildOutgoingAsync(EasContext context, ComposeRequest request, CancellationToken ct);
 
 	/// <summary>Flags the source message (answered/forwarded) after successful submission.</summary>
 	protected virtual Task MarkSourceAsync(EasContext context, ComposeRequest request, CancellationToken ct)
@@ -214,13 +231,15 @@ public sealed class SendMailHandler(
 {
 	public override string Command => "SendMail";
 
-	protected override async Task<byte[]> BuildOutgoingAsync(
+	protected override async Task<byte[]?> BuildOutgoingAsync(
 		EasContext context, ComposeRequest request, CancellationToken ct)
 	{
 		if (request.Mime.Length > 0)
 			return request.Mime;
 
-		// 16.x: SendMail without MIME submits a stored draft (Source > FolderId/ItemId).
+		// 16.x: SendMail without MIME submits a stored draft (Source > FolderId/ItemId). An
+		// unresolvable draft yields empty bytes → Status 103 (already a clean failure, never a
+		// degraded send), so this path does not need the source-not-found sentinel.
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
 		if (source is null)
 			return [];
@@ -252,18 +271,23 @@ public sealed class SmartReplyHandler(
 {
 	public override string Command => "SmartReply";
 
-	protected override async Task<byte[]> BuildOutgoingAsync(
+	protected override async Task<byte[]?> BuildOutgoingAsync(
 		EasContext context, ComposeRequest request, CancellationToken ct)
 	{
 		if (request.ReplaceMime)
 			return request.Mime;
+		// No source referenced: send the client's MIME as-is (nothing to quote).
+		if (request.SourceFolderId is null || request.SourceItemId is null)
+			return request.Mime;
+		// A source WAS referenced but could not be resolved / fetched — fail rather than send a
+		// reply with the quoted original silently missing (F29).
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
 		if (source is null)
-			return request.Mime;
+			return null;
 		byte[]? original = await context.Session.MailStore.GetRawMessageAsync(source.Value.FolderBackendKey,
 			source.Value.ItemKey, ct);
 		if (original is null)
-			return request.Mime;
+			return null;
 
 		using MemoryStream clientStream = new(request.Mime);
 		MimeMessage message = await MimeMessage.LoadAsync(clientStream, ct);
@@ -325,18 +349,23 @@ public sealed class SmartForwardHandler(
 {
 	public override string Command => "SmartForward";
 
-	protected override async Task<byte[]> BuildOutgoingAsync(
+	protected override async Task<byte[]?> BuildOutgoingAsync(
 		EasContext context, ComposeRequest request, CancellationToken ct)
 	{
 		if (request.ReplaceMime)
 			return request.Mime;
+		// No source referenced: send the client's MIME as-is (nothing to forward).
+		if (request.SourceFolderId is null || request.SourceItemId is null)
+			return request.Mime;
+		// A source WAS referenced but could not be resolved / fetched — fail rather than forward a
+		// message with the forwarded content silently missing (F29).
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
 		if (source is null)
-			return request.Mime;
+			return null;
 		byte[]? original = await context.Session.MailStore.GetRawMessageAsync(
 			source.Value.FolderBackendKey, source.Value.ItemKey, ct);
 		if (original is null)
-			return request.Mime;
+			return null;
 
 		// 16.x body-less forward: the server composes the whole message to the Forwardees.
 		if (request.Mime.Length == 0 && request.Forwardees.Count > 0)
