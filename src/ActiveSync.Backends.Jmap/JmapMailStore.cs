@@ -131,9 +131,12 @@ public sealed class JmapMailStore(
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string mailboxId = FromKey(folderBackendKey);
+		// H8: page at min(500, maxObjectsInGet). The Email/get back-references up to a page of
+		// Email/query ids, so a server advertising a lower maxObjectsInGet would answer
+		// requestTooLarge and fail the whole folder sync if we asked for 500 blindly.
+		int page = PageSize(await client.GetSessionAsync(ct).ConfigureAwait(false));
 		Dictionary<string, string> map = new(StringComparer.Ordinal);
 		int position = 0;
-		const int page = 500;
 		while (true)
 		{
 			JmapCall query = new("Email/query", new Dictionary<string, object?>
@@ -155,9 +158,20 @@ public sealed class JmapMailStore(
 			foreach (JsonElement email in response.Arguments("1").GetProperty("list").EnumerateArray())
 				map[email.GetProperty("id").GetString()!] = RevisionOf(KeywordsOf(email));
 
-			int returned = response.Arguments("0").GetProperty("ids").GetArrayLength();
-			position += returned;
-			if (returned < page)
+			JsonElement queryArgs = response.Arguments("0");
+			int returned = queryArgs.GetProperty("ids").GetArrayLength();
+			// H8: a short page does NOT mean "done" — servers may return fewer than requested. Advance
+			// by the server's own reported position (it may clamp ours) and stop only when a page comes
+			// back empty, or the server's reported total has been reached. Terminating on
+			// `returned < page` truncated the folder, silently dropping the tail.
+			int reported = queryArgs.TryGetProperty("position", out JsonElement pos) && pos.TryGetInt32(out int pv)
+				? pv
+				: position;
+			position = reported + returned;
+			if (returned == 0)
+				break;
+			if (queryArgs.TryGetProperty("total", out JsonElement tot) && tot.TryGetInt64(out long total) &&
+			    position >= total)
 				break;
 		}
 
@@ -499,13 +513,18 @@ public sealed class JmapMailStore(
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string mailboxId = FromKey(folderBackendKey);
+		// H8: cap the destroy batch at maxObjectsInSet (defaulting to 500) — a batch over the
+		// server's limit is rejected wholesale. The loop re-queries from the top after each destroy
+		// and stops only when a page comes back empty, never on a short page (which does not mean the
+		// folder is empty and previously left messages behind).
+		int batch = DestroyBatchSize(await client.GetSessionAsync(ct).ConfigureAwait(false));
 		while (true)
 		{
 			using JmapResponse response = await client.CallAsync(CapMail, "Email/query", new Dictionary<string, object?>
 			{
 				["accountId"] = account,
 				["filter"] = new Dictionary<string, object?> { ["inMailbox"] = mailboxId },
-				["limit"] = 500
+				["limit"] = batch
 			}, ct).ConfigureAwait(false);
 			string[] ids = response.Arguments("0").GetProperty("ids").EnumerateArray()
 				.Select(e => e.GetString()!).ToArray();
@@ -520,8 +539,6 @@ public sealed class JmapMailStore(
 				["destroy"] = ids
 			}, ct).ConfigureAwait(false);
 			EnsureNoneFailed(destroyResponse.Arguments("0"), "notDestroyed", "Email", "destroy");
-			if (ids.Length < 500)
-				break;
 		}
 	}
 
@@ -736,6 +753,20 @@ public sealed class JmapMailStore(
 			.OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
 			.ToList();
 		return categories.Count == 0 ? digits : $"{digits}|{string.Join(',', categories)}";
+	}
+
+	// The desired listing page — never larger than 500, and clamped down to the server's
+	// maxObjectsInGet so the Email/get back-reference (H8) never exceeds what the server accepts.
+	private static int PageSize(JmapSessionResource session)
+	{
+		return Math.Max(1, Math.Min(500, session.CoreLimits.MaxObjectsInGet));
+	}
+
+	// The Empty-folder destroy batch — bounded by maxObjectsInSet, since the whole page is destroyed
+	// in one Email/set (H8).
+	private static int DestroyBatchSize(JmapSessionResource session)
+	{
+		return Math.Max(1, Math.Min(500, session.CoreLimits.MaxObjectsInSet));
 	}
 
 	private static Dictionary<string, object?> MailboxFilter(string mailboxId, ContentFilter filter)
