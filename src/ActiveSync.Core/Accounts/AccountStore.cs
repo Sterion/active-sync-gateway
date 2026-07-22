@@ -42,18 +42,8 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 
 		Dictionary<string, AccountOptions> result = new(StringComparer.OrdinalIgnoreCase);
 		foreach (AccountEntry entry in entries)
-		{
-			try
-			{
-				result[entry.UserName] =
-					JsonSerializer.Deserialize<AccountOptions>(entry.Json, JsonOptions) ?? new AccountOptions();
-			}
-			catch (JsonException ex)
-			{
-				logger?.LogWarning(ex,
-					"Skipping database account entry for {User} — stored JSON does not parse", entry.UserName);
-			}
-		}
+			if (TryDeserialize(entry, logger, out AccountOptions options))
+				result[entry.UserName] = options;
 
 		return result;
 	}
@@ -65,23 +55,48 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 		// otherwise a differently-cased login misses the existing row (see UpsertAsync).
 		AccountEntry? entry = await db.AccountEntries.AsNoTracking()
 			.FirstOrDefaultAsync(a => a.UserName.ToLower() == login.ToLower(), ct).ConfigureAwait(false);
-		return entry is null
-			? null
-			: JsonSerializer.Deserialize<AccountOptions>(entry.Json, JsonOptions) ?? new AccountOptions();
+		// B15: tolerate an unparseable row like LoadAllAsync does — `eas user show` must never
+		// hard-fail with JsonException (it is one of the tools for finding the bad row).
+		return entry is not null && TryDeserialize(entry, null, out AccountOptions options) ? options : null;
 	}
 
-	public async Task<List<(string UserName, AccountOptions Options, DateTime UpdatedUtc)>> ListAsync(
+	public async Task<List<(string UserName, AccountOptions Options, DateTime UpdatedUtc, bool Valid)>> ListAsync(
 		CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
 		List<AccountEntry> entries = await db.AccountEntries.AsNoTracking()
 			.OrderBy(a => a.UserName).ToListAsync(ct).ConfigureAwait(false);
-		List<(string, AccountOptions, DateTime)> result = [];
+		List<(string, AccountOptions, DateTime, bool)> result = [];
 		foreach (AccountEntry entry in entries)
-			result.Add((entry.UserName,
-				JsonSerializer.Deserialize<AccountOptions>(entry.Json, JsonOptions) ?? new AccountOptions(),
-				entry.UpdatedUtc));
+		{
+			// B15: surface a bad row FLAGGED rather than omitting it or throwing — `eas users`
+			// and the admin list must still render, marking the row the operator has to fix.
+			bool valid = TryDeserialize(entry, null, out AccountOptions options);
+			result.Add((entry.UserName, options, entry.UpdatedUtc, valid));
+		}
+
 		return result;
+	}
+
+	/// <summary>
+	///   Deserializes one row's JSON, tolerating a malformed value: on failure it logs (when a
+	///   logger is supplied), yields an empty <see cref="AccountOptions" /> and returns false.
+	///   Shared by every read path so one corrupt row can never take a surface down (B15).
+	/// </summary>
+	private static bool TryDeserialize(AccountEntry entry, ILogger? logger, out AccountOptions options)
+	{
+		try
+		{
+			options = JsonSerializer.Deserialize<AccountOptions>(entry.Json, JsonOptions) ?? new AccountOptions();
+			return true;
+		}
+		catch (Exception ex) when (ex is JsonException or NotSupportedException)
+		{
+			logger?.LogWarning(ex,
+				"Database account entry for {User} does not parse — treating it as invalid", entry.UserName);
+			options = new AccountOptions();
+			return false;
+		}
 	}
 
 	public async Task UpsertAsync(string login, AccountOptions options, CancellationToken ct)

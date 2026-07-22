@@ -65,7 +65,7 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 		// Declared side: config overlay ⊕ database rows (the former `eas user list`).
 		AccountStore store = services.GetRequiredService<AccountStore>();
 		ActiveSyncOptions options = services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value;
-		List<(string UserName, AccountOptions Options, DateTime UpdatedUtc)> dbEntries =
+		List<(string UserName, AccountOptions Options, DateTime UpdatedUtc, bool Valid)> dbEntries =
 			await store.ListAsync(cancellationToken);
 		Dictionary<string, AccountOptions> configUsers =
 			options.Users ?? new Dictionary<string, AccountOptions>(StringComparer.OrdinalIgnoreCase);
@@ -106,15 +106,18 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 		foreach (string user in users)
 		{
 			// Declared attributes — null when the login only has state (a pass-through user).
-			bool inDb = dbEntries.Any(e => string.Equals(e.UserName, user, StringComparison.OrdinalIgnoreCase));
+			var dbEntry = dbEntries.FirstOrDefault(
+				e => string.Equals(e.UserName, user, StringComparison.OrdinalIgnoreCase));
+			bool inDb = dbEntry.UserName is not null;
 			bool inConfig = configUsers.ContainsKey(user);
-			AccountOptions? declared = inDb
-				? dbEntries.First(e => string.Equals(e.UserName, user, StringComparison.OrdinalIgnoreCase)).Options
-				: inConfig ? configUsers[user] : null;
+			AccountOptions? declared = inDb ? dbEntry.Options : inConfig ? configUsers[user] : null;
+			// B15: a row whose JSON does not parse is surfaced FLAGGED, not omitted, so the
+			// operator can see (and fix) the login the auth path is silently ignoring.
 			string origin = declared is null
 				? "pass-through"
 				: inDb
-					? declared.AutoProvisioned == true ? "db (auto)" : inConfig ? "db (shadows config)" : "db"
+					? !dbEntry.Valid ? "db (INVALID)"
+						: declared.AutoProvisioned == true ? "db (auto)" : inConfig ? "db (shadows config)" : "db"
 					: "config";
 			string password = string.IsNullOrWhiteSpace(declared?.Password)
 				? "-"

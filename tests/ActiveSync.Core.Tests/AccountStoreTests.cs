@@ -208,6 +208,35 @@ public sealed class AccountStoreTests : IDisposable
 	}
 
 	[Fact]
+	public async Task GetAndList_TolerateUnparseableRow_InsteadOfThrowing()
+	{
+		// B15: LoadAllAsync tolerated a bad row ("one bad row must never take auth down") but
+		// GetAsync/ListAsync deserialized bare, so `eas user show`/`eas users`/the admin list
+		// hard-failed with JsonException — the very tools for finding the bad row.
+		await _store.UpsertAsync("good", new AccountOptions { MailAddress = "g@x" }, CancellationToken.None);
+		await using (SyncDbContext db = _factory.CreateDbContext())
+		{
+#pragma warning disable VSTHRD103
+			db.AccountEntries.Add(new AccountEntry
+			{
+				UserName = "broken", Json = "{not json", UpdatedUtc = DateTime.UtcNow,
+			});
+#pragma warning restore VSTHRD103
+			await db.SaveChangesAsync();
+		}
+
+		// GetAsync: a bad row is tolerated (null), a good one still round-trips.
+		Assert.Null(await _store.GetAsync("broken", CancellationToken.None));
+		Assert.Equal("g@x", (await _store.GetAsync("good", CancellationToken.None))?.MailAddress);
+
+		// ListAsync: the bad row is SURFACED (flagged invalid), never omitted or thrown on.
+		var all = await _store.ListAsync(CancellationToken.None);
+		Assert.Equal(["broken", "good"], all.Select(e => e.UserName));
+		Assert.False(all.Single(e => e.UserName == "broken").Valid);
+		Assert.True(all.Single(e => e.UserName == "good").Valid);
+	}
+
+	[Fact]
 	public async Task Upsert_IsCaseInsensitive_NoDuplicateRow()
 	{
 		// B2: the store matched the login case-SENSITIVELY in SQL but case-INsensitively in memory,
@@ -239,9 +268,10 @@ public sealed class AccountStoreTests : IDisposable
 		Assert.Equal("a@x", a?.MailAddress);
 		Assert.Null(await _store.GetAsync("missing", CancellationToken.None));
 
-		List<(string UserName, AccountOptions Options, DateTime UpdatedUtc)> all =
+		List<(string UserName, AccountOptions Options, DateTime UpdatedUtc, bool Valid)> all =
 			await _store.ListAsync(CancellationToken.None);
 		Assert.Equal(["a", "b"], all.Select(e => e.UserName));
+		Assert.All(all, e => Assert.True(e.Valid));
 	}
 
 	private sealed class TestContextFactory(SqliteConnection connection) : ISyncDbContextFactory

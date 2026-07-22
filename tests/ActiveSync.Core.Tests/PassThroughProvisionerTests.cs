@@ -124,7 +124,7 @@ public sealed class PassThroughProvisionerTests : IDisposable
 		await provisioner.ProvisionIfEnabledAsync("phone@dnfl.dk", CancellationToken.None);
 		await provisioner.ProvisionIfEnabledAsync("PHONE@DNFL.DK", CancellationToken.None);
 
-		List<(string UserName, AccountOptions Options, DateTime UpdatedUtc)> rows =
+		List<(string UserName, AccountOptions Options, DateTime UpdatedUtc, bool Valid)> rows =
 			await _store.ListAsync(CancellationToken.None);
 		Assert.Single(rows);
 	}
