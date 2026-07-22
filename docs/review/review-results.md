@@ -1103,17 +1103,43 @@ auth-path resolver) ✓
 
 ---
 
-## Next: item 25 — Account resolution & storage casing (Phase 4 — Correctness)
+## Item 25 — Account resolution & storage casing
+**Findings:** `B3` `B6` `B16` `B23` (remaining; `B2` `B8` `B13` `B15` `B17` `B21` struck in earlier runs)
+**Commits:** `fb06dab` (B3) · `8fcfeb3` (B6) · `737774c` (B16) · `034221d` (B23)
+**Verification:** integrity items=56 live=15 assigned=365 unique=365 dupes=0 encoding=0 ✓ · cursor → item 26 ✓ ·
+one commit per finding, ID in subject ✓ · build clean 0 warnings ✓ · unit **Protocol 63 · WebUi 70 · Core 564 ·
+Server 158 = 855 / 0 skipped** ✓ · **integration 139 / 0 skipped** (full suite, fresh clean-volume backend — not a
+skipped-suite false green) ✓
+**Notes:**
+- **B3 is a fail-open→fail-closed auth behaviour change.** An invalid DB account row (parses but fails merge
+  validation, reachable without touching the row — a global backend edit or removed plugin re-invalidates a
+  previously-good row) previously degraded to pass-through (presented creds forwarded verbatim) *and* un-disabled an
+  `Enabled=false` account. It now registers an invalid sentinel that refuses resolution and stays in the merged view
+  flagged `Invalid`, so `IsLoginDisabled` still honours `Enabled==false`. **Judgment call:** the invalid DB row now
+  wins over a valid *shadowed config entry* of the same login (fail-closed, honouring "a DB row REPLACES the config
+  entry") rather than falling back to it — the old fallback is exactly what the finding removes. Reasonable either way;
+  fail-closed chosen per the finding's "sentinel template that refuses resolution". Worker rewrote the existing
+  `InvalidDbEntry_IsSkipped_ConfigEntrySurvives` test to encode the new semantics — verified green in the full suite.
+- **B16 is doc-only** (no code change): corrected the `BackendRoleOverride.Settings` comment to say a null value
+  *clears* the inherited global key (matches `AccountFieldPaths` null=clear), not "ignored". Its characterization test
+  is **coverage, not proof** — labelled as such — since there is no code defect to red-first.
+- **B23 struck on the fix, not a red test** — a memory-visibility race with no deterministic trigger; `_lastDbUsers`
+  (+ `BackendRolesProvider._signature` and progress bools) made volatile. Correctly labelled N/A-for-red.
+- `MergedAccount`/`AccountTemplate` gained a defaulted `Invalid` param (existing 3-arg call sites unaffected); the
+  invalid state is surfaced in the startup banner and admin/CLI origin so an invalid row reads as "refused" rather
+  than a normal account that mysteriously can't log in. In scope as making the fail-closed verdict observable.
 
-Items 21–24 verified and recorded above. Cursor is at **item 25** (`B2` `B3` `B6` `B8` `B13` `B15` `B16`
-`B17` `B21` `B23`) — `B2`: case-sensitive in SQL, case-insensitive in memory → duplicate rows,
-nondeterministic winner across restarts; `B3`: an invalid row degrades to credential pass-through **and
-un-disables** the account. This touches the auth/account-resolution path — run the unit suite in full,
-and run integration (auth-path change; a casing regression in login resolution is exactly the class that
-passes unit but breaks live login).
+---
 
-Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 553 ·
-WebUi 70 · Server 158** = 844.
+## Next: item 26 — Send/submit ordering & idempotency [LIVE] (Phase 4 — Correctness)
+
+Cursor is at **item 26** (`F10` `F29` `F30` `F31` `D9` `H18` `L36`). [LIVE] — restart the backend from a clean
+volume (`bash scripts/stalwart-up.sh -d && bash scripts/stalwart-up.sh`) in parallel with the worker, and run the
+**full** integration suite in verification. Idempotency/submit-ordering is a send-path change; a duplicate-send
+regression is exactly the class that passes unit but resends live.
+
+Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · WebUi 70 · Core 564 ·
+Server 158** = 855.
 
 **Standing lessons that carried this run (items 13–14):**
 - **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/contract
