@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -311,7 +312,7 @@ public sealed class WebDavClient : IDisposable
 		XDocument doc;
 		try
 		{
-			doc = XDocument.Parse(xml);
+			doc = ParseHardenedXml(xml);
 		}
 		catch (XmlException ex)
 		{
@@ -354,6 +355,26 @@ public sealed class WebDavClient : IDisposable
 				"they were omitted from the {ReturnedCount} returned resource(s)", droppedFailures, result.Count);
 
 		return result;
+	}
+
+	/// <summary>
+	///   Parses a DAV multistatus body with external-entity resolution and DTD processing
+	///   explicitly disabled (H28). <see cref="XDocument.Parse(string)" /> already prohibits DTDs
+	///   by default, so this is not a behaviour change — it makes the XXE hardening a stated,
+	///   review-visible property of the code rather than a silent inheritance of a framework
+	///   default that a future refactor could flip. A backend response is attacker-adjacent
+	///   (a compromised or hostile DAV server), so it must never resolve an external entity.
+	/// </summary>
+	private static XDocument ParseHardenedXml(string xml)
+	{
+		XmlReaderSettings settings = new()
+		{
+			DtdProcessing = DtdProcessing.Prohibit,
+			XmlResolver = null,
+			MaxCharactersFromEntities = 0
+		};
+		using XmlReader reader = XmlReader.Create(new StringReader(xml), settings);
+		return XDocument.Load(reader);
 	}
 
 	/// <summary>True when a DAV propstat status line ("HTTP/1.1 200 OK") reports a 2xx code.</summary>

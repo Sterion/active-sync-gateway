@@ -131,6 +131,31 @@ public sealed class WebDavClientTests
 		Assert.Equal("/dav/cal/c.ics", Assert.Single(resources).Href);
 	}
 
+	// H28: a hostile/compromised DAV server must never get the client to resolve an external
+	// entity. This is COVERAGE, not a red-first reproducer: XDocument.Parse already prohibits DTDs
+	// by default, so the multistatus is rejected before and after the fix; the test pins the
+	// hardening so a future refactor to a DTD-permitting reader is caught.
+	[Fact]
+	public async Task Multistatus_WithDtdEntity_IsRejected_NotResolved()
+	{
+		string xxe =
+			"""
+			<?xml version="1.0"?>
+			<!DOCTYPE multistatus [ <!ENTITY x "boom"> ]>
+			<D:multistatus xmlns:D="DAV:">
+			  <D:response><D:href>/dav/cal/&x;.ics</D:href>
+			    <D:propstat><D:status>HTTP/1.1 200 OK</D:status>
+			      <D:prop><D:getetag>"e1"</D:getetag></D:prop></D:propstat>
+			  </D:response>
+			</D:multistatus>
+			""";
+		RecordingHandler stub = new(_ => Xml(xxe));
+		using WebDavClient client = new(Base, new HttpClient(stub));
+
+		await Assert.ThrowsAsync<ActiveSync.Contracts.BackendException>(() =>
+			client.PropfindAsync("/dav/cal/", 1, new XElement(XName.Get("propfind", "DAV:")), CancellationToken.None));
+	}
+
 	private static HttpResponseMessage Ok(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)
