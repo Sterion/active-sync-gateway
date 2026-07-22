@@ -1541,3 +1541,52 @@ than red-first — worth reinforcing in the worker brief or the standing context
   **default interface method** `GetItemsAsync` — source-compatible for out-of-repo plugins (inherit the
   default loop). D38/H33 added to "Found while working the queue" (not assigned to a queue item, so
   assigned=365 holds).
+
+## Item 36 — Backend round trips [LIVE] — PARTIAL (5 of 9), item left OPEN
+
+**Completed & struck:** `H24` `H14` `H25` `H15` `D19`
+**Commits:** `19e8981` (H24) · `5bdd8a3` (H14) · `a545792` (H25) · `0f77b13` (H15) · `6a09da0` (D19)
+**Deferred & UNSTRUCK (item stays open, cursor remains at 36):** `D3` `D14` `D32` `H13`
+
+**Verification of the 5 completed (orchestrator-run):** integrity 56/15/365/365/0 ✓ · IDs in every subject ✓
+· build 0 warnings ✓ · unit suite Protocol 78/78, Core 614/616, WebUi 71/71, Server 239/241, 0 skipped
+(+9 new tests; same 4 pre-existing environmental failures as items 33–35, confirmed unchanged) ·
+**integration 141 passed, 0 skipped** (full suite, own run, fresh clean-volume Stalwart — H15's `ids:[]→state`
+and H14's `addressbook-query` exercised live) ✓
+
+**Completed-finding notes:**
+- **H24** behaviour change: an over-ceiling DAV/JMAP response now throws `BackendException` (or the framework
+  throws on a chunked over-cap body) instead of buffering the whole thing. Ceiling 128 MiB.
+  `MaxResponseContentBufferSize` set on both clients; SSE unaffected (`ResponseHeadersRead`). **Red-first done
+  correctly:** the worker added an inert `MaxResponseBytes` seam *first* so the test could target the
+  unbounded-read bug on otherwise-unmodified code — this is the legitimate way to red-first a brand-new limit,
+  not the fix-then-revert anti-pattern.
+- **H15 / H25** caches are session-scoped (recycle on config change). H15's wait keys on account-wide state, so
+  it over-notifies across an account's collections — safe direction (client resyncs, finds nothing), mirrors
+  the existing H19 mail token.
+- **D19** is **coverage** (labelled): parse-once via `BuildGalEntry`, `AsAsyncEnumerable`, `AsNoTracking` — all
+  behaviour-preserving, none output-observable. `LocalGalSearchTests` pins GAL results + photos through the
+  rewritten path. Accepted as coverage for a genuinely behaviour-preserving perf change.
+
+**The 4 deferrals — each a real blocker, NOT laziness:**
+- **`D32` — STOP-AND-REPORT: the finding's recommended fix would cause DATA LOSS.** Capping
+  `GetItemRevisionsAsync` newest-N conflicts with the sync model: `CollectionDiff.Compute` treats any snapshot
+  id absent from `current` as a **delete**, and the persisted snapshot **accumulates the whole folder across
+  rounds** (AGENTS.md § Sync model). Capping `current` would turn every already-synced item beyond the cap into
+  a spurious delete → the client loses mail. A safe mitigation belongs at the windowing/initial-population layer,
+  not as a newest-N cap on the revision map. This is an *orientation-contradicts-finding* case → **human
+  decision required** (per fix-review.md). Orchestrator did not resolve it.
+- **`D3`** (the item's only **High**): substantial architectural rework of the core mail-render path — fetch
+  BodyStructure/Envelope/Flags first, size attachments from `BodyPartBasic.Octets`, fetch only the wanted part,
+  reshape `MailConverter.ToApplicationData` (today needs a full `MimeMessage`). High regression risk; needs
+  focused cross-content-type live verification. Judged too large to bundle. Candidate for its own [LIVE] run.
+- **`H13`**: skipping the pre-PUT enumeration without degrading the Axigen href-rewrite path needs the tracked
+  snapshot threaded into `IContentStore.CreateItemAsync` — a cross-cutting **contract change** (item-17
+  territory). No safe partial win locally.
+- **`D14`**: the LIST-storm only occurs on servers **without** SPECIAL-USE; the Stalwart test backend advertises
+  SPECIAL-USE, so the symptom is not reproducible in the local env and the cache change is an unverifiable no-op
+  there. Deferred rather than land an unprovable optimization in the critical IMAP path.
+
+**Judgment call (H25):** batched get uses explicit `ids:[itemKey]` rather than a `#ids` back-reference — `itemKey`
+is known, so equivalent and more robust; one round trip either way. Accepted.
+**No new findings filed.** Landed on `main` (current branch), no branch/push.
