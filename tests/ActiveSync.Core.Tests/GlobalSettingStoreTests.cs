@@ -153,6 +153,35 @@ public sealed class GlobalSettingStoreTests : IDisposable
 		Assert.Equal(2, changed);
 	}
 
+	[Fact]
+	public async Task Refresher_ReloadSubscriberThrows_RecordsStamp_AppliesData_AndKeepsGoing()
+	{
+		// B6: a downstream reload-token subscriber that throws (e.g. the account-snapshot rebuild)
+		// escaped through SetData, so the refresher's own progress markers (_lastStamp/_hasLoaded)
+		// were never set and Changed never fired — the same stamp was retried forever and mislogged
+		// as a settings failure. The subscriber failure must be isolated: the data is applied, the
+		// stamp is recorded, and the next poll is a no-op.
+		DbSettingsConfigurationSource source = new();
+		SettingsRefresher refresher = new(_store, source.Provider, ZeroIntervalMonitor());
+		using IDisposable _ = Microsoft.Extensions.Primitives.ChangeToken.OnChange(
+			source.Provider.GetReloadToken, () => throw new InvalidOperationException("boom"));
+
+		await _store.UpsertAsync("ActiveSync:ReadOnly", "true", CancellationToken.None);
+		int changed = 0;
+		refresher.Changed += () => changed++;
+
+		await refresher.EnsureFreshAsync(true, CancellationToken.None);
+
+		// The data was applied despite the throwing subscriber, and Changed fired.
+		Assert.True(source.Provider.TryGet("ActiveSync:ReadOnly", out string? value));
+		Assert.Equal("true", value);
+		Assert.Equal(1, changed);
+
+		// The stamp was recorded, so the next poll is a no-op — not an endless failing retry.
+		await refresher.EnsureFreshAsync(false, CancellationToken.None);
+		Assert.Equal(1, changed);
+	}
+
 	[Theory]
 	[InlineData("ActiveSync:Database:ConnectionString")]
 	[InlineData("ActiveSync:Encryption:Key")]

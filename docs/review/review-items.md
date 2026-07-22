@@ -229,7 +229,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **24. Config validation unification** — ~~`B1`~~ ~~`B9`~~ ~~`B10`~~ ~~`B11`~~ ~~`B12`~~ ~~`B14`~~ ~~`B24`~~ ~~`B25`~~ ~~`B26`~~ ~~`A14`~~ **COMPLETE**
 > `B1` a CLI-settable value passes validation, persists, runs — then **blocks the next startup**. One fix collapses most of the item: make the write path run the same validator startup runs.
 
-**25. Account resolution & storage casing** — ~~`B2`~~ ~~`B3`~~ `B6` ~~`B8`~~ ~~`B13`~~ ~~`B15`~~ `B16` ~~`B17`~~ ~~`B21`~~ `B23`
+**25. Account resolution & storage casing** — ~~`B2`~~ ~~`B3`~~ ~~`B6`~~ ~~`B8`~~ ~~`B13`~~ ~~`B15`~~ `B16` ~~`B17`~~ ~~`B21`~~ `B23`
 > `B2` case-sensitive in SQL, case-insensitive in memory → duplicate rows, nondeterministic winner across restarts. `B3` an invalid row degrades to credential pass-through **and un-disables** the account.
 
 **26. Send/submit ordering & idempotency** [LIVE] — `F10` `F29` `F30` `F31` `D9` `H18` `L36`

@@ -50,9 +50,25 @@ public sealed class SettingsRefresher(
 				Dictionary<string, string?> data = stamp is null
 					? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
 					: await store.LoadAllAsync(ct).ConfigureAwait(false);
-				provider.SetData(data);
+
+				// B6: record progress BEFORE firing the reload token. SetData swaps the snapshot and
+				// then fires the token; a downstream subscriber that throws (e.g. the account-snapshot
+				// rebuild) used to escape here — so _lastStamp/_hasLoaded were never set, the same stamp
+				// was retried forever, and the failure was mislogged as a settings-refresh error. The
+				// data is already applied by then, so a throwing subscriber must not undo our progress.
 				_lastStamp = stamp;
 				_hasLoaded = true;
+				try
+				{
+					provider.SetData(data);
+				}
+				catch (Exception ex) when (ex is not OperationCanceledException)
+				{
+					logger?.LogWarning(ex,
+						"A settings reload handler failed after the snapshot was applied; the settings " +
+						"were still updated");
+				}
+
 				logger?.LogInformation(
 					"Global settings snapshot rebuilt: {Count} database override(s)", data.Count);
 				Changed?.Invoke();

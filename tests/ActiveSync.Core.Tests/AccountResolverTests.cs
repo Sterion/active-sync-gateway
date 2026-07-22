@@ -8,6 +8,7 @@ using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
+using ActiveSync.Core.Settings;
 using ActiveSync.Crypto;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -516,6 +517,55 @@ public class AccountResolverTests
 		List<string> failures = new();
 		AccountResolver.ValidateUsers(options, Roles(BaseConfig()), Registry(), null, failures);
 		Assert.Contains("sealed (enc:v1:) but no ActiveSync:Encryption key", string.Join(";", failures));
+	}
+
+	[Fact]
+	public void OnRolesChanged_ConfigUserMergeFailsAfterLiveEdit_KeepsPreviousSnapshot_DoesNotThrow()
+	{
+		// B6: a live backend edit that invalidates a CONFIG user's merge made OnRolesChanged's
+		// BuildSnapshot throw (config users are treated as strict — startup already validated them,
+		// which is untrue after a live edit). The throw escaped through the roles-Changed invocation
+		// and out of the settings reload, mislogged as a settings failure, leaving the snapshot stale
+		// forever. It must instead be caught, keeping the previous (last-good) snapshot.
+		DbSettingsConfigurationSource dbSource = new();
+		// Oof lives entirely in the DB layer so clearing it removes the WHOLE section (role absent =
+		// a valid rebuild that fires Changed). Left in the file layer, its Host key would keep the
+		// section alive and an empty Provider would be a rejected rebuild that never fires.
+		dbSource.Provider.SetData(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:Oof:Provider"] = "sieve",
+			["ActiveSync:Backends:Oof:Host"] = "sieve.global",
+		});
+		IConfigurationRoot root = new ConfigurationBuilder()
+			.AddInMemoryCollection(new Dictionary<string, string?>
+			{
+				["ActiveSync:Backends:MailStore:Provider"] = "imap",
+				["ActiveSync:Backends:MailStore:Host"] = "imap.global",
+				["ActiveSync:Backends:MailSubmit:Provider"] = "smtp",
+				["ActiveSync:Backends:MailSubmit:Host"] = "smtp.global",
+			})
+			.Add(dbSource)
+			.Build();
+		BackendRolesProvider rolesProvider = new(root, Registry());
+		ActiveSyncOptions options = HostOptions();
+		// The config user has an Oof override that inherits the global sieve provider — valid now.
+		options.Users = new Dictionary<string, AccountOptions>
+		{
+			["u"] = new()
+			{
+				Backends = new Dictionary<string, BackendRoleOverride> { ["Oof"] = new() },
+			},
+		};
+		AccountResolver resolver = new(TestOptionsMonitor.Of(options), rolesProvider, Registry());
+		Assert.Contains("u", resolver.MergedUsers.Keys);
+
+		// Remove the global Oof role live (role-valid — Oof is optional). The config user's Oof
+		// override can no longer inherit a provider, so its merge now fails.
+		Exception? ex = Record.Exception(() =>
+			dbSource.Provider.SetData(new Dictionary<string, string?>()));
+
+		Assert.Null(ex);                              // the throw must not escape the reload
+		Assert.Contains("u", resolver.MergedUsers.Keys); // previous snapshot kept
 	}
 
 	[Fact]

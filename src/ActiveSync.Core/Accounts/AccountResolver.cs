@@ -142,8 +142,27 @@ public sealed class AccountResolver
 	/// </summary>
 	private void OnRolesChanged()
 	{
-		_snapshot = BuildSnapshot(
-			_options.CurrentValue, _rolesProvider.Current, _registry, _lastDbUsers, _logger);
+		Snapshot rebuilt;
+		try
+		{
+			rebuilt = BuildSnapshot(
+				_options.CurrentValue, _rolesProvider.Current, _registry, _lastDbUsers, _logger);
+		}
+		catch (Exception ex)
+		{
+			// B6: config entries are treated as strict (startup already validated them), but a LIVE
+			// backend edit can newly invalidate a config user's merge — and BuildSnapshot then throws.
+			// Left uncaught the throw escaped through this Changed handler and out of the settings
+			// reload that fired it, mislogged as a settings-refresh failure, and left the snapshot
+			// stale forever (the roles provider had already committed the new signature, so it never
+			// fired again). Keep the previous (last-good) snapshot and log against the resolver.
+			_logger?.LogWarning(ex,
+				"Backend configuration change left one or more declared users invalid; " +
+				"keeping the previous account snapshot until the configuration is corrected");
+			return;
+		}
+
+		_snapshot = rebuilt;
 		SnapshotChanged?.Invoke();
 	}
 
