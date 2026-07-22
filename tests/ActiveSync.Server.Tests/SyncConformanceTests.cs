@@ -90,6 +90,28 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Equal("13", response!.Root!.Element(AS + "Status")?.Value);
 	}
 
+	// ---- F4: Status 3 must reset the client's sync key to 0, not echo the rejected one ----
+	[Fact]
+	public async Task F4_InvalidSyncKey_Status3_ResetsSyncKeyToZero()
+	{
+		UserFolder inbox = await RegisterInboxAsync();
+		SyncHandler handler = NewSyncHandler();
+
+		// Prime the collection so it exists at key 1; then present a key that is neither current
+		// nor the one-behind replay key → SyncKeyValidation.Invalid → Status 3.
+		await _harness.RunAsync(handler, "Sync",
+			SyncRequest(inbox.ServerId, "0", new XElement(AS + "GetChanges", "0")));
+
+		XDocument? response = await _harness.RunAsync(handler, "Sync", SyncRequest(inbox.ServerId, "99"));
+
+		Assert.NotNull(response);
+		XElement collection = response!.Root!.Element(AS + "Collections")!.Element(AS + "Collection")!;
+		Assert.Equal("3", collection.Element(AS + "Status")?.Value);
+		// Echoing "99" back would make a trusting client resend the same rejected key (resync loop);
+		// Exchange resets it to 0 so the client restarts from an initial sync.
+		Assert.Equal("0", collection.Element(AS + "SyncKey")?.Value);
+	}
+
 	private sealed class StubLifetime : IHostApplicationLifetime
 	{
 		public CancellationToken ApplicationStarted => CancellationToken.None;

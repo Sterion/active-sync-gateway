@@ -18,8 +18,12 @@ public sealed partial class SyncHandler
 
 		XElement Error(string status)
 		{
+			// F4: Status 3 (invalid sync key) must reset the client to an initial sync — echoing
+			// the rejected key back makes a trusting client resend it, the resync loop this
+			// codebase avoids. Transient/hierarchy errors ("5"/"12") keep the client's key.
+			string echoKey = status == "3" ? "0" : clientSyncKey;
 			return new XElement(AS + "Collection",
-				new XElement(AS + "SyncKey", clientSyncKey),
+				new XElement(AS + "SyncKey", echoKey),
 				new XElement(AS + "CollectionId", collectionId),
 				new XElement(AS + "Status", status));
 		}
