@@ -69,6 +69,10 @@ public partial class Program
 		ServerInitResult init = await InitializeAsync(app, options, databaseLogSink);
 		serverCertificate = init.Certificate;
 
+		// K5: feed the serving certificate's expiry to the TLS-expiry gauge (null when plaintext).
+		ActiveSync.Core.Observability.GatewayMetrics.SetCertificateExpiryObserver(
+			() => serverCertificate is { } cert ? new DateTimeOffset(cert.NotAfter.ToUniversalTime()) : null);
+
 		LogStartupBanner(app, options, init);
 
 		// Report the bound addresses and public endpoints once the server is listening.

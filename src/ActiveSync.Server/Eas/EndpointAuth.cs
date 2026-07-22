@@ -141,7 +141,7 @@ internal static class EndpointAuth
 	{
 		if (throttle.BlockedForSeconds(clientKey, throttle.IpWideLimit) is not { } retryAfter)
 			return false;
-		Core.Observability.GatewayMetrics.RecordThrottleRejection();
+		Core.Observability.GatewayMetrics.RecordThrottleRejection("eas");
 		http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
 		http.Response.Headers.RetryAfter = retryAfter.ToString();
 		return true;
@@ -167,7 +167,8 @@ internal static class EndpointAuth
 		string userKey = $"{clientKey}\n{credentials.UserName}";
 		if (throttle.BlockedForSeconds(userKey) is { } retryAfter)
 		{
-			Core.Observability.GatewayMetrics.RecordThrottleRejection();
+			Core.Observability.GatewayMetrics.RecordThrottleRejection("eas");
+			Core.Observability.GatewayMetrics.RecordAuthOutcome("eas", "throttled", credentials.UserName);
 			http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
 			http.Response.Headers.RetryAfter = retryAfter.ToString();
 			return false;
@@ -179,17 +180,20 @@ internal static class EndpointAuth
 			{
 				throttle.RecordFailure(userKey);
 				throttle.RecordFailure(clientKey); // feeds the per-address ceiling
+				Core.Observability.GatewayMetrics.RecordAuthOutcome("eas", "failure", credentials.UserName);
 				HttpBasicAuth.Challenge(http);
 				return false;
 			}
 
 			// Clear only this account's counter — never another user's on the same address.
 			throttle.RecordSuccess(userKey);
+			Core.Observability.GatewayMetrics.RecordAuthOutcome("eas", "success", credentials.UserName);
 			return true;
 		}
 		catch (BackendException ex)
 		{
 			logger.LogError(ex, "Backend unavailable during authentication");
+			Core.Observability.GatewayMetrics.RecordAuthOutcome("eas", "error", credentials.UserName);
 			http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
 			return false;
 		}

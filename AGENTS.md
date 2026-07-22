@@ -285,7 +285,8 @@ live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
   scheme.
 - **Metrics** (`GatewayMetrics`, static Meter "ActiveSync.Gateway" in Core/Observability):
   instruments are incremented from handlers/backends directly (no DI); the OTel Prometheus
-  exporter in Server subscribes by meter name only when `Metrics:Enabled`. eas_requests
+  exporter in Server subscribes by meter name only when `Metrics:Enabled`. Every instrument
+  name carries the `activesync_` prefix (e.g. `activesync_eas_requests`). eas_requests
   ride a tiny middleware reading the (command, user) tuple EasEndpoint stashes in
   HttpContext.Items — NOT the Serilog middleware. Per-user labels collapse to "-" when
   `Metrics:PerUser=false` (set once into `GatewayMetrics.PerUserLabels` at startup —
