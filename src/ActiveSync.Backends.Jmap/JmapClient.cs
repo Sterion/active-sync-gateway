@@ -25,6 +25,25 @@ public static class JmapCapabilities
 /// <summary>One JMAP method call: [name, arguments, callId] on the wire.</summary>
 public sealed record JmapCall(string Name, IReadOnlyDictionary<string, object?> Arguments, string Id);
 
+/// <summary>
+///   The server-advertised limits from the <c>urn:ietf:params:jmap:core</c> capability object
+///   (RFC 8620 §2). A caller MUST NOT batch more ids into one <c>Foo/get</c> than
+///   <see cref="MaxObjectsInGet" /> or the server answers <c>requestTooLarge</c> (H8). A server
+///   that omits the core capability (or a field) yields <see cref="Unknown" />, whose sentinels
+///   are <see cref="int.MaxValue" />/<see cref="long.MaxValue" /> so a <c>Math.Min</c> against a
+///   caller's own page size is a no-op — the historical behaviour, never a larger request.
+/// </summary>
+public sealed record JmapCoreLimits(
+	int MaxObjectsInGet,
+	int MaxObjectsInSet,
+	int MaxCallsInRequest,
+	long MaxSizeUpload,
+	int MaxConcurrentRequests)
+{
+	public static readonly JmapCoreLimits Unknown =
+		new(int.MaxValue, int.MaxValue, int.MaxValue, long.MaxValue, int.MaxValue);
+}
+
 /// <summary>Raised when the JMAP server rejects the presented credentials (HTTP 401/403).</summary>
 public sealed class JmapAuthenticationException(string message) : Exception(message);
 
@@ -41,9 +60,21 @@ public sealed record JmapSessionResource(
 	string? EventSourceUrlTemplate,
 	IReadOnlyDictionary<string, string> PrimaryAccounts,
 	IReadOnlySet<string> Capabilities,
+	JmapCoreLimits CoreLimits,
 	string State)
 {
 	public bool HasCapability(string urn) => Capabilities.Contains(urn);
+
+	/// <summary>
+	///   Fails fast with a named error when the server does not advertise a capability a store
+	///   depends on. Without this a store issues a request with <c>using:[…]</c> the server cannot
+	///   honour and gets an opaque <c>400</c> back (H9); the caller learns exactly what is missing.
+	/// </summary>
+	public void RequireCapability(string urn)
+	{
+		if (!Capabilities.Contains(urn))
+			throw new BackendException($"JMAP server does not support the required capability {urn}.");
+	}
 
 	public string PrimaryAccount(string capabilityUrn)
 	{
@@ -297,15 +328,23 @@ public sealed class JmapClient : IDisposable
 						primary[p.Name] = accountId;
 
 			HashSet<string> capabilities = new(StringComparer.Ordinal);
+			JmapCoreLimits limits = JmapCoreLimits.Unknown;
 			if (root.TryGetProperty("capabilities", out JsonElement caps) && caps.ValueKind == JsonValueKind.Object)
+			{
 				foreach (JsonProperty p in caps.EnumerateObject())
 					capabilities.Add(p.Name);
+				// The core capability object carries the request-shaping limits (H9); keeping only
+				// the URN name discarded them, so H8 could not size its pages to the server.
+				if (caps.TryGetProperty(JmapCapabilities.Core, out JsonElement core) &&
+				    core.ValueKind == JsonValueKind.Object)
+					limits = ParseCoreLimits(core);
+			}
 
 			string state = root.TryGetProperty("state", out JsonElement s) ? s.GetString() ?? "" : "";
 
 			return new JmapSessionResource(
 				new Uri(Rebase(apiUrl)), Rebase(downloadUrl), Rebase(uploadUrl), eventSourceUrl,
-				primary, capabilities, state);
+				primary, capabilities, limits, state);
 		}
 	}
 
@@ -332,6 +371,36 @@ public sealed class JmapClient : IDisposable
 		return root.TryGetProperty(name, out JsonElement value) && value.GetString() is { Length: > 0 } s
 			? s
 			: throw new BackendException($"JMAP session resource is missing '{name}'.");
+	}
+
+	/// <summary>
+	///   Reads the numeric limits from the core capability object; a missing or non-positive value
+	///   is left as the <see cref="JmapCoreLimits.Unknown" /> sentinel so it imposes no ceiling.
+	/// </summary>
+	private static JmapCoreLimits ParseCoreLimits(JsonElement core)
+	{
+		return new JmapCoreLimits(
+			PositiveInt(core, "maxObjectsInGet"),
+			PositiveInt(core, "maxObjectsInSet"),
+			PositiveInt(core, "maxCallsInRequest"),
+			PositiveLong(core, "maxSizeUpload"),
+			PositiveInt(core, "maxConcurrentRequests"));
+
+		static int PositiveInt(JsonElement obj, string name)
+		{
+			return obj.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.Number &&
+			       v.TryGetInt32(out int n) && n >= 1
+				? n
+				: int.MaxValue;
+		}
+
+		static long PositiveLong(JsonElement obj, string name)
+		{
+			return obj.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.Number &&
+			       v.TryGetInt64(out long n) && n >= 1
+				? n
+				: long.MaxValue;
+		}
 	}
 
 	/// <summary>

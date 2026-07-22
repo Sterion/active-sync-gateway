@@ -47,6 +47,50 @@ public class JmapClientTests
 		Assert.Equal("/.well-known/jmap", stub.Requests[0].RequestUri!.AbsolutePath);
 	}
 
+	// H9 (coverage — the parse is a new seam, so it cannot be observed red-first through behaviour
+	// without the field it introduces): the numeric limits inside the core capability object are
+	// captured rather than discarded, and an omitted field falls back to the no-ceiling sentinel.
+	[Fact]
+	public async Task GetSession_CapturesCoreCapabilityLimits()
+	{
+		const string withLimits = """
+		{
+		  "capabilities": {
+		    "urn:ietf:params:jmap:core": { "maxObjectsInGet": 42, "maxObjectsInSet": 17, "maxCallsInRequest": 8 },
+		    "urn:ietf:params:jmap:mail": {}
+		  },
+		  "primaryAccounts": { "urn:ietf:params:jmap:core": "c", "urn:ietf:params:jmap:mail": "c" },
+		  "apiUrl": "http://localhost:5232/jmap/",
+		  "downloadUrl": "http://localhost:5232/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
+		  "uploadUrl": "http://localhost:5232/jmap/upload/{accountId}/",
+		  "state": "abc"
+		}
+		""";
+		StubHandler stub = new((_, _) => Json(withLimits));
+		using JmapClient client = new(Base, new HttpClient(stub));
+
+		JmapSessionResource session = await client.GetSessionAsync(CancellationToken.None);
+
+		Assert.Equal(42, session.CoreLimits.MaxObjectsInGet);
+		Assert.Equal(17, session.CoreLimits.MaxObjectsInSet);
+		Assert.Equal(8, session.CoreLimits.MaxCallsInRequest);
+		// maxSizeUpload was omitted → the "no ceiling" sentinel, so a Math.Min never lowers a caller.
+		Assert.Equal(long.MaxValue, session.CoreLimits.MaxSizeUpload);
+	}
+
+	// H9 (coverage): a server that omits the core capability object entirely still yields usable
+	// (unbounded) limits rather than throwing.
+	[Fact]
+	public async Task GetSession_MissingCoreCapabilityObject_YieldsUnknownLimits()
+	{
+		StubHandler stub = new((_, _) => Json(SessionJson));
+		using JmapClient client = new(Base, new HttpClient(stub));
+
+		JmapSessionResource session = await client.GetSessionAsync(CancellationToken.None);
+
+		Assert.Equal(JmapCoreLimits.Unknown, session.CoreLimits);
+	}
+
 	[Fact]
 	public async Task GetSession_FollowsSameOriginRedirect()
 	{

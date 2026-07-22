@@ -351,8 +351,13 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 
 	private async Task<string> AccountAsync(CancellationToken ct)
 	{
-		return _account ??= (await client.GetSessionAsync(ct).ConfigureAwait(false))
-			.PrimaryAccount(JmapCapabilities.Calendars);
+		if (_account is not null)
+			return _account;
+		JmapSessionResource session = await client.GetSessionAsync(ct).ConfigureAwait(false);
+		// H9: a server without the calendars capability gets a clear error, not an opaque 400 from
+		// a request built with using:[…calendars] it never advertised support for.
+		session.RequireCapability(JmapCapabilities.Calendars);
+		return _account = session.PrimaryAccount(JmapCapabilities.Calendars);
 	}
 
 	private static string Revision(JsonElement jsEvent)

@@ -551,8 +551,13 @@ public sealed class JmapMailStore(
 
 	private async Task<string> AccountAsync(CancellationToken ct)
 	{
-		return _account ??= (await client.GetSessionAsync(ct).ConfigureAwait(false))
-			.PrimaryAccount(JmapCapabilities.Mail);
+		if (_account is not null)
+			return _account;
+		JmapSessionResource session = await client.GetSessionAsync(ct).ConfigureAwait(false);
+		// H9: fail fast if the server does not advertise mail, rather than sending a request it
+		// cannot honour and surfacing the opaque error back.
+		session.RequireCapability(JmapCapabilities.Mail);
+		return _account = session.PrimaryAccount(JmapCapabilities.Mail);
 	}
 
 	private async Task<byte[]?> GetRawByIdAsync(string account, string itemKey, CancellationToken ct)
