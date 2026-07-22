@@ -70,4 +70,48 @@ public sealed class MergedFreeBusyTests
 		BusyPeriod after = new(Start.AddHours(3), Start.AddHours(4), '2');
 		Assert.Equal("00", MergedFreeBusy.Build(Start, Start.AddHours(1), [before, after]));
 	}
+
+	// A15 — "no data" ('4') must NOT outrank a known "busy" ('2'). Char precedence made '4'
+	// (the highest ASCII digit) win, so a definitely-busy interval was reported as unknown and
+	// the meeting picker would suggest it as free-to-book.
+	[Fact]
+	public void NoData_DoesNotOutrankBusy()
+	{
+		BusyPeriod busy = new(Start, Start.AddMinutes(30), '2');
+		BusyPeriod noData = new(Start, Start.AddMinutes(30), '4');
+		Assert.Equal("2", MergedFreeBusy.Build(Start, Start.AddMinutes(30), [busy, noData]));
+	}
+
+	// A15 — full precedence ladder: OOF('3') > busy('2') > tentative('1') > no-data('4') > free('0').
+	[Fact]
+	public void Precedence_IsFreeThenNoDataThenTentativeThenBusyThenOof()
+	{
+		// A no-data period must still win over free (report unknown, not free) …
+		Assert.Equal("4", MergedFreeBusy.Build(Start, Start.AddMinutes(30),
+			[new BusyPeriod(Start, Start.AddMinutes(30), '4')]));
+		// … but lose to every known state.
+		Assert.Equal("1", MergedFreeBusy.Build(Start, Start.AddMinutes(30),
+			[new BusyPeriod(Start, Start.AddMinutes(30), '4'), new BusyPeriod(Start, Start.AddMinutes(30), '1')]));
+		Assert.Equal("3", MergedFreeBusy.Build(Start, Start.AddMinutes(30),
+			[new BusyPeriod(Start, Start.AddMinutes(30), '2'), new BusyPeriod(Start, Start.AddMinutes(30), '3')]));
+	}
+
+	// A16 — an inverted window (end < start) previously clamped to a single all-free digit,
+	// silently reporting "completely free" for a nonsense request.
+	[Fact]
+	public void InvertedWindow_Throws()
+	{
+		Assert.Throws<ArgumentOutOfRangeException>(() =>
+			MergedFreeBusy.Build(Start, Start.AddHours(-1), []));
+	}
+
+	// A16 — a period whose Kind is outside '0'..'4' (a buggy provider returning '\0' or 'B')
+	// must not be copied verbatim into the digit string, which then rides into WBXML.
+	[Fact]
+	public void MalformedKind_IsNotEmitted()
+	{
+		string result = MergedFreeBusy.Build(Start, Start.AddMinutes(30),
+			[new BusyPeriod(Start, Start.AddMinutes(30), 'B')]);
+		Assert.Equal("0", result);
+	}
 }
