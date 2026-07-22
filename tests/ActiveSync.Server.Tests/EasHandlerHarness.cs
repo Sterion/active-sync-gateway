@@ -148,7 +148,9 @@ public sealed class EasHandlerHarness : IDisposable
 			SecondaryStore is null ? [Store] : [Store, SecondaryStore];
 		public IMailStoreOperations MailStore => Mail;
 		public IMailSubmitOperations MailSubmit => Submit;
-		public IContactOperations? Contacts => null;
+
+		/// <summary>Address-book operations (GAL search). Null unless a test wires one in.</summary>
+		public IContactOperations? Contacts { get; set; }
 		public ICalendarOperations? Calendar => null;
 		public IOofBackend? Oof => null;
 

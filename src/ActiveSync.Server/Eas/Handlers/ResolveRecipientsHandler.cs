@@ -24,6 +24,13 @@ public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> l
 		List<string> tos = request?.Root?.Elements(RR + "To").Select(t => t.Value).ToList() ?? [];
 		XElement? options = request?.Root?.Element(RR + "Options");
 
+		// The client's cap on ambiguous matches (MS-ASCMD): honour it as both the GAL fetch limit
+		// and the "more than returned" threshold, rather than the hard-coded 10.
+		int maxAmbiguous =
+			int.TryParse(options?.Element(RR + "MaxAmbiguousRecipients")?.Value, out int max) && max > 0
+				? max
+				: 10;
+
 		// Optional photos: Options > Picture (MaxSize, MaxPictures) — RR namespace.
 		GalPhotoRequest? photos = null;
 		if (options?.Element(RR + "Picture") is XElement picture)
@@ -44,10 +51,12 @@ public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> l
 		foreach (string to in tos)
 		{
 			List<XElement> recipients = new();
+			int galHits = 0;
 			if (context.Session.Contacts is not null)
 			{
 				IReadOnlyList<IReadOnlyList<XElement>> hits =
-					await context.Session.Contacts.SearchGalAsync(to, 10, photos, ct);
+					await context.Session.Contacts.SearchGalAsync(to, maxAmbiguous, photos, ct);
+				galHits = hits.Count;
 				foreach (IReadOnlyList<XElement> hit in hits)
 				{
 					string display = hit.FirstOrDefault(e => e.Name == GAL + "DisplayName")?.Value ?? to;
@@ -87,9 +96,18 @@ public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> l
 				recipients.Add(echoed);
 			}
 
+			// MS-ASCMD status: 1 = single match, 4 = no match, and for ambiguity 2 = more matches
+			// than returned (the GAL truncated at the cap) vs 3 = all matches returned. Reporting
+			// 1 for a many-way match makes the client pick one arbitrarily instead of prompting.
+			string status = recipients.Count switch
+			{
+				0 => "4",
+				1 => "1",
+				_ => galHits >= maxAmbiguous ? "2" : "3"
+			};
 			responses.Add(new XElement(RR + "Response",
 				new XElement(RR + "To", to),
-				new XElement(RR + "Status", recipients.Count > 0 ? "1" : "4"),
+				new XElement(RR + "Status", status),
 				new XElement(RR + "RecipientCount", recipients.Count.ToString()),
 				recipients));
 		}
