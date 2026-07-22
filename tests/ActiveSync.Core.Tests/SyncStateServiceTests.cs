@@ -346,6 +346,36 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task CommitCollectionState_ConcurrencyFailure_ReloadsEntityNotLeftDirty()
+	{
+		// After a concurrency failure the entity kept its failed values and stayed Modified, so a
+		// later SaveChangesAsync on the same request retried the doomed UPDATE from an unrelated
+		// call site. The catch must reload it back to Unchanged (A18).
+		Device device = await _service.GetOrCreateDeviceAsync("u@a18", "DEV1", "Phone", CancellationToken.None);
+		(_, CollectionState? seed) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
+		Assert.NotNull(seed);
+		await _service.CommitCollectionStateAsync(seed, new Dictionary<string, string> { ["a"] = "1" }, 0,
+			CancellationToken.None);
+
+		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
+		SyncStateService service2 = new(db2);
+		Device device2 = await db2.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.UserName == "u@a18");
+		(_, CollectionState? stateB) = await service2.ValidateSyncKeyAsync(device2, "c", "1", CancellationToken.None);
+		(_, CollectionState? stateA) = await _service.ValidateSyncKeyAsync(device, "c", "1", CancellationToken.None);
+		Assert.NotNull(stateA);
+		Assert.NotNull(stateB);
+
+		await _service.CommitCollectionStateAsync(stateA,
+			new Dictionary<string, string> { ["a"] = "1", ["fromA"] = "2" }, 0, CancellationToken.None);
+
+		await Assert.ThrowsAsync<BackendException>(() =>
+			service2.CommitCollectionStateAsync(stateB,
+				new Dictionary<string, string> { ["fromB"] = "3" }, 0, CancellationToken.None));
+
+		Assert.Equal(EntityState.Unchanged, db2.Entry(stateB).State);
+	}
+
+	[Fact]
 	public async Task GetOrCreateDevice_NonUniqueFailure_PropagatesOriginalError()
 	{
 		// The insert-race catch assumed every DbUpdateException was "someone inserted first" and

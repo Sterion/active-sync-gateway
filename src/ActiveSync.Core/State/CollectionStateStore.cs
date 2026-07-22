@@ -141,6 +141,9 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 			// This snapshot was diffed against a now-stale base, so it must not overwrite the
 			// winner — fail the request and let the client retry; the SyncKey it holds is now
 			// one behind, which ValidateSyncKeyAsync recovers via the Replay path.
+			// Reload the entity first: left Modified with its failed values, a later
+			// SaveChangesAsync on the same request would retry the doomed UPDATE (A18).
+			await db.Entry(state).ReloadAsync(ct).ConfigureAwait(false);
 			throw new BackendException("Concurrent sync for this collection — please retry.", ex);
 		}
 
