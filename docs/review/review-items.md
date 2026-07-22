@@ -232,7 +232,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **25. Account resolution & storage casing** — ~~`B2`~~ ~~`B3`~~ ~~`B6`~~ ~~`B8`~~ ~~`B13`~~ ~~`B15`~~ ~~`B16`~~ ~~`B17`~~ ~~`B21`~~ ~~`B23`~~ **COMPLETE**
 > `B2` case-sensitive in SQL, case-insensitive in memory → duplicate rows, nondeterministic winner across restarts. `B3` an invalid row degrades to credential pass-through **and un-disables** the account.
 
-**26. Send/submit ordering & idempotency** [LIVE] — ~~`F10`~~ ~~`F29`~~ ~~`F30`~~ `F31` `D9` `H18` `L36`
+**26. Send/submit ordering & idempotency** [LIVE] — ~~`F10`~~ ~~`F29`~~ ~~`F30`~~ ~~`F31`~~ `D9` `H18` `L36`
 > One rule everywhere: close the `try` around the submit only; record the replay marker *before* the irreversible step; everything after is best-effort and swallowed. Otherwise the client resends and recipients get duplicates.
 
 **27. Long-poll & push reliability** [LIVE] — `E7` `E8` `F11` `F16` `F17` `F18` `H17` `H19`

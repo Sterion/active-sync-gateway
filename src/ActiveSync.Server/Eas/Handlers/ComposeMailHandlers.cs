@@ -369,7 +369,7 @@ public sealed class SmartReplyHandler(
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
 		if (source is not null)
 			await context.Session.MailStore.SetAnsweredAsync(
-				source.Value.FolderBackendKey, source.Value.ItemKey, false, ct);
+				source.Value.FolderBackendKey, source.Value.ItemKey, forwarded: false, ct);
 	}
 }
 
@@ -463,6 +463,6 @@ public sealed class SmartForwardHandler(
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
 		if (source is not null)
 			await context.Session.MailStore.SetAnsweredAsync(
-				source.Value.FolderBackendKey, source.Value.ItemKey, true, ct);
+				source.Value.FolderBackendKey, source.Value.ItemKey, forwarded: true, ct);
 	}
 }
