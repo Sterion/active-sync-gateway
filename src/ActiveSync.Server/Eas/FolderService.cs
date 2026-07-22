@@ -14,6 +14,11 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 	public async Task<List<UserFolder>> RefreshAsync(IBackendSession session, string userName, CancellationToken ct)
 	{
 		List<BackendFolder> all = new();
+		// The stored registry is fetched lazily and AT MOST ONCE (E25): when several DAV stores
+		// are down at the same time — the common correlated case — re-reading the whole registry
+		// inside each store's catch was N identical full-table queries during an already-degraded
+		// request. The registry does not change while we iterate, so one read serves every fallback.
+		List<UserFolder>? existing = null;
 		foreach (IContentStore store in session.Stores)
 			try
 			{
@@ -24,7 +29,7 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 				// A dead DAV server must not break mail sync: skip that store's folders
 				// (existing registry rows survive because we merge, not replace-all).
 				logger.LogWarning(ex, "Listing folders failed for store {Class}", store.EasClass);
-				List<UserFolder> existing = await state.GetFoldersAsync(userName, ct);
+				existing ??= await state.GetFoldersAsync(userName, ct);
 				all.AddRange(existing
 					.Where(f => f.EasClass == store.EasClass)
 					.Select(f => new BackendFolder(f.BackendKey, f.DisplayName, f.ParentBackendKey, f.Type, f.EasClass)));
