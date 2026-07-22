@@ -136,9 +136,16 @@ public sealed class EasHandlerHarness : IDisposable
 
 		public RecordingMailSubmit Submit { get; } = new();
 
+		/// <summary>
+		///   An optional second content store for a non-mail class (e.g. Calendar/Contacts/Tasks),
+		///   so a test can prove class-aware routing (F27). Null unless a test wires one in.
+		/// </summary>
+		public RecordingStore? SecondaryStore { get; set; }
+
 		public BackendCredentials Credentials => new(UserName, "pw");
 		public string? MailAddress => UserName;
-		public IReadOnlyList<IContentStore> Stores => [Store];
+		public IReadOnlyList<IContentStore> Stores =>
+			SecondaryStore is null ? [Store] : [Store, SecondaryStore];
 		public IMailStoreOperations MailStore => Mail;
 		public IMailSubmitOperations MailSubmit => Submit;
 		public IContactOperations? Contacts => null;
@@ -147,12 +154,20 @@ public sealed class EasHandlerHarness : IDisposable
 
 		public IContentStore? GetStoreForClass(string easClass)
 		{
-			return easClass == Store.EasClass ? Store : null;
+			if (easClass == Store.EasClass)
+				return Store;
+			if (SecondaryStore is not null && easClass == SecondaryStore.EasClass)
+				return SecondaryStore;
+			return null;
 		}
 
 		public IContentStore? GetStoreForBackendKey(string backendKey)
 		{
-			return Store.OwnsBackendKey(backendKey) ? Store : null;
+			if (Store.OwnsBackendKey(backendKey))
+				return Store;
+			if (SecondaryStore is not null && SecondaryStore.OwnsBackendKey(backendKey))
+				return SecondaryStore;
+			return null;
 		}
 
 		public bool IsReadOnlyFolder(string folderBackendKey)
@@ -192,11 +207,22 @@ public sealed class EasHandlerHarness : IDisposable
 		/// </summary>
 		public Func<IReadOnlyList<string>, IReadOnlyList<string>>? WaitForChanges { get; set; }
 
-		public string EasClass => Protocol.EasClass.Email;
+		/// <summary>
+		///   The EAS class and backend-key prefix this store claims. Default to the mail store
+		///   (Email / "imap:"); a test can retarget it to stand in for a calendar/contacts store.
+		/// </summary>
+		public string EasClass { get; set; } = Protocol.EasClass.Email;
+		public string KeyPrefix { get; set; } = "imap:";
+
+		/// <summary>
+		///   When set, the folder mutations (create/rename/delete) throw this instead of recording —
+		///   a backend/transport failure that is NOT a <see cref="BackendException" /> (F26).
+		/// </summary>
+		public Func<Exception>? FolderOpFailWith { get; set; }
 
 		public bool OwnsBackendKey(string backendKey)
 		{
-			return backendKey.StartsWith("imap:", StringComparison.Ordinal);
+			return backendKey.StartsWith(KeyPrefix, StringComparison.Ordinal);
 		}
 
 		public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
@@ -246,18 +272,24 @@ public sealed class EasHandlerHarness : IDisposable
 
 		public Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct)
 		{
+			if (FolderOpFailWith is { } fail)
+				throw fail();
 			CreatedFolders.Add($"{parentBackendKey}/{displayName}");
-			return Task.FromResult($"imap:{displayName}");
+			return Task.FromResult($"{KeyPrefix}{displayName}");
 		}
 
 		public Task RenameFolderAsync(string backendKey, string newDisplayName, CancellationToken ct)
 		{
+			if (FolderOpFailWith is { } fail)
+				throw fail();
 			RenamedFolders.Add(backendKey);
 			return Task.CompletedTask;
 		}
 
 		public Task DeleteFolderAsync(string backendKey, CancellationToken ct)
 		{
+			if (FolderOpFailWith is { } fail)
+				throw fail();
 			DeletedFolders.Add(backendKey);
 			return Task.CompletedTask;
 		}

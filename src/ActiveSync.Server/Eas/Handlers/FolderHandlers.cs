@@ -22,11 +22,33 @@ public sealed class FolderSyncHandler(FolderService folders) : IEasCommandHandle
 
 		Device device = context.Device;
 		bool initial = clientKey == "0";
-		if (!initial && (!int.TryParse(clientKey, out int key) || key != device.FolderSyncKey))
+		bool parsed = int.TryParse(clientKey, out int key);
+
+		// The current key is the normal case; the previous generation (key == N-1) is a lost
+		// response we replay (F25). Anything else is an unknown key → Status 9 → restart from 0.
+		if (!initial && (!parsed || (key != device.FolderSyncKey && key != device.FolderSyncKey - 1)))
 		{
 			await context.WriteResponseAsync(new XDocument(
 				new XElement(FH + "FolderSync",
 					new XElement(FH + "Status", "9")))); // invalid sync key → client restarts from 0
+			return;
+		}
+
+		// F25: one-generation replay. The client resent its previous key — the response carrying
+		// FolderSyncKey N was lost, so it still holds N-1 while we hold N. Rather than force a full
+		// resync (Status 9 → key 0), re-emit the CURRENT hierarchy as Adds under the current key
+		// without advancing it; clients apply re-Adds idempotently. This mirrors the item Sync
+		// path's N-1 replay (PreviousSnapshotCompressed).
+		if (!initial && parsed && key == device.FolderSyncKey - 1)
+		{
+			List<UserFolder> replayRegistry = await folders.RefreshAsync(context.Session, device.UserName, ct);
+			FolderHierarchyDiff replayDiff =
+				await context.State.ComputeFolderDiffAsync(device, replayRegistry, ct, true);
+			await context.WriteResponseAsync(new XDocument(
+				new XElement(FH + "FolderSync",
+					new XElement(FH + "Status", "1"),
+					new XElement(FH + "SyncKey", device.FolderSyncKey.ToString()),
+					BuildChanges(replayDiff))));
 			return;
 		}
 
@@ -48,30 +70,11 @@ public sealed class FolderSyncHandler(FolderService folders) : IEasCommandHandle
 				return;
 			}
 
-			XElement changes = new(FH + "Changes",
-				new XElement(FH + "Count",
-					(diff.Adds.Count + diff.Updates.Count + diff.Deletes.Count).ToString()));
-			foreach (FolderChange add in diff.Adds)
-				changes.Add(new XElement(FH + "Add",
-					new XElement(FH + "ServerId", add.ServerId),
-					new XElement(FH + "ParentId", add.ParentServerId ?? "0"),
-					new XElement(FH + "DisplayName", add.DisplayName),
-					new XElement(FH + "Type", add.Type.ToString())));
-			foreach (FolderChange update in diff.Updates)
-				changes.Add(new XElement(FH + "Update",
-					new XElement(FH + "ServerId", update.ServerId),
-					new XElement(FH + "ParentId", update.ParentServerId ?? "0"),
-					new XElement(FH + "DisplayName", update.DisplayName),
-					new XElement(FH + "Type", update.Type.ToString())));
-			foreach (string deleted in diff.Deletes)
-				changes.Add(new XElement(FH + "Delete",
-					new XElement(FH + "ServerId", deleted)));
-
 			await context.WriteResponseAsync(new XDocument(
 				new XElement(FH + "FolderSync",
 					new XElement(FH + "Status", "1"),
 					new XElement(FH + "SyncKey", newKey.ToString()),
-					changes)));
+					BuildChanges(diff))));
 		}
 		else
 		{
@@ -81,6 +84,30 @@ public sealed class FolderSyncHandler(FolderService folders) : IEasCommandHandle
 					new XElement(FH + "SyncKey", device.FolderSyncKey.ToString()),
 					new XElement(FH + "Changes", new XElement(FH + "Count", "0")))));
 		}
+	}
+
+	/// <summary>Renders a hierarchy diff into the FolderSync &lt;Changes&gt; element.</summary>
+	private static XElement BuildChanges(FolderHierarchyDiff diff)
+	{
+		XElement changes = new(FH + "Changes",
+			new XElement(FH + "Count",
+				(diff.Adds.Count + diff.Updates.Count + diff.Deletes.Count).ToString()));
+		foreach (FolderChange add in diff.Adds)
+			changes.Add(new XElement(FH + "Add",
+				new XElement(FH + "ServerId", add.ServerId),
+				new XElement(FH + "ParentId", add.ParentServerId ?? "0"),
+				new XElement(FH + "DisplayName", add.DisplayName),
+				new XElement(FH + "Type", add.Type.ToString())));
+		foreach (FolderChange update in diff.Updates)
+			changes.Add(new XElement(FH + "Update",
+				new XElement(FH + "ServerId", update.ServerId),
+				new XElement(FH + "ParentId", update.ParentServerId ?? "0"),
+				new XElement(FH + "DisplayName", update.DisplayName),
+				new XElement(FH + "Type", update.Type.ToString())));
+		foreach (string deleted in diff.Deletes)
+			changes.Add(new XElement(FH + "Delete",
+				new XElement(FH + "ServerId", deleted)));
+		return changes;
 	}
 }
 
