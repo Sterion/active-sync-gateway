@@ -43,7 +43,16 @@ public sealed class EasContext
 	{
 		if (_requestRead)
 			return _requestDocument;
+		// Mark the body consumed only once the read+decode has SUCCEEDED (E17): setting the
+		// flag first meant a read/decode that threw left _requestRead=true and _requestDocument
+		// null, so a retry got a silent "empty body" instead of re-surfacing the real error.
+		_requestDocument = await ReadAndDecodeRequestAsync();
 		_requestRead = true;
+		return _requestDocument;
+	}
+
+	private async Task<XDocument?> ReadAndDecodeRequestAsync()
+	{
 		// Treat a request as body-less only when it has neither a positive Content-Length nor
 		// a Transfer-Encoding header: a chunked request (Transfer-Encoding: chunked) has no
 		// Content-Length but still carries a body we must read. This shortcut is an HTTP/1.x
@@ -57,17 +66,23 @@ public sealed class EasContext
 		await Http.Request.Body.CopyToAsync(buffer, Aborted);
 		if (buffer.Length == 0)
 			return null;
-		_requestDocument = WbxmlDecoder.Decode(buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
-		if (WireLogger.IsEnabled(LogLevel.Trace) && _requestDocument is not null)
-			TraceWire("request", _requestDocument.ToString());
-		return _requestDocument;
+		XDocument document = WbxmlDecoder.Decode(buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
+		if (WireLogger.IsEnabled(LogLevel.Trace))
+			TraceWire("request", document.ToString());
+		return document;
 	}
 
 	/// <summary>Reads the raw request body (for message/rfc822 SendMail).</summary>
 	public async Task<byte[]> ReadRawBodyAsync()
 	{
+		// The request body is a single-consumption stream: a handler that already read it as
+		// WBXML (or raw) would silently get an empty second read here (E17). Fail loudly.
+		if (_requestRead)
+			throw new InvalidOperationException(
+				"The request body has already been consumed; read it as WBXML or raw, not both.");
 		using MemoryStream buffer = new();
 		await Http.Request.Body.CopyToAsync(buffer, Aborted);
+		_requestRead = true;
 		if (WireLogger.IsEnabled(LogLevel.Trace))
 			// Size only: the MIME shows up verbatim on the SMTP wire log when that is enabled.
 			TraceWire("request", $"(raw body, {buffer.Length} bytes)");

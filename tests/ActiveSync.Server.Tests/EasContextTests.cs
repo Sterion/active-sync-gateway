@@ -82,4 +82,60 @@ public sealed class EasContextTests : IDisposable
 		Assert.NotNull(decoded);
 		Assert.Equal("Ping", decoded!.Root!.Name.LocalName);
 	}
+
+	// E17: _requestRead was set true before the read, so a failed read poisoned the cache —
+	// a retry got a silent "empty body" (null) instead of the real error. After the fix the
+	// flag is only set on the happy path, so the failure re-surfaces on every attempt.
+	[Fact]
+	public async Task ReadRequest_FailedReadDoesNotPoisonCache()
+	{
+		DefaultHttpContext http = new();
+		http.Request.Protocol = "HTTP/1.1";
+		http.Request.Body = new ThrowingStream();
+		http.Request.ContentLength = 10;
+		EasContext context = await ContextForAsync(http);
+
+		await Assert.ThrowsAsync<IOException>(() => context.ReadRequestAsync());
+		// The second attempt must see the same error, not a silently-cached null.
+		await Assert.ThrowsAsync<IOException>(() => context.ReadRequestAsync());
+	}
+
+	// E17: ReadRawBodyAsync neither checked nor set _requestRead, so a handler that called
+	// ReadRequestAsync first got an empty second read from the already-consumed body with no
+	// diagnostic. After the fix it fails loudly instead.
+	[Fact]
+	public async Task ReadRawBody_AfterReadRequest_ThrowsInsteadOfEmpty()
+	{
+		byte[] body = EncodePing();
+		DefaultHttpContext http = new();
+		http.Request.Protocol = "HTTP/1.1";
+		http.Request.Body = new MemoryStream(body);
+		http.Request.ContentLength = body.Length;
+		EasContext context = await ContextForAsync(http);
+
+		Assert.NotNull(await context.ReadRequestAsync());
+		await Assert.ThrowsAsync<InvalidOperationException>(() => context.ReadRawBodyAsync());
+	}
+
+	/// <summary>A request body whose read always fails — stands in for a dropped connection.</summary>
+	private sealed class ThrowingStream : Stream
+	{
+		public override bool CanRead => true;
+		public override bool CanSeek => false;
+		public override bool CanWrite => false;
+		public override long Length => throw new NotSupportedException();
+		public override long Position { get => 0; set => throw new NotSupportedException(); }
+		public override void Flush() { }
+		public override int Read(byte[] buffer, int offset, int count) => throw new IOException("read failed");
+
+		public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+			throw new IOException("read failed");
+
+		public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+			throw new IOException("read failed");
+
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+	}
 }
