@@ -72,7 +72,16 @@ public sealed class CompositeBackendSession : IBackendSession
 		return session;
 	}
 
-	internal DateTime LastUsedUtc { get; set; } = DateTime.UtcNow;
+	// A24: written on the request path and read by the eviction timer thread — a bare DateTime is
+	// larger than a word and has no read/write atomicity guarantee, so the timer could read a torn
+	// or indefinitely-stale value. Backed by long ticks with Interlocked read/write.
+	private long _lastUsedTicks = DateTime.UtcNow.Ticks;
+
+	internal DateTime LastUsedUtc
+	{
+		get => new(Interlocked.Read(ref _lastUsedTicks), DateTimeKind.Utc);
+		set => Interlocked.Exchange(ref _lastUsedTicks, value.Ticks);
+	}
 
 	public BackendCredentials Credentials { get; }
 	public string? MailAddress { get; }
