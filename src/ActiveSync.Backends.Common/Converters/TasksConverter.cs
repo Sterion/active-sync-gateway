@@ -155,7 +155,9 @@ public static class TasksConverter
 			{
 				todo.Status = "COMPLETED";
 				todo.PercentComplete = 100;
-				DateTime completedAt = V("DateCompleted") is { } dc ? EasDateTime.Parse(dc) : DateTime.UtcNow;
+				DateTime completedAt = V("DateCompleted") is { } dc && EasDateTime.TryParse(dc, out DateTime parsedDc)
+					? parsedDc
+					: DateTime.UtcNow;
 				todo.Completed = new CalDateTime(completedAt, "UTC");
 			}
 			else if (string.Equals(todo.Status, "COMPLETED", StringComparison.OrdinalIgnoreCase))
@@ -173,11 +175,11 @@ public static class TasksConverter
 		// timezone round trip. Utc* is only a fallback for clients that omit the nominal.
 		// Presence-guarded: an omitted date leaves the stored one untouched.
 		string? due = V("DueDate") ?? V("UtcDueDate");
-		if (due is not null)
-			todo.Due = new CalDateTime(DateOnly.FromDateTime(EasDateTime.Parse(due)));
+		if (due is not null && EasDateTime.TryParse(due, out DateTime dueDate))
+			todo.Due = new CalDateTime(DateOnly.FromDateTime(dueDate));
 		string? start = V("StartDate") ?? V("UtcStartDate");
-		if (start is not null)
-			todo.DtStart = new CalDateTime(DateOnly.FromDateTime(EasDateTime.Parse(start)));
+		if (start is not null && EasDateTime.TryParse(start, out DateTime startDate))
+			todo.DtStart = new CalDateTime(DateOnly.FromDateTime(startDate));
 
 		if (V("Sensitivity") is { } sensitivity)
 			todo.Class = sensitivity switch
@@ -207,8 +209,9 @@ public static class TasksConverter
 				// An RRULE needs an anchor: derive DTSTART from Recurrence/Start when the
 				// task has no dates at all (date-only, like the nominal handling above).
 				if (todo.DtStart is null && todo.Due is null &&
-				    recurrenceElement.Element(Tasks + "Start")?.Value is { } recurrenceStart)
-					todo.DtStart = new CalDateTime(DateOnly.FromDateTime(EasDateTime.Parse(recurrenceStart)));
+				    recurrenceElement.Element(Tasks + "Start")?.Value is { } recurrenceStart &&
+				    EasDateTime.TryParse(recurrenceStart, out DateTime recurrenceStartDate))
+					todo.DtStart = new CalDateTime(DateOnly.FromDateTime(recurrenceStartDate));
 			}
 		}
 
@@ -220,11 +223,12 @@ public static class TasksConverter
 			foreach (Alarm displayAlarm in todo.Alarms.Where(a =>
 				         string.Equals(a.Action, "DISPLAY", StringComparison.OrdinalIgnoreCase)).ToList())
 				todo.Alarms.Remove(displayAlarm);
-			if (reminderSet == "1" && V("ReminderTime") is { } reminderTime)
+			if (reminderSet == "1" && V("ReminderTime") is { } reminderTime &&
+			    EasDateTime.TryParse(reminderTime, out DateTime reminderAt))
 			{
 				// Ical.Net only serializes an absolute trigger when VALUE=DATE-TIME is declared;
 				// without it the (null) duration path wins and TRIGGER comes out empty.
-				Trigger trigger = new() { DateTime = new CalDateTime(EasDateTime.Parse(reminderTime), "UTC") };
+				Trigger trigger = new() { DateTime = new CalDateTime(reminderAt, "UTC") };
 				trigger.SetValueType("DATE-TIME");
 				todo.Alarms.Add(new Alarm
 				{

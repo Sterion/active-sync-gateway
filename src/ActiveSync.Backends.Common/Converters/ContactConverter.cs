@@ -210,8 +210,8 @@ public static class ContactConverter
 		AppendLine(sb, "NICKNAME", merged.Element(Contacts2 + "NickName")?.Value);
 
 		string? birthday = V("Birthday");
-		if (birthday is not null)
-			AppendLine(sb, "BDAY", EasDateTime.Parse(birthday).ToString("yyyy-MM-dd"));
+		if (birthday is not null && EasDateTime.TryParse(birthday, out DateTime bday))
+			AppendLine(sb, "BDAY", bday.ToString("yyyy-MM-dd"));
 
 		string? body = merged.Element(AirSyncBase + "Body")?.Element(AirSyncBase + "Data")?.Value;
 		AppendLine(sb, "NOTE", body);

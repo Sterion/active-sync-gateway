@@ -252,7 +252,7 @@ public static class JsContactConverter
 				["n"] = new Dictionary<string, object?> { ["name"] = nick }
 			};
 
-		if (V("Birthday") is { } birthday)
+		if (V("Birthday") is { } birthday && EasDateTime.TryParse(birthday, out DateTime bday))
 			card["anniversaries"] = new Dictionary<string, object?>
 			{
 				["b"] = new Dictionary<string, object?>
@@ -262,7 +262,7 @@ public static class JsContactConverter
 					["date"] = new Dictionary<string, object?>
 					{
 						["@type"] = "Timestamp",
-						["utc"] = JmapDate.ToUtc(EasDateTime.Parse(birthday))
+						["utc"] = JmapDate.ToUtc(bday)
 					}
 				}
 			};

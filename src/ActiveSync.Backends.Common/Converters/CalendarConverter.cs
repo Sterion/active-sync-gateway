@@ -231,21 +231,15 @@ public static class CalendarConverter
 		string? endRaw = V("EndTime");
 		TimeSpan? tzOffset = TimeZoneBlob.ReadBaseOffset(V("TimeZone"));
 
-		if (startRaw is not null)
-		{
-			DateTime startUtc = EasDateTime.Parse(startRaw);
+		if (startRaw is not null && EasDateTime.TryParse(startRaw, out DateTime startUtc))
 			evt.Start = allDay
 				? new CalDateTime(DateOnly.FromDateTime(LocalDate(startUtc, tzOffset)))
 				: new CalDateTime(startUtc, "UTC");
-		}
 
-		if (endRaw is not null)
-		{
-			DateTime endUtc = EasDateTime.Parse(endRaw);
+		if (endRaw is not null && EasDateTime.TryParse(endRaw, out DateTime endUtc))
 			evt.End = allDay
 				? new CalDateTime(DateOnly.FromDateTime(LocalDate(endUtc, tzOffset)))
 				: new CalDateTime(endUtc, "UTC");
-		}
 
 		// Presence-guarded: an omitted element means "leave as is", never "reset to default" —
 		// a partial/ghosted Change must not silently flip a PRIVATE event to PUBLIC.
@@ -296,9 +290,8 @@ public static class CalendarConverter
 				if (exception.Element(Cal + "Deleted")?.Value != "1")
 					continue; // modified occurrences from clients are rare; deletions dominate
 				string? whenRaw = exception.Element(Cal + "ExceptionStartTime")?.Value;
-				if (whenRaw is null)
+				if (whenRaw is null || !EasDateTime.TryParse(whenRaw, out DateTime when))
 					continue;
-				DateTime when = EasDateTime.Parse(whenRaw);
 				if (existing.Add(when))
 					evt.ExceptionDates.Add(new CalDateTime(when, "UTC"));
 			}

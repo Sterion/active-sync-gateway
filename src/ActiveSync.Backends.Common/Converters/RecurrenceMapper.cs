@@ -127,8 +127,8 @@ internal static class RecurrenceMapper
 			pattern.Interval = interval;
 		if (int.TryParse(V("Occurrences"), out int occurrences) && occurrences > 0)
 			pattern.Count = occurrences;
-		else if (V("Until") is { } until)
-			pattern.Until = new CalDateTime(EasDateTime.Parse(until), "UTC");
+		else if (V("Until") is { } until && EasDateTime.TryParse(until, out DateTime untilUtc))
+			pattern.Until = new CalDateTime(untilUtc, "UTC");
 		return pattern;
 
 		void ApplyNthDay(RecurrencePattern p)

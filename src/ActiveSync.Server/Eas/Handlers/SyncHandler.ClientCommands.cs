@@ -208,15 +208,8 @@ public sealed partial class SyncHandler
 						return null;
 					}
 
-					DateTime occurrence;
-					try
-					{
-						occurrence = EasDateTime.Parse(instanceId);
-					}
-					catch (FormatException)
-					{
+					if (!EasDateTime.TryParse(instanceId, out DateTime occurrence))
 						return ClientCommandStatus(command, "6"); // unparsable InstanceId
-					}
 
 					XElement occurrenceDelete = new(AS + "ApplicationData",
 						new XElement(Cal + "Exceptions",
