@@ -56,16 +56,13 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 			CalendarConverter.SchedulingInfo? previous =
 				previousIcs is null ? null : CalendarConverter.ReadSchedulingInfo(previousIcs);
 			List<(string Email, string? Name)> current = Recipients(info, context);
-			List<(string Email, string? Name)> removed = previous is null
-				? []
-				: Recipients(previous, context)
-					.Where(p => !current.Any(c => MailboxEquals(c.Email, p.Email)))
-					.ToList();
-			List<(string Email, string? Name)> added = previous is null
-				? current
-				: current
-					.Where(c => !Recipients(previous, context).Any(p => MailboxEquals(p.Email, c.Email)))
-					.ToList();
+			// E24: compute the previous recipient list ONCE. The old code called Recipients(previous)
+			// inside both the removed- and added-filters, so it re-parsed and re-filtered the whole
+			// attendee list per current attendee — O(n²) for a large meeting.
+			List<(string Email, string? Name)> previousRecipients =
+				previous is null ? [] : Recipients(previous, context);
+			(List<(string Email, string? Name)> added, List<(string Email, string? Name)> removed) =
+				DiffRecipients(previousRecipients, current, previousKnown: previous is not null);
 
 			if (removed.Count > 0)
 				await SendAsync(context, ImipMailBuilder.BuildCancel(
@@ -136,7 +133,7 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 
 	/// <summary>The stored ICS of a calendar item, for delete/change hooks that need the "before".</summary>
 	public static async Task<string?> CaptureIcsAsync(
-		IContentStore store, string folderBackendKey, string itemKey, CancellationToken ct)
+		IContentStore store, string folderBackendKey, string itemKey, ILogger logger, CancellationToken ct)
 	{
 		if (store is not ICalendarOperations calendar)
 			return null;
@@ -146,7 +143,14 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
-			return null; // hooks degrade to "no previous state" — never fail the command
+			// E34: degrade to "no previous state" so the command still succeeds — but say so. A
+			// swallowed read here makes the change hook treat every attendee as newly added and
+			// re-invite the whole meeting; silently doing that on a transient backend hiccup is a
+			// spam vector the operator can't see.
+			logger.LogWarning(ex,
+				"Could not read the pre-change ICS for {ItemKey}; iMIP hooks will treat this as no " +
+				"previous state (a change may re-invite all attendees)", itemKey);
+			return null;
 		}
 	}
 
@@ -161,6 +165,29 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 		if (!MailboxEquals(info.Organizer, identity))
 			return false;
 		return await calendar.ShouldSendInvitationsAsync(ct);
+	}
+
+	/// <summary>
+	///   Attendees added and removed between the previous and current recipient lists, matched by
+	///   mailbox. When the previous state is unknown (no prior ICS captured), everyone is "added" and
+	///   nobody is "removed" — the same fallback the change hook has always used.
+	/// </summary>
+	internal static (List<(string Email, string? Name)> Added, List<(string Email, string? Name)> Removed)
+		DiffRecipients(
+			IReadOnlyList<(string Email, string? Name)> previous,
+			IReadOnlyList<(string Email, string? Name)> current,
+			bool previousKnown)
+	{
+		if (!previousKnown)
+			return (current.ToList(), []);
+
+		List<(string Email, string? Name)> added = current
+			.Where(c => !previous.Any(p => MailboxEquals(p.Email, c.Email)))
+			.ToList();
+		List<(string Email, string? Name)> removed = previous
+			.Where(p => !current.Any(c => MailboxEquals(c.Email, p.Email)))
+			.ToList();
+		return (added, removed);
 	}
 
 	/// <summary>All attendees except the organizer themself.</summary>
