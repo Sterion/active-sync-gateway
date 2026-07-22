@@ -75,18 +75,18 @@ internal static class SettingsEndpoints
 			    is { } validationError)
 				return EndpointHelpers.BadRequest(validationError);
 
-			// Catalogue-level secrets (the OIDC client secret) are sealed at rest when the
-			// master key exists; open-ended backend keys stay raw (their providers read them
-			// verbatim — the synthetic Secret flag only masks display).
+			// Catalogue-level secrets (the OIDC client secret, the TLS certificate password) are
+			// sealed at rest when the master key exists; open-ended backend keys stay raw (their
+			// providers read them verbatim — the synthetic Secret flag only masks display). Shared
+			// with `eas config set` via AccountSecretPolicy so both surfaces seal identically (B5).
 			string value = request.Value;
-			if (definition.Secret && IsCatalogueKey(definition.Key) && !SecretValue.IsSealed(value))
+			if (definition.Secret && SettingKeys.IsCatalogueKey(definition.Key))
 			{
-				byte[]? masterKey = EncryptionKeyLoader.TryLoadKey(options.Value.Encryption, out _);
-				if (masterKey is not null)
-				{
-					value = SecretValue.Seal(value, masterKey);
-					System.Security.Cryptography.CryptographicOperations.ZeroMemory(masterKey);
-				}
+				AccountSecretPolicy.SecretResult prepared =
+					AccountSecretPolicy.PrepareCatalogueSecret(value, options.Value.Encryption, definition.Key);
+				if (prepared.Error is not null)
+					return EndpointHelpers.BadRequest(prepared.Error);
+				value = prepared.Value!;
 			}
 
 			await store.UpsertAsync(definition.Key, value, ct);
@@ -103,11 +103,6 @@ internal static class SettingsEndpoints
 			await store.DeleteAsync(stored, ct);
 			return Results.Ok(new { key = stored, tier = SettingKeys.Find(stored)?.Tier ?? "live", removed = true });
 		});
-	}
-
-	private static bool IsCatalogueKey(string key)
-	{
-		return SettingKeys.All.Any(k => k.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
 	}
 
 	// Backend role settings (ActiveSync:Backends:<Role>:*) are owned by the structured Backends

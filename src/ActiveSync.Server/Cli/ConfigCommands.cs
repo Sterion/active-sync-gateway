@@ -1,6 +1,7 @@
 using ActiveSync.Core.Administration;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.Settings;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -192,7 +193,26 @@ internal sealed class ConfigSetCommand(IAnsiConsole terminal) : SettingsCommandB
 			return 1;
 		}
 
-		await store.UpsertAsync(definition.Key, settings.Value, cancellationToken);
+		// B5: seal a catalogue-level secret at rest the same way the web settings editor does —
+		// otherwise `eas config set ActiveSync:WebUi:Oidc:ClientSecret ...` stored it in plaintext
+		// while the web UI sealed it. Open-ended backend leaves stay raw (their provider reads them).
+		string valueToStore = settings.Value;
+		if (definition is { Secret: true } && SettingKeys.IsCatalogueKey(definition.Key))
+		{
+			EncryptionOptions encryption =
+				fileConfig.GetSection("ActiveSync:Encryption").Get<EncryptionOptions>() ?? new EncryptionOptions();
+			AccountSecretPolicy.SecretResult prepared =
+				AccountSecretPolicy.PrepareCatalogueSecret(settings.Value, encryption, definition.Key);
+			if (prepared.Error is not null)
+			{
+				await Console.Error.WriteLineAsync(prepared.Error);
+				return 1;
+			}
+
+			valueToStore = prepared.Value!;
+		}
+
+		await store.UpsertAsync(definition.Key, valueToStore, cancellationToken);
 		Terminal.WriteLine($"Set {definition.Key} = {Mask(definition, settings.Value)}. {PickupNote(definition.Restart)}");
 		return 0;
 	}

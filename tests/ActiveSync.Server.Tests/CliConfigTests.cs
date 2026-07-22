@@ -170,6 +170,30 @@ public sealed class CliConfigTests : IDisposable
 	}
 
 	[Fact]
+	public void Set_CatalogueSecret_IsSealedAtRest_WhenKeyConfigured()
+	{
+		// B5: `eas config set` stored catalogue secrets verbatim while the web UI sealed them.
+		// With a master key present (bootstrap from env), a Secret catalogue key must be stored
+		// sealed (enc:v1:) at rest, not in plaintext — the same as the web settings editor.
+		SetEnv("ActiveSync__Encryption__Key", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=");
+		Assert.Equal(0, Run("config", "set", "ActiveSync:WebUi:Oidc:ClientSecret", "super-secret").ExitCode);
+
+		string? stored = ReadStoredValue("ActiveSync:WebUi:Oidc:ClientSecret");
+		Assert.NotNull(stored);
+		Assert.StartsWith("enc:v1:", stored);
+		Assert.DoesNotContain("super-secret", stored);
+	}
+
+	private string? ReadStoredValue(string key)
+	{
+		DbContextOptions<SqliteSyncDbContext> options = new DbContextOptionsBuilder<SqliteSyncDbContext>()
+			.UseSqlite($"Data Source={_dbPath}")
+			.Options;
+		using SqliteSyncDbContext db = new(options);
+		return db.GlobalSettings.AsNoTracking().FirstOrDefault(g => g.Key == key)?.Value;
+	}
+
+	[Fact]
 	public void List_BackendSecretLeaves_AreMasked()
 	{
 		// L30: non-Password backend secrets (ApiKey/Token/ClientSecret) leaked in the clear because

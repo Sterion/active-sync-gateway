@@ -62,6 +62,33 @@ internal static class AccountSecretPolicy
 		return new SecretResult(GatewayPasswordHasher.Hash(raw), null, PlaintextDisposition.Hashed);
 	}
 
+	/// <summary>
+	///   Prepares a catalogue-level secret SETTING (the OIDC client secret, the TLS certificate
+	///   password) for storage: an already-sealed value passes through, a plaintext is sealed
+	///   (enc:v1:) when the master key exists, refused when a key is configured but cannot be
+	///   loaded, and stored verbatim only when no key is configured at all. Shared by
+	///   <c>eas config set</c> and the web settings editor so both seal identically (B5).
+	/// </summary>
+	internal static SecretResult PrepareCatalogueSecret(string raw, EncryptionOptions encryption, string key)
+	{
+		if (SecretValue.IsSealed(raw))
+			return new SecretResult(raw, null);
+
+		byte[]? master = EncryptionKeyLoader.TryLoadKey(encryption, out string? keyError);
+		if (master is null)
+		{
+			if (keyError is not null)
+				return new SecretResult(null,
+					$"{key}: the ActiveSync:Encryption key is configured but could not be loaded " +
+					$"({keyError}); refusing to store the secret in plaintext.");
+			return new SecretResult(raw, null, PlaintextDisposition.StoredPlaintext);
+		}
+
+		string sealedValue = SecretValue.Seal(raw, master);
+		CryptographicOperations.ZeroMemory(master);
+		return new SecretResult(sealedValue, null, PlaintextDisposition.Sealed);
+	}
+
 	internal static SecretResult PrepareBackendPassword(string raw, EncryptionOptions encryption, string fieldKey)
 	{
 		if (SecretValue.IsSealed(raw))

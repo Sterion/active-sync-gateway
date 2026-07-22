@@ -212,6 +212,13 @@ internal static class SettingKeys
 	///   <c>ActiveSync:Backends:&lt;Role&gt;:*</c> returns a synthetic string/live entry (the role's
 	///   provider validates the specifics on the server). Returns null for anything else.
 	/// </summary>
+	/// <summary>
+	///   True when the key is a statically-known catalogue entry (in <see cref="All" />), as opposed
+	///   to a synthetic open-ended <c>ActiveSync:Backends:&lt;Role&gt;:*</c> leaf. Catalogue secrets
+	///   are sealed at rest; backend secrets are left raw for their provider to read verbatim.
+	/// </summary>
+	internal static bool IsCatalogueKey(string key) => ByKey.ContainsKey(key);
+
 	internal static SettingKey? Find(string key)
 	{
 		if (ByKey.TryGetValue(key, out SettingKey? known))
