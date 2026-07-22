@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Net.Security;
 using System.Text;
 using System.Text.Json;
 using ActiveSync.Backends.Common;
@@ -129,25 +128,14 @@ public sealed class JmapClient : IDisposable
 		BackendCredentials credentials, bool allowInvalidCertificates, string? caCertificatePath,
 		TimeSpan? httpTimeout)
 	{
-		// Redirects are followed manually (same-origin only) so the Authorization header is
-		// never handed to another origin — the .well-known/jmap discovery hop redirects to
-		// the real session resource, and HttpClient's auto-redirect strips auth on it.
-		SocketsHttpHandler handler = new()
-		{
-			AllowAutoRedirect = false,
-			PooledConnectionLifetime = TimeSpan.FromMinutes(10)
-		};
-		RemoteCertificateValidationCallback? certCallback = ServerCertificateValidator.CreateCallback(
-			allowInvalidCertificates, caCertificatePath);
-		if (certCallback is not null)
-			handler.SslOptions.RemoteCertificateValidationCallback = certCallback;
-		// Default request/response cap; the EventSource watcher overrides this with an infinite
-		// timeout so its long-lived SSE stream is not aborted mid-flight (H17).
-		HttpClient http = new(handler) { Timeout = httpTimeout ?? TimeSpan.FromSeconds(100) };
-		string token = Convert.ToBase64String(
-			Encoding.UTF8.GetBytes($"{credentials.UserName}:{credentials.Password}"));
-		http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", token);
-		return http;
+		// Redirects are followed manually (same-origin only) so the Authorization header is never
+		// handed to another origin — the .well-known/jmap discovery hop redirects to the real
+		// session resource, and HttpClient's auto-redirect strips auth on it. The factory builds
+		// the handler (no auto-redirect, operator TLS) and Basic auth. The default request/response
+		// cap is 100 s; the EventSource watcher passes an infinite timeout so its long-lived SSE
+		// stream is not aborted mid-flight (H17).
+		return BackendHttpClientFactory.CreateClient(
+			credentials, allowInvalidCertificates, caCertificatePath, httpTimeout);
 	}
 
 	public void Dispose()

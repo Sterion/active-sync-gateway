@@ -8,6 +8,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<InternalsVisibleTo Include="ActiveSync.Core.Tests" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<PackageReference Include="FolkerKinzel.VCards" />
 		<PackageReference Include="Ical.Net" />
 	</ItemGroup>

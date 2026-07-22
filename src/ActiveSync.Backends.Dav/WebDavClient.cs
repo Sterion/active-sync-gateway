@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Net.Security;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
@@ -27,29 +26,22 @@ public sealed class WebDavClient : IDisposable
 		bool allowInvalidCertificates = false,
 		string? caCertificatePath = null,
 		ILogger? wireLogger = null)
+		// Redirects are followed manually in SendAsync: HttpClient's auto-redirect strips the
+		// Authorization header and downgrades non-GET methods on 301/302, which turns a
+		// well-known discovery redirect (Stalwart: 307 → /dav/cal) into an unauthenticated HTML
+		// page. BackendHttpClientFactory builds the handler (no auto-redirect) and Basic auth.
+		: this(baseUri,
+			BackendHttpClientFactory.CreateClient(credentials, allowInvalidCertificates, caCertificatePath),
+			wireLogger)
+	{
+	}
+
+	/// <summary>Test seam: inject a pre-built <see cref="HttpClient" /> (e.g. over a stub handler).</summary>
+	internal WebDavClient(Uri baseUri, HttpClient http, ILogger? wireLogger = null)
 	{
 		_baseUri = baseUri;
 		_wireLogger = wireLogger;
-		// Redirects are followed manually in SendAsync: HttpClient's auto-redirect strips
-		// the Authorization header and downgrades non-GET methods on 301/302, which turns
-		// a well-known discovery redirect (Stalwart: 307 → /dav/cal) into an
-		// unauthenticated HTML page.
-		SocketsHttpHandler handler = new()
-		{
-			AllowAutoRedirect = false,
-			PooledConnectionLifetime = TimeSpan.FromMinutes(10)
-		};
-		RemoteCertificateValidationCallback? certCallback = ServerCertificateValidator.CreateCallback(
-			allowInvalidCertificates, caCertificatePath);
-		if (certCallback is not null)
-			handler.SslOptions.RemoteCertificateValidationCallback = certCallback;
-		_http = new HttpClient(handler)
-		{
-			Timeout = TimeSpan.FromSeconds(100)
-		};
-		string token = Convert.ToBase64String(
-			Encoding.UTF8.GetBytes($"{credentials.UserName}:{credentials.Password}"));
-		_http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", token);
+		_http = http;
 	}
 
 	public void Dispose()
