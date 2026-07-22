@@ -14,6 +14,13 @@ public sealed class CompositeBackendSession : IBackendSession
 	private readonly List<IBackendConnection> _connections = [];
 	private readonly List<IContentStore> _stores = [];
 
+	// A2: the session is a refcounted lease. The cache owns the initial reference; every
+	// GetSessionAsync hands out an additional lease that the request releases (via DisposeAsync)
+	// when it finishes. The connections are torn down only when the last lease is released — so
+	// the idle sweep evicting a session a long-running Ping is still using drops the cache's
+	// reference but leaves the live socket intact until the request lets go.
+	private int _leaseCount = 1;
+
 	private CompositeBackendSession(BackendCredentials gatewayCredentials, string? mailAddress)
 	{
 		// The gateway credentials are the IDENTITY (DB scoping, encryption AAD, cache keys);
@@ -92,7 +99,34 @@ public sealed class CompositeBackendSession : IBackendSession
 		       source.IsReadOnlyCollection(folderBackendKey);
 	}
 
+	/// <summary>
+	///   Acquires a lease on this session, or returns false if it is already being torn down (the
+	///   last lease was released between a caller reading it from the cache and getting here). A
+	///   false return tells the caller to drop the stale entry and rebuild.
+	/// </summary>
+	internal bool TryAcquireLease()
+	{
+		int current = Volatile.Read(ref _leaseCount);
+		while (current > 0)
+		{
+			int prev = Interlocked.CompareExchange(ref _leaseCount, current + 1, current);
+			if (prev == current)
+				return true;
+			current = prev;
+		}
+
+		return false;
+	}
+
+	/// <summary>Releases one lease (A2). The connections are disposed only on the last release.</summary>
 	public async ValueTask DisposeAsync()
+	{
+		if (Interlocked.Decrement(ref _leaseCount) != 0)
+			return;
+		await DisposeConnectionsAsync().ConfigureAwait(false);
+	}
+
+	private async ValueTask DisposeConnectionsAsync()
 	{
 		// A12: one throwing connection (e.g. an IMAP LOGOUT on a dead socket) must not abort the
 		// loop and strand the remaining connections' live sockets — dispose them all, then surface

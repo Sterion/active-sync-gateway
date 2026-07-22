@@ -221,7 +221,9 @@ public static class EasEndpoint
 			}
 		}
 
-		IBackendSession session = await sessionFactory.GetSessionAsync(credentials, parameters.DeviceId, ct);
+		// A2: the returned session is a lease — disposing it at the end of the request releases the
+		// lease (the cache keeps the connection alive for reuse; the last release tears it down).
+		await using IBackendSession session = await sessionFactory.GetSessionAsync(credentials, parameters.DeviceId, ct);
 
 		EasContext context = new()
 		{

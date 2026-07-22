@@ -165,36 +165,52 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// user names never become identity, and in Accounts mode the backend credentials are
 		// config-static (restart to apply changes).
 		string key = $"{credentials.UserName}\n{deviceId}";
-		bool created = false;
 
-		// The build is SHARED across every concurrent caller for this (user, device), so it runs
-		// uncancellable (CancellationToken.None): one request cancelling must not fault the session
-		// the others are awaiting. This matches the pre-K61 synchronous, uncancellable build.
-		Lazy<Task<CompositeBackendSession>> NewLazy() =>
-			MakeLazy(() =>
-			{
-				created = true;
-				return CompositeBackendSession.CreateAsync(
-					_registry, credentials, account.MailAddress, roles, sharedCalendars, CancellationToken.None);
-			});
-
-		Lazy<Task<CompositeBackendSession>> lazy = _sessions.GetOrAdd(key, _ => NewLazy());
-		CompositeBackendSession session = await AwaitBuild(lazy).ConfigureAwait(false);
-		if (created)
-			_logger.LogInformation("Opened backend session for {User} (device {DeviceId})",
-				credentials.UserName, deviceId);
-
-		// Credentials changed (e.g. password rotation): rebuild the session.
-		if (session.Credentials.Password != credentials.Password)
+		// A2: rebuild loop. The cached session may need recycling (password rotation) or may have
+		// been evicted and torn down between our read of the cache and our lease acquisition; either
+		// way we drop the stale entry and go round again. The common path runs exactly once.
+		while (true)
 		{
-			if (_sessions.TryRemove(key, out Lazy<Task<CompositeBackendSession>>? stale))
-				_ = DisposeLazyAsync(stale);
-			lazy = _sessions.GetOrAdd(key, _ => NewLazy());
-			session = await lazy.Value.ConfigureAwait(false);
-		}
+			bool created = false;
 
-		session.LastUsedUtc = DateTime.UtcNow;
-		return session;
+			// The build is SHARED across every concurrent caller for this (user, device), so it runs
+			// uncancellable (CancellationToken.None): one request cancelling must not fault the session
+			// the others are awaiting. This matches the pre-K61 synchronous, uncancellable build.
+			Lazy<Task<CompositeBackendSession>> NewLazy() =>
+				MakeLazy(() =>
+				{
+					created = true;
+					return CompositeBackendSession.CreateAsync(
+						_registry, credentials, account.MailAddress, roles, sharedCalendars, CancellationToken.None);
+				});
+
+			Lazy<Task<CompositeBackendSession>> lazy = _sessions.GetOrAdd(key, _ => NewLazy());
+			CompositeBackendSession session = await AwaitBuild(lazy).ConfigureAwait(false);
+
+			// Credentials changed (e.g. password rotation): recycle the cached session and rebuild.
+			if (session.Credentials.Password != credentials.Password)
+			{
+				if (_sessions.TryRemove(new KeyValuePair<string, Lazy<Task<CompositeBackendSession>>>(key, lazy)))
+					_ = DisposeLazyAsync(lazy); // releases the cache's lease on the stale session
+				continue;
+			}
+
+			// Take a lease before handing the session out. A false return means the session was
+			// evicted and its connections torn down between the cache read and now — drop the dead
+			// entry and rebuild.
+			if (!session.TryAcquireLease())
+			{
+				_sessions.TryRemove(new KeyValuePair<string, Lazy<Task<CompositeBackendSession>>>(key, lazy));
+				continue;
+			}
+
+			if (created)
+				_logger.LogInformation("Opened backend session for {User} (device {DeviceId})",
+					credentials.UserName, deviceId);
+
+			session.LastUsedUtc = DateTime.UtcNow;
+			return session;
+		}
 	}
 
 	/// <summary>
