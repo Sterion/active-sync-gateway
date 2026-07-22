@@ -84,12 +84,11 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.Property<string>("OptionsJson")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("PreviousSnapshotJson")
-                        .HasColumnType("TEXT");
+                    b.Property<byte[]>("PreviousSnapshotCompressed")
+                        .HasColumnType("BLOB");
 
-                    b.Property<string>("SnapshotJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                    b.Property<byte[]>("SnapshotCompressed")
+                        .HasColumnType("BLOB");
 
                     b.Property<int>("SyncKey")
                         .HasColumnType("INTEGER");

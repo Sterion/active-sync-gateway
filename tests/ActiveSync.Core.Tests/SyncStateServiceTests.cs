@@ -164,7 +164,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.NotNull(state);
 		Guid before = state.ConcurrencyToken;
 
-		state.SnapshotJson = "{\"x\":\"1\"}";
+		SyncStateService.WriteSnapshot(state, new Dictionary<string, string> { ["x"] = "1" });
 		await _db.SaveChangesAsync(acceptAllChangesOnSuccess: true, CancellationToken.None);
 
 		Assert.NotEqual(before, state.ConcurrencyToken);
@@ -435,13 +435,54 @@ public sealed class SyncStateServiceTests : IDisposable
 		await service.CommitCollectionStateAsync(state, [], 0, CancellationToken.None);
 
 		// Mutate the snapshot in memory but do NOT persist it.
-		state.SnapshotJson = "{\"dirty\":\"1\"}";
+		SyncStateService.WriteSnapshot(state, new Dictionary<string, string> { ["dirty"] = "1" });
 		await service.GetOrAddDavItemIdAsync(folder, "/ab/x.vcf", CancellationToken.None);
 
 		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
 		CollectionState persisted = await verify.CollectionStates.AsNoTracking()
 			.FirstAsync(c => c.DeviceKey == device.Id && c.CollectionId == folder.ServerId);
-		Assert.DoesNotContain("dirty", persisted.SnapshotJson);
+		Assert.DoesNotContain("dirty", SyncStateService.ReadSnapshot(persisted).Keys);
+	}
+
+	[Fact]
+	public async Task Snapshot_PersistedGzipped_AndRoundTripsLosslessly()
+	{
+		// The snapshot column held plaintext JSON of every item ever sent — 2-3 MB on a large
+		// mailbox, stored twice (current + previous) and rewritten every round. It is now gzipped:
+		// the persisted bytes must be a fraction of the plaintext and carry no plaintext ServerId,
+		// while the in-memory round trip stays exact (A4).
+		Device device = await _service.GetOrCreateDeviceAsync("u@a4", "DEV1", "Phone", CancellationToken.None);
+		(_, CollectionState? state) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
+		Assert.NotNull(state);
+		await _service.CommitCollectionStateAsync(state, [], 0, CancellationToken.None);
+
+		// A realistic, highly repetitive snapshot (the keys share a prefix — gzip's sweet spot).
+		Dictionary<string, string> big = new(StringComparer.Ordinal);
+		for (int i = 0; i < 2000; i++)
+			big[$"7:mailmessage-{i:D6}"] = i % 2 == 0 ? "100" : "101|work,personal";
+		(_, state) = await _service.ValidateSyncKeyAsync(device, "c", "1", CancellationToken.None);
+		Assert.NotNull(state);
+		await _service.CommitCollectionStateAsync(state, big, 0, CancellationToken.None);
+
+		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
+		CollectionState persisted = await verify.CollectionStates.AsNoTracking()
+			.FirstAsync(c => c.DeviceKey == device.Id && c.CollectionId == "c");
+		Assert.NotNull(persisted.SnapshotCompressed);
+
+		int plaintextLength = System.Text.Json.JsonSerializer.Serialize(big).Length;
+		// gzip magic 0x1f 0x8b, and a real reduction (this snapshot compresses well past 5x).
+		Assert.Equal(0x1f, persisted.SnapshotCompressed![0]);
+		Assert.Equal(0x8b, persisted.SnapshotCompressed![1]);
+		Assert.True(persisted.SnapshotCompressed!.Length < plaintextLength / 5,
+			$"compressed {persisted.SnapshotCompressed!.Length} not < {plaintextLength / 5}");
+		string asText = System.Text.Encoding.UTF8.GetString(persisted.SnapshotCompressed!);
+		Assert.DoesNotContain("mailmessage-000001", asText);
+
+		// Lossless: the round trip returns exactly what was written.
+		Dictionary<string, string> read = SyncStateService.ReadSnapshot(persisted);
+		Assert.Equal(big.Count, read.Count);
+		Assert.Equal("101|work,personal", read["7:mailmessage-000001"]);
+		Assert.Equal("100", read["7:mailmessage-000000"]);
 	}
 
 	[Fact]

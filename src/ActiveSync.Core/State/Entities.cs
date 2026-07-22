@@ -101,11 +101,15 @@ public class CollectionState
 	public required string CollectionId { get; set; }
 	public int SyncKey { get; set; }
 
-	/// <summary>JSON: item ServerId → revision, as of SyncKey.</summary>
-	public string SnapshotJson { get; set; } = "{}";
+	/// <summary>
+	///   Gzipped JSON of {item ServerId → revision}, as of SyncKey. Stored compressed because it
+	///   holds every item ever sent (2–3 MB uncompressed on a large mailbox); read and written only
+	///   through <see cref="SnapshotCodec" /> (A4).
+	/// </summary>
+	public byte[]? SnapshotCompressed { get; set; }
 
-	/// <summary>Snapshot as of SyncKey-1, kept so a replayed key can be honored.</summary>
-	public string? PreviousSnapshotJson { get; set; }
+	/// <summary>Gzipped snapshot as of SyncKey-1, kept so a replayed key can be honored.</summary>
+	public byte[]? PreviousSnapshotCompressed { get; set; }
 
 	/// <summary>
 	///   JSON: ClientId → applied-Add outcome for the request that produced SyncKey. A client

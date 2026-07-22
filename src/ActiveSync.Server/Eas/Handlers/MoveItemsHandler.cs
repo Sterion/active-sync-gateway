@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Xml.Linq;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
@@ -131,7 +130,7 @@ public sealed class MoveItemsHandler(
 			snapshot.Remove(itemKey);
 		else
 			snapshot[itemKey] = revision ?? "";
-		state.SnapshotJson = JsonSerializer.Serialize(snapshot);
+		SyncStateService.WriteSnapshot(state, snapshot);
 		await context.State.PersistAsync(ct);
 	}
 }

@@ -141,6 +141,10 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 	public static Dictionary<string, string> ReadSnapshot(CollectionState state)
 		=> CollectionStateStore.ReadSnapshot(state);
 
+	/// <summary>Writes an item snapshot onto a <see cref="CollectionState" /> (stored gzipped).</summary>
+	public static void WriteSnapshot(CollectionState state, Dictionary<string, string> snapshot)
+		=> CollectionStateStore.WriteSnapshot(state, snapshot);
+
 	/// <summary>The applied-Add map of the generation that produced the current SyncKey.</summary>
 	public static Dictionary<string, AppliedClientAdd> ReadAppliedAdds(CollectionState state)
 		=> CollectionStateStore.ReadAppliedAdds(state);

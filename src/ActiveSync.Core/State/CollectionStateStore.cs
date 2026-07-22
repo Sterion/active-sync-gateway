@@ -34,8 +34,8 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 			}
 
 			state.SyncKey = 0;
-			state.SnapshotJson = "{}";
-			state.PreviousSnapshotJson = null;
+			state.SnapshotCompressed = null;
+			state.PreviousSnapshotCompressed = null;
 			state.LastClientAddsJson = null;
 			state.LastClientChangesJson = null;
 			state.UpdatedUtc = DateTime.UtcNow;
@@ -51,15 +51,15 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 		if (key == state.SyncKey)
 			return (SyncKeyValidation.Current, state);
 
-		if (key == state.SyncKey - 1 && state.PreviousSnapshotJson is not null)
+		if (key == state.SyncKey - 1 && state.PreviousSnapshotCompressed is not null)
 		{
 			// Client never saw our last response: roll back one generation.
 			// LastClientAddsJson/LastClientChangesJson are deliberately KEPT — they describe
 			// the commands of the discarded generation, which are exactly the ones the client
 			// is about to re-send.
 			state.SyncKey = key;
-			state.SnapshotJson = state.PreviousSnapshotJson;
-			state.PreviousSnapshotJson = null;
+			state.SnapshotCompressed = state.PreviousSnapshotCompressed;
+			state.PreviousSnapshotCompressed = null;
 			await db.SaveChangesAsync(ct).ConfigureAwait(false);
 			return (SyncKeyValidation.Replay, state);
 		}
@@ -86,16 +86,20 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 			return (SyncKeyValidation.Invalid, [], state?.FilterType ?? 0);
 		if (key == state.SyncKey)
 			return (SyncKeyValidation.Current, ReadSnapshot(state), state.FilterType);
-		if (key == state.SyncKey - 1 && state.PreviousSnapshotJson is not null)
-			return (SyncKeyValidation.Replay,
-				JsonSerializer.Deserialize<Dictionary<string, string>>(state.PreviousSnapshotJson, JsonOpts) ?? [],
-				state.FilterType);
+		if (key == state.SyncKey - 1 && state.PreviousSnapshotCompressed is not null)
+			return (SyncKeyValidation.Replay, SnapshotCodec.Decompress(state.PreviousSnapshotCompressed), state.FilterType);
 		return (SyncKeyValidation.Invalid, [], state.FilterType);
 	}
 
 	public static Dictionary<string, string> ReadSnapshot(CollectionState state)
 	{
-		return JsonSerializer.Deserialize<Dictionary<string, string>>(state.SnapshotJson, JsonOpts) ?? [];
+		return SnapshotCodec.Decompress(state.SnapshotCompressed);
+	}
+
+	/// <summary>Persists <paramref name="snapshot" /> onto the state's snapshot column (gzipped).</summary>
+	public static void WriteSnapshot(CollectionState state, Dictionary<string, string> snapshot)
+	{
+		state.SnapshotCompressed = SnapshotCodec.Compress(snapshot);
 	}
 
 	/// <summary>The applied-Add map of the generation that produced the current SyncKey.</summary>
@@ -120,8 +124,8 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 		Dictionary<string, AppliedClientAdd>? appliedAdds = null,
 		Dictionary<string, AppliedClientChange>? appliedChanges = null)
 	{
-		state.PreviousSnapshotJson = state.SnapshotJson;
-		state.SnapshotJson = JsonSerializer.Serialize(newSnapshot, JsonOpts);
+		state.PreviousSnapshotCompressed = state.SnapshotCompressed;
+		state.SnapshotCompressed = SnapshotCodec.Compress(newSnapshot);
 		state.LastClientAddsJson = appliedAdds is { Count: > 0 }
 			? JsonSerializer.Serialize(appliedAdds, JsonOpts)
 			: null;
