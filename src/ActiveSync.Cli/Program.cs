@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
-using ActiveSync.Core.Options;
-using ActiveSync.Core.Security;
 using ActiveSync.Crypto;
 
 // Slim `eas`: forward the command line to the running gateway's loopback /cli endpoint so everyday

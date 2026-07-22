@@ -1,9 +1,9 @@
-namespace ActiveSync.Core.Options;
+namespace ActiveSync.Crypto;
 
 /// <summary>
 ///   The <c>ActiveSync:Encryption</c> master-key configuration. Lives in the BCL-only crypto
-///   assembly (with <see cref="ActiveSync.Core.Security.EncryptionKeyLoader" />) so both the
-///   gateway and the slim <c>eas</c> client can bind and derive the key from the same settings.
+///   assembly (with <see cref="EncryptionKeyLoader" />) so both the gateway and the slim
+///   <c>eas</c> client can bind and derive the key from the same settings.
 /// </summary>
 public sealed class EncryptionOptions
 {

@@ -5,6 +5,7 @@ using System.Xml.Linq;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
+using ActiveSync.Crypto;
 using ActiveSync.Integration.Tests.Infrastructure;
 using ActiveSync.Protocol;
 using Microsoft.AspNetCore.Mvc.Testing;

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using ActiveSync.Core.Options;
+using ActiveSync.Crypto;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 

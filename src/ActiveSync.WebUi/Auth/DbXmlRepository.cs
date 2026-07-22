@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
 using System.Xml.Linq;
 using ActiveSync.Core.Options;
-using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
+using ActiveSync.Crypto;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;

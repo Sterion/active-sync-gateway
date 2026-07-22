@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
-using ActiveSync.Core.Security;
+using ActiveSync.Crypto;
 using Microsoft.Extensions.Configuration;
 
 namespace ActiveSync.Core.Options;

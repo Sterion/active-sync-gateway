@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace ActiveSync.Core.Security;
+namespace ActiveSync.Crypto;
 
 /// <summary>
 ///   Seals configuration secrets (backend passwords) with the ActiveSync:Encryption master

@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Net;
 using ActiveSync.Core.Options;
-using ActiveSync.Core.Security;
 using ActiveSync.Crypto;
 using Microsoft.Extensions.Options;
 using Spectre.Console;

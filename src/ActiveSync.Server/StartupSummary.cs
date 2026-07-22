@@ -5,6 +5,7 @@ using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
+using ActiveSync.Crypto;
 
 namespace ActiveSync.Server;
 

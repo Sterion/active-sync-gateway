@@ -11,6 +11,7 @@ using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
+using ActiveSync.Crypto;
 using ActiveSync.Server.Eas;
 using ActiveSync.Server.Eas.Handlers;
 using Microsoft.EntityFrameworkCore;

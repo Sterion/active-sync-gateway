@@ -1,8 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
-using ActiveSync.Core.Options;
 
-namespace ActiveSync.Core.Security;
+namespace ActiveSync.Crypto;
 
 /// <summary>
 ///   Loads the local-content encryption key from configuration. The value may be ANY

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using ActiveSync.Core.Security;
+using ActiveSync.Crypto;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Core.Options;

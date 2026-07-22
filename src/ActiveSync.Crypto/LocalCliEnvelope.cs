@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text.Json;
-using ActiveSync.Core.Security;
 
 namespace ActiveSync.Crypto;
 

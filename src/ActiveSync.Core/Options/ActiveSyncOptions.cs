@@ -1,3 +1,5 @@
+using ActiveSync.Crypto;
+
 namespace ActiveSync.Core.Options;
 
 public sealed class DatabaseOptions

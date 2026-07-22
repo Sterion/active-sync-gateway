@@ -3,6 +3,7 @@ using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
+using ActiveSync.Crypto;
 using ActiveSync.WebUi.Auth;
 using ActiveSync.WebUi.Setup;
 using Microsoft.AspNetCore.Authentication;

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Xml.Linq;
 using ActiveSync.Core.Security;
+using ActiveSync.Crypto;
 using ActiveSync.Integration.Tests.Infrastructure;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;

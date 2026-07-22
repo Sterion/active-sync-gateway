@@ -1,4 +1,5 @@
 using ActiveSync.Core.Security;
+using ActiveSync.Crypto;
 
 namespace ActiveSync.Core.Tests;
 

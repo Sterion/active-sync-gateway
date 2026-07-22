@@ -3,6 +3,7 @@ using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Administration;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
+using ActiveSync.Crypto;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Server.Tests;

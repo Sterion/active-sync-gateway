@@ -1,8 +1,8 @@
 using ActiveSync.Core.Administration;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
-using ActiveSync.Core.Options;
 using ActiveSync.Core.Settings;
+using ActiveSync.Crypto;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
