@@ -350,7 +350,7 @@ public sealed class CalDavStore(
 		return map;
 	}
 
-	private static XElement BuildEventFilter(ContentFilter filter)
+	internal static XElement BuildEventFilter(ContentFilter filter)
 	{
 		// Always send a time-range: Axigen's calendar-query omits recurring events when the
 		// VEVENT comp-filter carries no time-range (verified live 2026-07-17). An epoch start
@@ -359,6 +359,6 @@ public sealed class CalDavStore(
 		DateTime since = filter.SinceUtc ?? DateTime.UnixEpoch;
 		return new XElement(DavNs.CalDav + "comp-filter", new XAttribute("name", "VEVENT"),
 			new XElement(DavNs.CalDav + "time-range",
-				new XAttribute("start", since.ToString("yyyyMMdd'T'HHmmss'Z'"))));
+				new XAttribute("start", EasDateTime.ToCompact(since))));
 	}
 }
