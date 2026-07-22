@@ -22,8 +22,37 @@ public sealed class ContractSurfaceTests
 	public void ContractVersion_MatchesTheAssemblyVersion()
 	{
 		Version assemblyVersion = typeof(IGatewayPlugin).Assembly.GetName().Version!;
-		Assert.Equal(assemblyVersion.Major, ContractVersion.Major);
-		Assert.Equal(assemblyVersion.Minor, ContractVersion.Minor);
+		Assert.Equal(ContractVersion.Major, assemblyVersion.Major);
+		Assert.Equal(ContractVersion.Minor, assemblyVersion.Minor);
 		Assert.Equal(new Version(ContractVersion.Major, ContractVersion.Minor), ContractVersion.Current);
+	}
+
+	// K67: BackendItemNotFoundException derived straight from Exception, so the codebase-wide
+	// `catch (BackendException)` idiom silently MISSED it — an item-gone thrown from a store
+	// escaped every handler written to funnel backend errors. It must be a BackendException. And
+	// BackendException was sealed, so a plugin could not introduce its own typed backend error;
+	// unseal it.
+	[Fact]
+	public void BackendItemNotFoundException_IsABackendException()
+	{
+		Assert.True(typeof(BackendException).IsAssignableFrom(typeof(BackendItemNotFoundException)));
+
+		BackendException? caught = null;
+		try
+		{
+			throw new BackendItemNotFoundException("gone");
+		}
+		catch (BackendException ex)
+		{
+			caught = ex;
+		}
+
+		Assert.IsType<BackendItemNotFoundException>(caught);
+	}
+
+	[Fact]
+	public void BackendException_IsNotSealed_SoPluginsCanAddTypedErrors()
+	{
+		Assert.False(typeof(BackendException).IsSealed);
 	}
 }
