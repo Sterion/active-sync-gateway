@@ -307,6 +307,13 @@ public sealed class AccountResolver
 		    GatewayPasswordHasher.IsHashed(account.Password) &&
 		    !GatewayPasswordHasher.TryParse(account.Password, out string? parseError))
 			failures.Add($"ActiveSync:Users:{login}: Password is not a valid pbkdf2$ value: {parseError}.");
+		// B18: a sealed enc:v1: value in the gateway Password position never authenticates —
+		// VerifyLocally treats a non-pbkdf2$ value as plaintext and compares digests, so the real
+		// password never matches and the account is silently locked out. Flag it instead of
+		// letting it through unreported (the gateway Password wants pbkdf2$ or plaintext).
+		if (account.Password is not null && SecretValue.IsSealed(account.Password))
+			failures.Add($"ActiveSync:Users:{login}: the gateway Password is an enc:v1: sealed value, " +
+			             "which never authenticates — use a pbkdf2$ hash (eas user password) or plaintext.");
 
 		// Overrides keyed by role name; unknown keys are configuration mistakes, not silence.
 		Dictionary<BackendRole, BackendRoleOverride> overrides = new();

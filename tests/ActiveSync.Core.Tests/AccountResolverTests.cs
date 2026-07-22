@@ -470,4 +470,25 @@ public class AccountResolverTests
 		AccountResolver.ValidateUsers(options, Roles(BaseConfig()), Registry(), null, failures);
 		Assert.Contains("sealed (enc:v1:) but no ActiveSync:Encryption key", string.Join(";", failures));
 	}
+
+	[Fact]
+	public void ValidateUsers_SealedGatewayPassword_IsReported()
+	{
+		// B18: an enc:v1: value in the gateway Password position (NOT a backend role) is never a
+		// valid credential. VerifyLocally treats a non-pbkdf2$ stored value as plaintext and
+		// compares SHA256(sealed) against SHA256(presented), which never matches — so the real
+		// password never authenticates and the account is silently locked out, with no report. It
+		// must be flagged at validation time, mirroring the CLI/web write-path policy that already
+		// rejects a sealed gateway password. Reported regardless of whether a key is present.
+		byte[] key = new byte[32];
+		ActiveSyncOptions options = HostOptions();
+		options.Users = new Dictionary<string, AccountOptions>
+		{
+			["u"] = new() { Password = SecretValue.Seal("pw", key) }
+		};
+
+		List<string> failures = new();
+		AccountResolver.ValidateUsers(options, Roles(BaseConfig()), Registry(), key, failures);
+		Assert.Contains("gateway Password", string.Join(";", failures));
+	}
 }
