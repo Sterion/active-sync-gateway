@@ -56,6 +56,32 @@ public sealed class ContractSurfaceTests
 		Assert.False(typeof(BackendException).IsSealed);
 	}
 
+	// K57: the published plugin surface (ActiveSync.Contracts) must carry only what a plugin
+	// actually builds against. IBackendSession / IBackendSessionFactory / BackendSessionInfo are
+	// the HOST's composite session, its cache/factory and the dashboard projection of that cache —
+	// nothing a plugin implements or receives — so they must NOT be exported by Contracts. They now
+	// live in ActiveSync.Core.Backend. (Structural guard, in the spirit of items 15/16.)
+	[Theory]
+	[InlineData("IBackendSession")]
+	[InlineData("IBackendSessionFactory")]
+	[InlineData("BackendSessionInfo")]
+	public void HostOnlySessionTypes_AreNotOnTheContractsSurface(string typeName)
+	{
+		string[] contractsExports = typeof(IContentStore).Assembly
+			.GetExportedTypes()
+			.Select(static t => t.Name)
+			.ToArray();
+		Assert.DoesNotContain(typeName, contractsExports);
+	}
+
+	[Fact]
+	public void HostSessionTypes_LiveInCore()
+	{
+		Assert.Equal("ActiveSync.Core.Backend", typeof(Core.Backend.IBackendSession).Namespace);
+		Assert.Equal("ActiveSync.Core.Backend", typeof(Core.Backend.IBackendSessionFactory).Namespace);
+		Assert.Equal("ActiveSync.Core.Backend", typeof(Core.Backend.BackendSessionInfo).Namespace);
+	}
+
 	// K59: DeleteItemAsync put the CancellationToken THIRD (before `bool permanent = false`),
 	// breaking the ct-last convention every other member honours, and used an optional parameter
 	// on an interface method (a compile-time default the implementer cannot see or change). The

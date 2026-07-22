@@ -175,8 +175,9 @@ public interface IPerUserResourceOwner
 	void TrimUserResources(IReadOnlySet<string> activeGatewayLogins);
 }
 
-/// <summary>One live backend session of the factory cache (for the admin dashboard).</summary>
-public sealed record BackendSessionInfo(string User, string DeviceId, DateTime LastUsedUtc);
+// K57: BackendSessionInfo (a projection of the HOST's session cache for the admin dashboard) moved
+// to ActiveSync.Core.Backend with IBackendSessionFactory that produces it. WatcherInfo stays: it is
+// the return type of IWatcherDiagnostics, an OPTIONAL PROVIDER capability a plugin may implement.
 
 /// <summary>One live push watcher a provider holds (for the admin dashboard).</summary>
 public sealed record WatcherInfo(string User, string Resource);

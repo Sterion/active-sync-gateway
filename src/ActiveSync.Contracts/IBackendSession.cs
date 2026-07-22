@@ -108,47 +108,7 @@ public interface ICalendarOperations
 	Task<bool> ShouldSendInvitationsAsync(CancellationToken ct);
 }
 
-/// <summary>
-///   A per-user backend session bundling the content stores and side operations. Sessions cache
-///   live protocol connections (IMAP) and are reused across requests for the same user+device.
-/// </summary>
-public interface IBackendSession : IAsyncDisposable
-{
-	/// <summary>The gateway credentials — the user's identity, not any backend login.</summary>
-	BackendCredentials Credentials { get; }
-
-	/// <summary>
-	///   The user's mail address (explicit in Accounts mode; in PassThrough the login when it
-	///   contains '@'). Null when unknown — consumers must degrade, not guess.
-	/// </summary>
-	string? MailAddress { get; }
-
-	/// <summary>All content stores available for this deployment (mail always; DAV stores if configured).</summary>
-	IReadOnlyList<IContentStore> Stores { get; }
-
-	IMailStoreOperations MailStore { get; }
-	IMailSubmitOperations MailSubmit { get; }
-	IContactOperations? Contacts { get; }
-	ICalendarOperations? Calendar { get; }
-
-	/// <summary>Sieve-backed out-of-office management; null when Sieve is not configured.</summary>
-	IOofBackend? Oof { get; }
-
-	IContentStore? GetStoreForClass(string easClass);
-	IContentStore? GetStoreForBackendKey(string backendKey);
-
-	/// <summary>
-	///   Whether the folder is granted read-only (shared calendars): client writes are then
-	///   silently reverted, the same convergence semantics as global ReadOnly mode.
-	/// </summary>
-	bool IsReadOnlyFolder(string folderBackendKey);
-}
-
-public interface IBackendSessionFactory
-{
-	/// <summary>Validates credentials against the mail backend (used by HTTP Basic auth).</summary>
-	Task<bool> AuthenticateAsync(BackendCredentials credentials, CancellationToken ct);
-
-	/// <summary>Gets or creates a cached session for the user/device pair.</summary>
-	Task<IBackendSession> GetSessionAsync(BackendCredentials credentials, string deviceId, CancellationToken ct);
-}
+// K57: IBackendSession / IBackendSessionFactory are the HOST's composite-session aggregation and
+// its cache — nothing a plugin implements or receives (a plugin implements IBackendConnection and
+// the store/side-op interfaces above). They moved to ActiveSync.Core.Backend so the published
+// plugin surface carries only what a plugin actually builds against.

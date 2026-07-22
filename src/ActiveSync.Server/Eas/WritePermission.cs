@@ -14,7 +14,7 @@ namespace ActiveSync.Server.Eas;
 ///     </item>
 ///     <item>
 ///       <description>
-///         <see cref="Contracts.IBackendSession.IsReadOnlyFolder" /> — a per-folder grant
+///         <see cref="Core.Backend.IBackendSession.IsReadOnlyFolder" /> — a per-folder grant
 ///         (shared collections; the owning store opts in via <c>IReadOnlyCollectionSource</c>).
 ///       </description>
 ///     </item>
