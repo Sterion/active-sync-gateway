@@ -100,12 +100,14 @@ public partial class Program
 
 		app.MapGet("/", () => Results.Text("ActiveSync gateway is running. EAS endpoint: /Microsoft-Server-ActiveSync"));
 		app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
-		app.MapGet("/readyz", async (ReadinessProbe probe, CancellationToken ct) =>
+		app.MapGet("/readyz", async (HttpContext http, ReadinessProbe probe, CancellationToken ct) =>
 		{
 			(bool ready, Dictionary<string, bool> components) = await probe.CheckAsync(ct);
-			return ready
-				? Results.Ok(new { status = "ready", components })
-				: Results.Json(new { status = "not ready", components }, statusCode: 503);
+			// E16: withhold the component topology from anonymous, non-local callers — the HTTP
+			// status is the readiness verdict; only a local caller (k8s node probe, operator) sees
+			// which backend roles are configured.
+			object body = ReadinessResponse.Body(ready, components, ReadinessResponse.IsLocal(http));
+			return ready ? Results.Ok(body) : Results.Json(body, statusCode: 503);
 		});
 		if (options.Metrics.Enabled)
 		{
