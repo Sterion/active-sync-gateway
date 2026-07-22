@@ -137,6 +137,20 @@ public sealed class GlobalSettingStoreTests : IDisposable
 		Assert.Equal(2, changed);
 	}
 
+	[Theory]
+	[InlineData("ActiveSync:Database:ConnectionString")]
+	[InlineData("ActiveSync:Encryption:Key")]
+	[InlineData("ActiveSync:Plugins:Directory")]
+	[InlineData("ActiveSync:UsersFile")]
+	public async Task Upsert_RefusesHostControlledKeys_LastChokepoint(string key)
+	{
+		// B12: even bypassing the write surfaces, the store must never persist a bootstrap /
+		// host-controlled key — a stored ConnectionString/Encryption row would be trusted next boot.
+		await Assert.ThrowsAsync<InvalidOperationException>(
+			() => _store.UpsertAsync(key, "attacker-value", CancellationToken.None));
+		Assert.Null(await _store.GetAsync(key, CancellationToken.None));
+	}
+
 	[Fact]
 	public void Loader_ToleratesMissingTable_ReturnsEmpty()
 	{

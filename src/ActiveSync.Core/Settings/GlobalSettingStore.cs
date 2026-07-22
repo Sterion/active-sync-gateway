@@ -1,3 +1,4 @@
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.State;
 using Microsoft.EntityFrameworkCore;
 
@@ -52,6 +53,14 @@ public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)
 
 	public async Task UpsertAsync(string key, string value, CancellationToken ct)
 	{
+		// Defence in depth (B12): the write surfaces (`eas config set`, the web settings API) already
+		// refuse bootstrap/host-controlled keys, and DbSettingsConfigurationProvider drops any that
+		// reach the table by another route — but the store is the last common chokepoint, so refuse
+		// here too. A stored Database:ConnectionString / Encryption:Key row would be read on the next
+		// start (the DB provider is layered last) and repoint the gateway at a database it then trusts.
+		if (SettingKeys.HostControlledReason(key) is { } reason)
+			throw new InvalidOperationException($"'{key}' cannot be stored in the database: {reason}.");
+
 		await using SyncDbContext db = contextFactory.CreateDbContext();
 		GlobalSetting? row = await db.GlobalSettings
 			.FirstOrDefaultAsync(s => s.Key == key, ct).ConfigureAwait(false);
