@@ -644,17 +644,95 @@ stays the way to remove a gateway password.
 
 ---
 
-## Next: item 15 — `Backends.Common` drops its Core reference (Phase 3 — Boundaries)
+## Item 15 — `Backends.Common` drops its Core reference (Phase 3 — Boundaries)
 
-Phase 2 (Security) is complete through item 14. **Item 15 begins Phase 3 (structural/boundary work),
-which changes the verification profile:** these items *execute the architecture document* — moving types
-between assemblies, changing the plugin contract. AGENTS.md § *Solution layout and dependency rule* and
-`docs/plugins.md` are now **hard gates**, not background reading, and the orchestrator must read them
-before judging a worker's result in scope. Line anchors drift wholesale once types move (item 20
-especially) — locate findings by symbol. Item 17 is an intentional **breaking Contracts** change bundled
-into one major bump; item 20 must run **alone**.
+**Findings:** `S1` — High
+**Commits:** `9bb7522` (S1)
 
-Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 452 ·
+**Verification (orchestrator-run):** integrity 56/15/365/365/0, encoding 0 ✓ · cursor → item 16 ✓ ·
+one commit per finding with ID in subject ✓ · build **0 warnings** ✓ · unit **Protocol 63 · Core 453
+(was 452) · WebUi 70 · Server 156 = 742 passed, 0 failed, 0 skipped** ✓ · integration **139 / 0 skipped**
+on a **fresh** container (clean-volume restart in parallel with the worker; volumes recreated + all four
+ports OK confirmed from the restart log) ✓.
+
+Item 15 is **not [LIVE]**, but integration was run anyway — it is the first structural item, and a moved
+type breaking the DI graph is exactly the silent-failure class the standing lesson names. Clean.
+
+**`BackendConfigField`-already-in-Contracts claim independently verified.** The item text says "move
+`WireLog.Payload`, `TransientRetry`, `BackendConfigField` → Contracts," but `git ls-tree ce6259c` shows
+`BackendConfigField` already lived in `src/ActiveSync.Contracts/BackendConfigSchema.cs` at baseline. The
+worker correctly treated that clause as already-satisfied and moved only the remaining two types — not a
+skipped finding.
+
+**Contracts dependency cleanliness re-checked.** After the move, `ActiveSync.Contracts.csproj` still
+references only `ActiveSync.Protocol` + `Microsoft.Extensions.Configuration`/`.Binder`/
+`.DependencyInjection.Abstractions` — NOT Core, Crypto or EF. The moved `WireLog` uses only BCL (pure
+string truncation/sanitization, no `ILogger`), so the boundary in AGENTS.md § *Solution layout* holds.
+
+**Notes (worker-flagged):**
+- **Namespace change (pre-2.0 contract):** `WireLog` and `TransientRetry` move `ActiveSync.Core.*` →
+  `ActiveSync.Contracts`. Additive for real plugins — they reference Contracts, not Core, so they could
+  not use these types before and now can. Acceptable per Standing context (no external consumers).
+- **`Backends.Common` now declares `Microsoft.Extensions.Logging.Abstractions` directly** (pinned
+  `10.0.10` in `Directory.Packages.props`). `MailKitWireLogger`'s `ILogger` previously flowed in
+  transitively via the dropped Core reference; the dependency is now explicit and correct.
+- **The guard test is finding-specific, not the broad boundary suite.** `DependencyRuleTests
+  .BackendsCommon_DoesNotReferenceCore` asserts the Common assembly's `GetReferencedAssemblies()` omits
+  `ActiveSync.Core` — genuine red-green (RED against unmodified code). The wide plugin-boundary suite is
+  deliberately item 44 (`S5`); the test comment points there so a future worker generalizes, not
+  duplicates.
+- **No new findings filed.**
+
+---
+
+## Item 16 — Crypto namespace realignment (Phase 3 — Boundaries)
+
+**Findings:** `S2` (= `K49`) — one Medium defect under two IDs (cross-cutting `S2` and Area-K `K49`)
+**Commits:** `ba73bc8` (S2, K49)
+
+**Verification (orchestrator-run):** integrity 56/15/365/365/0, encoding 0 ✓ · cursor → item 17 ✓ ·
+one commit with both IDs in subject ✓ (S2/K49 are the same defect — one commit is correct) · build
+**0 warnings** ✓ · unit **Protocol 63 · Core 454 (was 453) · WebUi 70 · Server 156 = 743 passed, 0
+failed, 0 skipped** ✓ · integration **139 / 0 skipped** on a **fresh** container ✓ · tree clean apart
+from the orchestrator-owned results file, which is **not** in the worker's commit (worker unstaged it) ✓.
+
+**Independently confirmed the move actually landed:** `git grep '^namespace ActiveSync.Core'` over
+`src/ActiveSync.Crypto/*.cs` at HEAD returns nothing — no Crypto source declares a `Core.*` namespace
+any more. `SecretValue`, `EncryptionKeyLoader` (were `ActiveSync.Core.Security`) and `EncryptionOptions`
+(was `ActiveSync.Core.Options`) now sit under `ActiveSync.Crypto`, matching the assembly's `RootNamespace`
+and the already-correct `LocalCliEnvelope`/`LocalCliResult`.
+
+**Notes (worker-flagged):**
+- **Source-level breaking change (pre-2.0 contract).** Three published Crypto types change namespace
+  `ActiveSync.Core.*` → `ActiveSync.Crypto`. No runtime behaviour change. Acceptable per Standing
+  context; the item explicitly says to do it before the package has external consumers. The break was
+  itself the diagnostic — `ActiveSync.Cli` (BCL-only, references only Crypto) stopped compiling with its
+  `using ActiveSync.Core.*`, which is exactly the invisibility the finding describes.
+- **Guard test is a genuine reproducer**, not coverage: `DependencyRuleTests
+  .Crypto_TypesDeclareTheCryptoNamespace` asserts every exported Crypto type declares a namespace under
+  `ActiveSync.Crypto`; RED against unmodified code, naming the three offenders, then green.
+- **Judgment call:** flat `ActiveSync.Crypto` namespace chosen over preserving `.Security`/`.Options`
+  subdivisions under Crypto — consistent with the assembly root and the sibling CLI-envelope types
+  already there. A reviewer could reasonably have kept the subdivision.
+- **No new findings filed.**
+
+---
+
+## Next: item 17 — Contracts surface (Phase 3 — Boundaries) · **breaking, one major bump**
+
+**Items 17–19 remain in Phase 3 (structural/boundary work):** these items *execute the architecture
+document* — moving types between assemblies, changing the plugin contract. AGENTS.md § *Solution layout
+and dependency rule* and `docs/plugins.md` are **hard gates**, not background reading, and the
+orchestrator must read them before judging a worker's result in scope. Line anchors drift wholesale once
+types move (item 20 especially) — locate findings by symbol.
+
+**Item 17 is the intentional breaking Contracts change** — `K57 K58 K59 K61 K62 K64 K67 K69 K71`: move
+host-only types out, split `IContentStore` into optional capabilities, make `CreateConnection` async, fix
+fail-open `SharedCollection.Parse`, add `ContractVersion`. Bundle into one major version bump. It is the
+highest DI/pipeline-risk item in this range — the integration run after it is not optional. Item 20 must
+run **alone** (not in this orchestrator's range).
+
+Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 454 ·
 WebUi 70 · Server 156**.
 
 **Standing lessons that carried this run (items 13–14):**
