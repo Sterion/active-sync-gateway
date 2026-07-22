@@ -947,21 +947,49 @@ codes, response bodies and ordering unchanged.
 --- END OF PHASE 3 (Boundaries). Items 21–31 are Phase 4 (Correctness). ---
 ---
 
-## Next: item 21 — Backend session lifetime (Phase 4 — Correctness) · run stopped here
+# PHASE 4 — Correctness (items 21–31)
 
-**The orchestrated run stopped at the end of Phase 3.** Items 18–20 are complete, committed and verified
-above. The item-21 worker was interrupted by an Anthropic session limit mid-item (resets 07:00
-Europe/Copenhagen) and **its uncommitted work was reverted**, so item 21 is **un-started**: no finding
-commits exist for `A2`/`A11`/`A12`/`A13`/`A24`/`A28`/`D27`/`D28`/`K60`, and the queue line is un-struck.
-The cursor resumes cleanly at item 21 — a fresh worker starts it from scratch, losing nothing.
+## Item 21 — Backend session lifetime
+**Findings:** `A2` `A11` `A12` `A13` `A24` `A28` `D27` `D28` `K60`
+**Commits:** `686cc1e` (K60) · `81dfe48` (A12) · `13f0f93` (A2) · `90c7a00` (A11) · `063a709` (A28) ·
+`8d6a67c` (D28) · `faef6cc` (A13) · `bc0dff5` (A24) · `f3803a3` (D27)
+**Verification:** integrity items=56 · live=15 · assigned=365 · unique=365 · dupes=0 · encoding=0 ✓ ·
+cursor → item 22 ✓ · one commit per finding, ID in each subject ✓ · build 0 warnings / 0 errors ✓ ·
+unit **Protocol 63 · Core 500 · WebUi 70 · Server 157**, 0 skipped ✓ · integration **139 passed, 0
+skipped** (full suite, fresh Stalwart container, canonical ports) ✓
+**Notes:**
+- **Session contract change (durable — every future session-lifetime item must know this).**
+  `IBackendSessionFactory.GetSessionAsync` now hands out a **refcounted lease**, not the session itself.
+  `IBackendSession.DisposeAsync` now means "**release one lease**," not "tear down" — the composite is
+  disposed only on the last release, and idle eviction cannot tear down a session an active request holds
+  (that was the `A2` bug). `EasEndpoint` `await using`s its lease; **any new caller of `GetSessionAsync`
+  must release its lease or the connection leaks and is never torn down.**
+- **Disposal now aggregates.** `BackendConnection.DisposeAsync` (`K60`) and
+  `CompositeBackendSession.DisposeAsync` (`A12`) now throw `AggregateException` when a resource's disposal
+  fails, instead of surfacing only the first inner exception, and dispose every resource even when one
+  throws. A caller catching a specific disposal exception type would need to unwrap.
+- **Two findings are coverage, not red-first proof.** `A24` (make `LastUsedUtc` thread-safe) and `D27`
+  (CAS the IDLE watcher on password rotation) are memory-model / benign races with no deterministic
+  trigger; both struck on the strength of the fix, exercised only indirectly by the `A2`/`A13` factory
+  tests. No dedicated failing reproducer exists for either — a future regression in these two would not
+  be caught by a targeted test.
+- **Judgment call (`K60`).** The finding offered typing the owned-resources bag as
+  `IReadOnlyList<IAsyncDisposable>` *or* auto-disposing disposable stores. The resources are a genuine
+  mix (`ImapSession` is `IAsyncDisposable`; `WebDavClient`/`JmapClient` are `IDisposable`-only), so no
+  single interface types all seven call sites without reworking those clients (out of scope). The worker
+  kept the `object`-typed bag + the auto-dispose alternative (plus idempotence and aggregation). The
+  "untyped bag silently no-ops a non-disposable resource" wart is therefore **not** closed — reasonable,
+  but a reviewer could have insisted on retyping the clients instead.
 
-Item 21 is one refactor to an `IAsyncDisposable` lease that refcounts use, gates concurrent access
-(MailKit's `ImapClient` is not thread-safe and clients pipeline), and defers disposal to the last release.
-`A13` is a process-death bug (an unguarded timer callback whose escaping exception terminates the process).
-It reshapes `BackendSessionFactory`/`CompositeBackendSession` — session lifetime and concurrency — so run
-integration even though it is not marked [LIVE].
+---
 
-Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 490 ·
+## Next: item 22 — State layer correctness (Phase 4 — Correctness)
+
+Item 21 verified and recorded above. Cursor is at **item 22** (`A1` `A5` `A6` `A7` `A8` `A9` `A10` `A17`
+`A18` `A22`) — decide the transaction policy here (it settles `A10`/`A18`). Not [LIVE], but it reshapes
+the state layer, so run the unit suite in full; integration is optional unless it touches the pipeline.
+
+Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · Core 500 ·
 WebUi 70 · Server 157**.
 
 **Standing lessons that carried this run (items 13–14):**
