@@ -55,13 +55,84 @@ internal sealed class DavItemMap(SyncDbContext db, ISyncDbContextFactory? factor
 		return item.Id.ToString();
 	}
 
+	/// <summary>
+	///   Batch counterpart of <see cref="GetOrAddDavItemIdAsync" />: maps every distinct href to
+	///   its short id in ONE query and ONE flush, however many are new. The per-item form runs a
+	///   SELECT + a full SaveChanges each, so a 100-item Sync window was 100 round trips / 100
+	///   transactions (A3); the render path pre-resolves its whole window through this instead.
+	/// </summary>
+	public async Task<IReadOnlyDictionary<string, string>> GetOrAddDavItemIdsAsync(
+		UserFolder folder, IReadOnlyCollection<string> hrefs, CancellationToken ct)
+	{
+		if (hrefs.Count == 0)
+			return new Dictionary<string, string>(StringComparer.Ordinal);
+		if (factory is null)
+			return await GetOrAddBatchAsync(db, folder.Id, hrefs, ct).ConfigureAwait(false);
+
+		await using SyncDbContext own = factory.CreateDbContext();
+		return await GetOrAddBatchAsync(own, folder.Id, hrefs, ct).ConfigureAwait(false);
+	}
+
+	private static async Task<Dictionary<string, string>> GetOrAddBatchAsync(
+		SyncDbContext ctx, int folderId, IReadOnlyCollection<string> hrefs, CancellationToken ct)
+	{
+		List<string> wanted = hrefs.Distinct(StringComparer.Ordinal).ToList();
+		Dictionary<string, string> map = await ReadHrefIdsAsync(ctx, folderId, wanted, ct).ConfigureAwait(false);
+
+		List<DavItem> added = new();
+		foreach (string href in wanted)
+			if (!map.ContainsKey(href))
+			{
+				DavItem item = new() { UserFolderKey = folderId, Href = href };
+				// DbSet.Add false positive for VSTHRD103 — see GetOrCreateDeviceAsync.
+#pragma warning disable VSTHRD103
+				ctx.DavItems.Add(item);
+#pragma warning restore VSTHRD103
+				added.Add(item);
+			}
+
+		if (added.Count == 0)
+			return map;
+
+		try
+		{
+			await ctx.SaveChangesAsync(ct).ConfigureAwait(false);
+			foreach (DavItem item in added)
+				map[item.Href] = item.Id.ToString();
+		}
+		catch (DbUpdateException ex) when (DbExceptions.IsUniqueViolation(ex))
+		{
+			// A concurrent request mapped one or more of the same hrefs first — detach our staged
+			// inserts and re-read the winners in one query. Only a unique violation takes this
+			// path; any other failure keeps its diagnostic (A9), same as the single-item form.
+			foreach (DavItem item in added)
+				ctx.Entry(item).State = EntityState.Detached;
+			map = await ReadHrefIdsAsync(ctx, folderId, wanted, ct).ConfigureAwait(false);
+		}
+
+		return map;
+	}
+
+	private static async Task<Dictionary<string, string>> ReadHrefIdsAsync(
+		SyncDbContext ctx, int folderId, List<string> hrefs, CancellationToken ct)
+	{
+		List<DavItem> rows = await ctx.DavItems
+			.Where(i => i.UserFolderKey == folderId && hrefs.Contains(i.Href))
+			.ToListAsync(ct).ConfigureAwait(false);
+		Dictionary<string, string> map = new(StringComparer.Ordinal);
+		foreach (DavItem row in rows)
+			map[row.Href] = row.Id.ToString();
+		return map;
+	}
+
 	public async Task<string?> ResolveDavHrefAsync(UserFolder folder, string shortId, CancellationToken ct)
 	{
 		// A pure read flushes nothing, so it stays on the shared context — only the writer above
-		// needs isolation (A10). Its tracking/N+1 shape is A3's remit (item 23).
+		// needs isolation (A10). AsNoTracking: this is a read, never a mutation, so tracking the
+		// entity is pure overhead (A3/A19).
 		if (!int.TryParse(shortId, out int id))
 			return null;
-		DavItem? item = await db.DavItems
+		DavItem? item = await db.DavItems.AsNoTracking()
 			.FirstOrDefaultAsync(i => i.Id == id && i.UserFolderKey == folder.Id, ct)
 			.ConfigureAwait(false);
 		return item?.Href;

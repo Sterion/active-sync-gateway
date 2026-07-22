@@ -154,6 +154,10 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 	public Task<string> GetOrAddDavItemIdAsync(UserFolder folder, string href, CancellationToken ct)
 		=> _davItems.GetOrAddDavItemIdAsync(folder, href, ct);
 
+	public Task<IReadOnlyDictionary<string, string>> GetOrAddDavItemIdsAsync(
+		UserFolder folder, IReadOnlyCollection<string> hrefs, CancellationToken ct)
+		=> _davItems.GetOrAddDavItemIdsAsync(folder, hrefs, ct);
+
 	public Task<string?> ResolveDavHrefAsync(UserFolder folder, string shortId, CancellationToken ct)
 		=> _davItems.ResolveDavHrefAsync(folder, shortId, ct);
 

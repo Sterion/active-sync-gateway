@@ -167,10 +167,19 @@ public sealed partial class SyncHandler
 			Core.Observability.GatewayMetrics.RecordSyncItems(
 				context.Device.UserName, store.EasClass, "server_to_client", "soft_delete", agedOut.Count);
 
+			// Pre-resolve the whole window's DAV item ids in one query + one flush; without this
+			// every Add/Change/Delete composition below did its own SELECT + SaveChanges (A3).
+			List<string> windowKeys = new(diff.Adds.Count + diff.Changes.Count + diff.Deletes.Count);
+			windowKeys.AddRange(diff.Adds.Select(a => a.ServerId));
+			windowKeys.AddRange(diff.Changes.Select(c => c.ServerId));
+			windowKeys.AddRange(diff.Deletes);
+			IReadOnlyDictionary<string, string>? davIds =
+				await folders.PreResolveDavItemIdsAsync(folder, store, windowKeys, ct);
+
 			foreach (ItemChange add in diff.Adds)
 			{
 				XElement? element = await BuildItemElementAsync(
-					AS + "Add", context, folder, store, add.ServerId, bodyPreference, ct);
+					AS + "Add", context, folder, store, add.ServerId, bodyPreference, ct, davIds);
 				if (element is not null)
 					serverCommands.Add(element);
 				else
@@ -180,14 +189,14 @@ public sealed partial class SyncHandler
 			foreach (ItemChange change in diff.Changes)
 			{
 				XElement? element = await BuildItemElementAsync(
-					AS + "Change", context, folder, store, change.ServerId, bodyPreference, ct);
+					AS + "Change", context, folder, store, change.ServerId, bodyPreference, ct, davIds);
 				if (element is not null)
 					serverCommands.Add(element);
 			}
 
 			foreach (string deletedKey in diff.Deletes)
 			{
-				string serverId = await folders.ComposeServerIdAsync(folder, store, deletedKey, ct);
+				string serverId = await folders.ComposeServerIdAsync(folder, store, deletedKey, ct, davIds);
 				serverCommands.Add(new XElement(AS + (agedOut.Contains(deletedKey) ? "SoftDelete" : "Delete"),
 					new XElement(AS + "ServerId", serverId)));
 			}

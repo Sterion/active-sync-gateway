@@ -445,6 +445,45 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task GetOrAddDavItemIds_BatchesAllHrefsIntoOneFlush()
+	{
+		// Per-item GetOrAddDavItemIdAsync does one SELECT + one full SaveChanges per href, so a
+		// 100-item Sync window is 100 transactions. The batch path must map every href in ONE
+		// flush (A3). Counting saves across the DavItemMap's own short-lived contexts proves it.
+		SaveCountingInterceptor counter = new();
+		CountingDbContextFactory factory = new(_connection, counter);
+		SyncStateService service = new(_db, factory);
+		List<UserFolder> registry = await service.RefreshFolderRegistryAsync("u@a3",
+			[new BackendFolder("carddav:/ab/", "Contacts", null, 9, "Contacts")], CancellationToken.None);
+		UserFolder folder = registry[0];
+
+		// Baseline: the per-item path flushes once per new href — the N+1 the finding quantifies.
+		string[] loopHrefs = ["/ab/loop0.vcf", "/ab/loop1.vcf", "/ab/loop2.vcf"];
+		foreach (string href in loopHrefs)
+			await service.GetOrAddDavItemIdAsync(folder, href, CancellationToken.None);
+		Assert.Equal(loopHrefs.Length, counter.SaveCount);
+
+		// Batch: five new hrefs, a single flush regardless of count.
+		int before = counter.SaveCount;
+		string[] batchHrefs = ["/ab/a.vcf", "/ab/b.vcf", "/ab/c.vcf", "/ab/d.vcf", "/ab/e.vcf"];
+		IReadOnlyDictionary<string, string> map =
+			await service.GetOrAddDavItemIdsAsync(folder, batchHrefs, CancellationToken.None);
+		Assert.Equal(1, counter.SaveCount - before);
+		Assert.Equal(batchHrefs.Length, map.Count);
+
+		// Every mapping agrees with the single-item resolver, and a second batch (all existing)
+		// flushes nothing at all.
+		foreach (string href in batchHrefs)
+			Assert.Equal(await service.GetOrAddDavItemIdAsync(folder, href, CancellationToken.None), map[href]);
+		int settled = counter.SaveCount;
+		IReadOnlyDictionary<string, string> again =
+			await service.GetOrAddDavItemIdsAsync(folder, batchHrefs, CancellationToken.None);
+		Assert.Equal(settled, counter.SaveCount); // nothing new to insert → no flush
+		foreach (string href in batchHrefs)
+			Assert.Equal(map[href], again[href]);
+	}
+
+	[Fact]
 	public async Task DavItemMap_RoundTripsHrefs()
 	{
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@x",

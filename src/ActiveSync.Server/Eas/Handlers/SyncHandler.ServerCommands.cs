@@ -11,7 +11,8 @@ public sealed partial class SyncHandler
 {
 	private async Task<XElement?> BuildItemElementAsync(
 		XName commandName, EasContext context, UserFolder folder, IContentStore store,
-		string itemKey, BodyPreference bodyPreference, CancellationToken ct)
+		string itemKey, BodyPreference bodyPreference, CancellationToken ct,
+		IReadOnlyDictionary<string, string>? davIds = null)
 	{
 		BackendItem? item;
 		try
@@ -26,7 +27,7 @@ public sealed partial class SyncHandler
 
 		if (item is null)
 			return null;
-		string serverId = await folders.ComposeServerIdAsync(folder, store, itemKey, ct);
+		string serverId = await folders.ComposeServerIdAsync(folder, store, itemKey, ct, davIds);
 		XElement applicationData = new(AS + "ApplicationData", item.ApplicationData);
 
 		// 16.x drafts: items in the Drafts folder carry email2:IsDraft so the client opens

@@ -48,7 +48,7 @@ internal sealed class FaultInjectingInterceptor : SaveChangesInterceptor
 /// <summary>Shared builders for the in-memory SQLite contexts the state-layer tests use.</summary>
 internal static class StateTestSupport
 {
-	public static SqliteSyncDbContext NewContext(SqliteConnection connection, FaultInjectingInterceptor? interceptor = null)
+	public static SqliteSyncDbContext NewContext(SqliteConnection connection, IInterceptor? interceptor = null)
 	{
 		DbContextOptionsBuilder<SqliteSyncDbContext> builder = new DbContextOptionsBuilder<SqliteSyncDbContext>()
 			.UseSqlite(connection);
@@ -62,4 +62,34 @@ internal static class StateTestSupport
 internal sealed class TestDbContextFactory(SqliteConnection connection) : ISyncDbContextFactory
 {
 	public SyncDbContext CreateDbContext() => StateTestSupport.NewContext(connection);
+}
+
+/// <summary>Counts how many times any context flushes, across the whole test.</summary>
+internal sealed class SaveCountingInterceptor : SaveChangesInterceptor
+{
+	private int _saves;
+
+	/// <summary>Number of flushes that reached the database.</summary>
+	public int SaveCount => _saves;
+
+	public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+		DbContextEventData eventData, InterceptionResult<int> result, CancellationToken ct = default)
+	{
+		Interlocked.Increment(ref _saves);
+		return base.SavingChangesAsync(eventData, result, ct);
+	}
+
+	public override InterceptionResult<int> SavingChanges(
+		DbContextEventData eventData, InterceptionResult<int> result)
+	{
+		Interlocked.Increment(ref _saves);
+		return base.SavingChanges(eventData, result);
+	}
+}
+
+/// <summary>Hands out short-lived contexts that all share one <see cref="SaveCountingInterceptor" />.</summary>
+internal sealed class CountingDbContextFactory(SqliteConnection connection, SaveCountingInterceptor counter)
+	: ISyncDbContextFactory
+{
+	public SyncDbContext CreateDbContext() => StateTestSupport.NewContext(connection, counter);
 }

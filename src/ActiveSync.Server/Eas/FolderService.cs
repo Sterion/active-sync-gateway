@@ -43,13 +43,33 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 		return store is null ? null : (folder, store);
 	}
 
+	/// <summary>
+	///   Pre-resolves a whole window of DAV item keys to short ids in one query + one flush, so the
+	///   render loop can compose ServerIds without a per-item round trip (A3). Returns null for mail
+	///   collections (their sub IS the UID — no map) and for an empty window.
+	/// </summary>
+	public async Task<IReadOnlyDictionary<string, string>?> PreResolveDavItemIdsAsync(
+		UserFolder folder, IContentStore store, IReadOnlyCollection<string> itemKeys, CancellationToken ct)
+	{
+		if (store.EasClass == EasClass.Email || itemKeys.Count == 0)
+			return null;
+		return await state.GetOrAddDavItemIdsAsync(folder, itemKeys, ct);
+	}
+
 	/// <summary>Composes an item ServerId from a backend item key.</summary>
+	/// <param name="davIdCache">
+	///   Optional href → short-id map from <see cref="PreResolveDavItemIdsAsync" />; when it already
+	///   holds the key the composition costs no database round trip (A3).
+	/// </param>
 	public async Task<string> ComposeServerIdAsync(
-		UserFolder folder, IContentStore store, string itemKey, CancellationToken ct)
+		UserFolder folder, IContentStore store, string itemKey, CancellationToken ct,
+		IReadOnlyDictionary<string, string>? davIdCache = null)
 	{
 		string sub = store.EasClass == EasClass.Email
 			? itemKey
-			: await state.GetOrAddDavItemIdAsync(folder, itemKey, ct);
+			: davIdCache is not null && davIdCache.TryGetValue(itemKey, out string? cached)
+				? cached
+				: await state.GetOrAddDavItemIdAsync(folder, itemKey, ct);
 		return $"{folder.ServerId}:{sub}";
 	}
 
