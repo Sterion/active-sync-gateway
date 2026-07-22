@@ -25,6 +25,13 @@ public sealed class PingHandler(
 		XDocument? request = await context.ReadRequestAsync();
 		PingParams? parameters = null;
 
+		// Both Folders and HeartbeatInterval are individually optional (MS-ASCMD 2.2.3.107.2/2.2.3.80):
+		// a client may send either, both, or neither and expects the server to fall back to the last
+		// cached values for whatever it omitted. Resolve each dimension independently against the cache.
+		PingParams? cached = context.Device.PingParamsJson is { } json
+			? JsonSerializer.Deserialize<PingParams>(json)
+			: null;
+
 		if (request?.Root is { } root)
 		{
 			List<string>? folderIds = root.Element(P + "Folders")?
@@ -33,24 +40,27 @@ public sealed class PingHandler(
 				.Where(id => !string.IsNullOrEmpty(id))
 				.Select(id => id!)
 				.ToList();
-			int heartbeat = int.TryParse(root.Element(P + "HeartbeatInterval")?.Value, out int hb) ? hb : 0;
+			int? heartbeat = int.TryParse(root.Element(P + "HeartbeatInterval")?.Value, out int hb) ? hb : null;
 
-			if (folderIds is { Count: > 0 } && heartbeat > 0)
+			List<string>? effectiveFolders = folderIds is { Count: > 0 } ? folderIds : cached?.FolderIds;
+			int? effectiveHeartbeat = heartbeat ?? cached?.HeartbeatSeconds;
+
+			if (effectiveFolders is { Count: > 0 } && effectiveHeartbeat is { } hbSeconds && hbSeconds > 0)
 			{
-				parameters = new PingParams(heartbeat, folderIds);
-				context.Device.PingParamsJson = JsonSerializer.Serialize(parameters);
-				await context.State.PersistAsync(ct);
-			}
-			else if (heartbeat > 0 && context.Device.PingParamsJson is not null)
-			{
-				PingParams? cached = JsonSerializer.Deserialize<PingParams>(context.Device.PingParamsJson);
-				if (cached is not null)
-					parameters = cached with { HeartbeatSeconds = heartbeat };
+				parameters = new PingParams(hbSeconds, effectiveFolders);
+				// Persist when the client supplied a (new) monitoring set, so a later bare Ping replays
+				// it — including the F17 case where Folders arrive without a HeartbeatInterval and the
+				// heartbeat is inherited from the cache.
+				if (folderIds is { Count: > 0 })
+				{
+					context.Device.PingParamsJson = JsonSerializer.Serialize(parameters);
+					await context.State.PersistAsync(ct);
+				}
 			}
 		}
-		else if (context.Device.PingParamsJson is not null)
+		else if (cached is not null)
 		{
-			parameters = JsonSerializer.Deserialize<PingParams>(context.Device.PingParamsJson);
+			parameters = cached;
 		}
 
 		if (parameters is null)

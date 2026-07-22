@@ -159,6 +159,13 @@ public sealed class EasHandlerHarness : IDisposable
 		public List<string> RenamedFolders { get; } = [];
 		public List<string> CreatedFolders { get; } = [];
 
+		/// <summary>
+		///   Long-poll wait behaviour for Ping/Sync tests: given the requested backend keys, return
+		///   the ones that changed. Left null, <see cref="WaitForChangesAsync" /> throws (the default
+		///   for handlers that never wait).
+		/// </summary>
+		public Func<IReadOnlyList<string>, IReadOnlyList<string>>? WaitForChanges { get; set; }
+
 		public string EasClass => Protocol.EasClass.Email;
 
 		public bool OwnsBackendKey(string backendKey)
@@ -230,6 +237,8 @@ public sealed class EasHandlerHarness : IDisposable
 		public Task<IReadOnlyList<string>> WaitForChangesAsync(
 			IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
 		{
+			if (WaitForChanges is { } wait)
+				return Task.FromResult(wait(folderBackendKeys));
 			throw new NotSupportedException();
 		}
 	}
