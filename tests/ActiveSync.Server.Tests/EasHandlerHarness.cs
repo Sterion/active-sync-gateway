@@ -245,12 +245,21 @@ public sealed class EasHandlerHarness : IDisposable
 				new Dictionary<string, string>(Revisions, StringComparer.Ordinal));
 		}
 
+		/// <summary>
+		///   Overrides the ApplicationData a fetched item carries. The default (an
+		///   <c>airsync:Subject</c>, which has no WBXML token) is deliberately unencodable so
+		///   Fetch tests can assert the decision without a real body; a test that DOES round-trip
+		///   the response through WBXML (Search/Find) supplies an encodable payload here.
+		/// </summary>
+		public Func<string, IReadOnlyList<XElement>>? ItemApplicationData { get; set; }
+
 		public Task<BackendItem?> GetItemAsync(
 			string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct)
 		{
 			Fetched.Add($"{folderBackendKey}/{itemKey}");
-			return Task.FromResult<BackendItem?>(
-				new BackendItem([new XElement(EasNamespaces.AirSync + "Subject", itemKey)]));
+			IReadOnlyList<XElement> data = ItemApplicationData?.Invoke(itemKey)
+				?? [new XElement(EasNamespaces.AirSync + "Subject", itemKey)];
+			return Task.FromResult<BackendItem?>(new BackendItem(data));
 		}
 
 		public Task<(string ItemKey, string Revision)> CreateItemAsync(
@@ -367,10 +376,23 @@ public sealed class EasHandlerHarness : IDisposable
 			throw new NotSupportedException();
 		}
 
+		/// <summary>
+		///   Backend hits a Search/Find will page over. <see cref="SearchAsync" /> returns the first
+		///   <c>maxResults</c> of these (the fetch cap the handler passes), so a test can make the
+		///   pre-paging hit count differ from the served page size (F36) and exercise paging (F41).
+		/// </summary>
+		public List<(string FolderBackendKey, string ItemKey)> SearchHits { get; } = [];
+
+		/// <summary>Number of times the backend search was actually invoked (F41 skips it).</summary>
+		public int SearchCalls { get; private set; }
+
 		public Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
 			string? folderBackendKey, string freeText, DateTime? sinceUtc, int maxResults, CancellationToken ct)
 		{
-			throw new NotSupportedException();
+			SearchCalls++;
+			IReadOnlyList<(string FolderBackendKey, string ItemKey)> page =
+				SearchHits.Take(maxResults).ToList();
+			return Task.FromResult(page);
 		}
 
 		public Task EmptyFolderAsync(string folderBackendKey, CancellationToken ct)

@@ -33,6 +33,14 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 		// cannot request an unbounded result set; skip `start` server-side for real paging.
 		(int start, int pageSize) = ParseRange(store.Element(S + "Options")?.Element(S + "Range")?.Value);
 		int fetch = Math.Min(start + pageSize, MaxFetch);
+		// Paging at/beyond the fetch cap can never return anything (the backend fetches at most
+		// MaxFetch, then Skip(start) drops them all) — refuse it without a wasted backend call
+		// rather than returning an empty page indistinguishable from "no more results" (F41).
+		if (start >= MaxFetch)
+		{
+			await WriteAsync(context, "1", []);
+			return;
+		}
 
 		try
 		{
@@ -52,7 +60,7 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 				List<XElement> results = hits.Skip(start).Take(pageSize)
 					.Select(properties => new XElement(S + "Result",
 						new XElement(S + "Properties", properties))).ToList();
-				await WriteAsync(context, "1", results, start);
+				await WriteAsync(context, "1", results, start, hits.Count);
 			}
 			else // Mailbox
 			{
@@ -91,7 +99,7 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 					results.Add(result);
 				}
 
-				await WriteAsync(context, "1", results, start);
+				await WriteAsync(context, "1", results, start, hits.Count);
 			}
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
@@ -123,7 +131,8 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 		return (start, pageSize);
 	}
 
-	private static Task WriteAsync(EasContext context, string status, List<XElement> results, int start = 0)
+	private static Task WriteAsync(
+		EasContext context, string status, List<XElement> results, int start = 0, int total = 0)
 	{
 		XElement response = new(S + "Response",
 			new XElement(S + "Store",
@@ -133,7 +142,9 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 				results.Count > 0
 					? new XElement(S + "Range", $"{start}-{start + results.Count - 1}")
 					: null,
-				new XElement(S + "Total", results.Count.ToString())));
+				// Total is the number of matches FOUND (capped by the fetch limit), not the served
+				// page size — reporting the page size makes the client stop after page 1 (F36).
+				new XElement(S + "Total", total.ToString())));
 		return context.WriteResponseAsync(new XDocument(
 			new XElement(S + "Search",
 				new XElement(S + "Status", "1"),

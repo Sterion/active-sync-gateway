@@ -41,18 +41,32 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 		                  ?? criterion.Element(F + "Query")?.Value ?? "";
 		(int start, int pageSize) = ParseRange(criterion.Element(F + "Options")?.Element(F + "Range")?.Value);
 		int fetch = Math.Min(start + pageSize, MaxFetch);
+		// Paging at/beyond the fetch cap can never serve anything — refuse it without a wasted
+		// backend call rather than fetching the whole cap and Skip()-ing it all away (F41).
+		if (start >= MaxFetch)
+		{
+			await WriteAsync(context, searchId, "1",
+				new XElement(F + "Response",
+					new XElement(F + "Status", "1"),
+					new XElement(F + "Total", "0")));
+			return;
+		}
 
 		try
 		{
-			List<XElement> results = mailbox is not null
+			(List<XElement> results, int total) = mailbox is not null
 				? await SearchMailboxAsync(context, mailbox, freeText, start, pageSize, fetch, ct)
 				: await SearchGalAsync(context, gal!, freeText, start, pageSize, fetch, ct);
 
 			XElement response = new(F + "Response",
 				new XElement(F + "Status", "1"),
-				results,
-				new XElement(F + "Range", $"{start}-{start + Math.Max(results.Count - 1, 0)}"),
-				new XElement(F + "Total", (start + results.Count).ToString()));
+				results);
+			// Omit Range entirely when empty — "0-0" claims one result was returned (F37).
+			if (results.Count > 0)
+				response.Add(new XElement(F + "Range", $"{start}-{start + results.Count - 1}"));
+			// Total is the number of matches FOUND (capped by the fetch limit), not start+served,
+			// which stops the client after the first page (F36).
+			response.Add(new XElement(F + "Total", total.ToString()));
 			await WriteAsync(context, searchId, "1", response);
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
@@ -62,7 +76,7 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 		}
 	}
 
-	private async Task<List<XElement>> SearchMailboxAsync(
+	private async Task<(List<XElement> Results, int Total)> SearchMailboxAsync(
 		EasContext context, XElement criterion, string freeText, int start, int pageSize, int fetch,
 		CancellationToken ct)
 	{
@@ -109,23 +123,24 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 					preview.Length > 255 ? preview[..255] : preview));
 			properties.Add(new XElement(F + "HasAttachments", hasAttachments ? "1" : "0"));
 
-			XElement result = new(F + "Result",
-				new XElement(AS + "Class", EasClass.Email),
-				new XElement(F + "Properties", properties.Elements()));
+			// MS-ASCMD Find Result child order: Class, ServerId, CollectionId, Properties. Build
+			// them in that order rather than prepending ServerId/CollectionId after the fact (F38).
+			List<XElement> children = [new XElement(AS + "Class", EasClass.Email)];
 			if (searchFolder is not null)
 			{
-				result.AddFirst(new XElement(AS + "CollectionId", searchFolder.ServerId));
-				result.AddFirst(new XElement(AS + "ServerId",
+				children.Add(new XElement(AS + "ServerId",
 					await folders.ComposeServerIdAsync(searchFolder, mailStore, itemKey, ct)));
+				children.Add(new XElement(AS + "CollectionId", searchFolder.ServerId));
 			}
 
-			results.Add(result);
+			children.Add(new XElement(F + "Properties", properties.Elements()));
+			results.Add(new XElement(F + "Result", children));
 		}
 
-		return results;
+		return (results, hits.Count);
 	}
 
-	private static async Task<List<XElement>> SearchGalAsync(
+	private static async Task<(List<XElement> Results, int Total)> SearchGalAsync(
 		EasContext context, XElement criterion, string freeText, int start, int pageSize, int fetch,
 		CancellationToken ct)
 	{
@@ -140,10 +155,11 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 			? []
 			: await contacts.SearchGalAsync(freeText, fetch, photos, ct);
 
-		return hits.Skip(start).Take(pageSize)
+		List<XElement> results = hits.Skip(start).Take(pageSize)
 			.Select(properties => new XElement(F + "Result",
 				new XElement(F + "Properties", properties)))
 			.ToList();
+		return (results, hits.Count);
 	}
 
 	private static (int Start, int PageSize) ParseRange(string? range)
