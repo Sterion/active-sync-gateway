@@ -77,6 +77,29 @@ public class AccountResolverTests
 	// ---------- pass-through baseline ----------
 
 	[Fact]
+	public void OrderedRoles_IsStableAndComputedOnce()
+	{
+		// B28 (item 37): OrderedRoles used to sort+ToList on EVERY read, so each access allocated a
+		// fresh list with a different identity. Cache it: repeated reads return the SAME instance
+		// (and the order — enum order, MailStore first — is unchanged).
+		ResolvedAccount account = new(
+			"u@x", "u@x", false,
+			new Dictionary<BackendRole, ResolvedRole>
+			{
+				[BackendRole.MailSubmit] =
+					new(BackendRole.MailSubmit, "smtp", ProviderSettings.Empty, new BackendCredentials("u", "p")),
+				[BackendRole.MailStore] =
+					new(BackendRole.MailStore, "imap", ProviderSettings.Empty, new BackendCredentials("u", "p")),
+			});
+
+		IReadOnlyList<ResolvedRole> first = account.OrderedRoles;
+		IReadOnlyList<ResolvedRole> second = account.OrderedRoles;
+
+		Assert.Same(first, second);
+		Assert.Equal(BackendRole.MailStore, first[0].Role); // still sorted, MailStore first
+	}
+
+	[Fact]
 	public void UndeclaredLogin_IsPurePassThrough()
 	{
 		Dictionary<string, string?> config = BaseConfig();

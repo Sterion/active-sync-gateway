@@ -15,7 +15,11 @@ public sealed record ResolvedAccount(
 	bool MailAddressIsExplicit,
 	IReadOnlyDictionary<BackendRole, ResolvedRole> Roles)
 {
+	private IReadOnlyList<ResolvedRole>? _orderedRoles;
+
 	/// <summary>Roles in a stable order (enum order, MailStore first) for session composition.</summary>
+	// B28 (item 37): computed once and cached — the sort+allocation used to run on every read, and the
+	// list identity changed each time, inviting O(n) LINQ inside a loop from an unwary caller.
 	public IReadOnlyList<ResolvedRole> OrderedRoles =>
-		Roles.Values.OrderBy(r => r.Role).ToList();
+		_orderedRoles ??= Roles.Values.OrderBy(r => r.Role).ToList();
 }
