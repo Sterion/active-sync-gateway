@@ -188,24 +188,60 @@ public sealed class AccountStoreTests : IDisposable
 	}
 
 	[Fact]
-	public async Task InvalidDbEntry_IsSkipped_ConfigEntrySurvives()
+	public async Task InvalidDbEntry_FailsClosed_DoesNotFallBackToShadowedConfig()
 	{
+		// B3 (behaviour change): a DB row REPLACES the whole config entry, so an invalid row must NOT
+		// silently fall back to the shadowed config identity. Previously it was skipped and the config
+		// entry stayed active; now the invalid row wins (replace semantics) and fails closed — the
+		// login is refused and surfaced as invalid until the row is corrected or removed.
 		ActiveSyncOptions options = BaseOptions();
 		options.Users = new Dictionary<string, AccountOptions>
 		{
 			["phone1"] = new() { MailAddress = "config@x" },
 		};
 
-		// Out-of-range port makes the DB entry invalid — it must be skipped (lenient), and
-		// the shadowed config entry stays active.
+		// Out-of-range port makes the DB entry invalid.
 		await _store.UpsertAsync("phone1",
 			new AccountOptions { Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { Settings = new Dictionary<string, string?> { ["Port"] = "99999" } } } }, CancellationToken.None);
 
 		AccountResolver resolver = Resolver(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
-		Assert.Equal("config@x", resolver.Resolve(new BackendCredentials("phone1", "pw")).MailAddress);
-		Assert.False(resolver.MergedUsers["phone1"].FromDatabase);
+		MergedAccount merged = resolver.MergedUsers["phone1"];
+		Assert.True(merged.Invalid);
+		Assert.True(merged.FromDatabase);
+		Assert.True(merged.ShadowsConfig);
+		// Fails closed: no local auth (no pass-through probe) and no resolution — the config
+		// MailAddress must NOT leak through the invalid row.
+		Assert.False(resolver.VerifyLocally("phone1", "pw"));
+		Assert.Throws<InvalidOperationException>(
+			() => resolver.Resolve(new BackendCredentials("phone1", "pw")));
+	}
+
+	[Fact]
+	public async Task InvalidDbEntry_FailsClosed_DoesNotDegradeToPassThrough_OrUnDisable()
+	{
+		// B3: a DB row that fails validation (e.g. a live backend edit invalidated a previously-good
+		// row) used to be SKIPPED — leaving no entry, so Resolve degraded to pass-through (presented
+		// credentials forwarded verbatim to every role) and IsLoginDisabled returned false, which
+		// UN-disabled a disabled account. It must instead honour Enabled==false and fail closed.
+		AccountResolver resolver = Resolver(BaseOptions());
+		await _store.UpsertAsync("phone1", new AccountOptions
+		{
+			Enabled = false,
+			Backends = new Dictionary<string, BackendRoleOverride>
+				{ ["MailStore"] = new() { Settings = new Dictionary<string, string?> { ["Port"] = "99999" } } },
+		}, CancellationToken.None);
+		await resolver.EnsureFreshAsync(true, CancellationToken.None);
+
+		// Disabled stays disabled (honoured before validation) and the row is surfaced as invalid.
+		Assert.True(resolver.IsLoginDisabled("phone1"));
+		Assert.True(resolver.MergedUsers["phone1"].Invalid);
+		Assert.True(resolver.MergedUsers["phone1"].FromDatabase);
+		// Never authenticates locally (no pass-through) and never resolves.
+		Assert.False(resolver.VerifyLocally("phone1", "pw"));
+		Assert.Throws<InvalidOperationException>(
+			() => resolver.Resolve(new BackendCredentials("phone1", "pw")));
 	}
 
 	[Fact]

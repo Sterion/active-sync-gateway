@@ -11,8 +11,14 @@ using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Core.Accounts;
 
-/// <summary>One entry of the merged (config ⊕ database) user view, for banners and the CLI.</summary>
-public sealed record MergedAccount(AccountOptions Options, bool FromDatabase, bool ShadowsConfig);
+/// <summary>
+///   One entry of the merged (config ⊕ database) user view, for banners and the CLI.
+///   <paramref name="Invalid" /> marks a database row that failed validation: it is kept in the view
+///   (so operators see it, and <see cref="AccountResolver.IsLoginDisabled" /> still honours its
+///   <see cref="AccountOptions.Enabled" />) but the login is refused (fail-closed) until corrected.
+/// </summary>
+public sealed record MergedAccount(
+	AccountOptions Options, bool FromDatabase, bool ShadowsConfig, bool Invalid = false);
 
 /// <summary>
 ///   Maps a gateway login to its effective backend roles and credentials. Pass-through is
@@ -152,6 +158,10 @@ public sealed class AccountResolver
 		AccountTemplate? template = _snapshot.Templates?.GetValueOrDefault(login);
 		if (template is null)
 			return _options.CurrentValue.RequireDeclaredUsers ? false : null;
+		// B3: an invalid stored row fails closed — it never authenticates and never falls through to
+		// the backend probe (which would admit it as pass-through with the presented credentials).
+		if (template.Invalid)
+			return false;
 		if (template.GatewayPassword is not null)
 			return GatewayPasswordHasher.Verify(template.GatewayPassword, presented);
 		if (template.Roles.GetValueOrDefault(BackendRole.MailStore)?.Password is { } mailPassword)
@@ -173,6 +183,14 @@ public sealed class AccountResolver
 			return new ResolvedAccount(
 				login, login.Contains('@') ? login : null, false, passThrough);
 		}
+
+		// B3: an invalid stored row refuses resolution rather than degrading to pass-through. In
+		// practice VerifyLocally already refused the login (false) before any session is built, so
+		// this is defence in depth against a caller that resolves without authenticating first.
+		if (template.Invalid)
+			throw new InvalidOperationException(
+				$"Account '{login}' has an invalid stored configuration and cannot be resolved; " +
+				"correct or remove the database row (the login is refused until then).");
 
 		// Credential inheritance: MailStore anchors on (override ?? login, override ?? presented);
 		// every other role defaults to the effective MailStore pair.
@@ -270,15 +288,26 @@ public sealed class AccountResolver
 					List<string> failures = new();
 					ValidateLogin(login, failures);
 					AccountTemplate template = BuildOne(roles, registry, login, account, key, failures);
+					bool shadows = merged.ContainsKey(login);
 					if (failures.Count > 0)
 					{
+						// B3: fail closed. Skipping the row left NO entry, so Resolve degraded to
+						// pass-through (presented credentials forwarded verbatim, the row's overrides
+						// discarded) and — with no merged entry — IsLoginDisabled UN-disabled an
+						// Enabled=false account. A DB row REPLACES the config entry, so we must not fall
+						// back to a shadowed config identity either. Register an invalid sentinel that
+						// refuses resolution and keep the row in the merged view: operators still see it,
+						// and IsLoginDisabled still honours Enabled==false (evaluated on the raw row,
+						// before validation), while the login is refused until the row is corrected.
 						logger?.LogWarning(
-							"Skipping invalid database account entry for {User}: {Failures}",
+							"Refusing invalid database account entry for {User} (fail-closed) until corrected: {Failures}",
 							login, string.Join("; ", failures));
+						templates[login] = new AccountTemplate(
+							null, null, new Dictionary<BackendRole, RoleTemplate>(), Invalid: true);
+						merged[login] = new MergedAccount(account, true, shadows, Invalid: true);
 						continue;
 					}
 
-					bool shadows = merged.ContainsKey(login);
 					templates[login] = template;
 					merged[login] = new MergedAccount(account, true, shadows);
 				}
@@ -511,7 +540,8 @@ public sealed class AccountResolver
 	private sealed record AccountTemplate(
 		string? GatewayPassword,
 		string? MailAddress,
-		IReadOnlyDictionary<BackendRole, RoleTemplate> Roles);
+		IReadOnlyDictionary<BackendRole, RoleTemplate> Roles,
+		bool Invalid = false);
 
 	/// <summary>Immutable compiled view, swapped atomically on database changes.</summary>
 	private sealed record Snapshot(

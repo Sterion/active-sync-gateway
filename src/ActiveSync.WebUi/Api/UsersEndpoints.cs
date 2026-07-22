@@ -262,7 +262,8 @@ internal static class UsersEndpoints
 			: null;
 		return new UserDto(
 			login,
-			account.FromDatabase
+			account.Invalid ? "db (invalid — refused)"
+				: account.FromDatabase
 				? o.AutoProvisioned == true ? "db (auto)"
 				: account.ShadowsConfig ? "db (shadows config)" : "db"
 				: "config",

@@ -157,6 +157,8 @@ public static class StartupSummary
 				: account.ShadowsConfig ? "[db, shadows config]" : "[db]"
 				: "[config]",
 		];
+		if (account.Invalid)
+			parts.Add("INVALID (refused)");
 		if (o.Enabled == false)
 			parts.Add("DISABLED");
 		if (!string.IsNullOrWhiteSpace(o.MailAddress))
