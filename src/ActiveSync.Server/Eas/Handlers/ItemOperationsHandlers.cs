@@ -194,9 +194,9 @@ public sealed class ItemOperationsHandler(
 			: resolved.Value.Store.EasClass != EasClass.Email ? "2"
 			: WritePermission.IsBlocked(context, options.Value, resolved.Value.Folder) ? "3"
 			: null;
-		if (failure is not null)
+		if (failure is not null || resolved is null)
 			return new XElement(IO + "EmptyFolderContents",
-				new XElement(IO + "Status", failure),
+				new XElement(IO + "Status", failure ?? "6"),
 				new XElement(AS + "CollectionId", collectionId));
 		await context.Session.MailStore.EmptyFolderAsync(resolved.Value.Folder.BackendKey, ct);
 		return new XElement(IO + "EmptyFolderContents",
