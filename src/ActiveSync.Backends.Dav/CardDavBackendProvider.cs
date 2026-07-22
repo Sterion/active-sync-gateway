@@ -47,7 +47,9 @@ public sealed class CardDavBackendProvider(ILoggerFactory loggerFactory) : IBack
 
 	public Task<bool> ProbeReadinessAsync(ProviderSettings settings, CancellationToken ct)
 	{
-		return DavReadiness.ProbeAsync(settings.Bind<DavServerOptions>().BaseUrl, ct);
+		DavServerOptions options = settings.Bind<DavServerOptions>();
+		return DavReadiness.ProbeAsync(
+			options.BaseUrl, options.AllowInvalidCertificates, options.CaCertificatePath, ct);
 	}
 
 	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
