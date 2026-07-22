@@ -5,6 +5,8 @@ using ActiveSync.Crypto;
 using ActiveSync.WebUi.Auth;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.WebUi.Tests;
@@ -41,7 +43,7 @@ public sealed class DbXmlRepositoryTests : IDisposable
 		return new SqliteSyncDbContext(options);
 	}
 
-	private DbXmlRepository CreateRepository(string? encryptionKey)
+	private DbXmlRepository CreateRepository(string? encryptionKey, ILogger<DbXmlRepository>? logger = null)
 	{
 		ActiveSyncOptions options = new()
 		{
@@ -49,7 +51,8 @@ public sealed class DbXmlRepositoryTests : IDisposable
 				? new EncryptionOptions { AllowPlaintext = true }
 				: new EncryptionOptions { Key = encryptionKey }
 		};
-		return new DbXmlRepository(new ConnectionFactory(_connection), Options.Create(options));
+		return new DbXmlRepository(new ConnectionFactory(_connection), Options.Create(options),
+			logger ?? NullLogger<DbXmlRepository>.Instance);
 	}
 
 	[Fact]
@@ -97,6 +100,38 @@ public sealed class DbXmlRepositoryTests : IDisposable
 
 		// A second repository with the right key still reads it.
 		Assert.Single(CreateRepository(KeyBase64).GetAllElements());
+	}
+
+	[Fact]
+	public void UnreadableRows_AreLogged_NotSilentlyDiscarded()
+	{
+		// C11: skipping the row is right, but doing it silently means a wrong/rotated master key
+		// invalidates every web session with only "users keep getting logged out" as a symptom.
+		DbXmlRepository sealer = CreateRepository(KeyBase64);
+		sealer.StoreElement(new XElement("key", new XAttribute("id", "s1")), "key-friendly-name");
+
+		CapturingLogger logger = new();
+		DbXmlRepository keyless = CreateRepository(null, logger);
+		Assert.Empty(keyless.GetAllElements());
+
+		Assert.Contains(logger.Warnings, w => w.Contains("key-friendly-name"));
+		Assert.Contains(logger.Warnings, w => w.Contains("unreadable")); // the summary line
+	}
+
+	private sealed class CapturingLogger : ILogger<DbXmlRepository>
+	{
+		public List<string> Warnings { get; } = [];
+
+		public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+		public bool IsEnabled(LogLevel logLevel) => true;
+
+		public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+			Func<TState, Exception?, string> formatter)
+		{
+			if (logLevel == LogLevel.Warning)
+				Warnings.Add(formatter(state, exception));
+		}
 	}
 
 	private sealed class ConnectionFactory(SqliteConnection connection) : ISyncDbContextFactory

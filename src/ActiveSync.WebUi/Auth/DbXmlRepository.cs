@@ -5,6 +5,7 @@ using ActiveSync.Core.State;
 using ActiveSync.Crypto;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.WebUi.Auth;
@@ -19,7 +20,8 @@ namespace ActiveSync.WebUi.Auth;
 /// </summary>
 internal sealed class DbXmlRepository(
 	ISyncDbContextFactory contextFactory,
-	IOptions<ActiveSyncOptions> options) : IXmlRepository
+	IOptions<ActiveSyncOptions> options,
+	ILogger<DbXmlRepository> logger) : IXmlRepository
 {
 	public IReadOnlyCollection<XElement> GetAllElements()
 	{
@@ -29,6 +31,7 @@ internal sealed class DbXmlRepository(
 		try
 		{
 			List<XElement> elements = new();
+			int skipped = 0;
 			foreach (DataProtectionKeyEntry row in rows)
 			{
 				if (string.IsNullOrEmpty(row.Xml))
@@ -38,13 +41,30 @@ internal sealed class DbXmlRepository(
 				{
 					// Wrong/missing master key: skip the row — DataProtection mints a fresh
 					// key (users re-login once) instead of the whole web UI failing.
-					if (key is null || !SecretValue.TryUnseal(xml, key, out string? plain, out _))
+					string? error = null;
+					if (key is null || !SecretValue.TryUnseal(xml, key, out string? plain, out error))
+					{
+						// C11: the fallback is right, but skipping silently means a wrong/rotated
+						// master key (or a tampered row) invalidates every web session on each restart
+						// with the only symptom being repeated logouts. Say which row and why.
+						skipped++;
+						logger.LogWarning(
+							"Skipping unreadable DataProtection key row {FriendlyName}: {Reason}",
+							row.FriendlyName, key is null ? "no encryption master key is configured" : error);
 						continue;
+					}
+
 					xml = plain!;
 				}
 
 				elements.Add(XElement.Parse(xml));
 			}
+
+			if (skipped > 0)
+				logger.LogWarning(
+					"{Skipped} DataProtection key row(s) were unreadable and skipped; web sessions signed " +
+					"with those keys are now invalid (affected users re-login once). A wrong or rotated " +
+					"encryption master key is the usual cause.", skipped);
 
 			return elements;
 		}
