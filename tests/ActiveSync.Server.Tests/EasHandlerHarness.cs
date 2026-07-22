@@ -151,7 +151,9 @@ public sealed class EasHandlerHarness : IDisposable
 
 		/// <summary>Address-book operations (GAL search). Null unless a test wires one in.</summary>
 		public IContactOperations? Contacts { get; set; }
-		public ICalendarOperations? Calendar => null;
+
+		/// <summary>Calendar operations (meeting response). Null unless a test wires one in.</summary>
+		public ICalendarOperations? Calendar { get; set; }
 
 		/// <summary>Out-of-office backend. Null unless a test wires one in (the accept-and-ignore stub).</summary>
 		public IOofBackend? Oof { get; set; }
@@ -279,9 +281,13 @@ public sealed class EasHandlerHarness : IDisposable
 			return Task.FromResult("updated-rev");
 		}
 
+		/// <summary>Items a handler asked to delete, so a test can assert removal happened (F35).</summary>
+		public List<string> Deleted { get; } = [];
+
 		public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
 		{
-			throw new NotSupportedException();
+			Deleted.Add($"{folderBackendKey}/{itemKey}");
+			return Task.CompletedTask;
 		}
 
 		public Task<string> MoveItemAsync(
@@ -365,9 +371,19 @@ public sealed class EasHandlerHarness : IDisposable
 			return Task.CompletedTask;
 		}
 
+		/// <summary>The raw MIME a MeetingResponse invite fetch returns; null throws NotSupported.</summary>
+		public byte[]? RawMessage { get; set; }
+
+		/// <summary>When set, GetRawMessageAsync throws this — a backend failure mid-request (F34).</summary>
+		public Func<Exception>? GetRawFailWith { get; set; }
+
 		public Task<byte[]?> GetRawMessageAsync(string folderBackendKey, string itemKey, CancellationToken ct)
 		{
-			throw new NotSupportedException();
+			if (GetRawFailWith is { } fail)
+				throw fail();
+			if (RawMessage is null)
+				throw new NotSupportedException();
+			return Task.FromResult<byte[]?>(RawMessage);
 		}
 
 		public Task<BackendAttachment?> GetAttachmentAsync(string fileReference, CancellationToken ct)

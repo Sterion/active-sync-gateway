@@ -142,11 +142,53 @@ public sealed class MeetingResponseHandler(
 			new XElement(MR + "MeetingResponse", results)));
 	}
 
-	private static string? ExtractUid(string ics)
+	/// <summary>
+	///   Unfolds RFC 5545 (§3.1) folded content lines: a line continued onto the next begins with
+	///   a single space or tab, which is stripped and the remainder appended to the previous line.
+	///   Exchange/Google routinely fold UID and ORGANIZER past 75 octets, so every scan must run on
+	///   the unfolded text or it truncates the value / loses the "mailto:" onto the continuation.
+	/// </summary>
+	internal static string Unfold(string ics)
 	{
-		return ics.Split('\n')
-			.Select(l => l.TrimEnd('\r'))
+		StringBuilder builder = new(ics.Length);
+		bool first = true;
+		foreach (string raw in ics.Split('\n'))
+		{
+			string line = raw.TrimEnd('\r');
+			if (!first && line.Length > 0 && (line[0] == ' ' || line[0] == '\t'))
+			{
+				builder.Append(line, 1, line.Length - 1);
+			}
+			else
+			{
+				if (!first)
+					builder.Append('\n');
+				builder.Append(line);
+				first = false;
+			}
+		}
+
+		return builder.ToString();
+	}
+
+	internal static string? ExtractUid(string ics)
+	{
+		return Unfold(ics).Split('\n')
 			.FirstOrDefault(l => l.StartsWith("UID:", StringComparison.OrdinalIgnoreCase))?[4..].Trim();
+	}
+
+	/// <summary>
+	///   The organizer address to reply to: the iCalendar ORGANIZER's mailto value wins over the
+	///   mail From header (the reply must go to the organizer, not always the sender). A minimal
+	///   scan that tolerates CN=/other params before the value.
+	/// </summary>
+	internal static string? ExtractOrganizerEmail(string ics, string? fallbackAddress)
+	{
+		string? organizerLine = Unfold(ics).Split('\n')
+			.FirstOrDefault(l => l.StartsWith("ORGANIZER", StringComparison.OrdinalIgnoreCase));
+		return organizerLine is not null && organizerLine.Contains("mailto:", StringComparison.OrdinalIgnoreCase)
+			? organizerLine[(organizerLine.IndexOf("mailto:", StringComparison.OrdinalIgnoreCase) + 7)..].Trim()
+			: fallbackAddress;
 	}
 
 	private static async Task SendReplyAsync(
@@ -158,12 +200,7 @@ public sealed class MeetingResponseHandler(
 		// (offset 7) as the address — a deliberately minimal parse (no full iCal property
 		// parsing) that tolerates the CN=/other params some servers add before the value.
 		MailboxAddress? organizer = invite.From.Mailboxes.FirstOrDefault();
-		string? organizerLine = ics.Split('\n').Select(l => l.TrimEnd('\r'))
-			.FirstOrDefault(l => l.StartsWith("ORGANIZER", StringComparison.OrdinalIgnoreCase));
-		string? organizerEmail =
-			organizerLine is not null && organizerLine.Contains("mailto:", StringComparison.OrdinalIgnoreCase)
-				? organizerLine[(organizerLine.IndexOf("mailto:", StringComparison.OrdinalIgnoreCase) + 7)..].Trim()
-				: organizer?.Address;
+		string? organizerEmail = ExtractOrganizerEmail(ics, organizer?.Address);
 		if (organizerEmail is null)
 			return;
 
