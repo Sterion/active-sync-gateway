@@ -460,6 +460,30 @@ public class AccountResolverTests
 	}
 
 	[Fact]
+	public void ValidateUsers_ValidationMemo_ReplaysSharedFailurePerUser()
+	{
+		// B7 (item 37): validation is memoized per (provider, role, settings-identity). Users that
+		// inherit the same broken global MailStore section share the settings object, so validation
+		// runs once — but the cached failure must still be reported for EVERY user (not just the first).
+		Dictionary<string, string?> config = BaseConfig();
+		config.Remove("ActiveSync:Backends:MailStore:Host"); // global MailStore now invalid for all
+		ActiveSyncOptions options = HostOptions();
+		options.Users = new Dictionary<string, AccountOptions>
+		{
+			["alice@x"] = new(),
+			["bob@x"] = new(),
+			["carol@x"] = new(),
+		};
+
+		List<string> failures = new();
+		AccountResolver.ValidateUsers(options, Roles(config), Registry(), null, failures);
+
+		// One "Host is required" per user proves the memo replays the shared verdict rather than
+		// swallowing it after the first cache hit.
+		Assert.Equal(3, failures.Count(f => f.Contains("Host is required")));
+	}
+
+	[Fact]
 	public void ValidateUsers_UnknownRole_AndUnknownProvider_AreReported()
 	{
 		ActiveSyncOptions options = HostOptions();

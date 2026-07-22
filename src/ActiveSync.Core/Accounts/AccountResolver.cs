@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using ActiveSync.Contracts;
@@ -240,10 +241,11 @@ public sealed class AccountResolver
 	{
 		if (options.Users is null)
 			return;
+		ValidationMemo memo = new();
 		foreach ((string login, AccountOptions account) in options.Users)
 		{
 			ValidateLogin(login, failures);
-			BuildOne(roles, registry, login, account, encryptionKey, failures);
+			BuildOne(roles, registry, login, account, encryptionKey, failures, memo);
 		}
 	}
 
@@ -260,7 +262,7 @@ public sealed class AccountResolver
 		if (keyError is not null)
 			failures.Add(keyError);
 		ValidateLogin(login, failures);
-		BuildOne(roles, registry, login, entry, key, failures);
+		BuildOne(roles, registry, login, entry, key, failures, new ValidationMemo());
 		if (key is not null)
 			CryptographicOperations.ZeroMemory(key);
 		return failures;
@@ -287,6 +289,10 @@ public sealed class AccountResolver
 				logger?.LogWarning("Encryption key unavailable for account secrets: {Error}", keyError);
 		}
 
+		// One memo across the whole build: declared users overwhelmingly inherit the SAME global role
+		// ProviderSettings objects, so provider validation (CA reads, host probes) runs once per
+		// distinct settings object rather than once per user (B7).
+		ValidationMemo memo = new();
 		try
 		{
 			if (options.Users is { Count: > 0 })
@@ -295,7 +301,7 @@ public sealed class AccountResolver
 				foreach ((string login, AccountOptions account) in options.Users)
 				{
 					ValidateLogin(login, failures);
-					templates[login] = BuildOne(roles, registry, login, account, key, failures);
+					templates[login] = BuildOne(roles, registry, login, account, key, failures, memo);
 					merged[login] = new MergedAccount(account, false, false);
 				}
 
@@ -310,7 +316,7 @@ public sealed class AccountResolver
 				{
 					List<string> failures = new();
 					ValidateLogin(login, failures);
-					AccountTemplate template = BuildOne(roles, registry, login, account, key, failures);
+					AccountTemplate template = BuildOne(roles, registry, login, account, key, failures, memo);
 					bool shadows = merged.ContainsKey(login);
 					if (failures.Count > 0)
 					{
@@ -348,7 +354,7 @@ public sealed class AccountResolver
 	/// <summary>Merges one entry against the global role assignments, collecting validation failures.</summary>
 	private static AccountTemplate BuildOne(
 		BackendRolesConfig roles, BackendProviderRegistry registry, string login,
-		AccountOptions account, byte[]? encryptionKey, List<string> failures)
+		AccountOptions account, byte[]? encryptionKey, List<string> failures, ValidationMemo memo)
 	{
 		if (account.Password is not null &&
 		    GatewayPasswordHasher.IsHashed(account.Password) &&
@@ -442,17 +448,16 @@ public sealed class AccountResolver
 				string.IsNullOrWhiteSpace(user.UserName) ? null : user.UserName, password);
 		}
 
-		// Provider-delegated validation of every effective role.
+		// Provider-delegated validation of every effective role — memoized per (provider, role,
+		// settings-identity) so shared global settings are validated once, not once per user (B7).
 		foreach ((BackendRole role, RoleTemplate template) in templates)
-			try
-			{
-				registry.GetFor(template.ProviderName, role)
-					.ValidateConfiguration(role, template.Settings, failures);
-			}
-			catch (InvalidOperationException ex)
-			{
-				failures.Add($"ActiveSync:Users:{login}:Backends:{role}: {ex.Message}");
-			}
+		{
+			ValidationMemo.Outcome outcome = memo.Validate(registry, template.ProviderName, role, template.Settings);
+			foreach (string failure in outcome.DirectFailures)
+				failures.Add(failure);
+			if (outcome.GetForError is not null)
+				failures.Add($"ActiveSync:Users:{login}:Backends:{role}: {outcome.GetForError}");
+		}
 
 		return new AccountTemplate(
 			string.IsNullOrWhiteSpace(account.Password) ? null : account.Password,
@@ -554,6 +559,67 @@ public sealed class AccountResolver
 		byte[] expectedDigest = SHA256.HashData(Encoding.UTF8.GetBytes(expected));
 		byte[] presentedDigest = SHA256.HashData(Encoding.UTF8.GetBytes(presented));
 		return CryptographicOperations.FixedTimeEquals(expectedDigest, presentedDigest);
+	}
+
+	/// <summary>
+	///   B7: memoizes provider <c>ValidateConfiguration</c> output within one snapshot build. Almost
+	///   every declared user inherits the SAME global role <see cref="ProviderSettings" /> object (an
+	///   unset role, or a role whose Settings are not overridden, reuses the assignment's Settings
+	///   reference), so keying on settings identity collapses O(users × roles) provider validations —
+	///   each of which re-reads the CA file and re-checks the section — to O(distinct settings × roles).
+	///   The provider's output is login-independent, so this is behaviour-preserving; the one
+	///   login-specific part (the <c>GetFor</c> failure prefix) is applied by the caller.
+	/// </summary>
+	private sealed class ValidationMemo
+	{
+		internal sealed record Outcome(IReadOnlyList<string> DirectFailures, string? GetForError);
+
+		private static readonly IReadOnlyList<string> None = [];
+
+		private readonly Dictionary<(string Provider, BackendRole Role, ProviderSettings Settings), Outcome> _cache =
+			new(KeyComparer.Instance);
+
+		public Outcome Validate(
+			BackendProviderRegistry registry, string providerName, BackendRole role, ProviderSettings settings)
+		{
+			(string, BackendRole, ProviderSettings) key = (providerName, role, settings);
+			if (_cache.TryGetValue(key, out Outcome? cached))
+				return cached;
+
+			Outcome outcome;
+			try
+			{
+				List<string> local = new();
+				registry.GetFor(providerName, role).ValidateConfiguration(role, settings, local);
+				outcome = new Outcome(local.Count == 0 ? None : local, null);
+			}
+			catch (InvalidOperationException ex)
+			{
+				outcome = new Outcome(None, ex.Message);
+			}
+
+			_cache[key] = outcome;
+			return outcome;
+		}
+
+		private sealed class KeyComparer
+			: IEqualityComparer<(string Provider, BackendRole Role, ProviderSettings Settings)>
+		{
+			public static readonly KeyComparer Instance = new();
+
+			public bool Equals(
+				(string Provider, BackendRole Role, ProviderSettings Settings) a,
+				(string Provider, BackendRole Role, ProviderSettings Settings) b) =>
+				a.Role == b.Role &&
+				ReferenceEquals(a.Settings, b.Settings) &&
+				string.Equals(a.Provider, b.Provider, StringComparison.OrdinalIgnoreCase);
+
+			public int GetHashCode((string Provider, BackendRole Role, ProviderSettings Settings) key) =>
+				HashCode.Combine(
+					StringComparer.OrdinalIgnoreCase.GetHashCode(key.Provider),
+					key.Role,
+					RuntimeHelpers.GetHashCode(key.Settings));
+		}
 	}
 
 	/// <summary>Configured (non-inherited) parts of one role: unset = inherit at resolve time.</summary>
