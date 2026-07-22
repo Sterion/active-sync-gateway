@@ -215,11 +215,14 @@ public sealed class JmapMailStore(
 
 			MimeMessage merged = DraftMessageBuilder.Build(applicationData, original, mailAddress);
 			await ImportAsync(account, merged, mailboxId, ct).ConfigureAwait(false);
-			await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
+			// H10: dispose the response and surface a per-item destroy failure instead of leaking
+			// the JsonDocument and assuming success — a lingering old draft duplicates the message.
+			using JmapResponse destroyOld = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
 			{
 				["accountId"] = account,
 				["destroy"] = new[] { itemKey }
 			}, ct).ConfigureAwait(false);
+			EnsureDestroyed(destroyOld.Arguments("0"), itemKey, "Email");
 			return "000";
 		}
 
@@ -267,11 +270,14 @@ public sealed class JmapMailStore(
 		string? trashId = permanent ? null : await FindMailboxByRoleAsync(account, "trash", ct).ConfigureAwait(false);
 		if (trashId is null || string.Equals(trashId, FromKey(folderBackendKey), StringComparison.Ordinal))
 		{
-			await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
+			// H10: dispose the response and check the per-item destroy bucket rather than assuming
+			// success on a leaked document.
+			using JmapResponse destroyResponse = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
 			{
 				["accountId"] = account,
 				["destroy"] = new[] { itemKey }
 			}, ct).ConfigureAwait(false);
+			EnsureDestroyed(destroyResponse.Arguments("0"), itemKey, "Email");
 			return;
 		}
 
@@ -363,7 +369,9 @@ public sealed class JmapMailStore(
 		if (sentId is null)
 			return;
 		string blobId = await client.UploadBlobAsync(account, mime, "message/rfc822", ct).ConfigureAwait(false);
-		await client.CallAsync(CapMailBlob, "Email/import", new Dictionary<string, object?>
+		// H10: dispose the response and surface an import failure — a dropped Save-to-Sent leaves
+		// the user's Sent folder missing the message they just sent.
+		using JmapResponse response = await client.CallAsync(CapMailBlob, "Email/import", new Dictionary<string, object?>
 		{
 			["accountId"] = account,
 			["emails"] = new Dictionary<string, object?>
@@ -376,6 +384,7 @@ public sealed class JmapMailStore(
 				}
 			}
 		}, ct).ConfigureAwait(false);
+		EnsureNotIn(response.Arguments("0"), "notCreated", "sent", "Email", "import");
 	}
 
 	public async Task<byte[]?> GetRawMessageAsync(string folderBackendKey, string itemKey, CancellationToken ct)
@@ -478,11 +487,15 @@ public sealed class JmapMailStore(
 				.Select(e => e.GetString()!).ToArray();
 			if (ids.Length == 0)
 				break;
-			await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
+			// H10: dispose the response and surface a batch destroy failure rather than looping on
+			// a leaked document — a message the server refused to delete would otherwise reappear
+			// in the very next Email/query page and spin this loop forever.
+			using JmapResponse destroyResponse = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
 			{
 				["accountId"] = account,
 				["destroy"] = ids
 			}, ct).ConfigureAwait(false);
+			EnsureNoneFailed(destroyResponse.Arguments("0"), "notDestroyed", "Email", "destroy");
 			if (ids.Length < 500)
 				break;
 		}
@@ -719,9 +732,22 @@ public sealed class JmapMailStore(
 		if (setResult.TryGetProperty(bucket, out JsonElement failures) &&
 		    failures.ValueKind == JsonValueKind.Object &&
 		    failures.TryGetProperty(id, out JsonElement error))
-		{
-			string type = error.TryGetProperty("type", out JsonElement t) ? t.GetString() ?? "unknown" : "unknown";
-			throw new BackendException($"JMAP {kind}/{verb} failed for '{id}': {type}.");
-		}
+			throw SetError(kind, verb, id, error);
+	}
+
+	/// <summary>Throws if a batch */set bucket (e.g. notDestroyed over many ids) carries any entry.</summary>
+	private static void EnsureNoneFailed(JsonElement setResult, string bucket, string kind, string verb)
+	{
+		if (setResult.TryGetProperty(bucket, out JsonElement failures) &&
+		    failures.ValueKind == JsonValueKind.Object)
+			foreach (JsonProperty failure in failures.EnumerateObject())
+				throw SetError(kind, verb, failure.Name, failure.Value);
+	}
+
+	/// <summary>Maps a JMAP SetError to an exception.</summary>
+	private static BackendException SetError(string kind, string verb, string id, JsonElement error)
+	{
+		string type = error.TryGetProperty("type", out JsonElement t) ? t.GetString() ?? "unknown" : "unknown";
+		return new BackendException($"JMAP {kind}/{verb} failed for '{id}': {type}.");
 	}
 }

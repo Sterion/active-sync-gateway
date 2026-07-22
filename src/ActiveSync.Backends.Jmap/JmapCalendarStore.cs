@@ -211,7 +211,10 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		// EAS userResponse: 1=Accept, 2=Tentative, 3=Decline.
 		string status = userResponse switch { 2 => "tentative", 3 => "declined", _ => "accepted" };
 		if (mailAddress is not null && FindParticipantId(match, mailAddress) is { } participantId)
-			await client.CallAsync(Cap, "CalendarEvent/set", new Dictionary<string, object?>
+		{
+			// H10: dispose the response and surface a failed participation-status update instead of
+			// leaking the document and reporting a meeting response that never took.
+			using JmapResponse response = await client.CallAsync(Cap, "CalendarEvent/set", new Dictionary<string, object?>
 			{
 				["accountId"] = account,
 				["update"] = new Dictionary<string, object?>
@@ -222,6 +225,9 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 					}
 				}
 			}, ct).ConfigureAwait(false);
+			EnsureNotIn(response.Arguments("0"), "notUpdated", itemKey);
+		}
+
 		return itemKey;
 	}
 

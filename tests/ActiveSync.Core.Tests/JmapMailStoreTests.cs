@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using ActiveSync.Backends.Jmap;
+using ActiveSync.Contracts;
 
 namespace ActiveSync.Core.Tests;
 
@@ -53,6 +54,28 @@ public sealed class JmapMailStoreTests
 			[JmapMailStore.ToKey("INBOXID")], TimeSpan.FromSeconds(4), CancellationToken.None);
 
 		Assert.Contains(JmapMailStore.ToKey("INBOXID"), changed);
+	}
+
+	// H10: a permanent delete whose Email/set returns the id in notDestroyed used to be ignored
+	// (the response leaked, undisposed) and reported as success. It must surface as a failure.
+	[Fact]
+	public async Task DeleteItem_ServerReportsNotDestroyed_Throws()
+	{
+		StubHandler stub = new(request =>
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			return Json("""
+			{"methodResponses":[
+			  ["Email/set",{"accountId":"c","notDestroyed":{"E1":{"type":"serverFail"}}},"0"]
+			],"sessionState":"x"}
+			""");
+		});
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+
+		await Assert.ThrowsAsync<BackendException>(() =>
+			store.DeleteItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", permanent: true, CancellationToken.None));
 	}
 
 	private static HttpResponseMessage Json(string body)
