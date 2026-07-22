@@ -207,9 +207,17 @@ public static class MailConverter
 		if (!ics.Contains("METHOD:REQUEST", StringComparison.OrdinalIgnoreCase))
 			return null;
 
-		string? Prop(string name)
+		// Unfold RFC 5545 §3.1 continuation lines (a CRLF followed by a space or tab) before
+		// scanning properties, otherwise a folded LOCATION/ORGANIZER is silently truncated.
+		string unfolded = ics
+			.Replace("\r\n ", "").Replace("\r\n\t", "")
+			.Replace("\n ", "").Replace("\n\t", "");
+
+		// Returns the property's parameter segment (everything between the name and the first
+		// colon, e.g. ";TZID=Europe/Copenhagen") and its value (after the colon).
+		(string Parameters, string Value)? Prop(string name)
 		{
-			foreach (string rawLine in ics.Split('\n'))
+			foreach (string rawLine in unfolded.Split('\n'))
 			{
 				string line = rawLine.TrimEnd('\r');
 				if (line.StartsWith(name, StringComparison.OrdinalIgnoreCase) &&
@@ -217,19 +225,23 @@ public static class MailConverter
 				{
 					int colon = line.IndexOf(':');
 					if (colon >= 0)
-						return line[(colon + 1)..].Trim();
+						return (line[name.Length..colon], line[(colon + 1)..].Trim());
 				}
 			}
 
 			return null;
 		}
 
-		string uid = Prop("UID") ?? Guid.NewGuid().ToString();
-		DateTime? dtStart = ParseIcsDate(Prop("DTSTART"));
-		DateTime? dtEnd = ParseIcsDate(Prop("DTEND"));
-		string location = Prop("LOCATION") ?? "";
-		string organizer = Prop("ORGANIZER")?.Replace("mailto:", "", StringComparison.OrdinalIgnoreCase) ?? "";
-		bool allDay = Prop("DTSTART")?.Contains("VALUE=DATE", StringComparison.OrdinalIgnoreCase) == true;
+		string uid = Prop("UID")?.Value ?? Guid.NewGuid().ToString();
+		(string Parameters, string Value)? startProp = Prop("DTSTART");
+		(string Parameters, string Value)? endProp = Prop("DTEND");
+		DateTime? dtStart = ParseIcsDate(startProp);
+		DateTime? dtEnd = ParseIcsDate(endProp);
+		string location = Prop("LOCATION")?.Value ?? "";
+		string organizer = Prop("ORGANIZER")?.Value.Replace("mailto:", "", StringComparison.OrdinalIgnoreCase) ?? "";
+		bool allDay = startProp is { } sp &&
+		              (sp.Parameters.Contains("VALUE=DATE", StringComparison.OrdinalIgnoreCase) ||
+		               (sp.Value.Length == 8 && !sp.Value.Contains('T')));
 
 		XElement mr = new(Email + "MeetingRequest",
 			new XElement(Email + "AllDayEvent", allDay ? "1" : "0"),
@@ -273,16 +285,62 @@ public static class MailConverter
 		return Convert.ToBase64String(ms.ToArray());
 	}
 
-	private static DateTime? ParseIcsDate(string? value)
+	private static DateTime? ParseIcsDate((string Parameters, string Value)? property)
 	{
-		if (string.IsNullOrEmpty(value))
+		if (property is not { } prop || string.IsNullOrEmpty(prop.Value))
 			return null;
-		value = value.Trim();
-		string[] formats = ["yyyyMMdd'T'HHmmss'Z'", "yyyyMMdd'T'HHmmss", "yyyyMMdd"];
-		if (DateTime.TryParseExact(value, formats, CultureInfo.InvariantCulture,
-			    DateTimeStyles.AssumeUniversal |
-			    DateTimeStyles.AdjustToUniversal, out DateTime dt))
-			return dt;
+		string value = prop.Value.Trim();
+
+		// Bare-Z (UTC) or DATE forms are already absolute.
+		if (DateTime.TryParseExact(value, ["yyyyMMdd'T'HHmmss'Z'", "yyyyMMdd"],
+			    CultureInfo.InvariantCulture,
+			    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTime absolute))
+			return absolute;
+
+		// A floating (no-Z) wall-clock time: honour the TZID parameter if present, otherwise
+		// fall back to treating it as UTC (the historical behaviour).
+		if (DateTime.TryParseExact(value, "yyyyMMdd'T'HHmmss", CultureInfo.InvariantCulture,
+			    DateTimeStyles.None, out DateTime local))
+		{
+			TimeZoneInfo? zone = ResolveTzid(prop.Parameters);
+			if (zone is not null)
+			{
+				try
+				{
+					return TimeZoneInfo.ConvertTimeToUtc(
+						DateTime.SpecifyKind(local, DateTimeKind.Unspecified), zone);
+				}
+				catch (Exception ex) when (ex is ArgumentException or InvalidTimeZoneException)
+				{
+					// ambiguous/invalid wall-clock in the zone — fall through to UTC
+				}
+			}
+
+			return DateTime.SpecifyKind(local, DateTimeKind.Utc);
+		}
+
+		return null;
+	}
+
+	/// <summary>Reads a TZID= parameter and resolves it to a <see cref="TimeZoneInfo" />.</summary>
+	private static TimeZoneInfo? ResolveTzid(string parameters)
+	{
+		foreach (string part in parameters.Split(';', StringSplitOptions.RemoveEmptyEntries))
+		{
+			if (!part.StartsWith("TZID=", StringComparison.OrdinalIgnoreCase))
+				continue;
+			string id = part[5..].Trim();
+			if (id.Length == 0)
+				return null;
+			if (TimeZoneInfo.TryFindSystemTimeZoneById(id, out TimeZoneInfo? zone))
+				return zone;
+			// iCalendar TZIDs are frequently Windows ids; try the IANA translation.
+			if (TimeZoneInfo.TryConvertWindowsIdToIanaId(id, out string? iana) &&
+			    TimeZoneInfo.TryFindSystemTimeZoneById(iana, out zone))
+				return zone;
+			return null;
+		}
+
 		return null;
 	}
 
