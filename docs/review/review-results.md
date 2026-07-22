@@ -1131,15 +1131,49 @@ skipped-suite false green) ✓
 
 ---
 
-## Next: item 26 — Send/submit ordering & idempotency [LIVE] (Phase 4 — Correctness)
+## Item 26 — Send/submit ordering & idempotency [LIVE]
+**Findings:** `F10` `F29` `F30` `F31` `D9` `H18` `L36`
+**Commits:** `6ffe571` (F10) · `4dd5550` (F29) · `d35af1a` (F30) · `2d725dc` (F31) · `d9bc73b` (D9) · `439f911` (H18) ·
+`68b9e10` (L36)
+**Verification:** integrity items=56 live=15 assigned=365 unique=365 dupes=0 encoding=0 ✓ · cursor → item 27 ✓ ·
+one commit per finding, ID in subject ✓ · build clean 0 warnings ✓ · unit **Protocol 63 · WebUi 70 · Core 564 ·
+Server 161 = 858 / 0 skipped** ✓ · **integration 141 / 0 skipped** (full suite, fresh clean-volume backend; +2 new
+live tests over the 139 baseline — D9 SmtpSubmitTeardown, H18 DavCreatePutReplay) ✓
+**Notes:**
+- **Client-visible behaviour changes** (worth watching on real devices): **F29** — SmartReply/SmartForward with a
+  referenced-but-**unresolvable** source now fails with **Status 150** instead of silently sending a degraded
+  message. **L36** — `eas` no longer re-runs a command locally after a server 5xx or timeout; it reports and exits
+  non-zero (fall back only on 404 + `HttpRequestException`). **F30/F10/D9** — a *post-submit* failure (Sent-filing,
+  QUIT teardown, draft cleanup) is now **swallowed**; callers that previously surfaced such a failure now see success.
+  This is the whole point (no client resend → no duplicate recipients), but it means a Sent-filing failure is now
+  invisible to the client and only logged.
+- **F29 status-code judgment call (could have gone another way):** the worker used MS-ASCMD **150** for
+  source-not-found but could not authoritatively pin that exact value against the spec; no precedent existed in the
+  codebase. The test asserts the *essential* property (non-success + nothing sent), not the numeric code, so the
+  finding's floor holds regardless — but if a device rejects 150 here, the code is the thing to revisit.
+- **F10 ordering interpretation:** the finding says "record the replay marker *before* the irreversible step." The
+  worker records it immediately **after a successful submit** (before best-effort cleanup), not before the SMTP send —
+  recording before the send would mark a *failed* send as sent and lose the mail on resend. Safe under both readings
+  (no duplicate, no lost mail) and matches the file's existing "record after backend write" convention. Reasonable.
+- **H18 fix location differs from the finding's suggestion** (caught the 412 in `WebDavClient.PutAsync`, guarded by
+  `ifNoneMatch`, rather than in `CreateItemAsync`): that's where the 412 is observed and it makes the replay
+  deterministically live-testable. Update-PUT `If-Match` 412s still surface — verified the create/update split holds.
+- **Coverage-not-proof, correctly labelled:** **D9** (cancel-after-send race, no deterministic trigger — struck on
+  the fix; a live teardown test provides coverage) and **L36** (slim `ActiveSync.Cli` has no test seam — top-level
+  statements, no test project; struck on fix + build, no red test). **F31** is a Nit rename, no behaviour change.
+- Test-infra: extended the shared `EasHandlerHarness` (recording `MailSubmit`/`SaveToSent`, a `NewContextAsync`
+  helper). Existing harness consumers don't touch the new members; confirmed by the green Server.Tests run.
 
-Cursor is at **item 26** (`F10` `F29` `F30` `F31` `D9` `H18` `L36`). [LIVE] — restart the backend from a clean
-volume (`bash scripts/stalwart-up.sh -d && bash scripts/stalwart-up.sh`) in parallel with the worker, and run the
-**full** integration suite in verification. Idempotency/submit-ordering is a send-path change; a duplicate-send
-regression is exactly the class that passes unit but resends live.
+---
 
-Current green baseline: **integration 139 / 0 skipped** (fresh container), unit **Protocol 63 · WebUi 70 · Core 564 ·
-Server 158** = 855.
+## Next: item 27 — Long-poll & push reliability [LIVE] (Phase 4 — Correctness)
+
+Cursor is at **item 27** (`E7` `E8` `F11` `F16` `F17` `F18` `H17` `H19`). [LIVE] — restart clean-volume in parallel
+with the worker, run the **full** integration suite. Ping/long-poll changes alter the HTTP request lifecycle; blast
+radius is non-obvious (a watcher/heartbeat regression can hang or 500 a poll live while unit stays green).
+
+Current green baseline: **integration 141 / 0 skipped** (fresh container), unit **Protocol 63 · WebUi 70 · Core 564 ·
+Server 161** = 858.
 
 **Standing lessons that carried this run (items 13–14):**
 - **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/contract
