@@ -24,6 +24,20 @@ public sealed class MoveItemsHandler(
 		List<XElement> moves = request?.Root?.Elements(M + "Move").ToList() ?? [];
 		List<XElement> responses = new();
 
+		// F22: accumulate snapshot edits per collection and apply them ONCE at the end — a single
+		// state load + one PersistAsync per collection, instead of a query + commit per move (a
+		// 50-item move was 100 queries and 100 commits). Each edit is also applied to the previous
+		// (replay) generation, so an N-1 replay cannot restore the pre-move snapshot and echo the
+		// move back to the client that made it.
+		Dictionary<string, List<SnapshotEdit>> pendingEdits = new(StringComparer.Ordinal);
+
+		void QueueEdit(string collectionId, string itemKey, bool remove, string? revision)
+		{
+			if (!pendingEdits.TryGetValue(collectionId, out List<SnapshotEdit>? edits))
+				pendingEdits[collectionId] = edits = new List<SnapshotEdit>();
+			edits.Add(new SnapshotEdit(itemKey, remove, revision));
+		}
+
 		foreach (XElement move in moves)
 		{
 			string srcMsgId = move.Element(M + "SrcMsgId")?.Value ?? "";
@@ -82,7 +96,7 @@ public sealed class MoveItemsHandler(
 						"Read-only: rejecting move of {SrcMsgId} from \"{Source}\" to \"{Destination}\" for {User}",
 						srcMsgId, source.Value.Folder.DisplayName,
 						destination.Value.Folder.DisplayName, context.Device.UserName);
-					await PatchSnapshotAsync(context, srcFldId, itemKey, true, null, ct);
+					QueueEdit(srcFldId, itemKey, true, null);
 					responses.Add(Response("5"));
 					continue;
 				}
@@ -101,8 +115,8 @@ public sealed class MoveItemsHandler(
 					destination.Value.Folder, destination.Value.Store, newItemKey, ct);
 
 				// Patch snapshots so the move is not echoed back on the next Sync.
-				await PatchSnapshotAsync(context, srcFldId, itemKey, true, null, ct);
-				await PatchSnapshotAsync(context, dstFldId, newItemKey, false, "moved", ct);
+				QueueEdit(srcFldId, itemKey, true, null);
+				QueueEdit(dstFldId, newItemKey, false, "moved");
 
 				logger.LogInformation("Moved {SrcMsgId} from \"{Source}\" to \"{Destination}\" for {User}",
 					srcMsgId, source.Value.Folder.DisplayName,
@@ -116,21 +130,48 @@ public sealed class MoveItemsHandler(
 			}
 		}
 
+		// Apply every collection's accumulated edits with a single load each, then one flush total.
+		bool anyPatched = false;
+		foreach ((string collectionId, List<SnapshotEdit> edits) in pendingEdits)
+			anyPatched |= await ApplySnapshotEditsAsync(context, collectionId, edits, ct);
+		if (anyPatched)
+			await context.State.PersistAsync(ct);
+
 		await context.WriteResponseAsync(new XDocument(new XElement(M + "MoveItems", responses)));
 	}
 
-	private static async Task PatchSnapshotAsync(
-		EasContext context, string collectionId, string itemKey, bool remove, string? revision, CancellationToken ct)
+	private static async Task<bool> ApplySnapshotEditsAsync(
+		EasContext context, string collectionId, IReadOnlyList<SnapshotEdit> edits, CancellationToken ct)
 	{
 		CollectionState? state = await context.State.GetCollectionStateAsync(context.Device, collectionId, ct);
 		if (state is null || state.SyncKey == 0)
-			return;
+			return false;
+
 		Dictionary<string, string> snapshot = SyncStateService.ReadSnapshot(state);
-		if (remove)
-			snapshot.Remove(itemKey);
-		else
-			snapshot[itemKey] = revision ?? "";
+		Apply(snapshot, edits);
 		SyncStateService.WriteSnapshot(state, snapshot);
-		await context.State.PersistAsync(ct);
+
+		// The previous (replay) generation must carry the same edits, or a client resending the
+		// N-1 key would replay against a snapshot that still holds the moved item and re-Add it.
+		if (state.PreviousSnapshotCompressed is not null)
+		{
+			Dictionary<string, string> previous = SyncStateService.ReadPreviousSnapshot(state);
+			Apply(previous, edits);
+			SyncStateService.WritePreviousSnapshot(state, previous);
+		}
+
+		return true;
 	}
+
+	private static void Apply(Dictionary<string, string> snapshot, IReadOnlyList<SnapshotEdit> edits)
+	{
+		foreach (SnapshotEdit edit in edits)
+			if (edit.Remove)
+				snapshot.Remove(edit.ItemKey);
+			else
+				snapshot[edit.ItemKey] = edit.Revision ?? "";
+	}
+
+	/// <summary>One pending edit to a collection's snapshot: remove a key, or set it to a revision.</summary>
+	private readonly record struct SnapshotEdit(string ItemKey, bool Remove, string? Revision);
 }

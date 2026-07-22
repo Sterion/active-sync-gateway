@@ -145,6 +145,14 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 	public static void WriteSnapshot(CollectionState state, Dictionary<string, string> snapshot)
 		=> CollectionStateStore.WriteSnapshot(state, snapshot);
 
+	/// <summary>The one-generation-old snapshot (SyncKey-1) — empty when there is no replay generation.</summary>
+	public static Dictionary<string, string> ReadPreviousSnapshot(CollectionState state)
+		=> CollectionStateStore.ReadPreviousSnapshot(state);
+
+	/// <summary>Writes the previous-generation snapshot onto a <see cref="CollectionState" /> (stored gzipped).</summary>
+	public static void WritePreviousSnapshot(CollectionState state, Dictionary<string, string> snapshot)
+		=> CollectionStateStore.WritePreviousSnapshot(state, snapshot);
+
 	/// <summary>The applied-Add map of the generation that produced the current SyncKey.</summary>
 	public static Dictionary<string, AppliedClientAdd> ReadAppliedAdds(CollectionState state)
 		=> CollectionStateStore.ReadAppliedAdds(state);

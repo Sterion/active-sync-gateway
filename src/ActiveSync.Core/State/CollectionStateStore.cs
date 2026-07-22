@@ -107,6 +107,18 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 		state.SnapshotCompressed = SnapshotCodec.Compress(snapshot);
 	}
 
+	/// <summary>The one-generation-old snapshot (SyncKey-1), or empty when there is no replay generation.</summary>
+	public static Dictionary<string, string> ReadPreviousSnapshot(CollectionState state)
+	{
+		return SnapshotCodec.Decompress(state.PreviousSnapshotCompressed);
+	}
+
+	/// <summary>Persists <paramref name="snapshot" /> onto the state's previous-snapshot column (gzipped).</summary>
+	public static void WritePreviousSnapshot(CollectionState state, Dictionary<string, string> snapshot)
+	{
+		state.PreviousSnapshotCompressed = SnapshotCodec.Compress(snapshot);
+	}
+
 	/// <summary>The applied-Add map of the generation that produced the current SyncKey.</summary>
 	public static Dictionary<string, AppliedClientAdd> ReadAppliedAdds(CollectionState state)
 	{
