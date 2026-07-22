@@ -256,12 +256,18 @@ public sealed class FolderCreateHandler(
 		string displayName = root.Element(FH + "DisplayName")?.Value
 		                     ?? throw new FolderOperationException("10", "Missing DisplayName");
 
-		IContentStore mailStore = context.Session.GetStoreForClass(EasClass.Email)!;
-		// K58: folder mutation is an optional capability. A store without it (never the mail store
-		// today) throws BackendException, which the base handler turns into Status 3 — the same
-		// answer as an unmodifiable system folder.
-		IFolderOperations folderOps = mailStore as IFolderOperations
-			?? throw new BackendException("The mail store does not support folder creation.");
+		// F27: honour the requested Type. A client creating a calendar (13), contacts (14) or
+		// tasks (15) folder must NOT get a mail folder silently created and reported as success.
+		// Route to the store for the requested class; a class with no configured store (or one
+		// without folder ops) falls through to Status 3 rather than being misfiled as mail.
+		int type = int.TryParse(root.Element(FH + "Type")?.Value, out int t) ? t : EasFolderType.UserMail;
+		string easClass = ClassForFolderType(type);
+		IContentStore? store = context.Session.GetStoreForClass(easClass);
+		// K58: folder mutation is an optional capability. A store without it (or an unconfigured
+		// class → null) throws BackendException, which the base handler turns into Status 3 — the
+		// same answer as an unmodifiable system folder.
+		IFolderOperations folderOps = store as IFolderOperations
+			?? throw new BackendException($"The {easClass} store does not support folder creation.");
 		string? parentBackendKey = null;
 		if (parentId != "0")
 			// A read-only grant on the parent covers its subtree: creating a child inside it
@@ -272,6 +278,22 @@ public sealed class FolderCreateHandler(
 		// Register so the response can carry the assigned ServerId.
 		List<UserFolder> registry = await Folders.RefreshAsync(context.Session, context.Device.UserName, ct);
 		return registry.FirstOrDefault(f => f.BackendKey == backendKey)?.ServerId;
+	}
+
+	/// <summary>
+	///   Maps a requested MS-ASCMD folder Type to the EAS content class that owns it. The user-*
+	///   types route to their class; Type 12 (UserMail) and anything else fall to mail (the
+	///   historical default).
+	/// </summary>
+	private static string ClassForFolderType(int type)
+	{
+		return type switch
+		{
+			EasFolderType.UserCalendar => EasClass.Calendar,
+			EasFolderType.UserContacts => EasClass.Contacts,
+			EasFolderType.UserTasks => EasClass.Tasks,
+			_ => EasClass.Email
+		};
 	}
 }
 

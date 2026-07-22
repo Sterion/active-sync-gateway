@@ -94,6 +94,59 @@ public sealed class FolderConformanceTests : IDisposable
 		Assert.Empty(_harness.Session.Store.CreatedFolders);
 	}
 
+	// ---- F27 -------------------------------------------------------------------------------
+
+	[Fact]
+	public async Task FolderCreate_CalendarType_WithNoCalendarStore_IsRefused_NotCreatedAsMail()
+	{
+		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
+			new XDocument(new XElement(FH + "FolderCreate",
+				new XElement(FH + "SyncKey", "0"),
+				new XElement(FH + "ParentId", "0"),
+				new XElement(FH + "Type", EasFolderType.UserCalendar.ToString()),
+				new XElement(FH + "DisplayName", "MyCalendar"))));
+
+		Assert.Equal("3", response?.Root?.Element(FH + "Status")?.Value);
+		Assert.Empty(_harness.Session.Store.CreatedFolders); // never silently filed as a mail folder
+	}
+
+	[Fact]
+	public async Task FolderCreate_CalendarType_RoutesToTheCalendarStore()
+	{
+		EasHandlerHarness.RecordingStore calendar = new()
+		{
+			EasClass = EasClass.Calendar,
+			KeyPrefix = "caldav:"
+		};
+		_harness.Session.SecondaryStore = calendar;
+
+		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
+			new XDocument(new XElement(FH + "FolderCreate",
+				new XElement(FH + "SyncKey", "0"),
+				new XElement(FH + "ParentId", "0"),
+				new XElement(FH + "Type", EasFolderType.UserCalendar.ToString()),
+				new XElement(FH + "DisplayName", "MyCalendar"))));
+
+		Assert.Equal("1", response?.Root?.Element(FH + "Status")?.Value);
+		Assert.Single(calendar.CreatedFolders);
+		Assert.Empty(_harness.Session.Store.CreatedFolders); // mail store left untouched
+	}
+
+	[Fact]
+	public async Task FolderCreate_MailType_StillCreatesInTheMailStore()
+	{
+		// Regression guard: the default class (Email / Type 12) still routes to the mail store.
+		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
+			new XDocument(new XElement(FH + "FolderCreate",
+				new XElement(FH + "SyncKey", "0"),
+				new XElement(FH + "ParentId", "0"),
+				new XElement(FH + "Type", EasFolderType.UserMail.ToString()),
+				new XElement(FH + "DisplayName", "Projects"))));
+
+		Assert.Equal("1", response?.Root?.Element(FH + "Status")?.Value);
+		Assert.Single(_harness.Session.Store.CreatedFolders);
+	}
+
 	private FolderCreateHandler CreateHandler()
 	{
 		return new FolderCreateHandler(_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
