@@ -18,6 +18,16 @@ namespace ActiveSync.Backends.Common;
 /// </summary>
 public static class BackendHttpClientFactory
 {
+	/// <summary>
+	///   Hard ceiling on a buffered backend response body (H24). Applied as
+	///   <see cref="HttpClient.MaxResponseContentBufferSize" /> on the long-lived DAV/JMAP clients so
+	///   a malicious or malfunctioning server cannot stream an unbounded body into memory via the
+	///   buffering read methods (<c>ReadAsStringAsync</c> etc.). It does NOT apply to a
+	///   <c>ResponseHeadersRead</c> stream, so the JMAP EventSource (SSE) watcher is unaffected.
+	///   Generous on purpose — a real multistatus listing for a large collection is several MB.
+	/// </summary>
+	public const long MaxBackendResponseBytes = 128L * 1024 * 1024;
+
 	// Probe handlers are keyed by their TLS shape and reused across calls so a periodic
 	// readiness probe does not build and discard a handler (and its connection pool) every
 	// time (H26). The HttpClient wrapping them is cheap and created disposable per call.
@@ -53,7 +63,8 @@ public static class BackendHttpClientFactory
 	{
 		HttpClient http = new(CreateHandler(allowInvalidCertificates, caCertificatePath))
 		{
-			Timeout = timeout ?? TimeSpan.FromSeconds(100)
+			Timeout = timeout ?? TimeSpan.FromSeconds(100),
+			MaxResponseContentBufferSize = MaxBackendResponseBytes
 		};
 		http.DefaultRequestHeaders.Authorization = BasicAuthHeader(credentials);
 		return http;

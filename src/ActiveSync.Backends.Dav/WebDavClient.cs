@@ -17,9 +17,20 @@ namespace ActiveSync.Backends.Dav;
 /// </summary>
 public sealed class WebDavClient : IDisposable
 {
+	/// <summary>
+	///   Ceiling on a single DAV response body (H24). Multistatus listings for a large collection
+	///   are legitimately several MB, so the cap is generous — its job is to bound a malicious or
+	///   malfunctioning server that would otherwise stream an unbounded body into memory, not to
+	///   second-guess a real listing. Exposed internally so tests can lower it.
+	/// </summary>
+	internal static readonly long DefaultMaxResponseBytes = BackendHttpClientFactory.MaxBackendResponseBytes;
+
 	private readonly Uri _baseUri;
 	private readonly HttpClient _http;
 	private readonly ILogger? _wireLogger;
+
+	/// <summary>Per-response size ceiling; see <see cref="DefaultMaxResponseBytes" />.</summary>
+	internal long MaxResponseBytes { get; set; } = DefaultMaxResponseBytes;
 
 	public WebDavClient(
 		Uri baseUri,
@@ -96,7 +107,7 @@ public sealed class WebDavClient : IDisposable
 		if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
 			return null;
 		await EnsureSuccessAsync(response, "REPORT", href, ct).ConfigureAwait(false);
-		return await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+		return await ReadCappedStringAsync(response, "REPORT", href, ct).ConfigureAwait(false);
 	}
 
 	public async Task<(string Content, string? ETag)?> GetAsync(string href, CancellationToken ct)
@@ -106,7 +117,7 @@ public sealed class WebDavClient : IDisposable
 		if (response.StatusCode == HttpStatusCode.NotFound)
 			return null;
 		await EnsureSuccessAsync(response, "GET", href, ct).ConfigureAwait(false);
-		string content = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+		string content = await ReadCappedStringAsync(response, "GET", href, ct).ConfigureAwait(false);
 		return (content, response.Headers.ETag?.Tag);
 	}
 
@@ -313,11 +324,10 @@ public sealed class WebDavClient : IDisposable
 			throw new BackendException(
 				$"DAV request failed: {(int)response.StatusCode} {response.ReasonPhrase}.");
 
-		string xml = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 		XDocument doc;
 		try
 		{
-			doc = ParseHardenedXml(xml);
+			doc = await ParseHardenedXmlAsync(response, "multistatus", ct).ConfigureAwait(false);
 		}
 		catch (XmlException ex)
 		{
@@ -363,23 +373,100 @@ public sealed class WebDavClient : IDisposable
 	}
 
 	/// <summary>
-	///   Parses a DAV multistatus body with external-entity resolution and DTD processing
-	///   explicitly disabled (H28). <see cref="XDocument.Parse(string)" /> already prohibits DTDs
-	///   by default, so this is not a behaviour change — it makes the XXE hardening a stated,
-	///   review-visible property of the code rather than a silent inheritance of a framework
-	///   default that a future refactor could flip. A backend response is attacker-adjacent
-	///   (a compromised or hostile DAV server), so it must never resolve an external entity.
+	///   Parses a DAV multistatus response by STREAMING it (H24) with external-entity resolution and
+	///   DTD processing explicitly disabled (H28). The body is read through a size-capped stream so a
+	///   malicious/malfunctioning server cannot buffer an unbounded response into memory; the XXE
+	///   hardening (DtdProcessing.Prohibit, XmlResolver null) is a stated, review-visible property
+	///   rather than a silent inheritance of a framework default a future refactor could flip.
 	/// </summary>
-	private static XDocument ParseHardenedXml(string xml)
+	private async Task<XDocument> ParseHardenedXmlAsync(
+		HttpResponseMessage response, string what, CancellationToken ct)
 	{
+		await using Stream stream = await OpenCappedStreamAsync(response, what, ct).ConfigureAwait(false);
 		XmlReaderSettings settings = new()
 		{
 			DtdProcessing = DtdProcessing.Prohibit,
 			XmlResolver = null,
-			MaxCharactersFromEntities = 0
+			MaxCharactersFromEntities = 0,
+			Async = true
 		};
-		using XmlReader reader = XmlReader.Create(new StringReader(xml), settings);
-		return XDocument.Load(reader);
+		using XmlReader reader = XmlReader.Create(stream, settings);
+		return await XDocument.LoadAsync(reader, LoadOptions.None, ct).ConfigureAwait(false);
+	}
+
+	/// <summary>Reads a (non-multistatus) response body as a string through the same size cap.</summary>
+	private async Task<string> ReadCappedStringAsync(
+		HttpResponseMessage response, string method, string href, CancellationToken ct)
+	{
+		await using Stream stream = await OpenCappedStreamAsync(response, $"{method} {href}", ct).ConfigureAwait(false);
+		using StreamReader reader = new(stream, Encoding.UTF8);
+		return await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+	}
+
+	/// <summary>
+	///   Opens the response content stream behind a hard byte ceiling (H24). A declared
+	///   Content-Length over the ceiling is rejected before a single byte is read; a chunked body
+	///   with no declared length is capped mid-read by <see cref="LengthCapStream" /> so it cannot
+	///   grow without bound either.
+	/// </summary>
+	private async Task<Stream> OpenCappedStreamAsync(
+		HttpResponseMessage response, string what, CancellationToken ct)
+	{
+		if (response.Content.Headers.ContentLength is { } declared && declared > MaxResponseBytes)
+			throw new BackendException(
+				$"DAV {what} response is {declared} bytes, over the {MaxResponseBytes}-byte ceiling.");
+		Stream raw = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+		return new LengthCapStream(raw, MaxResponseBytes, what);
+	}
+
+	/// <summary>
+	///   A forward-only read wrapper that throws <see cref="BackendException" /> once the total bytes
+	///   read exceed the ceiling — the backstop for a response whose size is not declared up front.
+	/// </summary>
+	private sealed class LengthCapStream(Stream inner, long cap, string what) : Stream
+	{
+		private long _read;
+
+		public override bool CanRead => true;
+		public override bool CanSeek => false;
+		public override bool CanWrite => false;
+		public override long Length => throw new NotSupportedException();
+		public override long Position { get => _read; set => throw new NotSupportedException(); }
+
+		public override int Read(byte[] buffer, int offset, int count)
+		{
+			return Track(inner.Read(buffer, offset, count));
+		}
+
+		public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+		{
+			return Track(await inner.ReadAsync(buffer, ct).ConfigureAwait(false));
+		}
+
+		public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
+		{
+			return ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+		}
+
+		private int Track(int n)
+		{
+			_read += n;
+			if (_read > cap)
+				throw new BackendException($"DAV {what} response exceeded the {cap}-byte ceiling mid-stream.");
+			return n;
+		}
+
+		public override void Flush() { }
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing)
+				inner.Dispose();
+			base.Dispose(disposing);
+		}
 	}
 
 	/// <summary>True when a DAV propstat status line ("HTTP/1.1 200 OK") reports a 2xx code.</summary>

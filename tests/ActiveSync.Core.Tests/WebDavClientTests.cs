@@ -190,12 +190,85 @@ public sealed class WebDavClientTests
 				CancellationToken.None));
 	}
 
+	// H24: multistatus/GET/REPORT bodies were read with ReadAsStringAsync — fully buffered with no
+	// size ceiling, so a malicious or malfunctioning server could stream an unbounded body into
+	// memory and OOM the gateway. A response whose declared Content-Length exceeds the ceiling must
+	// be refused before it is buffered.
+	[Fact]
+	public async Task Propfind_ResponseExceedingCeiling_IsRefused_NotBuffered()
+	{
+		string multistatus =
+			"""
+			<D:multistatus xmlns:D="DAV:">
+			  <D:response>
+			    <D:href>/dav/cal/a.ics</D:href>
+			    <D:propstat><D:status>HTTP/1.1 200 OK</D:status>
+			      <D:prop><D:getetag>"e1"</D:getetag></D:prop>
+			    </D:propstat>
+			  </D:response>
+			</D:multistatus>
+			""";
+		RecordingHandler stub = new(_ => Xml(multistatus));
+		using WebDavClient client = new(Base, new HttpClient(stub)) { MaxResponseBytes = 16 };
+
+		await Assert.ThrowsAsync<ActiveSync.Contracts.BackendException>(() =>
+			client.PropfindAsync("/dav/cal/", 1, new XElement(XName.Get("propfind", "DAV:")), CancellationToken.None));
+	}
+
+	// H24: the ceiling must also stop a body with NO declared Content-Length (chunked) — the read
+	// itself is capped, not just the header check — while a body under the ceiling still parses.
+	[Fact]
+	public async Task Propfind_ChunkedBodyOverCeiling_IsCappedMidRead()
+	{
+		string multistatus =
+			"<D:multistatus xmlns:D=\"DAV:\"><D:response><D:href>/dav/cal/a.ics</D:href>" +
+			"<D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop><D:getetag>\"" +
+			new string('x', 4096) + "\"</D:getetag></D:prop></D:propstat></D:response></D:multistatus>";
+		RecordingHandler stub = new(_ => ChunkedXml(multistatus));
+		using WebDavClient client = new(Base, new HttpClient(stub)) { MaxResponseBytes = 256 };
+
+		await Assert.ThrowsAsync<ActiveSync.Contracts.BackendException>(() =>
+			client.PropfindAsync("/dav/cal/", 1, new XElement(XName.Get("propfind", "DAV:")), CancellationToken.None));
+	}
+
 	private static HttpResponseMessage Ok(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)
 		{
 			Content = new StringContent(body, Encoding.UTF8, "text/calendar")
 		};
+	}
+
+	// A 207 whose content reports no Content-Length (a non-seekable stream), forcing the reader to
+	// consume the body without knowing its size up front.
+	private static HttpResponseMessage ChunkedXml(string body)
+	{
+		return new HttpResponseMessage((HttpStatusCode)207)
+		{
+			Content = new StreamContent(new ForwardOnlyStream(Encoding.UTF8.GetBytes(body)))
+		};
+	}
+
+	/// <summary>A read-only, non-seekable stream so StreamContent cannot report a Content-Length.</summary>
+	private sealed class ForwardOnlyStream(byte[] data) : Stream
+	{
+		private int _pos;
+		public override bool CanRead => true;
+		public override bool CanSeek => false;
+		public override bool CanWrite => false;
+		public override long Length => throw new NotSupportedException();
+		public override long Position { get => _pos; set => throw new NotSupportedException(); }
+		public override void Flush() { }
+		public override int Read(byte[] buffer, int offset, int count)
+		{
+			int n = Math.Min(count, data.Length - _pos);
+			Array.Copy(data, _pos, buffer, offset, n);
+			_pos += n;
+			return n;
+		}
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 	}
 
 	private static HttpResponseMessage Xml(string body)
