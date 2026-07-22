@@ -55,23 +55,25 @@ public partial class Program
 			?? new ActiveSyncOptions();
 
 		// HTTPS: the certificate is loaded after migrations (InitializeAsync) but Kestrel binds the
-		// listener now, so its selector reads this mutable local per handshake. Assigned once below.
-		X509Certificate2? serverCertificate = null;
+		// listener now, so its selector reads this holder per handshake. The volatile field inside
+		// gives the cross-thread ordering the startup path and the Kestrel connection threads need
+		// (E20). Assigned once below.
+		CertificateHolder certificateHolder = new();
 
 		// Persists Information+ to the state database; its background drain begins after migrations
 		// (Activate in InitializeAsync), so it never writes before the table exists.
 		DatabaseLogSink databaseLogSink = new();
 
-		ConfigureHosting(builder, options, settingsSource, databaseLogSink, () => serverCertificate);
+		ConfigureHosting(builder, options, settingsSource, databaseLogSink, () => certificateHolder.Current);
 
 		WebApplication app = builder.Build();
 
 		ServerInitResult init = await InitializeAsync(app, options, databaseLogSink);
-		serverCertificate = init.Certificate;
+		certificateHolder.Current = init.Certificate;
 
 		// K5: feed the serving certificate's expiry to the TLS-expiry gauge (null when plaintext).
 		ActiveSync.Core.Observability.GatewayMetrics.SetCertificateExpiryObserver(
-			() => serverCertificate is { } cert ? new DateTimeOffset(cert.NotAfter.ToUniversalTime()) : null);
+			() => certificateHolder.Current is { } cert ? new DateTimeOffset(cert.NotAfter.ToUniversalTime()) : null);
 
 		LogStartupBanner(app, options, init);
 
