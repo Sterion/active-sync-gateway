@@ -249,7 +249,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **30. Timezone & date handling** [LIVE] — ~~`W15`~~ ~~`W16`~~ ~~`D5`~~ ~~`D12`~~ **(fallback: preserve stored TZID on update; full blob→zone recovery deferred)** ~~`D24`~~ ~~`D33`~~ **(coverage — null-start trigger not deterministically reproducible; struck on the fix)** ~~`H30`~~ **COMPLETE**
 > `W15` `EasDateTime` shifts `DateTimeKind.Unspecified` by the machine offset — invisible in UTC CI, wrong in production. `D12` recurring events drift an hour across DST.
 
-**31. Hosting & startup correctness** — ~~`E1`~~ `E12` ~~`E13`~~ ~~`E17`~~ ~~`E19`~~ ~~`E20`~~ **(coverage — theoretical memory barrier; struck on the fix)** ~~`E22`~~ **(cancellation forwarded; pg_advisory_lock multi-replica hardening deferred — the history-table script is already CREATE TABLE IF NOT EXISTS)** ~~`E25`~~
+**31. Hosting & startup correctness** — ~~`E1`~~ ~~`E12`~~ **(behaviour change: KeepAliveTimeout 65 min → 2 min; corrected the contradicting AGENTS.md note)** ~~`E13`~~ ~~`E17`~~ ~~`E19`~~ ~~`E20`~~ **(coverage — theoretical memory barrier; struck on the fix)** ~~`E22`~~ **(cancellation forwarded; pg_advisory_lock multi-replica hardening deferred — the history-table script is already CREATE TABLE IF NOT EXISTS)** ~~`E25`~~ **COMPLETE**
 > `E1` request bodies are dropped on HTTP/2 (the body test assumes HTTP/1.1 framing while Kestrel negotiates h2). `E12` `KeepAliveTimeout` doesn't do what its comment claims.
 
 ## Phase 5 — Protocol conformance

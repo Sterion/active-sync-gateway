@@ -606,8 +606,12 @@ derive an address from `UserName` with `Contains('@')`.
   dispatched by `Cmd` name in `EasEndpoint`. To add a command: handler class in
   `src/ActiveSync.Server/Eas/Handlers/`, DI registration, and append the name to
   `ProtocolCommands` in `EasEndpoint.cs`.
-- Kestrel keep-alive is 65 minutes because Ping can legally hold a request for 59 minutes.
-  Do not "fix" the long timeout.
+- Kestrel `KeepAliveTimeout` is the framework default (2 minutes) and bounds idle time BETWEEN
+  requests on a connection — it is PAUSED while a request is in flight, so it never limits a
+  long-held Ping (Kestrel imposes no per-request cap; a 59-minute Ping is safe regardless). It was
+  historically set to 65 minutes on the mistaken belief it protected long polls, which only let
+  abandoned phone sockets linger for an hour as zombie connections — corrected by E12. Do NOT raise
+  it back to "protect Ping"; the request duration and the keep-alive idle window are unrelated.
 - SendMail has **two wire forms**: WBXML ComposeMail (14.x, MIME in an OPAQUE element)
   and raw `message/rfc822` body with query options (12.x). `ComposeMailHandlerBase`
   handles both; keep it that way.

@@ -180,6 +180,23 @@ public partial class Program
 	}
 
 	/// <summary>
+	///   Sets the connection-wide Kestrel limits. <c>KeepAliveTimeout</c> bounds idle time BETWEEN
+	///   requests on a connection (it is PAUSED while a request is in flight), not the duration of a
+	///   single request — Kestrel imposes no per-request cap, so a 59-minute Ping was never at risk.
+	///   The old 65-minute value was set on the mistaken belief it protected long polls; all it did
+	///   was let every dead/abandoned phone socket (NAT rebind, roaming, backgrounded app) linger for
+	///   over an hour as a zombie connection/fd. Keep the framework default (2 min) so they are
+	///   reaped promptly (E12).
+	/// </summary>
+	internal static void ConfigureKestrelLimits(
+		Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerLimits limits)
+	{
+		limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);
+		limits.RequestHeadersTimeout = TimeSpan.FromSeconds(60);
+		limits.MaxRequestBodySize = 64 * 1024 * 1024;
+	}
+
+	/// <summary>
 	///   Configures the host: service-provider validation, Serilog, options binding, Kestrel limits
 	///   and TLS listener, all DI registrations, and out-of-repo plugin loading. The Kestrel HTTPS
 	///   selector reads the certificate through <paramref name="certificateSelector" /> so the
@@ -222,12 +239,9 @@ public partial class Program
 		// listener before the certificate is loaded.
 		bool tlsEnabled = options.Tls.Enabled;
 
-		// Long-poll friendly Kestrel limits (Ping can hold a request open for up to an hour).
 		builder.WebHost.ConfigureKestrel(kestrel =>
 		{
-			kestrel.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(65);
-			kestrel.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(60);
-			kestrel.Limits.MaxRequestBodySize = 64 * 1024 * 1024;
+			ConfigureKestrelLimits(kestrel.Limits);
 			if (tlsEnabled)
 				kestrel.ListenAnyIP(options.Tls.Port, listen =>
 					listen.UseHttps(new HttpsConnectionAdapterOptions
