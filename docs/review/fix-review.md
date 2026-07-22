@@ -111,12 +111,29 @@ It is the participant with the most accumulated context and the least room to th
 value is being an independent check. One that authors code is both author and reviewer, which is the
 property the split exists to prevent.
 
-### Cap the orchestrator at ~8 items
+### When to hand off to a fresh orchestrator
 
 Subagents get a clean context per item; the orchestrator does not — it accumulates every report,
-verification dump and test summary. One reached 1.5M tokens over four hours and its judgment visibly
-degraded well before any hard limit. Handover is free: the cursor is the state, so a fresh
-orchestrator resumes exactly where the last stopped.
+verification dump and test summary. That cost is smaller than it first looks (most of a run's tokens
+are the *workers'* implementation rolled up into the display, not the orchestrator), so the limit is
+not tokens — it is **context accumulation degrading judgment**, gradually, and a degrading
+orchestrator gets *sloppy at verification*: terse checks, skipped integrity numbers, "looks good"
+instead of the counts. That is worse than a crash, because it silently defeats the whole point.
+
+Handover is free — the cursor is the state — so hand off at a natural boundary rather than a magic
+number:
+
+- **A run-alone item is always its own run.** `review-items.md` marks these (a "Run alone" NOTE on
+  the item). They are the big structural operations — decompositions, wholesale anchor rewrites —
+  where a fresh orchestrator's full attention matters most and a degraded one does the most damage.
+- **Prefer to stop at a phase boundary** (the queue's phase headings) — items within a phase share a
+  shape, so a batch of them is coherent; crossing into a different phase is a natural seam.
+- **Watch for the degradation signals above and cut early if you see them**, whichever comes first.
+  A structural batch (dependency-rule work, breaking changes) degrades more expensively than a batch
+  of uniform correctness fixes, so lean shorter on the former, longer on the latter.
+
+The human is the reliable backstop here: a degrading orchestrator is precisely the one least able to
+notice it is degrading, so external eyes catch it sooner than self-assessment.
 
 ### The worker brief is a constant, not a composition
 
