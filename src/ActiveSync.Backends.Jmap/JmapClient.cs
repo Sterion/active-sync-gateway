@@ -111,8 +111,9 @@ public sealed class JmapClient : IDisposable
 		BackendCredentials credentials,
 		bool allowInvalidCertificates = false,
 		string? caCertificatePath = null,
-		ILogger? wireLogger = null)
-		: this(baseUri, BuildHttpClient(credentials, allowInvalidCertificates, caCertificatePath), wireLogger)
+		ILogger? wireLogger = null,
+		TimeSpan? httpTimeout = null)
+		: this(baseUri, BuildHttpClient(credentials, allowInvalidCertificates, caCertificatePath, httpTimeout), wireLogger)
 	{
 	}
 
@@ -125,7 +126,8 @@ public sealed class JmapClient : IDisposable
 	}
 
 	private static HttpClient BuildHttpClient(
-		BackendCredentials credentials, bool allowInvalidCertificates, string? caCertificatePath)
+		BackendCredentials credentials, bool allowInvalidCertificates, string? caCertificatePath,
+		TimeSpan? httpTimeout)
 	{
 		// Redirects are followed manually (same-origin only) so the Authorization header is
 		// never handed to another origin — the .well-known/jmap discovery hop redirects to
@@ -139,7 +141,9 @@ public sealed class JmapClient : IDisposable
 			allowInvalidCertificates, caCertificatePath);
 		if (certCallback is not null)
 			handler.SslOptions.RemoteCertificateValidationCallback = certCallback;
-		HttpClient http = new(handler) { Timeout = TimeSpan.FromSeconds(100) };
+		// Default request/response cap; the EventSource watcher overrides this with an infinite
+		// timeout so its long-lived SSE stream is not aborted mid-flight (H17).
+		HttpClient http = new(handler) { Timeout = httpTimeout ?? TimeSpan.FromSeconds(100) };
 		string token = Convert.ToBase64String(
 			Encoding.UTF8.GetBytes($"{credentials.UserName}:{credentials.Password}"));
 		http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", token);
@@ -243,7 +247,16 @@ public sealed class JmapClient : IDisposable
 		request.Headers.Accept.ParseAdd("text/event-stream");
 		HttpResponseMessage response = await _http
 			.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-		await EnsureSuccessAsync(response, "GET", "eventsource", ct).ConfigureAwait(false);
+		try
+		{
+			await EnsureSuccessAsync(response, "GET", "eventsource", ct).ConfigureAwait(false);
+		}
+		catch
+		{
+			response.Dispose(); // H17: don't leak the response (and its connection) on the error path
+			throw;
+		}
+
 		return response;
 	}
 

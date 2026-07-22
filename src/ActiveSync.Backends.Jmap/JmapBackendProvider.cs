@@ -182,9 +182,13 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 	{
 		JmapEventSourceWatcher Build()
 		{
+			// Infinite HTTP timeout: this client holds a long-lived EventSource (SSE) stream open, so
+			// the default 100 s request cap would abort it mid-flight every ~100 s (H17). The stream's
+			// own ping keep-alive and the watcher's cancellation token bound its lifetime instead.
 			JmapClient watcherClient = new(
 				new Uri(options.BaseUrl), credentials,
-				options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger);
+				options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger,
+				httpTimeout: Timeout.InfiniteTimeSpan);
 			return new JmapEventSourceWatcher(watcherClient, credentials, _logger);
 		}
 

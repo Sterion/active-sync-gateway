@@ -196,6 +196,22 @@ public class JmapClientTests
 		Assert.Equal(1, apiCalls); // never replayed
 	}
 
+	// H17: a non-success EventSource open must dispose the response (and its connection),
+	// not leak it on the error path.
+	[Fact]
+	public async Task OpenEventSource_OnErrorStatus_DisposesTheResponse()
+	{
+		TrackingContent tracker = new();
+		StubHandler stub = new((request, _) =>
+			request.RequestUri!.AbsolutePath.Contains("eventsource", StringComparison.Ordinal)
+				? new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = tracker }
+				: Json(SessionJson));
+		using JmapClient client = new(Base, new HttpClient(stub));
+
+		await Assert.ThrowsAsync<BackendException>(() => client.OpenEventSourceAsync(30, CancellationToken.None));
+		Assert.True(tracker.Disposed, "the failed EventSource response must be disposed, not leaked");
+	}
+
 	private static HttpResponseMessage Json(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)
@@ -217,6 +233,28 @@ public class JmapClientTests
 				: await request.Content.ReadAsStringAsync(cancellationToken);
 			Requests.Add(request);
 			return responder(request, body);
+		}
+	}
+
+	private sealed class TrackingContent : HttpContent
+	{
+		public bool Disposed { get; private set; }
+
+		protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+		{
+			return Task.CompletedTask;
+		}
+
+		protected override bool TryComputeLength(out long length)
+		{
+			length = 0;
+			return true;
+		}
+
+		protected override void Dispose(bool disposing)
+		{
+			Disposed = true;
+			base.Dispose(disposing);
 		}
 	}
 }
