@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
@@ -16,6 +17,13 @@ namespace ActiveSync.Server.Eas;
 public static class PolicyDocument
 {
 	private static readonly XNamespace PV = EasNamespaces.Provision;
+
+	// The hash is recomputed only when the policy instance changes. IOptionsMonitor hands out a
+	// fresh PolicyOptions instance on every config reload and keeps the same one otherwise, so
+	// reference identity is a sound cache key: a stable policy hits the cache on every request
+	// (Hash runs per Sync/Ping/FolderSync while enforcement is on), and a reloaded policy misses
+	// and recomputes. Weak keys mean superseded policy instances are collected, not leaked.
+	private static readonly ConditionalWeakTable<PolicyOptions, string> HashCache = new();
 
 	public static XElement Build(PolicyOptions policy)
 	{
@@ -45,8 +53,11 @@ public static class PolicyDocument
 	/// <summary>Hex SHA-256 of the document a device must have acknowledged to be current.</summary>
 	public static string Hash(PolicyOptions policy)
 	{
-		string canonical = Build(policy).ToString(SaveOptions.DisableFormatting);
-		return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+		return HashCache.GetValue(policy, static p =>
+		{
+			string canonical = Build(p).ToString(SaveOptions.DisableFormatting);
+			return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+		});
 	}
 
 	private static XElement Flag(string name, bool value)
