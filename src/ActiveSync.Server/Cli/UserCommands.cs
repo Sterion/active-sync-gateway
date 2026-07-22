@@ -66,9 +66,12 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 
 	protected static string PickupNote(ActiveSyncOptions options)
 	{
-		return options.Auth.UsersRefreshSeconds < 0
-			? "Live refresh is disabled (Auth:UsersRefreshSeconds < 0) — restart the gateway to apply."
-			: $"A running gateway picks this up within ~{Math.Max(options.Auth.UsersRefreshSeconds, 1):0}s.";
+		// A negative/non-finite cadence no longer disables live refresh — it is clamped to
+		// "every request" (B11), so a running gateway always picks this up.
+		double seconds = double.IsFinite(options.Auth.UsersRefreshSeconds)
+			? Math.Max(options.Auth.UsersRefreshSeconds, 0)
+			: 0;
+		return $"A running gateway picks this up within ~{Math.Max(seconds, 1):0}s.";
 	}
 }
 

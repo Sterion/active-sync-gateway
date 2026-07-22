@@ -80,7 +80,7 @@ internal static class SettingKeys
 		new("ActiveSync:Auth:SuccessCacheMinutes", ValueType.Int, false, "5",
 			"Good-credential cache TTL (0 disables).", Min: 0, Max: 1440),
 		new("ActiveSync:Auth:UsersRefreshSeconds", ValueType.Number, false, "1",
-			"Database change-stamp poll cadence (0 = every request; negative = load once).", Max: 86400),
+			"Database change-stamp poll cadence in seconds (0 = check on every request).", Min: 0, Max: 86400),
 
 		new("ActiveSync:Log:Mode", ValueType.Enum, true, "Standard",
 			"Console line shape.", EnumValues: ["Simple", "Standard", "Extended"]),

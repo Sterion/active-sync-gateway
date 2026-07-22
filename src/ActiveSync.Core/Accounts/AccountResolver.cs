@@ -33,8 +33,8 @@ public sealed class AccountResolver
 	private readonly AccountStore? _store;
 	private readonly ILogger<AccountResolver>? _logger;
 	private readonly SemaphoreSlim _refreshGate = new(1, 1);
+	private readonly Settings.ChangeStampRefreshGate _gate = new();
 	private volatile Snapshot _snapshot;
-	private long _nextCheckTicks;
 	private Guid? _lastStamp;
 	private Dictionary<string, AccountOptions>? _lastDbUsers;
 	private bool _refreshErrorLogged;
@@ -88,13 +88,8 @@ public sealed class AccountResolver
 		if (_store is null)
 			return;
 		double refreshSeconds = _options.CurrentValue.Auth.UsersRefreshSeconds;
-		if (!force)
-		{
-			if (refreshSeconds < 0)
-				return;
-			if (Environment.TickCount64 < Volatile.Read(ref _nextCheckTicks))
-				return;
-		}
+		if (!_gate.ShouldCheck(force))
+			return;
 
 		// A refresh already in flight serves this caller fine — use the current snapshot.
 		if (!await _refreshGate.WaitAsync(0, ct).ConfigureAwait(false))
@@ -128,8 +123,7 @@ public sealed class AccountResolver
 		}
 		finally
 		{
-			Volatile.Write(ref _nextCheckTicks,
-				Environment.TickCount64 + (long)(Math.Max(refreshSeconds, 0) * 1000));
+			_gate.ScheduleNext(refreshSeconds);
 			_refreshGate.Release();
 		}
 	}

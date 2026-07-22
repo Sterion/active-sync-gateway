@@ -20,7 +20,7 @@ public sealed class SettingsRefresher(
 	ILogger<SettingsRefresher>? logger = null)
 {
 	private readonly SemaphoreSlim _refreshGate = new(1, 1);
-	private long _nextCheckTicks;
+	private readonly ChangeStampRefreshGate _gate = new();
 	private Guid? _lastStamp;
 	private bool _hasLoaded;
 	private bool _refreshErrorLogged;
@@ -36,13 +36,8 @@ public sealed class SettingsRefresher(
 	public async Task EnsureFreshAsync(bool force, CancellationToken ct)
 	{
 		double refreshSeconds = options.CurrentValue.Auth.UsersRefreshSeconds;
-		if (!force)
-		{
-			if (_hasLoaded && refreshSeconds < 0)
-				return;
-			if (Environment.TickCount64 < Volatile.Read(ref _nextCheckTicks))
-				return;
-		}
+		if (!_gate.ShouldCheck(force))
+			return;
 
 		// A refresh already in flight serves this caller fine — use the current snapshot.
 		if (!await _refreshGate.WaitAsync(0, ct).ConfigureAwait(false))
@@ -75,8 +70,7 @@ public sealed class SettingsRefresher(
 		}
 		finally
 		{
-			Volatile.Write(ref _nextCheckTicks,
-				Environment.TickCount64 + (long)(Math.Max(refreshSeconds, 0) * 1000));
+			_gate.ScheduleNext(refreshSeconds);
 			_refreshGate.Release();
 		}
 	}

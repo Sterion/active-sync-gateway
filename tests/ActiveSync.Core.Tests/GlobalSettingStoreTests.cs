@@ -117,6 +117,27 @@ public sealed class GlobalSettingStoreTests : IDisposable
 	}
 
 	[Fact]
+	public async Task NegativeRefreshInterval_StillPicksUpLaterChanges_NoLockout()
+	{
+		// B11: a negative cadence used to PERMANENTLY disable live refresh after the first load —
+		// including the pickup of an operator setting it back — so recovery needed a restart. It is
+		// now clamped to "every request", so a later change is still picked up.
+		DbSettingsConfigurationSource source = new();
+		SettingsRefresher refresher = new(_store, source.Provider,
+			new StubMonitor(new ActiveSyncOptions { Auth = new AuthOptions { UsersRefreshSeconds = -1 } }));
+
+		int changed = 0;
+		refresher.Changed += () => changed++;
+
+		await refresher.EnsureFreshAsync(true, CancellationToken.None); // initial load
+		Assert.Equal(1, changed);
+
+		await _store.UpsertAsync("ActiveSync:ReadOnly", "true", CancellationToken.None);
+		await refresher.EnsureFreshAsync(false, CancellationToken.None); // NOT forced
+		Assert.Equal(2, changed);
+	}
+
+	[Fact]
 	public void Loader_ToleratesMissingTable_ReturnsEmpty()
 	{
 		// A fresh in-memory database with no schema — the build-time loader must not throw.

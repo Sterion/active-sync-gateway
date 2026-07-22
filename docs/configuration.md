@@ -196,7 +196,7 @@ supported yet.
 | `FailureWindowSeconds` | `300` | Length of the failure-counting window. |
 | `NegativeCacheSeconds` | `15` | A rejected (user, password) pair is remembered this long, so repeats are refused without an IMAP login round-trip (the gateway cannot be used to hammer the mail server). `0` disables. |
 | `SuccessCacheMinutes` | `5` | A successful (user, password) pair is trusted this long without re-verifying against IMAP. Note the flip side: a password revoked on the mail server keeps working against the gateway for at most this long. `0` disables (every request performs an IMAP login). |
-| `UsersRefreshSeconds` | `1` | How often the merged user set is re-checked against the database (one primary-key point-read, only when a request arrives). `0` checks on every request; negative disables live pickup (database edits then need a restart). |
+| `UsersRefreshSeconds` | `1` | How often the merged user set is re-checked against the database (one primary-key point-read, only when a request arrives). `0` checks on every request. A negative or non-finite value is clamped to `0` — it can no longer permanently disable live pickup. |
 | `TrustedProxies` | *(empty)* | Addresses or CIDR ranges the gateway accepts `X-Forwarded-For` from, e.g. `["10.0.0.0/8"]`. See below. |
 
 Failed logins are logged at Warning with the client-supplied username, so fail2ban-style
