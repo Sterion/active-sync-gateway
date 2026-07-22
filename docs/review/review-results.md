@@ -521,15 +521,81 @@ format and `L22` changes when the endpoint answers 404. It came back clean.
 
 ---
 
-## Next: item 13 — Unified secret redaction
+## Item 13 — Unified secret redaction
 
-Items 13–14 are Phase 2 (Security), neither [LIVE]; the orchestrator is running integration after every
-item regardless. Ordering constraint now imminent: **item 13 (unified redaction) before item 14** —
-build the single redactor first, then apply it. Current green baseline: **integration 139 / 0 skipped**,
-unit Core 420 · WebUi 67 · Server 145 · Protocol 63.
+**Findings:** `S7` `L29` `L30` `E15` `E23` `C5` `K37` `K53`(→N/A) `L42` `L43`
+**Commits:** `10d9481` (S7, K37 — build the redactor) · `3c77a3d` (L30) · `633b430` (L29) ·
+`5770aee` (E15) · `b9b7ee5` (E23) · `5c9dffd` (C5) · `91c35ae` (L42) · `b7e6373` (L43) ·
+`32b746d` (K53 — docs, marked N/A)
 
-**Process lesson for future runs:** "not [LIVE]" means the *worker* need not run integration. It does
-not mean the *orchestrator* shouldn't, and items 5–8 show why — a non-[LIVE] item with a schema or
-auth-surface change can pass every check the protocol asks of it and still break 23 integration tests.
-Consider running integration after any item that touches migrations, cookies, or auth, regardless of
-its [LIVE] marking.
+**Verification (orchestrator-run):** integrity 56/15/365/365/0, encoding 0 ✓ · cursor → item 14 ✓ ·
+one commit per finding with ID in subject ✓ (S7+K37 clustered as the shared-redactor build, legitimate) ·
+build **0 warnings** ✓ · unit **Protocol 63 · Core 441 (was 420) · WebUi 70 (was 67) · Server 151 (was 145)
+— 0 failed, 0 skipped** ✓ · integration **139 / 0 skipped** ✓ (see the flakiness note — took a fresh
+container to confirm).
+
+**K53 N/A independently verified.** `git show ce6259c:…/SecretValue.cs` vs current: `TryUnseal` returns
+four distinct error strings (bad prefix / bad base64 / too-short / wrong-key-or-tampered) and did so at
+baseline — nothing was struck to dodge work. The one lump (wrong-key vs tampered) is a deliberate
+anti-oracle choice. The N/A holds; a reader could argue that lump is what the finding meant by "coarse",
+and it stays lumped on purpose.
+
+**⚠ Integration flakiness — the bisect nearly lied, and this matters for every future [LIVE]/integration
+verification.** First full-suite run at HEAD failed **3** DAV round-trip tests (Task, RecurringEvent,
+Contact); a bisect showed the pre-item-13 commit clean at 139/0, which *looked* like item 13 owned a
+regression — the exact item-8 shape. It did not. Two things broke the false conclusion: (1) a **second**
+HEAD run failed a **different** subset (2 tests, Task now passing) — a real code regression fails the
+*same* tests every time (item 8 failed the same 23); a shifting subset is environmental. (2) Every call
+site of the new redaction API is **display/CLI/WebUi-DTO only** — `SettingKeys` sets a `Secret` *flag*,
+`ConfigCommands`/`StartupSummary` are banners, `BackendsEndpoints`/`EndpointHelpers` are WebUi endpoints
+the DAV tests never call — so there is **no path** by which it could affect device-to-device DAV sync.
+Root cause: the canonical Stalwart had been **up 9 hours** and each full-suite run creates ~139 tests'
+worth of DAV items; Stalwart indexes DAV asynchronously (AGENTS.md), so under accumulated state the
+round-trip `WaitUntil` polls start timing out non-deterministically. The baseline 139/0 was an *earlier*
+(less-degraded) run — run **order**, not code, confounded the bisect. `down -v` + fresh `up` → HEAD
+passes **139/0**. **Lesson: start integration verification from a fresh backend (`down -v`), and treat
+intermittent, subset-shifting DAV round-trip failures on a warm container as environmental — confirm with
+a fresh-container run before blaming the item.**
+
+**Notes (worker-flagged):**
+- **Behaviour change — account APIs now mask secret-named role settings.** `GET /admin/api/users`,
+  `/admin/api/users/{login}`, `/user/api/me` and `/admin/api/backends` return `***` for secret-named
+  settings (ApiKey/Token/ClientSecret/…) instead of cleartext; a re-posted `***` on save resolves back to
+  the stored value (round-trip guard test). The SPA's default-form flow is unaffected; any *other* client
+  that read those values in the clear now gets the mask.
+- **`IsSecretName` markers:** password/passwd/pwd/passphrase/secret/token/apikey/credential. It
+  **excludes bare "key"** (to avoid `CertificateKeyPath`/identifier false positives), so a backend leaf
+  literally named `Key` would not mask — a deliberate call open to revision.
+- **`MailKitWireLogger.Redact` left unchanged** though S7 names it as one of the "four": it masks SASL
+  secret byte-ranges via MailKit's `AuthenticationSecretDetector`, a distinct and correct mechanism.
+  Folding byte-range SASL masking into a name-based classifier would be wrong. The three name/value
+  maskers + the connection-string redactor are what got unified.
+- **E15 username logging left as-is.** The finding also flags "logs every declared user (PII, into the DB
+  sink)"; only the secret-settings leak was treated as in-scope — the `User: <login>` banner lines are
+  deliberate operator visibility of the configured fleet. Suppressing them was the alternative.
+- **`L42`/`L43` are coverage, not proof**, and labelled as such. `L42` (zero the master key in a
+  `finally` on a failed stdin read) — the key is a local `byte[]` with no external handle, so the zeroing
+  is not observable. `L43` (explicit `IsGatewayPassword` flag replacing the `!Key.Contains(':')`
+  heuristic) — behaviour is unchanged because the old heuristic was correct for every current key, so it
+  cannot go red on behaviour.
+- **S7+K37** is a structural consolidation with no pre-existing behaviour to red-test; proven by the new
+  `SecretRedactionTests` (21 cases). L29/L30/E15/E23/C5 are all red-first reproducers that leaked the
+  secret before the fix.
+- **No new findings filed.**
+
+---
+
+## Next: item 14 — Credential & key handling
+
+Item 13 (unified redactor) is done, so its ordering precondition for item 14 is satisfied — item 14 can
+now *apply* the redactor where it needs to (`K56` `BackendCredentials.ToString()`). Neither item is
+[LIVE]; the orchestrator runs integration regardless. Current green baseline: **integration 139 / 0
+skipped** (fresh container), unit **Protocol 63 · Core 441 · WebUi 70 · Server 151**.
+
+**Two standing lessons for the item-14 run:**
+- **"Not [LIVE]" binds the worker, not the orchestrator.** A non-[LIVE] item with a schema/auth/session
+  change can pass every unit check and still break integration (items 5–8). Item 14 touches credential
+  and key handling and `B19` changes gateway-password verification — run integration after it.
+- **Start from a fresh backend and distrust warm-container DAV flakiness** (item 13's near-miss above):
+  `down -v` first; a subset-shifting DAV round-trip failure on a warm container is environmental until a
+  fresh-container run says otherwise.
