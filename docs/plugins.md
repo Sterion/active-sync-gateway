@@ -66,13 +66,15 @@ public sealed class MyNotesProvider : IBackendProvider
     public string DescribeRole(BackendRole role, ProviderSettings settings) =>
         $"my-notes {settings.Bind<MyOptions>().Endpoint}";   // one redacted banner line, no secrets
 
-    public IBackendConnection CreateConnection(BackendConnectionContext context)
+    public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
     {
         // Build one IContentStore per content role assigned to you, over one connection.
         // context.GatewayCredentials is the IDENTITY (DB scoping, cache keys); each role's
-        // Credentials are what to present to the backend.
+        // Credentials are what to present to the backend. Async so you can open a transport
+        // (a TCP/TLS connect, an auth round-trip) here; return Task.FromResult if you don't need to.
         MyOptions options = context.Roles[0].Settings.Bind<MyOptions>();
-        return new BackendConnection([new MyNotesStore(options, context.Roles[0].Credentials)]);
+        return Task.FromResult<IBackendConnection>(
+            new BackendConnection([new MyNotesStore(options, context.Roles[0].Credentials)]));
     }
 }
 ```
@@ -89,11 +91,15 @@ Key rules:
   your own prefix). The session dispatches folder/item keys to the first store that
   claims them.
 - **Optional capabilities** are extra interfaces a store/provider may also implement:
-  `ICalendarOperations`, `IFreeBusySource`, `ICalendarAttachmentSource`,
-  `IContactOperations`, `IReadOnlyCollectionSource` (on stores); `ICredentialVerifier`
-  (verify a login for the auth path — required if your provider serves `MailStore` for
-  pass-through users), `IPerUserResourceOwner` (trim per-user caches on session eviction),
-  `IReadinessSource` (a `/readyz` probe). Implement only what applies.
+  `IItemMoveOperations` (MoveItems — a store that cannot move an item simply omits it, and
+  the command answers "move failed"), `IFolderOperations` (client folder create/rename/delete —
+  omit it and those commands answer "not permitted"), `ICalendarOperations`, `IFreeBusySource`,
+  `ICalendarAttachmentSource`, `IContactOperations`, `IReadOnlyCollectionSource` (on stores);
+  `ICredentialVerifier` (verify a login for the auth path — required if your provider serves
+  `MailStore` for pass-through users), `IPerUserResourceOwner` (trim per-user caches on session
+  eviction), `IReadinessSource` (a `/readyz` probe). `IContentStore` itself is only the item CRUD
+  plus folder listing and the change wait — everything else is a capability you opt into. Implement
+  only what applies.
 - **The gateway login is the identity** — DB row scoping, the local-content encryption
   AAD, and session/cache keys all derive from `context.GatewayCredentials.UserName`, never
   a per-backend user name.
@@ -251,6 +257,7 @@ loaded.
 
 The backend contract is **not ABI-stable before 2.0** — `IContentStore` and friends still
 evolve with new EAS features. The loader enforces that a plugin's referenced
-`ActiveSync.Contracts` **major** version matches the host and aborts on a mismatch. Pin the
-exact minor you built against and rebuild your plugin when you upgrade the gateway across a
-minor, until a 2.0 stability guarantee lands.
+`ActiveSync.Contracts` **major** version matches the host and aborts on a mismatch — that major
+is `ActiveSync.Contracts.ContractVersion.Major`, which you can also read at runtime
+(`ContractVersion.Current` is `Major.Minor`). Pin the exact minor you built against and rebuild
+your plugin when you upgrade the gateway across a minor, until a 2.0 stability guarantee lands.
