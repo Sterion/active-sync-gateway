@@ -62,7 +62,21 @@ public sealed class TlsCertificateResolver(
 	{
 		TlsOptions tls = options.CurrentValue.Tls;
 		if (!string.IsNullOrWhiteSpace(tls.CertificatePath))
-			return (LoadExternal(tls, MasterKey()), TlsCertificateSource.External);
+		{
+			// K14: load the master key into a local we can zero, and surface (don't discard) a
+			// loader error — a sealed CertificatePassword will otherwise fail with a misleading
+			// "cannot be unsealed" message when the real cause is a misconfigured key.
+			byte[]? masterKey = LoadMasterKey(logger);
+			try
+			{
+				return (LoadExternal(tls, masterKey), TlsCertificateSource.External);
+			}
+			finally
+			{
+				if (masterKey is not null)
+					CryptographicOperations.ZeroMemory(masterKey);
+			}
+		}
 
 		X509Certificate2 selfSigned = await selfSignedStore.GetOrCreateAsync(
 			GatewayCertificateStore.HostFromPublicUrl(options.CurrentValue.PublicUrl), logger, ct)
@@ -83,9 +97,10 @@ public sealed class TlsCertificateResolver(
 
 		if (!string.IsNullOrWhiteSpace(tls.CertificatePath))
 		{
+			byte[]? masterKey = LoadMasterKey(logger);
 			try
 			{
-				using X509Certificate2 external = LoadExternal(tls, MasterKey());
+				using X509Certificate2 external = LoadExternal(tls, masterKey);
 				return Describe(external, tls, TlsCertificateSource.External, tls.CertificatePath);
 			}
 			catch (Exception ex) when (ex is CryptographicException or IOException or
@@ -93,6 +108,11 @@ public sealed class TlsCertificateResolver(
 			{
 				return Empty(tls, TlsCertificateSource.External, tls.CertificatePath,
 					$"Certificate at '{tls.CertificatePath}' cannot be loaded: {ex.Message}");
+			}
+			finally
+			{
+				if (masterKey is not null)
+					CryptographicOperations.ZeroMemory(masterKey);
 			}
 		}
 
@@ -104,8 +124,20 @@ public sealed class TlsCertificateResolver(
 			return Describe(stored, tls, TlsCertificateSource.SelfSigned, null);
 	}
 
-	private byte[]? MasterKey() =>
-		EncryptionKeyLoader.TryLoadKey(options.CurrentValue.Encryption, out _);
+	/// <summary>
+	///   Loads the encryption master key, logging (rather than discarding) a loader error so a
+	///   misconfigured key surfaces in diagnostics instead of hiding behind a downstream
+	///   "cannot be unsealed" message (K14). The caller owns zeroing the returned buffer.
+	/// </summary>
+	private byte[]? LoadMasterKey(ILogger logger)
+	{
+		byte[]? key = EncryptionKeyLoader.TryLoadKey(options.CurrentValue.Encryption, out string? error);
+		if (error is not null)
+			logger.LogWarning(
+				"ActiveSync:Encryption key could not be loaded ({Error}); a sealed Tls:CertificatePassword " +
+				"cannot be unsealed.", error);
+		return key;
+	}
 
 	/// <summary>Loads an operator-supplied certificate: a PEM cert+key pair, or a PFX bundle.</summary>
 	internal static X509Certificate2 LoadExternal(TlsOptions tls, byte[]? masterKey)

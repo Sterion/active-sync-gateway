@@ -140,6 +140,29 @@ public sealed class TlsCertificateResolverTests : IDisposable
 	}
 
 	[Fact]
+	public async Task Describe_External_SealedPassword_UnsealsWithMasterKey_NoError()
+	{
+		// K14 COVERAGE (not proof): the resolver now loads the master key into a buffer it zeroes
+		// after use and logs (rather than discards) a loader error. The wipe itself has no external
+		// handle; this test guards that the key-lifetime refactor still unseals a sealed
+		// CertificatePassword correctly (load -> unseal -> zero, all functional).
+		string sealedPw = SecretValue.Seal(PfxPassword, Key());
+		ActiveSyncOptions options = new()
+		{
+			Encryption = new EncryptionOptions { Key = Convert.ToBase64String(Key()) }
+		};
+		options.Tls.CertificatePath = _pfxWithPassword;
+		options.Tls.CertificatePassword = sealedPw;
+
+		TlsCertificateInfo info = await Resolver(options, out _)
+			.DescribeAsync(NullLogger.Instance, CancellationToken.None);
+
+		Assert.Equal(TlsCertificateSource.External, info.Source);
+		Assert.Null(info.Error);
+		Assert.NotNull(info.Fingerprint);
+	}
+
+	[Fact]
 	public async Task Describe_External_MissingFile_ReportsErrorInsteadOfThrowing()
 	{
 		ActiveSyncOptions options = new() { Encryption = new EncryptionOptions { AllowPlaintext = true } };
