@@ -145,7 +145,9 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 		// its connection pool) on every readiness sweep.
 		using HttpClient http = BackendHttpClientFactory.CreateProbeClient(
 			options.AllowInvalidCertificates, options.CaCertificatePath, TimeSpan.FromSeconds(5));
-		using HttpResponseMessage response = await http.GetAsync(
+		// H31: the response is needed only for disposal (any HTTP answer = reachable), so it is a
+		// throwaway rather than a read local.
+		using HttpResponseMessage _ = await http.GetAsync(
 			new Uri(baseUri, "/.well-known/jmap"), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
 		return true;
 	}

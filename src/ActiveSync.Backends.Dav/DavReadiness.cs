@@ -20,7 +20,9 @@ internal static class DavReadiness
 		using HttpClient http = BackendHttpClientFactory.CreateProbeClient(
 			allowInvalidCertificates, caCertificatePath, TimeSpan.FromSeconds(5));
 		using HttpRequestMessage request = new(HttpMethod.Options, baseUrl);
-		using HttpResponseMessage response = await http.SendAsync(request, ct).ConfigureAwait(false);
-		return true; // any HTTP status = the server answered
+		// H31: the response is needed only for disposal — any HTTP status means the server
+		// answered — so it is a throwaway, not a read local.
+		using HttpResponseMessage _ = await http.SendAsync(request, ct).ConfigureAwait(false);
+		return true;
 	}
 }
