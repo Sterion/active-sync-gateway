@@ -150,13 +150,29 @@ internal sealed class DeviceStore(SyncDbContext db)
 		bool alreadyBlocked = await db.LoginBlocks
 			.AnyAsync(b => b.UserName == device.UserName && b.DeviceId == device.DeviceId, ct)
 			.ConfigureAwait(false);
+		LoginBlock? added = null;
 		if (!alreadyBlocked)
-			await db.LoginBlocks.AddAsync(new LoginBlock
+		{
+			added = new LoginBlock
 			{
 				UserName = device.UserName,
 				DeviceId = device.DeviceId,
 				CreatedUtc = DateTime.UtcNow
-			}, ct).ConfigureAwait(false);
-		await db.SaveChangesAsync(ct).ConfigureAwait(false);
+			};
+			await db.LoginBlocks.AddAsync(added, ct).ConfigureAwait(false);
+		}
+
+		try
+		{
+			await db.SaveChangesAsync(ct).ConfigureAwait(false);
+		}
+		catch (DbUpdateException ex) when (added is not null && DbExceptions.IsUniqueViolation(ex))
+		{
+			// A concurrent wipe ack already inserted the (user, device) block between our
+			// AnyAsync check and this insert — the block we want exists, so this is success, not
+			// a 500. Drop our duplicate insert and persist the wipe-completion flag alone (A22).
+			db.Entry(added).State = EntityState.Detached;
+			await db.SaveChangesAsync(ct).ConfigureAwait(false);
+		}
 	}
 }

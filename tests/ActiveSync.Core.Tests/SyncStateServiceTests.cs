@@ -376,6 +376,30 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task CompleteAccountWipe_ConcurrentBlockInsert_TreatedAsSuccess()
+	{
+		// CompleteAccountWipeAsync did AnyAsync then AddAsync against the unique (UserName, DeviceId)
+		// LoginBlock index. Two concurrent wipe acks raced the insert → unhandled DbUpdateException
+		// → 500. A unique violation must be treated as success, with the wipe-completion flag still
+		// persisted (A22).
+		FaultInjectingInterceptor faults = new();
+		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
+		SyncStateService service = new(db);
+		Device device = await service.GetOrCreateDeviceAsync("u@a22", "DEV1", "Phone", CancellationToken.None);
+		device.PendingAccountWipe = true;
+		await db.SaveChangesAsync(CancellationToken.None);
+
+		// Simulate the concurrent ack inserting the block between our AnyAsync check and our insert.
+		faults.ThrowOnNextSave(new DbUpdateException("dup",
+			new SqliteException("UNIQUE constraint failed", 19, 2067)));
+		await service.CompleteAccountWipeAsync(device, CancellationToken.None); // must not throw
+
+		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
+		Device saved = await verify.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.UserName == "u@a22");
+		Assert.False(saved.PendingAccountWipe);
+	}
+
+	[Fact]
 	public async Task GetOrCreateDevice_NonUniqueFailure_PropagatesOriginalError()
 	{
 		// The insert-race catch assumed every DbUpdateException was "someone inserted first" and
