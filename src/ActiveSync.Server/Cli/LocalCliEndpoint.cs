@@ -131,7 +131,7 @@ internal static class LocalCliEndpoint
 
 			long startedAt = Stopwatch.GetTimestamp();
 			CliResponse response = await ExecuteAsync(args, stdin, context.RequestAborted,
-				request?.Color ?? false, request?.Width ?? 0);
+				request?.Color ?? false, request?.Width ?? 0, app.Services);
 			AuditCommand(logger, args, response.ExitCode,
 				(long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds, key is not null);
 			return Results.Json(ProtectResponse(response, key));
@@ -269,12 +269,13 @@ internal static class LocalCliEndpoint
 	///   <c>serve</c> (no nested gateway); every other verb — secret-bearing or not — is allowed.
 	/// </summary>
 	internal static async Task<CliResponse> ExecuteAsync(
-		string[] args, string stdin, CancellationToken ct, bool color = false, int width = 0)
+		string[] args, string stdin, CancellationToken ct, bool color = false, int width = 0,
+		IServiceProvider? hostServices = null)
 	{
 		if (args.Length > 0 && string.Equals(args[0], "serve", StringComparison.OrdinalIgnoreCase))
 			return new CliResponse(1, "", "serve is not available over /cli; run it locally.\n");
 
-		return await RunCapturedAsync(args, stdin, ct, color, width);
+		return await RunCapturedAsync(args, stdin, ct, color, width, hostServices);
 	}
 
 	/// <summary>
@@ -290,9 +291,13 @@ internal static class LocalCliEndpoint
 	///   an admin's stdout and lost from the container log.</para>
 	/// </summary>
 	private static async Task<CliResponse> RunCapturedAsync(
-		string[] args, string stdin, CancellationToken ct, bool color, int width)
+		string[] args, string stdin, CancellationToken ct, bool color, int width,
+		IServiceProvider? hostServices = null)
 	{
 		await Gate.WaitAsync(ct);
+		// L35: publish the host provider so a forwarded DatabaseCommand reuses it instead of building
+		// its own; cleared in the finally so a later local run never sees a stale provider.
+		CliHostServices.Enter(hostServices);
 		TextWriter originalOut = Console.Out;
 		TextWriter originalError = Console.Error;
 		TextReader originalIn = Console.In;
@@ -349,6 +354,7 @@ internal static class LocalCliEndpoint
 			Console.SetError(originalError);
 			Console.SetIn(originalIn);
 			AnsiConsole.Console = originalAnsi;
+			CliHostServices.Enter(null);
 			Gate.Release();
 		}
 	}

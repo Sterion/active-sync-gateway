@@ -28,6 +28,16 @@ internal abstract class DatabaseCommand<TSettings>(IAnsiConsole terminal) : Asyn
 	protected sealed override async Task<int> ExecuteAsync(
 		CommandContext context, TSettings settings, CancellationToken cancellationToken)
 	{
+		// L35: when this command is forwarded to the warm gateway, reuse the host's already-built and
+		// already-migrated provider instead of constructing a parallel container (and probing pending
+		// migrations) per invocation. Standalone (no gateway answered) falls back to CliServices.
+		if (CliHostServices.Current is { } host)
+		{
+			await using AsyncServiceScope hostScope = host.CreateAsyncScope();
+			SyncDbContext hostDb = hostScope.ServiceProvider.GetRequiredService<SyncDbContext>();
+			return await RunAsync(hostScope.ServiceProvider, hostDb, settings, cancellationToken);
+		}
+
 		ServiceProvider? services = await CliServices.TryCreateAsync();
 		if (services is null)
 			return 1;

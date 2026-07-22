@@ -3,6 +3,7 @@ using ActiveSync.Core.State;
 using ActiveSync.Server.Cli;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console.Cli.Testing;
 
 namespace ActiveSync.Server.Tests;
@@ -117,6 +118,43 @@ public sealed class CliInspectTests : IDisposable
 		Assert.Equal(0, exitCode);
 		Assert.Contains("user1@x", output);
 		Assert.Contains("user2@x", output);
+	}
+
+	[Fact]
+	public async Task DatabaseCommand_PrefersAmbientHostProvider_OverRebuildingFromEnv()
+	{
+		// L35: a command forwarded to the warm gateway must run against the HOST's already-built
+		// provider, not build a parallel container from the ambient (env) configuration. Build a host
+		// provider bound to the seeded database, then point the env config at a DIFFERENT empty
+		// database and publish the host provider as the ambient one. The seeded user must still show:
+		// on the unmodified DatabaseCommand (which always rebuilds from env) it would read the empty
+		// database and show nothing.
+		ServiceProvider host = (await CliServices.TryCreateAsync())!;
+		Assert.NotNull(host);
+		await using ServiceProvider hostOwner = host;
+
+		string emptyDb = Path.Combine(Path.GetTempPath(), $"as-cli-empty-{Guid.NewGuid():N}.db");
+		DbContextOptions<SqliteSyncDbContext> emptyOptions = new DbContextOptionsBuilder<SqliteSyncDbContext>()
+			.UseSqlite($"Data Source={emptyDb}")
+			.Options;
+		await using (SqliteSyncDbContext db = new(emptyOptions))
+			await db.Database.MigrateAsync();
+		SetEnv("ActiveSync__Database__ConnectionString", $"Data Source={emptyDb}");
+
+		try
+		{
+			CliHostServices.Enter(host);
+			(int exitCode, _, _, string output) = Run("users");
+			Assert.Equal(0, exitCode);
+			// user1@x lives only in the seeded (host) database, never in the empty env database.
+			Assert.Contains("user1@x", output);
+		}
+		finally
+		{
+			CliHostServices.Enter(null);
+			SqliteConnection.ClearAllPools();
+			File.Delete(emptyDb);
+		}
 	}
 
 	[Fact]
