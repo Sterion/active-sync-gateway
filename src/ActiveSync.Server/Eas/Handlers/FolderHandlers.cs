@@ -35,7 +35,19 @@ public sealed class FolderSyncHandler(FolderService folders) : IEasCommandHandle
 
 		if (initial || diff.Adds.Count > 0 || diff.Updates.Count > 0 || diff.Deletes.Count > 0)
 		{
-			int newKey = await context.State.CommitFolderHierarchyAsync(device, registry, ct);
+			int newKey;
+			try
+			{
+				newKey = await context.State.CommitFolderHierarchyAsync(device, registry, ct);
+			}
+			catch (BackendException) // a pipelined FolderSync won the FolderSyncKey race (A6)
+			{
+				await context.WriteResponseAsync(new XDocument(
+					new XElement(FH + "FolderSync",
+						new XElement(FH + "Status", "9")))); // client restarts the hierarchy from 0
+				return;
+			}
+
 			XElement changes = new(FH + "Changes",
 				new XElement(FH + "Count",
 					(diff.Adds.Count + diff.Updates.Count + diff.Deletes.Count).ToString()));
@@ -119,7 +131,17 @@ public abstract class FolderModifyHandlerBase(
 		}
 
 		List<UserFolder> registry = await Folders.RefreshAsync(context.Session, context.Device.UserName, ct);
-		int newKey = await context.State.CommitFolderHierarchyAsync(context.Device, registry, ct);
+		int newKey;
+		try
+		{
+			newKey = await context.State.CommitFolderHierarchyAsync(context.Device, registry, ct);
+		}
+		catch (BackendException) // a pipelined FolderSync won the FolderSyncKey race (A6)
+		{
+			await WriteStatusAsync(context, "9", null);
+			return;
+		}
+
 		logger.LogInformation("{Command} \"{Folder}\" for {User}",
 			Command, RequestedFolderName(request.Root), context.Device.UserName);
 		await WriteStatusAsync(context, "1", newKey.ToString(), newServerId);

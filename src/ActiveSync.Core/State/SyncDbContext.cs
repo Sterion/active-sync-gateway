@@ -38,6 +38,8 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 				.OnDelete(DeleteBehavior.Cascade);
 			e.HasMany(d => d.Collections).WithOne(c => c.Device).HasForeignKey(c => c.DeviceKey)
 				.OnDelete(DeleteBehavior.Cascade);
+			// Guards FolderSyncKey against pipelined FolderSyncs losing a bump (A6).
+			e.Property(d => d.ConcurrencyToken).IsConcurrencyToken();
 		});
 
 		modelBuilder.Entity<UserFolder>(e =>
@@ -125,7 +127,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	{
 		foreach (EntityEntry entry in ChangeTracker.Entries())
 			if (entry.State is EntityState.Added or EntityState.Modified &&
-			    entry.Entity is CollectionState or LocalItem)
+			    entry.Entity is CollectionState or LocalItem or Device)
 				entry.CurrentValues["ConcurrencyToken"] = Guid.NewGuid();
 	}
 }

@@ -47,6 +47,9 @@ public class Device
 	public DateTime CreatedUtc { get; set; }
 	public DateTime LastSeenUtc { get; set; }
 
+	/// <summary>Optimistic-concurrency token; re-stamped on every save (see SyncDbContext).</summary>
+	public Guid ConcurrencyToken { get; set; }
+
 	public List<DeviceFolder> Folders { get; set; } = [];
 	public List<CollectionState> Collections { get; set; } = [];
 }

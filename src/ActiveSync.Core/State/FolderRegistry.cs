@@ -166,7 +166,19 @@ internal sealed class FolderRegistry(SyncDbContext db)
 #pragma warning restore VSTHRD103
 
 		device.FolderSyncKey++;
-		await db.SaveChangesAsync(ct).ConfigureAwait(false);
+		try
+		{
+			await db.SaveChangesAsync(ct).ConfigureAwait(false);
+		}
+		catch (DbUpdateConcurrencyException ex)
+		{
+			// A pipelined FolderSync already advanced this device's FolderSyncKey off the same
+			// generation. This commit diffed against a now-stale hierarchy, so it must not
+			// overwrite the winner — surface it so the handler answers FolderSync Status 9 and
+			// the client restarts the hierarchy from key 0 (A6).
+			throw new BackendException("Concurrent folder-hierarchy update — please retry.", ex);
+		}
+
 		return device.FolderSyncKey;
 	}
 }

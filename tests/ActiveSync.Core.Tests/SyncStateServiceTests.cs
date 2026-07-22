@@ -211,6 +211,29 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task CommitFolderHierarchy_ConcurrentBump_RejectsStaleWriter()
+	{
+		// Two pipelined FolderSyncs read the same FolderSyncKey generation. Without a concurrency
+		// token on Device both wrote N+1 (a lost update, both clients told N+1); the racing
+		// DeviceFolder RemoveRange/Add batches could also 500 on the unique index. The second
+		// writer off the stale generation must be rejected, not silently applied (A6).
+		Device device = await _service.GetOrCreateDeviceAsync("u@a6", "DEV1", "Phone", CancellationToken.None);
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@a6",
+			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email")], CancellationToken.None);
+
+		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
+		SyncStateService service2 = new(db2);
+		Device device2 = await db2.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.UserName == "u@a6");
+		List<UserFolder> registry2 = await service2.GetFoldersAsync("u@a6", CancellationToken.None);
+
+		int firstKey = await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
+		Assert.Equal(1, firstKey);
+
+		await Assert.ThrowsAsync<BackendException>(() =>
+			service2.CommitFolderHierarchyAsync(device2, registry2, CancellationToken.None));
+	}
+
+	[Fact]
 	public async Task CommitCollectionState_ConcurrentWrite_LosesNoUpdate_ThrowsOnStale()
 	{
 		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
