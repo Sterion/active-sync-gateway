@@ -151,9 +151,24 @@ public abstract class FolderModifyHandlerBase(
 		{
 			newServerId = await ExecuteAsync(context, request.Root, ct);
 		}
+		catch (FolderOperationException ex) // a client error that knows its own EAS status (F26)
+		{
+			logger.LogInformation("{Command} rejected for {User}: {Reason} (Status {Status})",
+				Command, context.Device.UserName, ex.Message, ex.Status);
+			await WriteStatusAsync(context, ex.Status, null);
+			return;
+		}
 		catch (BackendException)
 		{
 			await WriteStatusAsync(context, "3", null); // special/system folder or unsupported store
+			return;
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			// A backend/transport failure (e.g. IMAP down) must surface as EAS Status 6, not escape
+			// to the endpoint as an HTTP 500 the client cannot interpret (F26).
+			logger.LogError(ex, "{Command} failed for {User}", Command, context.Device.UserName);
+			await WriteStatusAsync(context, "6", null);
 			return;
 		}
 
@@ -184,17 +199,19 @@ public abstract class FolderModifyHandlerBase(
 	protected abstract Task<string?> ExecuteAsync(EasContext context, XElement root, CancellationToken ct);
 
 	/// <summary>
-	///   Resolves a folder a modifying operation is about to touch, refusing one the session
-	///   reports read-only (a shared-collection grant). Throws <see cref="BackendException" />
-	///   so the caller's existing handling turns it into Status 3, the same answer an
-	///   unmodifiable system folder gets — the client must not retry either.
+	///   Resolves a folder a modifying operation is about to touch. A folder that does not exist
+	///   yields a <see cref="FolderOperationException" /> carrying <paramref name="notFoundStatus" />
+	///   (Status 4 "folder does not exist", or 5 "parent does not exist" for a create) — NOT the
+	///   generic "system folder" Status 3 (F26). A folder the session reports read-only (a
+	///   shared-collection grant) still throws <see cref="BackendException" /> → Status 3, the same
+	///   answer an unmodifiable system folder gets: the client must not retry either.
 	/// </summary>
 	protected async Task<(UserFolder Folder, IContentStore Store)> ResolveWritableAsync(
-		EasContext context, string serverId, CancellationToken ct)
+		EasContext context, string serverId, CancellationToken ct, string notFoundStatus = "4")
 	{
 		(UserFolder Folder, IContentStore Store) resolved =
 			await Folders.ResolveCollectionAsync(context.Session, context.Device.UserName, serverId, ct)
-			?? throw new BackendException("Unknown folder");
+			?? throw new FolderOperationException(notFoundStatus, $"Unknown folder \"{serverId}\"");
 		if (!WritePermission.IsBlocked(context, options.Value, resolved.Folder))
 			return resolved;
 		logger.LogInformation("Read-only folder: rejecting {Command} of \"{Folder}\" for {User}",
@@ -213,6 +230,18 @@ public abstract class FolderModifyHandlerBase(
 	}
 }
 
+/// <summary>
+///   A folder-operation error that already knows the EAS status the client should see
+///   (MS-ASCMD FolderCreate/Delete/Update Status: 10 malformed request, 5 parent missing,
+///   4 folder missing, …). Distinct from <see cref="BackendException" />, which the base handler
+///   maps to the generic "cannot be modified" Status 3 — so a client is told what actually went
+///   wrong instead of "system folder" (F26).
+/// </summary>
+internal sealed class FolderOperationException(string status, string message) : Exception(message)
+{
+	public string Status { get; } = status;
+}
+
 public sealed class FolderCreateHandler(
 	FolderService folders,
 	IOptionsSnapshot<ActiveSyncOptions> options,
@@ -225,7 +254,7 @@ public sealed class FolderCreateHandler(
 	{
 		string parentId = root.Element(FH + "ParentId")?.Value ?? "0";
 		string displayName = root.Element(FH + "DisplayName")?.Value
-		                     ?? throw new BackendException("Missing DisplayName");
+		                     ?? throw new FolderOperationException("10", "Missing DisplayName");
 
 		IContentStore mailStore = context.Session.GetStoreForClass(EasClass.Email)!;
 		// K58: folder mutation is an optional capability. A store without it (never the mail store
@@ -236,8 +265,8 @@ public sealed class FolderCreateHandler(
 		string? parentBackendKey = null;
 		if (parentId != "0")
 			// A read-only grant on the parent covers its subtree: creating a child inside it
-			// is a write to the shared collection.
-			parentBackendKey = (await ResolveWritableAsync(context, parentId, ct)).Folder.BackendKey;
+			// is a write to the shared collection. A missing parent is Status 5, not "system folder".
+			parentBackendKey = (await ResolveWritableAsync(context, parentId, ct, "5")).Folder.BackendKey;
 
 		string backendKey = await folderOps.CreateFolderAsync(parentBackendKey, displayName, ct);
 		// Register so the response can carry the assigned ServerId.
@@ -257,7 +286,7 @@ public sealed class FolderDeleteHandler(
 	protected override async Task<string?> ExecuteAsync(EasContext context, XElement root, CancellationToken ct)
 	{
 		string serverId = root.Element(FH + "ServerId")?.Value
-		                  ?? throw new BackendException("Missing ServerId");
+		                  ?? throw new FolderOperationException("10", "Missing ServerId");
 		(UserFolder Folder, IContentStore Store) resolved = await ResolveWritableAsync(context, serverId, ct);
 		IFolderOperations folderOps = resolved.Store as IFolderOperations
 			?? throw new BackendException("This folder's store does not support folder deletion.");
@@ -277,9 +306,9 @@ public sealed class FolderUpdateHandler(
 	protected override async Task<string?> ExecuteAsync(EasContext context, XElement root, CancellationToken ct)
 	{
 		string serverId = root.Element(FH + "ServerId")?.Value
-		                  ?? throw new BackendException("Missing ServerId");
+		                  ?? throw new FolderOperationException("10", "Missing ServerId");
 		string displayName = root.Element(FH + "DisplayName")?.Value
-		                     ?? throw new BackendException("Missing DisplayName");
+		                     ?? throw new FolderOperationException("10", "Missing DisplayName");
 		(UserFolder Folder, IContentStore Store) resolved = await ResolveWritableAsync(context, serverId, ct);
 		IFolderOperations folderOps = resolved.Store as IFolderOperations
 			?? throw new BackendException("This folder's store does not support folder rename.");

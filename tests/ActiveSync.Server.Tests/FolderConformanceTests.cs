@@ -62,6 +62,44 @@ public sealed class FolderConformanceTests : IDisposable
 		Assert.Equal(3, replay?.Root?.Element(FH + "Changes")?.Elements(FH + "Add").Count());
 	}
 
+	// ---- F26 -------------------------------------------------------------------------------
+
+	[Fact]
+	public async Task FolderCreate_BackendTransportFailure_YieldsStatus6_NotAnUncaughtError()
+	{
+		// A non-BackendException (e.g. an IMAP socket drop) must surface as EAS Status 6, not
+		// escape the handler as an HTTP 500.
+		_harness.Session.Store.FolderOpFailWith = () => new InvalidOperationException("IMAP connection dropped");
+
+		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
+			new XDocument(new XElement(FH + "FolderCreate",
+				new XElement(FH + "SyncKey", "0"),
+				new XElement(FH + "ParentId", "0"),
+				new XElement(FH + "Type", EasFolderType.UserMail.ToString()),
+				new XElement(FH + "DisplayName", "NewFolder"))));
+
+		Assert.Equal("6", response?.Root?.Element(FH + "Status")?.Value);
+	}
+
+	[Fact]
+	public async Task FolderCreate_MissingDisplayName_YieldsMalformedStatus10_NotSystemFolder3()
+	{
+		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
+			new XDocument(new XElement(FH + "FolderCreate",
+				new XElement(FH + "SyncKey", "0"),
+				new XElement(FH + "ParentId", "0"),
+				new XElement(FH + "Type", EasFolderType.UserMail.ToString()))));
+
+		Assert.Equal("10", response?.Root?.Element(FH + "Status")?.Value);
+		Assert.Empty(_harness.Session.Store.CreatedFolders);
+	}
+
+	private FolderCreateHandler CreateHandler()
+	{
+		return new FolderCreateHandler(_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<FolderCreateHandler>.Instance);
+	}
+
 	private static XDocument FolderSyncRequest(string syncKey)
 	{
 		return new XDocument(new XElement(FH + "FolderSync", new XElement(FH + "SyncKey", syncKey)));

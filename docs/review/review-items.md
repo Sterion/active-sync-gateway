@@ -258,7 +258,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **32. Sync command conformance** [LIVE] — ~~`F1`~~ ~~`F4`~~ ~~`F5`~~ ~~`F6`~~ ~~`F7`~~ ~~`F8`~~ ~~`F9`~~ ~~`F12`~~ ~~`F22`~~ **COMPLETE**
 > `F4` echoes the *rejected* sync key with Status 3, causing the resync loop. `F6` `MIMESupport` is read nowhere and Type-4 is force-downgraded, so S/MIME can't work on-device.
 
-**33. Folder & provision conformance** [LIVE] — ~~`F25`~~ `F26` `F27`
+**33. Folder & provision conformance** [LIVE] — ~~`F25`~~ ~~`F26`~~ `F27`
 > No FolderSync replay generation; every folder-op failure collapses to "system folder"; `FolderCreate` ignores the requested `Type`.
 
 **34. Search, find, recipients & settings** [LIVE] — `F19` `F20` `F32` `F33` `F34` `F35` `F36` `F37` `F38` `F41` `F42` `F45` `F47` `F48` `A15` `A16`
