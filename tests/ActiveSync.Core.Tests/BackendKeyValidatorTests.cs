@@ -27,15 +27,15 @@ public sealed class BackendKeyValidatorTests
 	private static IConfiguration Config(Dictionary<string, string?> values) =>
 		new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 
-	// The bug: the section stored under the role does not satisfy the incoming provider (imap needs a
-	// Host, and none is stored), yet the switch used to be accepted because imap CAN serve MailStore.
+	// The bug: a value already stored under the role is mis-shaped for the incoming provider (a
+	// non-numeric Port), yet the switch used to be accepted because imap CAN serve MailStore.
 	[Fact]
-	public void ProviderChange_OverSettingsThatFailTheNewSchema_IsRejected()
+	public void ProviderChange_OverAMisShapedStoredValue_IsRejected()
 	{
 		IConfiguration effective = Config(new Dictionary<string, string?>
 		{
-			["ActiveSync:Backends:MailStore:Provider"] = "imap",
-			["ActiveSync:Backends:MailStore:Port"] = "993", // no Host
+			["ActiveSync:Backends:MailStore:Host"] = "imap.example",
+			["ActiveSync:Backends:MailStore:Port"] = "not-a-number",
 		});
 
 		string? error = BackendKeyValidator.Validate(
@@ -43,13 +43,28 @@ public sealed class BackendKeyValidatorTests
 		Assert.NotNull(error);
 	}
 
+	// Present values that are well-shaped for the new provider are accepted...
 	[Fact]
-	public void ProviderChange_OverSettingsThatSatisfyTheNewSchema_IsAccepted()
+	public void ProviderChange_OverWellShapedStoredValues_IsAccepted()
 	{
 		IConfiguration effective = Config(new Dictionary<string, string?>
 		{
-			["ActiveSync:Backends:MailStore:Provider"] = "imap",
 			["ActiveSync:Backends:MailStore:Host"] = "imap.example",
+			["ActiveSync:Backends:MailStore:Port"] = "993",
+		});
+
+		Assert.Null(BackendKeyValidator.Validate(
+			Registry(), effective, "ActiveSync:Backends:MailStore:Provider", "imap"));
+	}
+
+	// ...and a still-incomplete section (a required field the operator hasn't set yet) does NOT block
+	// assigning the provider — completeness is checked at startup, not when the provider is chosen.
+	[Fact]
+	public void ProviderChange_OverAnIncompleteSection_IsAccepted()
+	{
+		IConfiguration effective = Config(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:MailStore:Port"] = "993", // no Host yet
 		});
 
 		Assert.Null(BackendKeyValidator.Validate(

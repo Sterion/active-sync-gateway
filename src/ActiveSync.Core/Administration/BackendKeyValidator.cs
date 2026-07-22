@@ -105,20 +105,29 @@ internal static class BackendKeyValidator
 			return ex.Message;
 		}
 
-		// B24: switching a role's Provider is not just "can this provider serve the role" — the
-		// settings ALREADY stored under the role must satisfy the NEW provider's schema too. Otherwise
-		// `eas config set ...:Calendar:Provider carddav` is accepted over a caldav-shaped section and
-		// only surfaces at the next restart (the live rebuild doesn't validate it — B14). Re-validate
-		// the effective section against the incoming provider.
-		Dictionary<string, string?> effectiveSettings = new(StringComparer.OrdinalIgnoreCase);
+		// B24: switching a role's Provider is not just "can this provider serve the role" — a value
+		// ALREADY stored under the role that is mis-SHAPED for the NEW provider (an out-of-range Port,
+		// an unknown enum) must be rejected now, not surface at the next restart (the live rebuild
+		// doesn't validate it — B14). Only PRESENT values are checked, per-field, exactly as the
+		// non-Provider branch checks a single leaf — completeness (a still-missing required field) is
+		// a startup concern the operator is mid-filling, so it must not block assigning the provider.
+		IReadOnlyList<BackendConfigField> schema = provider.DescribeConfiguration(role);
 		foreach ((string leaf, string? leafValue) in
 		         effective.GetSection($"ActiveSync:Backends:{role}").AsEnumerable(makePathsRelative: true))
-			if (!string.IsNullOrEmpty(leaf) &&
-			    !leaf.Equals(BackendRolesConfig.ProviderKey, StringComparison.OrdinalIgnoreCase) &&
-			    leafValue is not null)
-				effectiveSettings[leaf] = leafValue;
+		{
+			if (string.IsNullOrEmpty(leaf) || string.IsNullOrWhiteSpace(leafValue) ||
+			    leaf.Equals(BackendRolesConfig.ProviderKey, StringComparison.OrdinalIgnoreCase))
+				continue;
 
-		IReadOnlyList<BackendFieldError> errors = BackendConfigValidation.Validate(provider, role, effectiveSettings);
-		return errors.Count > 0 ? errors[0].Message : null;
+			BackendConfigField? field = schema.FirstOrDefault(f =>
+				f.Name.Equals(BackendConfigValidation.ListRoot(leaf), StringComparison.OrdinalIgnoreCase));
+			if (field is null || field.Type == BackendFieldType.StringList)
+				continue;
+
+			if (BackendConfigValidation.CheckValue(field, leafValue.Trim()) is { } error)
+				return error.Message;
+		}
+
+		return null;
 	}
 }

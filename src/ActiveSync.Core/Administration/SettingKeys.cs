@@ -252,10 +252,14 @@ internal static class SettingKeys
 	///   <see cref="ActiveSyncOptions" /> and runs that same validator, so both the CLI and the web
 	///   editor reject at write time exactly what startup would reject.
 	///
-	///   Only failures this write INTRODUCES are surfaced: a gateway already sitting on an unrelated
-	///   invalid value (a bad file/env setting the operator is mid-fixing) must not have every
-	///   unrelated edit blocked by it. Returns a combined error message, or null when the write leaves
-	///   the configuration no worse than it found it.
+	///   Two scoping rules keep this from breaking legitimate incremental configuration. Only failures
+	///   this write INTRODUCES are surfaced (a gateway already sitting on an unrelated invalid value
+	///   must not have every edit blocked by it), AND only failures that NAME the key being written —
+	///   i.e. the value just entered is itself the problem. Setting one key of an interdependent set
+	///   (an OIDC ClientSecret before its Authority/ClientId) reports a failure about the OTHER,
+	///   still-unset keys; that is the operator's next step, not a reason to reject this one. The
+	///   remaining incompleteness is still caught at startup, which is where it becomes a real fault.
+	///   Returns a combined error message, or null when the value is acceptable.
 	/// </summary>
 	internal static string? ValidateStartupImpact(IConfiguration effective, string key, string? value)
 	{
@@ -267,7 +271,8 @@ internal static class SettingKeys
 			.AddInMemoryCollection(new Dictionary<string, string?> { [key] = value })
 			.Build();
 		List<string> introduced = Failures(validator, Bind(candidate))
-			.Where(failure => !before.Contains(failure))
+			.Where(failure => !before.Contains(failure) &&
+			                  failure.Contains(key, StringComparison.OrdinalIgnoreCase))
 			.ToList();
 
 		return introduced.Count > 0 ? string.Join(" ", introduced) : null;

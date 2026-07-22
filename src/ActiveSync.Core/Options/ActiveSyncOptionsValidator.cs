@@ -26,7 +26,8 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 		if (options.Eas.MinHeartbeatSeconds < 1 ||
 		    options.Eas.MaxHeartbeatSeconds < options.Eas.MinHeartbeatSeconds ||
 		    options.Eas.MaxHeartbeatSeconds > 3540)
-			failures.Add("ActiveSync:Eas heartbeat bounds are invalid (need 1 <= Min <= Max <= 3540).");
+			failures.Add("ActiveSync:Eas:MinHeartbeatSeconds/ActiveSync:Eas:MaxHeartbeatSeconds are invalid " +
+			             "(need 1 <= Min <= Max <= 3540).");
 
 		if (options.Eas.WatchdogSeconds is < 0 or > 0 and < 15)
 			failures.Add("ActiveSync:Eas:WatchdogSeconds must be 0 (disabled) or at least 15.");
