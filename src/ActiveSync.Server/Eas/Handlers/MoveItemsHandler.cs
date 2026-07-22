@@ -88,7 +88,15 @@ public sealed class MoveItemsHandler(
 					continue;
 				}
 
-				string newItemKey = await source.Value.Store.MoveItemAsync(
+				// K58: item move is an optional capability. A store without it (local, DAV) reports
+				// Status 5 (move failed) — the same answer its "not supported" throw used to produce.
+				if (source.Value.Store is not IItemMoveOperations mover)
+				{
+					responses.Add(Response("5"));
+					continue;
+				}
+
+				string newItemKey = await mover.MoveItemAsync(
 					source.Value.Folder.BackendKey, itemKey, destination.Value.Folder.BackendKey, ct);
 				string dstMsgId = await folders.ComposeServerIdAsync(
 					destination.Value.Folder, destination.Value.Store, newItemKey, ct);

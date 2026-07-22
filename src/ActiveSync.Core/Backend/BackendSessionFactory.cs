@@ -179,7 +179,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			});
 
 		Lazy<Task<CompositeBackendSession>> lazy = _sessions.GetOrAdd(key, _ => NewLazy());
-		CompositeBackendSession session = await Build(lazy).ConfigureAwait(false);
+		CompositeBackendSession session = await AwaitBuild(lazy).ConfigureAwait(false);
 		if (created)
 			_logger.LogInformation("Opened backend session for {User} (device {DeviceId})",
 				credentials.UserName, deviceId);
@@ -292,7 +292,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		CompositeBackendSession session;
 		try
 		{
-			session = await Build(lazy).ConfigureAwait(false);
+			session = await AwaitBuild(lazy).ConfigureAwait(false);
 		}
 		catch
 		{
@@ -306,20 +306,23 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	// async-lazy idiom (Stephen Toub's). The value factory returns the hot Task from
 	// CompositeBackendSession.CreateAsync, which yields at its first await, so `.Value` returns that
 	// Task WITHOUT ever blocking a thread — the VSTHRD011 "blocking value factory" deadlock case does
-	// not apply. Result is only read below through Built(), always guarded by IsBuilt(), so the task
-	// is already completed and `.Result` returns synchronously (VSTHRD002). These three accessors are
-	// the single, justified place those suppressions live.
-#pragma warning disable VSTHRD002, VSTHRD011
+	// not apply. AwaitBuild awaits that shared Task (VSTHRD003: safe here — the whole codebase runs
+	// with no synchronization context and ConfigureAwait(false), so the "foreign task" deadlock cannot
+	// arise). Result is only read through Built(), always guarded by IsBuilt(), so the task is already
+	// completed and `.Result` returns synchronously (VSTHRD002). This block is the single, justified
+	// home for those suppressions.
+#pragma warning disable VSTHRD002, VSTHRD003, VSTHRD011
 	private static Lazy<Task<CompositeBackendSession>> MakeLazy(Func<Task<CompositeBackendSession>> factory) =>
 		new(factory);
 
-	private static Task<CompositeBackendSession> Build(Lazy<Task<CompositeBackendSession>> lazy) => lazy.Value;
+	private static async Task<CompositeBackendSession> AwaitBuild(Lazy<Task<CompositeBackendSession>> lazy) =>
+		await lazy.Value.ConfigureAwait(false);
 
 	private static bool IsBuilt(Lazy<Task<CompositeBackendSession>> lazy) =>
 		lazy.IsValueCreated && lazy.Value.IsCompletedSuccessfully;
 
 	private static CompositeBackendSession Built(Lazy<Task<CompositeBackendSession>> lazy) => lazy.Value.Result;
-#pragma warning restore VSTHRD002, VSTHRD011
+#pragma warning restore VSTHRD002, VSTHRD003, VSTHRD011
 
 	private async Task DisposeSessionAsync(CompositeBackendSession session)
 	{

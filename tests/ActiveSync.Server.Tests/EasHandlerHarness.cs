@@ -127,7 +127,7 @@ public sealed class EasHandlerHarness : IDisposable
 	}
 
 	/// <summary>Records the mutations a handler asked for, so a test can assert none happened.</summary>
-	public sealed class RecordingStore : IContentStore
+	public sealed class RecordingStore : IContentStore, IItemMoveOperations, IFolderOperations
 	{
 		public List<string> Fetched { get; } = [];
 		public List<string> Moved { get; } = [];

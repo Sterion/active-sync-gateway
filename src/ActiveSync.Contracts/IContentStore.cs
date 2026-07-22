@@ -49,15 +49,12 @@ public interface IContentStore
 	/// </summary>
 	Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct);
 
-	/// <summary>Moves an item to another folder of the same class; returns the new item key.</summary>
-	Task<string> MoveItemAsync(
-		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct);
-
-	/// <summary>Folder manipulation. Returns the new folder's backend key.</summary>
-	Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct);
-
-	Task RenameFolderAsync(string backendKey, string newDisplayName, CancellationToken ct);
-	Task DeleteFolderAsync(string backendKey, CancellationToken ct);
+	// K58: item move and folder mutation are OPTIONAL CAPABILITIES (IItemMoveOperations /
+	// IFolderOperations below), not mandatory members — a third of the in-repo stores threw
+	// "not supported" for them (local, DAV, and JMAP calendar/contact folders). A store implements
+	// only the capabilities it truly has; the host checks for the interface and answers the EAS
+	// command with the unsupported status when it is absent (the same status the throw used to
+	// produce), instead of every store carrying a stub.
 
 	/// <summary>
 	///   Waits until something changes in one of the given folders, or the timeout elapses.
@@ -65,6 +62,34 @@ public interface IContentStore
 	/// </summary>
 	Task<IReadOnlyList<string>> WaitForChangesAsync(
 		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct);
+}
+
+/// <summary>
+///   Optional capability: a store that can move an item to another folder of the same class
+///   (EAS MoveItems). Mail stores and the JMAP calendar/contact stores implement it; DAV and local
+///   stores do not. A store without it makes MoveItems answer Status 5 (move failed) — the same
+///   answer the "not supported" throw used to produce.
+/// </summary>
+public interface IItemMoveOperations
+{
+	/// <summary>Moves an item to another folder of the same class; returns the new item key.</summary>
+	Task<string> MoveItemAsync(
+		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct);
+}
+
+/// <summary>
+///   Optional capability: a store whose folder set the client can mutate — FolderCreate,
+///   FolderUpdate (rename) and FolderDelete. Only mail stores implement it; calendar, contacts,
+///   task and local stores expose a fixed folder set. A store without it makes those commands
+///   answer EAS Status 3 (folder operation not permitted), the same as an unmodifiable system folder.
+/// </summary>
+public interface IFolderOperations
+{
+	/// <summary>Creates a folder. Returns the new folder's backend key.</summary>
+	Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct);
+
+	Task RenameFolderAsync(string backendKey, string newDisplayName, CancellationToken ct);
+	Task DeleteFolderAsync(string backendKey, CancellationToken ct);
 }
 
 /// <summary>

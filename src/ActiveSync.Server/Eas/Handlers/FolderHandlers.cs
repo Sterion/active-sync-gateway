@@ -179,13 +179,18 @@ public sealed class FolderCreateHandler(
 		                     ?? throw new BackendException("Missing DisplayName");
 
 		IContentStore mailStore = context.Session.GetStoreForClass(EasClass.Email)!;
+		// K58: folder mutation is an optional capability. A store without it (never the mail store
+		// today) throws BackendException, which the base handler turns into Status 3 — the same
+		// answer as an unmodifiable system folder.
+		IFolderOperations folderOps = mailStore as IFolderOperations
+			?? throw new BackendException("The mail store does not support folder creation.");
 		string? parentBackendKey = null;
 		if (parentId != "0")
 			// A read-only grant on the parent covers its subtree: creating a child inside it
 			// is a write to the shared collection.
 			parentBackendKey = (await ResolveWritableAsync(context, parentId, ct)).Folder.BackendKey;
 
-		string backendKey = await mailStore.CreateFolderAsync(parentBackendKey, displayName, ct);
+		string backendKey = await folderOps.CreateFolderAsync(parentBackendKey, displayName, ct);
 		// Register so the response can carry the assigned ServerId.
 		List<UserFolder> registry = await Folders.RefreshAsync(context.Session, context.Device.UserName, ct);
 		return registry.FirstOrDefault(f => f.BackendKey == backendKey)?.ServerId;
@@ -205,7 +210,9 @@ public sealed class FolderDeleteHandler(
 		string serverId = root.Element(FH + "ServerId")?.Value
 		                  ?? throw new BackendException("Missing ServerId");
 		(UserFolder Folder, IContentStore Store) resolved = await ResolveWritableAsync(context, serverId, ct);
-		await resolved.Store.DeleteFolderAsync(resolved.Folder.BackendKey, ct);
+		IFolderOperations folderOps = resolved.Store as IFolderOperations
+			?? throw new BackendException("This folder's store does not support folder deletion.");
+		await folderOps.DeleteFolderAsync(resolved.Folder.BackendKey, ct);
 		return null;
 	}
 }
@@ -225,7 +232,9 @@ public sealed class FolderUpdateHandler(
 		string displayName = root.Element(FH + "DisplayName")?.Value
 		                     ?? throw new BackendException("Missing DisplayName");
 		(UserFolder Folder, IContentStore Store) resolved = await ResolveWritableAsync(context, serverId, ct);
-		await resolved.Store.RenameFolderAsync(resolved.Folder.BackendKey, displayName, ct);
+		IFolderOperations folderOps = resolved.Store as IFolderOperations
+			?? throw new BackendException("This folder's store does not support folder rename.");
+		await folderOps.RenameFolderAsync(resolved.Folder.BackendKey, displayName, ct);
 		return null;
 	}
 }

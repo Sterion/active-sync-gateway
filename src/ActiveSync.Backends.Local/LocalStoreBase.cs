@@ -150,26 +150,9 @@ public abstract class LocalStoreBase(
 		notifier.NotifyChanged(credentials.UserName, Collection);
 	}
 
-	public Task<string> MoveItemAsync(
-		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
-	{
-		throw new BackendException($"Moving local {Collection} items is not supported.");
-	}
-
-	public Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct)
-	{
-		throw new BackendException($"Creating local {Collection} folders is not supported.");
-	}
-
-	public Task RenameFolderAsync(string backendKey, string newDisplayName, CancellationToken ct)
-	{
-		throw new BackendException($"Renaming the local {Collection} folder is not supported.");
-	}
-
-	public Task DeleteFolderAsync(string backendKey, CancellationToken ct)
-	{
-		throw new BackendException($"Deleting the local {Collection} folder is not supported.");
-	}
+	// K58: local stores expose a single fixed folder and cannot move items — so they implement
+	// neither IItemMoveOperations nor IFolderOperations rather than carrying throw-stubs. The host
+	// answers MoveItems/Folder* with the unsupported status when the capability is absent.
 
 	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
 		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)

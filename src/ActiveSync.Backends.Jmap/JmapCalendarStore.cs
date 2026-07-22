@@ -19,7 +19,7 @@ namespace ActiveSync.Backends.Jmap;
 ///   also mail iMIP (<see cref="ShouldSendInvitationsAsync" /> is false).
 /// </summary>
 public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, int pollSeconds)
-	: IContentStore, ICalendarOperations, IReadOnlyCollectionSource
+	: IContentStore, ICalendarOperations, IReadOnlyCollectionSource, IItemMoveOperations
 {
 	public const string KeyPrefix = "jmap-cal:";
 
@@ -165,14 +165,8 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		return itemKey;
 	}
 
-	public Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct) =>
-		throw new BackendException("Creating JMAP calendars via ActiveSync is not supported.");
-
-	public Task RenameFolderAsync(string backendKey, string newDisplayName, CancellationToken ct) =>
-		throw new BackendException("Renaming JMAP calendars via ActiveSync is not supported.");
-
-	public Task DeleteFolderAsync(string backendKey, CancellationToken ct) =>
-		throw new BackendException("Deleting JMAP calendars via ActiveSync is not supported.");
+	// K58: JMAP calendar folder mutation over ActiveSync is not supported, so this store does not
+	// implement IFolderOperations (it does support item move — IItemMoveOperations above).
 
 	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
 		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)

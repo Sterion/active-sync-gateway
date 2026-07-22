@@ -78,17 +78,7 @@ public sealed class FolderServiceTests : IDisposable
 		public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<string> MoveItemAsync(
-			string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct) =>
-			throw new NotSupportedException();
-
-		public Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct) =>
-			throw new NotSupportedException();
-
-		public Task RenameFolderAsync(string backendKey, string newDisplayName, CancellationToken ct) =>
-			throw new NotSupportedException();
-
-		public Task DeleteFolderAsync(string backendKey, CancellationToken ct) => throw new NotSupportedException();
+		// K58: item move and folder mutation are optional capabilities; this stub implements neither.
 
 		public Task<IReadOnlyList<string>> WaitForChangesAsync(
 			IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct) =>

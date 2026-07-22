@@ -15,7 +15,8 @@ namespace ActiveSync.Backends.Jmap;
 ///   the card JSON (JMAP exposes no per-card ETag). Also serves GAL search for
 ///   ResolveRecipients/Search.
 /// </summary>
-public sealed class JmapContactStore(JmapClient client, int pollSeconds) : IContentStore, IContactOperations
+public sealed class JmapContactStore(JmapClient client, int pollSeconds)
+	: IContentStore, IContactOperations, IItemMoveOperations
 {
 	public const string KeyPrefix = "jmap-contact:";
 
@@ -140,14 +141,8 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds) : ICont
 		return itemKey;
 	}
 
-	public Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct) =>
-		throw new BackendException("Creating JMAP address books via ActiveSync is not supported.");
-
-	public Task RenameFolderAsync(string backendKey, string newDisplayName, CancellationToken ct) =>
-		throw new BackendException("Renaming JMAP address books via ActiveSync is not supported.");
-
-	public Task DeleteFolderAsync(string backendKey, CancellationToken ct) =>
-		throw new BackendException("Deleting JMAP address books via ActiveSync is not supported.");
+	// K58: JMAP address-book folder mutation over ActiveSync is not supported, so this store does
+	// not implement IFolderOperations (it does support item move — IItemMoveOperations above).
 
 	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
 		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)

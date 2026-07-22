@@ -56,6 +56,34 @@ public sealed class ContractSurfaceTests
 		Assert.False(typeof(BackendException).IsSealed);
 	}
 
+	// K58: IContentStore was a 12-member mandatory interface even though a third of stores threw
+	// "not supported" for folder mutation and item move — the same members the file already models
+	// as optional capabilities elsewhere. Those four members moved to optional capability interfaces
+	// (IFolderOperations, IItemMoveOperations), so IContentStore no longer declares them and a store
+	// that cannot do them simply does not implement the capability.
+	[Theory]
+	[InlineData("MoveItemAsync")]
+	[InlineData("CreateFolderAsync")]
+	[InlineData("RenameFolderAsync")]
+	[InlineData("DeleteFolderAsync")]
+	public void IContentStore_DoesNotDeclare_OptionalCapabilityMembers(string member)
+	{
+		Assert.Null(typeof(IContentStore).GetMethod(member));
+	}
+
+	[Fact]
+	public void OptionalCapabilities_DeclareTheMovedMembers()
+	{
+		Assert.NotNull(typeof(IItemMoveOperations).GetMethod("MoveItemAsync"));
+		Assert.NotNull(typeof(IFolderOperations).GetMethod("CreateFolderAsync"));
+		Assert.NotNull(typeof(IFolderOperations).GetMethod("RenameFolderAsync"));
+		Assert.NotNull(typeof(IFolderOperations).GetMethod("DeleteFolderAsync"));
+
+		// Both capabilities are OPTIONAL — not baked back into IContentStore.
+		Assert.False(typeof(IContentStore).IsAssignableFrom(typeof(IItemMoveOperations)));
+		Assert.False(typeof(IContentStore).IsAssignableFrom(typeof(IFolderOperations)));
+	}
+
 	// K61: CreateConnection was synchronous in an otherwise fully async contract — a provider that
 	// opens a TCP/TLS connection could not do it without blocking. It is now
 	// Task<IBackendConnection> CreateConnectionAsync(context, ct); the synchronous method is gone.

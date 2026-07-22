@@ -132,27 +132,9 @@ public abstract class DavStoreBase(
 		return dav.DeleteAsync(itemKey, ct); // DAV deletes are always permanent
 	}
 
-	public Task<string> MoveItemAsync(
-		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
-	{
-		throw new BackendException(
-			$"Moving {ItemNounPlural} between {CollectionKindPlural} is not supported.");
-	}
-
-	public Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct)
-	{
-		throw new BackendException($"Creating {CollectionKindPlural} is not supported.");
-	}
-
-	public Task RenameFolderAsync(string backendKey, string newDisplayName, CancellationToken ct)
-	{
-		throw new BackendException($"Renaming {CollectionKindPlural} is not supported.");
-	}
-
-	public Task DeleteFolderAsync(string backendKey, CancellationToken ct)
-	{
-		throw new BackendException($"Deleting {CollectionKindPlural} is not supported.");
-	}
+	// K58: DAV stores support neither cross-collection item move nor client folder mutation over
+	// ActiveSync, so they implement neither IItemMoveOperations nor IFolderOperations (rather than
+	// carrying throw-stubs). The host answers MoveItems/Folder* with the unsupported status.
 
 	public Task<IReadOnlyList<string>> WaitForChangesAsync(
 		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)

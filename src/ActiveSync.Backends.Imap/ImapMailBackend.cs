@@ -21,7 +21,7 @@ public sealed partial class ImapMailBackend(
 	ImapSession session,
 	string? mailAddress,
 	Func<string, ImapIdleWatcher?> idleWatcherProvider,
-	ILogger logger) : IContentStore, IMailStoreOperations
+	ILogger logger) : IContentStore, IMailStoreOperations, IItemMoveOperations, IFolderOperations
 {
 	private static readonly XNamespace Email = EasNamespaces.Email;
 	private static readonly XNamespace Email2 = EasNamespaces.Email2;

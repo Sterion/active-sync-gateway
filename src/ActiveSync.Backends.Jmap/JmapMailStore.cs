@@ -20,7 +20,8 @@ public sealed class JmapMailStore(
 	JmapClient client,
 	string? mailAddress,
 	int pollSeconds,
-	Func<DateTime, CancellationToken, Task>? waitForPush = null) : IContentStore, IMailStoreOperations
+	Func<DateTime, CancellationToken, Task>? waitForPush = null)
+	: IContentStore, IMailStoreOperations, IItemMoveOperations, IFolderOperations
 {
 	public const string KeyPrefix = "jmap-mail:";
 
