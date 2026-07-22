@@ -60,6 +60,10 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string bookId = FromKey(folderBackendKey);
+		// H29: Contacts have no EAS FilterType, so ContentFilter.ForClass(Contacts, …) is always
+		// ContentFilter.All — there is no date window to apply here (CardDavStore likewise doesn't
+		// filter contacts). Only the JMAP calendar store gained a filter.
+		_ = filter;
 		// ContactCard/get ids:null returns every card reliably; ContactCard/query is FTS-backed
 		// and eventually-consistent (returns serverUnavailable right after a write), so listing
 		// filters the full get by addressBookIds client-side instead.

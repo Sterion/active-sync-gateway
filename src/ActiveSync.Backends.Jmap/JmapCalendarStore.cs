@@ -1,6 +1,8 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Xml;
 using System.Xml.Linq;
 using ActiveSync.Backends.Converters;
 using ActiveSync.Contracts;
@@ -66,7 +68,10 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string calId = FromKey(folderBackendKey);
 		List<JsonElement> events = await GetAllEventsAsync(account, ct).ConfigureAwait(false);
+		// H29: honor the client's calendar FilterType window instead of ignoring it (CalDavStore
+		// applies a time-range; the JMAP store enumerates all events, so it filters in memory).
 		return events.Where(e => InCalendar(e, calId))
+			.Where(e => WithinFilter(e, filter))
 			.ToDictionary(e => e.GetProperty("id").GetString()!, Revision, StringComparer.Ordinal);
 	}
 
@@ -303,6 +308,33 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		}
 
 		return null;
+	}
+
+	/// <summary>
+	///   Whether an event falls inside the client's calendar filter window. A recurring event may
+	///   still have current occurrences, so it is never dropped on a date filter; a single event is
+	///   kept when its end (start + duration) is at or after the window start. When the start cannot
+	///   be parsed the event is kept — over-including is harmless (the client just sees a few old
+	///   events); silently dropping one is not.
+	/// </summary>
+	private static bool WithinFilter(JsonElement jsEvent, ContentFilter filter)
+	{
+		if (filter.SinceUtc is not { } since)
+			return true;
+		if (jsEvent.TryGetProperty("recurrenceRules", out _) ||
+		    jsEvent.TryGetProperty("recurrenceRule", out _) ||
+		    jsEvent.TryGetProperty("recurrenceOverrides", out _))
+			return true;
+		if (!jsEvent.TryGetProperty("start", out JsonElement startEl) || startEl.GetString() is not { } startStr ||
+		    !DateTime.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime start))
+			return true;
+		TimeSpan duration = TimeSpan.Zero;
+		if (jsEvent.TryGetProperty("duration", out JsonElement durEl) && durEl.GetString() is { } durStr)
+			try { duration = XmlConvert.ToTimeSpan(durStr); }
+			catch (FormatException) { /* malformed duration — treat as instantaneous */ }
+		// start is a local/floating wall time and `since` is UTC; the ≤ tz-offset slop is
+		// acceptable for a coarse day-granularity window (CalDAV's time-range is no finer).
+		return start + duration >= since;
 	}
 
 	private static bool InCalendar(JsonElement jsEvent, string calId)
