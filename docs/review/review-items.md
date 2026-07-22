@@ -266,7 +266,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 
 ## Phase 6 — Performance
 
-**35. Server request hot path** — ~~`E4`~~ ~~`E5`~~ ~~`E6`~~ ~~`E18`~~ ~~`E31`~~ ~~`E35`~~ `F13` `F14` `F15` `F28` `F40` `F43`
+**35. Server request hot path** — ~~`E4`~~ ~~`E5`~~ ~~`E6`~~ ~~`E18`~~ ~~`E31`~~ ~~`E35`~~ ~~`F13`~~ **(seam only: batch GetItemsAsync default + handler routing + the ServerId DB batching already landed by A3; per-backend FETCH-set/multiget overrides deferred to a LIVE item — see new finding D38)** ~~`F14`~~ `F15` `F28` `F40` `F43`
 > `E4` every request constructs all 20 handlers and discards 19. Biggest single allocation win for a polling fleet.
 
 **36. Backend round trips** [LIVE] — `D3` `D14` `D19` `D32` `H13` `H14` `H15` `H24` `H25`
@@ -545,3 +545,5 @@ Baseline verified good: no endpoint is unauthenticated by accident (route-group 
 > 2. **`D7` conflated two problems and its fix solved one.** Routing iTIP through Ical.Net fixed the injection (escaping) but not line endings — it swapped `AppendLine`'s LF for the serializer's LF. Only looked fixed because the author's box is Windows.
 
 **DEFERRED:** `JsCalendarConverter.cs:134` (JMAP, `?? ""` not throw) is live-verified item-5 code; left untouched rather than changed without its own reproducer. Route it through a CRLF-guaranteeing helper and add a red-first test in a JMAP-backend run. — `Backends.Common/Converters/{IcalHelpers,CalendarConverter,ImipMailBuilder}.cs` (fixed), `Backends.Jmap/JsCalendarConverter.cs:134` (deferred).
+
+`D38` **Med** `F13` (item 35) added the `IContentStore.GetItemsAsync` batch seam (default loops `GetItemAsync`) and routed the Sync window through a single batched call, but no in-repo store yet **overrides** it — so the N sequential backend round trips the finding names are still N (only the seam and, via `A3`, the ServerId DB batching are in place). The remaining win is per-backend: `ImapMailBackend.GetItemsAsync` should take ONE session lease + ONE folder open + a single flags FETCH-set for the whole UID list (today each item re-acquires the per-user IMAP gate and re-opens the folder — the dominant "50k mailbox" cost); the DAV stores should use a CalDAV/CardDAV **multiget** REPORT; JMAP a single `*/get` with the id list. Needs a real backend to verify (item 35 is not [LIVE]), which is why it was carved off here rather than done blind. Same family as item 36's backend-round-trip work — fold it into a [LIVE] run. — `Backends.Imap/ImapMailBackend.cs` (`GetItemAsync` → add `GetItemsAsync`), `Backends.Dav/DavStoreBase.cs`, `Backends.Jmap/*Store.cs`.

@@ -12,17 +12,29 @@ public sealed partial class SyncHandler
 	private async Task<XElement?> BuildItemElementAsync(
 		XName commandName, EasContext context, UserFolder folder, IContentStore store,
 		string itemKey, BodyPreference bodyPreference, CancellationToken ct,
-		IReadOnlyDictionary<string, string>? davIds = null)
+		IReadOnlyDictionary<string, string>? davIds = null,
+		IReadOnlyDictionary<string, BackendItem?>? prefetched = null)
 	{
 		BackendItem? item;
-		try
+		// F13: the window's items are fetched in one batched GetItemsAsync call up-front; use that
+		// result when present. Fall back to a single fetch only when the batch didn't cover this key
+		// (a store override that omitted a failed item) so a lone fetch failure still skips just that
+		// item and re-tries next round rather than failing the whole collection.
+		if (prefetched is not null && prefetched.TryGetValue(itemKey, out BackendItem? fetched))
 		{
-			item = await store.GetItemAsync(folder.BackendKey, itemKey, bodyPreference, ct);
+			item = fetched;
 		}
-		catch (Exception ex) when (ex is not OperationCanceledException)
+		else
 		{
-			logger.LogWarning(ex, "Fetching item {ItemKey} failed", itemKey);
-			return null;
+			try
+			{
+				item = await store.GetItemAsync(folder.BackendKey, itemKey, bodyPreference, ct);
+			}
+			catch (Exception ex) when (ex is not OperationCanceledException)
+			{
+				logger.LogWarning(ex, "Fetching item {ItemKey} failed", itemKey);
+				return null;
+			}
 		}
 
 		if (item is null)

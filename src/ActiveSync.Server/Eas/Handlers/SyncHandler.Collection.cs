@@ -171,10 +171,6 @@ public sealed partial class SyncHandler
 			CollectionChanges diff = CollectionDiff.Compute(snapshot, current, windowSize);
 			moreAvailable = diff.MoreAvailable;
 			newSnapshot = diff.NewSnapshot;
-			Core.Observability.GatewayMetrics.RecordSyncItems(
-				context.Device.UserName, store.EasClass, "server_to_client", "add", diff.Adds.Count);
-			Core.Observability.GatewayMetrics.RecordSyncItems(
-				context.Device.UserName, store.EasClass, "server_to_client", "change", diff.Changes.Count);
 
 			// MS-ASCMD: an item that merely slid out of the FilterType window is still on the
 			// server and must be reported as SoftDelete; Delete means "gone for good". The two
@@ -200,12 +196,6 @@ public sealed partial class SyncHandler
 						"window departures as hard deletes", collectionId, diff.Deletes.Count);
 				}
 
-			Core.Observability.GatewayMetrics.RecordSyncItems(
-				context.Device.UserName, store.EasClass, "server_to_client", "delete",
-				diff.Deletes.Count - agedOut.Count);
-			Core.Observability.GatewayMetrics.RecordSyncItems(
-				context.Device.UserName, store.EasClass, "server_to_client", "soft_delete", agedOut.Count);
-
 			// Pre-resolve the whole window's DAV item ids in one query + one flush; without this
 			// every Add/Change/Delete composition below did its own SELECT + SaveChanges (A3).
 			List<string> windowKeys = new(diff.Adds.Count + diff.Changes.Count + diff.Deletes.Count);
@@ -215,10 +205,30 @@ public sealed partial class SyncHandler
 			IReadOnlyDictionary<string, string>? davIds =
 				await folders.PreResolveDavItemIdsAsync(folder, store, windowKeys, ct);
 
+			// F13: fetch every Add/Change item's body in ONE batched round instead of one backend
+			// round trip (and, for IMAP, one per-user gate acquisition) per item. The default
+			// GetItemsAsync loops GetItemAsync so behaviour is unchanged; a store override batches
+			// at the protocol level. A batch-level failure degrades to per-item fetch inside
+			// BuildItemElementAsync (empty prefetch map), preserving the old resilience.
+			IReadOnlyDictionary<string, BackendItem?>? prefetched = null;
+			List<string> fetchKeys = new(diff.Adds.Count + diff.Changes.Count);
+			fetchKeys.AddRange(diff.Adds.Select(a => a.ServerId));
+			fetchKeys.AddRange(diff.Changes.Select(c => c.ServerId));
+			if (fetchKeys.Count > 0)
+				try
+				{
+					prefetched = await store.GetItemsAsync(folder.BackendKey, fetchKeys, bodyPreference, ct);
+				}
+				catch (Exception ex) when (ex is not OperationCanceledException)
+				{
+					logger.LogWarning(ex,
+						"Batch item fetch failed for {CollectionId}; falling back to per-item fetch", collectionId);
+				}
+
 			foreach (ItemChange add in diff.Adds)
 			{
 				XElement? element = await BuildItemElementAsync(
-					AS + "Add", context, folder, store, add.ServerId, bodyPreference, ct, davIds);
+					AS + "Add", context, folder, store, add.ServerId, bodyPreference, ct, davIds, prefetched);
 				if (element is not null)
 					serverCommands.Add(element);
 				else
@@ -228,7 +238,7 @@ public sealed partial class SyncHandler
 			foreach (ItemChange change in diff.Changes)
 			{
 				XElement? element = await BuildItemElementAsync(
-					AS + "Change", context, folder, store, change.ServerId, bodyPreference, ct, davIds);
+					AS + "Change", context, folder, store, change.ServerId, bodyPreference, ct, davIds, prefetched);
 				if (element is not null)
 					serverCommands.Add(element);
 			}
@@ -239,6 +249,22 @@ public sealed partial class SyncHandler
 				serverCommands.Add(new XElement(AS + (agedOut.Contains(deletedKey) ? "SoftDelete" : "Delete"),
 					new XElement(AS + "ServerId", serverId)));
 			}
+
+			// F14: record the metric from what was actually SENT — an Add whose fetch returned null
+			// (vanished mid-sync) is not in serverCommands and must not be counted as delivered.
+			// The same counts feed the activity log below.
+			Core.Observability.GatewayMetrics.RecordSyncItems(
+				context.Device.UserName, store.EasClass, "server_to_client", "add",
+				serverCommands.Count(c => c.Name.LocalName == "Add"));
+			Core.Observability.GatewayMetrics.RecordSyncItems(
+				context.Device.UserName, store.EasClass, "server_to_client", "change",
+				serverCommands.Count(c => c.Name.LocalName == "Change"));
+			Core.Observability.GatewayMetrics.RecordSyncItems(
+				context.Device.UserName, store.EasClass, "server_to_client", "delete",
+				serverCommands.Count(c => c.Name.LocalName == "Delete"));
+			Core.Observability.GatewayMetrics.RecordSyncItems(
+				context.Device.UserName, store.EasClass, "server_to_client", "soft_delete",
+				serverCommands.Count(c => c.Name.LocalName == "SoftDelete"));
 		}
 
 		// One activity line per collection round; idle polls (all counts zero) stay silent.

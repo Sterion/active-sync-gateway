@@ -259,13 +259,51 @@ public sealed class EasHandlerHarness : IDisposable
 		/// </summary>
 		public Func<string, IReadOnlyList<XElement>>? ItemApplicationData { get; set; }
 
+		/// <summary>
+		///   Item keys that <see cref="GetItemAsync" /> reports as gone (returns null), standing in
+		///   for an item that vanished between the revision listing and the fetch (F13/F14).
+		/// </summary>
+		public HashSet<string> VanishedKeys { get; } = new(StringComparer.Ordinal);
+
+		/// <summary>
+		///   One entry per batched <see cref="GetItemsAsync" /> the Sync engine issued, each the
+		///   ordered key list of that call — lets a test assert the window is fetched in ONE batch
+		///   rather than a fetch per item (F13).
+		/// </summary>
+		public List<IReadOnlyList<string>> BatchFetched { get; } = [];
+
 		public Task<BackendItem?> GetItemAsync(
 			string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct)
 		{
 			Fetched.Add($"{folderBackendKey}/{itemKey}");
+			if (VanishedKeys.Contains(itemKey))
+				return Task.FromResult<BackendItem?>(null);
 			IReadOnlyList<XElement> data = ItemApplicationData?.Invoke(itemKey)
 				?? [new XElement(EasNamespaces.AirSync + "Subject", itemKey)];
 			return Task.FromResult<BackendItem?>(new BackendItem(data));
+		}
+
+		/// <summary>
+		///   Records the batch and mirrors the interface default (loop + per-item null on failure),
+		///   so existing Sync tests are behaviourally unchanged while a test can assert the routing.
+		/// </summary>
+		public async Task<IReadOnlyDictionary<string, BackendItem?>> GetItemsAsync(
+			string folderBackendKey, IReadOnlyList<string> itemKeys, BodyPreference bodyPreference, CancellationToken ct)
+		{
+			BatchFetched.Add(itemKeys.ToList());
+			Dictionary<string, BackendItem?> items = new(itemKeys.Count, StringComparer.Ordinal);
+			foreach (string itemKey in itemKeys)
+			{
+				try
+				{
+					items[itemKey] = await GetItemAsync(folderBackendKey, itemKey, bodyPreference, ct);
+				}
+				catch (Exception ex) when (ex is not OperationCanceledException)
+				{
+					items[itemKey] = null;
+				}
+			}
+			return items;
 		}
 
 		public Task<(string ItemKey, string Revision)> CreateItemAsync(

@@ -32,6 +32,38 @@ public interface IContentStore
 	Task<BackendItem?> GetItemAsync(
 		string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct);
 
+	/// <summary>
+	///   Fetches several items of one folder in a single round. The Sync engine calls this once
+	///   per windowed batch instead of <see cref="GetItemAsync" /> per item, so a store can amortize
+	///   the per-fetch overhead — for IMAP, one session lease + one folder open + one FETCH set
+	///   rather than N of each (F13). The returned map is keyed by item key; a key mapped to
+	///   <c>null</c> (or absent) vanished or could not be fetched and is skipped, exactly as a
+	///   <c>null</c> from <see cref="GetItemAsync" /> is. The DEFAULT implementation loops
+	///   <see cref="GetItemAsync" /> — a per-item failure becomes a <c>null</c> entry so one bad
+	///   item never fails the batch — so existing stores keep working unchanged; a store overrides
+	///   it to batch at the protocol level.
+	/// </summary>
+	async Task<IReadOnlyDictionary<string, BackendItem?>> GetItemsAsync(
+		string folderBackendKey, IReadOnlyList<string> itemKeys, BodyPreference bodyPreference, CancellationToken ct)
+	{
+		Dictionary<string, BackendItem?> items = new(itemKeys.Count, StringComparer.Ordinal);
+		foreach (string itemKey in itemKeys)
+		{
+			try
+			{
+				items[itemKey] = await GetItemAsync(folderBackendKey, itemKey, bodyPreference, ct).ConfigureAwait(false);
+			}
+			catch (Exception ex) when (ex is not OperationCanceledException)
+			{
+				// One item's fetch failure must not sink the whole batch: record it as "not
+				// fetched" (null) so the caller skips it and re-tries it on the next Sync round,
+				// the same outcome GetItemAsync's per-item catch produced.
+				items[itemKey] = null;
+			}
+		}
+		return items;
+	}
+
 	/// <summary>Creates an item from client ApplicationData; returns (itemKey, revision).</summary>
 	Task<(string ItemKey, string Revision)> CreateItemAsync(
 		string folderBackendKey, XElement applicationData, CancellationToken ct);
