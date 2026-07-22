@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 
-namespace ActiveSync.Backends;
+namespace ActiveSync.Backends.Common;
 
 /// <summary>
 ///   The single source of TLS certificate-validation callbacks for every backend connection

@@ -792,7 +792,7 @@ banner. Rules:
   MailKit would otherwise fail the upgrade. `MailTransportSecurity` in Backends is the
   single mapping point for these options.
 - TLS certificate validation callbacks come **only** from
-  `ServerCertificateValidator` (Backends root) — MailKit and SocketsHttpHandler share the
+  `ServerCertificateValidator` (Backends.Common) — MailKit and SocketsHttpHandler share the
   delegate type. Never inline a validation callback. Knobs per backend section:
   `AllowInvalidCertificates` (accept everything, lab use) and `CaCertificatePath`
   (PEM CAs trusted on top of the system store via CustomRootTrust).

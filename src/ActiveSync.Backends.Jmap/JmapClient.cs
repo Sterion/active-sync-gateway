@@ -3,7 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Security;
 using System.Text;
 using System.Text.Json;
-using ActiveSync.Backends;
+using ActiveSync.Backends.Common;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Observability;

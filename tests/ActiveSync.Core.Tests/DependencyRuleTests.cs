@@ -73,4 +73,25 @@ public sealed class DependencyRuleTests
 		Assert.Null(core.GetType("ActiveSync.Core.Sync.CollectionDiff"));
 		Assert.NotNull(protocol.GetType("ActiveSync.Protocol.Sync.CollectionDiff"));
 	}
+
+	// S8: ActiveSync.Backends.Common is a published, plugin-facing package. Its types must sit under a
+	// coherent namespace set — the assembly-named ActiveSync.Backends.Common (its helpers) or the
+	// purpose-named ActiveSync.Backends.Converters (the EAS converters). ServerCertificateValidator was
+	// the odd one out in the bare ActiveSync.Backends root — a namespace that conceptually belongs to
+	// the sibling backend assemblies (Imap/Dav/…), forcing consumers to guess a third using for one
+	// assembly. This guards against any type drifting back out of the two sanctioned namespaces.
+	[Fact]
+	public void BackendsCommon_TypesUseCoherentNamespaces()
+	{
+		string[] offenders = typeof(MailKitWireLogger).Assembly
+			.GetExportedTypes()
+			.Where(static t => t.Namespace is null ||
+				!(t.Namespace.StartsWith("ActiveSync.Backends.Common", StringComparison.Ordinal) ||
+					t.Namespace.StartsWith("ActiveSync.Backends.Converters", StringComparison.Ordinal)))
+			.Select(static t => t.FullName!)
+			.OrderBy(static n => n, StringComparer.Ordinal)
+			.ToArray();
+
+		Assert.Empty(offenders);
+	}
 }

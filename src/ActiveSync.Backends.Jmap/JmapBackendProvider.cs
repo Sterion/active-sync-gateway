@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Net.Security;
-using ActiveSync.Backends;
 using ActiveSync.Backends.Common;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;

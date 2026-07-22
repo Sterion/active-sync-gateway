@@ -1,6 +1,7 @@
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
+using ActiveSync.Backends.Common;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using Microsoft.Extensions.Logging;

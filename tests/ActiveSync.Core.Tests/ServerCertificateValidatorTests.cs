@@ -1,7 +1,7 @@
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using ActiveSync.Backends;
+using ActiveSync.Backends.Common;
 using ActiveSync.Core.Options;
 using Microsoft.Extensions.Options;
 
