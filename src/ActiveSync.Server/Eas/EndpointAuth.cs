@@ -1,10 +1,26 @@
 using System.Net;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
+using ActiveSync.Core.State;
 
 namespace ActiveSync.Server.Eas;
+
+/// <summary>Why a login that authenticated is nonetheless refused (checked post-auth).</summary>
+internal enum LoginRefusal
+{
+	None,
+	Disabled,
+	Blocked
+}
+
+/// <summary>
+///   Outcome of <see cref="EndpointAuth.TryAuthorizeAsync" />: authorized plus the verified
+///   credentials, or a stop (the response has already been written).
+/// </summary>
+internal readonly record struct AuthOutcome(bool Authorized, BackendCredentials? Credentials);
 
 /// <summary>
 ///   Shared Basic-auth prologue for the authenticated endpoints (EAS + Autodiscover): the
@@ -177,5 +193,83 @@ internal static class EndpointAuth
 			http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
 			return false;
 		}
+	}
+
+	/// <summary>
+	///   The disabled/blocked decision shared by both authenticated endpoints — the single point the
+	///   E14 drift proved must not be copy-pasted. An account disabled via <c>eas user disable</c>
+	///   refuses every device; operator blocks (<c>eas block/unblock</c>) are the ad-hoc/device-scoped
+	///   variant. A null <paramref name="deviceId" /> matches only user-level blocks (Autodiscover
+	///   carries no device id). Decision only, evaluated after authentication so only holders of valid
+	///   credentials can observe it — the caller writes the 403 so each endpoint keeps its own body.
+	/// </summary>
+	public static async Task<LoginRefusal> CheckLoginRefusalAsync(
+		AccountResolver resolver, SyncStateService state, string userName, string? deviceId, CancellationToken ct)
+	{
+		if (resolver.IsLoginDisabled(userName))
+			return LoginRefusal.Disabled;
+		if (await state.IsLoginBlockedAsync(userName, deviceId, ct))
+			return LoginRefusal.Blocked;
+		return LoginRefusal.None;
+	}
+
+	/// <summary>
+	///   The complete Basic-auth prologue for an endpoint with no interleaved per-request work:
+	///   unconfigured ⇒ 503, over the per-address ceiling ⇒ 429, missing/invalid credentials ⇒ 401
+	///   challenge, backend auth failure ⇒ 429/401/503, and the disabled/blocked gate ⇒ 403 (device
+	///   id optional — null for Autodiscover). Returns the verified credentials when authorized;
+	///   otherwise the response has been written and the caller returns.
+	///   <para>
+	///     The EAS endpoint deliberately does NOT use this: its prologue interleaves query-string
+	///     parsing, device-id validation, the pre-auth metrics label and the pass-through provisioner
+	///     (which must run between auth and the block check), and folding those in would reorder them.
+	///     It shares <see cref="CheckLoginRefusalAsync" /> instead, so the 403 gate cannot drift again.
+	///   </para>
+	/// </summary>
+	public static async Task<AuthOutcome> TryAuthorizeAsync(
+		HttpContext http,
+		BackendRolesProvider rolesProvider,
+		AuthOptions authOptions,
+		AuthThrottle throttle,
+		IBackendSessionFactory sessionFactory,
+		AccountResolver resolver,
+		SyncStateService state,
+		string? blockDeviceId,
+		ILogger logger,
+		CancellationToken ct)
+	{
+		// Unconfigured gateway (no mail backend yet): answer 503 until it is configured via
+		// `eas config set` (applied within ~1s by the settings change-stamp poll).
+		if (!rolesProvider.Current.IsMailConfigured)
+		{
+			logger.LogWarning("Request refused: the gateway has no mail backend configured (503)");
+			http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+			return new AuthOutcome(false, null);
+		}
+
+		string clientKey = ClientKey(http, authOptions);
+		if (IsThrottled(http, throttle, clientKey))
+			return new AuthOutcome(false, null);
+
+		BackendCredentials? credentials = HttpBasicAuth.Parse(http.Request.Headers.Authorization.ToString());
+		if (credentials is null)
+		{
+			HttpBasicAuth.Challenge(http);
+			return new AuthOutcome(false, null);
+		}
+
+		if (!await AuthenticateAsync(http, sessionFactory, throttle, clientKey, credentials, logger, ct))
+			return new AuthOutcome(false, null);
+
+		LoginRefusal refusal = await CheckLoginRefusalAsync(resolver, state, credentials.UserName, blockDeviceId, ct);
+		if (refusal != LoginRefusal.None)
+		{
+			logger.LogWarning("Refused {State} login {User}",
+				refusal == LoginRefusal.Disabled ? "disabled" : "blocked", LogText.Clean(credentials.UserName, 128));
+			http.Response.StatusCode = StatusCodes.Status403Forbidden;
+			return new AuthOutcome(false, null);
+		}
+
+		return new AuthOutcome(true, credentials);
 	}
 }

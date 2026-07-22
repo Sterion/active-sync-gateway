@@ -155,15 +155,18 @@ public static class EasEndpoint
 
 		// A disabled account (eas user disable) refuses every device; operator blocks (eas
 		// block/unblock) are the ad-hoc/device-scoped variant. Both are enforced after auth so
-		// only holders of valid credentials can observe them. 403, not 401 — a challenge would
-		// loop the client through credential prompts.
-		bool disabled = accountResolver.IsLoginDisabled(credentials.UserName);
-		if (disabled || await state.IsLoginBlockedAsync(credentials.UserName, parameters.DeviceId, ct))
+		// only holders of valid credentials can observe them, through the same decision the
+		// Autodiscover prologue uses (EndpointAuth.CheckLoginRefusalAsync — the E14 drift point).
+		// 403, not 401 — a challenge would loop the client through credential prompts.
+		LoginRefusal refusal = await EndpointAuth.CheckLoginRefusalAsync(
+			accountResolver, state, credentials.UserName, parameters.DeviceId, ct);
+		if (refusal != LoginRefusal.None)
 		{
 			logger.LogWarning("Refused {State} EAS login {User} ({DeviceId})",
-				disabled ? "disabled" : "blocked", LogText.Clean(credentials.UserName, 128), parameters.DeviceId);
+				refusal == LoginRefusal.Disabled ? "disabled" : "blocked",
+				LogText.Clean(credentials.UserName, 128), parameters.DeviceId);
 			http.Response.StatusCode = StatusCodes.Status403Forbidden;
-			await http.Response.WriteAsync(disabled
+			await http.Response.WriteAsync(refusal == LoginRefusal.Disabled
 				? "This account is disabled on the gateway."
 				: "This account or device is blocked on the gateway.", ct);
 			return;

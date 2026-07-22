@@ -46,45 +46,17 @@ public static class AutodiscoverEndpoint
 		ILoggerFactory loggerFactory)
 	{
 		CancellationToken ct = http.RequestAborted;
-
-		// Unconfigured gateway (no mail backend yet): answer 503 until configured via `eas config set`.
-		if (!rolesProvider.Current.IsMailConfigured)
-		{
-			loggerFactory.CreateLogger("ActiveSync.Autodiscover")
-				.LogWarning("Autodiscover request refused: the gateway has no mail backend configured (503)");
-			http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-			return;
-		}
-
-		// Autodiscover is authenticated (Basic) just like the EAS endpoint, and shares its
-		// brute-force throttle and credential-verification prologue.
-		string clientKey = EndpointAuth.ClientKey(http, options.Value.Auth);
-		if (EndpointAuth.IsThrottled(http, authThrottle, clientKey))
-			return;
-		BackendCredentials? credentials = HttpBasicAuth.Parse(http.Request.Headers.Authorization.ToString());
-		if (credentials is null)
-		{
-			HttpBasicAuth.Challenge(http);
-			return;
-		}
-
 		ILogger logger = loggerFactory.CreateLogger("ActiveSync.Autodiscover");
-		if (!await EndpointAuth.AuthenticateAsync(
-			    http, sessionFactory, authThrottle, clientKey, credentials, logger, ct))
-			return;
 
-		// Same refusals as the EAS endpoint, and for the same reason: a disabled account
-		// (eas user disable) must not be handed a service document just because it came in
-		// through the other door. Autodiscover carries no device id, so the operator block
-		// is necessarily the user-level one — the device-scoped variant applies only on EAS.
-		bool disabled = resolver.IsLoginDisabled(credentials.UserName);
-		if (disabled || await state.IsLoginBlockedAsync(credentials.UserName, null, ct))
-		{
-			logger.LogWarning("Refused {State} Autodiscover login {User}",
-				disabled ? "disabled" : "blocked", LogText.Clean(credentials.UserName, 128));
-			http.Response.StatusCode = StatusCodes.Status403Forbidden;
+		// Autodiscover is authenticated (Basic) just like the EAS endpoint and shares its whole
+		// prologue: unconfigured ⇒ 503, throttle ⇒ 429, missing/invalid credentials ⇒ 401, backend
+		// auth, and the disabled/blocked ⇒ 403 gate. It carries no device id, so the block is
+		// necessarily the user-level one — the device-scoped variant applies only on EAS.
+		AuthOutcome auth = await EndpointAuth.TryAuthorizeAsync(
+			http, rolesProvider, options.Value.Auth, authThrottle, sessionFactory, resolver, state, null, logger, ct);
+		if (!auth.Authorized)
 			return;
-		}
+		BackendCredentials credentials = auth.Credentials!;
 
 		// An explicitly configured MailAddress is authoritative; otherwise keep the
 		// pass-through chain (address the client posted, then the login).
