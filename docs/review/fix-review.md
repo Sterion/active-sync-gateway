@@ -391,6 +391,22 @@ grep -c $'\xc3\xa2\xc2\x80\|\xc3\xb0\xc2\x9f' review-items.md
 
 Compare every number against the invariants block in `review-items.md`.
 
+**Definition adequacy** — every report-backed finding assigned in the queue must have a full entry in
+`review-items-detail.md` (not just an appearance in the index). Run this to catch a finding whose detail
+is missing, or — the subtler failure — a whole area reconstructed under the wrong ID offset:
+
+```sh
+grep -oE '`[A-Z][0-9]+`' review-items.md | tr -d '`' | grep -E '^[ABCDEFHKLSW][0-9]+$' | sort -u > /tmp/ref
+grep -oE '^[A-Z][0-9]+\.' review-items-detail.md | tr -d '.' | sort -u > /tmp/def
+echo "orphan detail (defined but never referenced — MUST be empty):"; comm -13 /tmp/ref /tmp/def
+echo "missing detail (referenced but not defined):";                  comm -23 /tmp/ref /tmp/def
+```
+
+The *orphan* list must be empty — a defined entry nothing references means a typo'd or off-by-N ID.
+The *missing* list is expected to contain **only** Area `S` items and anything under "Found while
+working the queue" (both are self-contained in `review-items.md` by design). Any `A`–`W` area finding
+showing up there means its detail entry is missing or misnumbered.
+
 ---
 
 ## Recording results
