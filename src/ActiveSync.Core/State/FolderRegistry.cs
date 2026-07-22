@@ -146,24 +146,51 @@ internal sealed class FolderRegistry(SyncDbContext db)
 		List<DeviceFolder> known = await db.DeviceFolders
 			.Where(f => f.DeviceKey == device.Id)
 			.ToListAsync(ct).ConfigureAwait(false);
-		db.DeviceFolders.RemoveRange(known);
+		Dictionary<string, DeviceFolder> knownById = known.ToDictionary(f => f.ServerId, StringComparer.Ordinal);
 
 		Dictionary<string, UserFolder> byBackendKey = registry.ToDictionary(f => f.BackendKey, StringComparer.Ordinal);
-		// DbSet.Add false positive for VSTHRD103 — see GetOrCreateDeviceAsync.
-#pragma warning disable VSTHRD103
+		string ParentServerId(UserFolder f)
+		{
+			return f.ParentBackendKey is not null && byBackendKey.TryGetValue(f.ParentBackendKey, out UserFolder? parent)
+				? parent.ServerId
+				: "0";
+		}
+
+		// Reconcile in place rather than delete-all + reinsert: one renamed folder used to churn
+		// every row's primary key (N DELETE + N INSERT) and bloat the autoincrement (A7).
+		HashSet<string> desired = new(StringComparer.Ordinal);
 		foreach (UserFolder f in registry)
-			db.DeviceFolders.Add(new DeviceFolder
+		{
+			desired.Add(f.ServerId);
+			string parentId = ParentServerId(f);
+			if (knownById.TryGetValue(f.ServerId, out DeviceFolder? row))
 			{
-				DeviceKey = device.Id,
-				ServerId = f.ServerId,
-				DisplayName = f.DisplayName,
-				ParentServerId = f.ParentBackendKey is not null &&
-				                 byBackendKey.TryGetValue(f.ParentBackendKey, out UserFolder? parent)
-					? parent.ServerId
-					: "0",
-				Type = f.Type
-			});
+				if (row.DisplayName != f.DisplayName)
+					row.DisplayName = f.DisplayName;
+				if ((row.ParentServerId ?? "0") != parentId)
+					row.ParentServerId = parentId;
+				if (row.Type != f.Type)
+					row.Type = f.Type;
+			}
+			else
+			{
+				// DbSet.Add false positive for VSTHRD103 — see GetOrCreateDeviceAsync.
+#pragma warning disable VSTHRD103
+				db.DeviceFolders.Add(new DeviceFolder
+				{
+					DeviceKey = device.Id,
+					ServerId = f.ServerId,
+					DisplayName = f.DisplayName,
+					ParentServerId = parentId,
+					Type = f.Type
+				});
 #pragma warning restore VSTHRD103
+			}
+		}
+
+		foreach (DeviceFolder row in known)
+			if (!desired.Contains(row.ServerId))
+				db.DeviceFolders.Remove(row);
 
 		device.FolderSyncKey++;
 		try

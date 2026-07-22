@@ -234,6 +234,32 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task CommitFolderHierarchy_UnchangedCommit_KeepsRowIdentity()
+	{
+		// The commit reconciled by deleting the whole hierarchy and reinserting it, so one
+		// renamed folder churned every row's primary key. A commit that changes nothing must
+		// leave the existing rows untouched (A7).
+		Device device = await _service.GetOrCreateDeviceAsync("u@a7", "DEV1", "Phone", CancellationToken.None);
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@a7",
+			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
+			 new BackendFolder("imap:Sent", "Sent", null, 5, "Email")], CancellationToken.None);
+		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
+
+		async Task<int[]> DeviceFolderIds()
+		{
+			await using SqliteSyncDbContext read = StateTestSupport.NewContext(_connection);
+			return await read.DeviceFolders.Where(f => f.DeviceKey == device.Id)
+				.OrderBy(f => f.ServerId).Select(f => f.Id).ToArrayAsync();
+		}
+
+		int[] before = await DeviceFolderIds();
+		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
+		int[] after = await DeviceFolderIds();
+
+		Assert.Equal(before, after);
+	}
+
+	[Fact]
 	public async Task CommitCollectionState_ConcurrentWrite_LosesNoUpdate_ThrowsOnStale()
 	{
 		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
