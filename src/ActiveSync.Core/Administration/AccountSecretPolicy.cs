@@ -31,6 +31,14 @@ internal static class AccountSecretPolicy
 
 	internal static SecretResult PrepareGatewayPassword(string raw)
 	{
+		// B19: an empty/whitespace plaintext must never be hashed. Hash("") is a valid pbkdf2$
+		// credential and Verify(Hash(""), "") is true, so an empty gateway Password would let an
+		// empty Basic-auth password authenticate locally and bypass the backend entirely. An
+		// already-hashed/sealed value is handled below (its shape is validated, not its length).
+		if (!GatewayPasswordHasher.IsHashed(raw) && !SecretValue.IsSealed(raw) &&
+		    string.IsNullOrWhiteSpace(raw))
+			return new SecretResult(null,
+				"The gateway Password cannot be empty (clear it instead to fall through to the backend).");
 		if (GatewayPasswordHasher.IsHashed(raw))
 			return GatewayPasswordHasher.TryParse(raw, out string? error)
 				? new SecretResult(raw, null)

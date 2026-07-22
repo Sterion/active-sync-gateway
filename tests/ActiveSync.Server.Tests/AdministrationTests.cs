@@ -116,6 +116,21 @@ public sealed class AdministrationTests
 	}
 
 	[Fact]
+	public void SecretPolicy_GatewayPassword_RejectsEmpty_ClosingTheBypass()
+	{
+		// B19: an empty gateway Password used to be hashed into a valid pbkdf2$ credential.
+		// GatewayPasswordHasher.Verify(Hash(""), "") returns true, so the account authenticated
+		// locally against a hash of the empty string and the backend was NEVER probed — a phone
+		// sending an empty Basic-auth password got in. The policy must refuse it outright.
+		foreach (string blank in new[] { "", "   ", "\t" })
+		{
+			AccountSecretPolicy.SecretResult result = AccountSecretPolicy.PrepareGatewayPassword(blank);
+			Assert.NotNull(result.Error);
+			Assert.Null(result.Value);
+		}
+	}
+
+	[Fact]
 	public void SecretPolicy_BackendPassword_SealsWithKey_PlainWithout_RejectsHash()
 	{
 		EncryptionOptions withKey = new() { Key = KeyBase64 };
