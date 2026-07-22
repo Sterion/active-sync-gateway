@@ -82,6 +82,18 @@ public sealed class PingHandler(
 			return;
 		}
 
+		// Cap the number of monitored folders (MS-ASCMD Ping Status 6): a client naming more than
+		// the server allows is told the limit so it can trim its watch set, rather than the gateway
+		// silently spinning up an unbounded fan of watchers per heartbeat.
+		if (eas.MaxPingFolders > 0 && parameters.FolderIds.Count > eas.MaxPingFolders)
+		{
+			await context.WriteResponseAsync(new XDocument(
+				new XElement(P + "Ping",
+					new XElement(P + "Status", "6"),
+					new XElement(P + "MaxFolders", eas.MaxPingFolders.ToString()))));
+			return;
+		}
+
 		// Resolve folders to stores.
 		Dictionary<IContentStore, List<(string CollectionId, UserFolder Folder)>> byStore = new();
 		foreach (string collectionId in parameters.FolderIds)

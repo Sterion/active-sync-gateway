@@ -62,6 +62,27 @@ public sealed class PingHandlerTests : IDisposable
 		Assert.Contains(inbox.ServerId, reported);
 	}
 
+	// F18: monitoring more folders than the configured cap is refused with Ping Status 6 and the
+	// limit, rather than silently spinning up an unbounded fan of watchers.
+	[Fact]
+	public async Task Ping_MonitoringMoreThanTheCap_IsRefusedWithStatus6()
+	{
+		_harness.Options.Eas.MaxPingFolders = 2;
+		_harness.Options.Eas.MinHeartbeatSeconds = 1; // keep the un-capped (red) path from idling long
+		_harness.Session.Store.WaitForChanges = _ => Array.Empty<string>();
+		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email),
+			new BackendFolder("imap:A", "A", null, EasFolderType.UserMail, EasClass.Email),
+			new BackendFolder("imap:B", "B", null, EasFolderType.UserMail, EasClass.Email));
+
+		PingHandler handler = NewHandler();
+		XDocument? response = await _harness.RunAsync(handler, "Ping",
+			PingRequest(registry.Select(f => f.ServerId), heartbeat: 2));
+
+		Assert.Equal("6", Status(response));
+		Assert.Equal("2", response!.Root!.Element(P + "MaxFolders")?.Value);
+	}
+
 	private async Task<UserFolder> InboxAsync()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(

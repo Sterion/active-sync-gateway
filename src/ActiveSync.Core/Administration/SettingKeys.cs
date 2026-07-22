@@ -58,6 +58,8 @@ internal static class SettingKeys
 			"Maximum Ping/Sync heartbeat (EAS cap 3540).", Min: 1, Max: 3540),
 		new("ActiveSync:Eas:DavPollSeconds", ValueType.Int, false, "60",
 			"DAV collection poll interval during Ping.", Min: 1, Max: 86400),
+		new("ActiveSync:Eas:MaxPingFolders", ValueType.Int, false, "200",
+			"Maximum folders a single Ping may monitor (Status 6 beyond it; 0 disables the cap).", Min: 0, Max: 65535),
 		new("ActiveSync:Eas:MaxWindowSize", ValueType.Int, false, "512",
 			"Maximum Sync window size.", Min: 1, Max: 522),
 		new("ActiveSync:Eas:DefaultWindowSize", ValueType.Int, false, "100",

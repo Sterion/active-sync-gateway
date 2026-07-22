@@ -181,6 +181,7 @@ supported yet.
 | `MinHeartbeatSeconds` | `60` | Lower bound for Ping/Sync heartbeats (must be ≥ 1). |
 | `MaxHeartbeatSeconds` | `1770` | Upper bound for Ping/Sync heartbeats (EAS allows up to 3540). |
 | `DavPollSeconds` | `60` | ctag/sync-token poll interval for DAV collections during waits. |
+| `MaxPingFolders` | `200` | Maximum number of folders a single Ping may monitor. A request naming more is refused with Ping Status 6 and this limit; `0` disables the cap. |
 | `DefaultWindowSize` | `100` | Items per Sync response when the client sends no `WindowSize`. |
 | `MaxWindowSize` | `512` | Hard cap on the client-requested window size. |
 | `SessionIdleMinutes` | `15` | Idle backend sessions (and with them the user's shared IDLE watchers) are evicted after this long. |

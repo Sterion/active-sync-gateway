@@ -29,6 +29,13 @@ public sealed class EasOptions
 	/// <summary>Interval for polling DAV collections during Ping.</summary>
 	public int DavPollSeconds { get; set; } = 60;
 
+	/// <summary>
+	///   Maximum number of folders a single Ping may monitor. A request naming more is answered with
+	///   Ping Status 6 and this limit (MS-ASCMD 2.2.3.171.2), so the client trims its watch set.
+	///   0 disables the cap.
+	/// </summary>
+	public int MaxPingFolders { get; set; } = 200;
+
 	public int MaxWindowSize { get; set; } = 512;
 	public int DefaultWindowSize { get; set; } = 100;
 
