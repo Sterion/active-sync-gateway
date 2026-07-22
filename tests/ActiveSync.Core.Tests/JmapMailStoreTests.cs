@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Xml.Linq;
 using ActiveSync.Backends.Jmap;
 using ActiveSync.Contracts;
 
@@ -76,6 +77,31 @@ public sealed class JmapMailStoreTests
 
 		await Assert.ThrowsAsync<BackendException>(() =>
 			store.DeleteItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", permanent: true, CancellationToken.None));
+	}
+
+	// H20: updating a message the server has since deleted (Email/set returns it in notUpdated with
+	// type notFound) must surface as BackendItemNotFoundException so the host reconciles, not as a
+	// generic error or a silent success.
+	[Fact]
+	public async Task UpdateItem_ServerReportsNotFound_ThrowsItemNotFound()
+	{
+		StubHandler stub = new(request =>
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			return Json("""
+			{"methodResponses":[
+			  ["Email/set",{"accountId":"c","notUpdated":{"E1":{"type":"notFound"}}},"0"]
+			],"sessionState":"x"}
+			""");
+		});
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		XElement change = new("ApplicationData",
+			new XElement(XName.Get("Read", "Email"), "1"));
+
+		await Assert.ThrowsAsync<BackendItemNotFoundException>(() =>
+			store.UpdateItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", change, CancellationToken.None));
 	}
 
 	private static HttpResponseMessage Json(string body)

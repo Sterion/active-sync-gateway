@@ -744,10 +744,17 @@ public sealed class JmapMailStore(
 				throw SetError(kind, verb, failure.Name, failure.Value);
 	}
 
-	/// <summary>Maps a JMAP SetError to an exception.</summary>
+	/// <summary>
+	///   Maps a JMAP SetError to an exception. H20: a <c>notFound</c> type becomes
+	///   <see cref="BackendItemNotFoundException" /> so the host reconciles an item the server no
+	///   longer has (re-add/delete) instead of treating a doomed update/delete as a generic
+	///   transient failure — or, worse, as success.
+	/// </summary>
 	private static BackendException SetError(string kind, string verb, string id, JsonElement error)
 	{
 		string type = error.TryGetProperty("type", out JsonElement t) ? t.GetString() ?? "unknown" : "unknown";
-		return new BackendException($"JMAP {kind}/{verb} failed for '{id}': {type}.");
+		return string.Equals(type, "notFound", StringComparison.Ordinal)
+			? new BackendItemNotFoundException($"JMAP {kind} {id} no longer exists.")
+			: new BackendException($"JMAP {kind}/{verb} failed for '{id}': {type}.");
 	}
 }

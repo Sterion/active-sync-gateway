@@ -328,7 +328,11 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		    failures.ValueKind == JsonValueKind.Object && failures.TryGetProperty(id, out JsonElement error))
 		{
 			string type = error.TryGetProperty("type", out JsonElement t) ? t.GetString() ?? "unknown" : "unknown";
-			throw new BackendException($"JMAP CalendarEvent/set failed for '{id}': {type}.");
+			// H20: a notFound SetError means the event is gone; surface it as not-found so the host
+			// reconciles (re-add/delete) rather than treating the update/delete as a transient error.
+			throw string.Equals(type, "notFound", StringComparison.Ordinal)
+				? new BackendItemNotFoundException($"JMAP CalendarEvent {id} no longer exists.")
+				: new BackendException($"JMAP CalendarEvent/set failed for '{id}': {type}.");
 		}
 	}
 }
