@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Net.Security;
 using ActiveSync.Backends.Common;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
@@ -142,16 +141,10 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 		JmapOptions options = settings.Bind<JmapOptions>();
 		if (!Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out Uri? baseUri))
 			return true; // misconfiguration is a startup-validation concern, not a readiness failure
-		SocketsHttpHandler handler = new()
-		{
-			AllowAutoRedirect = false,
-			PooledConnectionLifetime = TimeSpan.FromMinutes(1)
-		};
-		RemoteCertificateValidationCallback? certCallback = ServerCertificateValidator.CreateCallback(
-			options.AllowInvalidCertificates, options.CaCertificatePath);
-		if (certCallback is not null)
-			handler.SslOptions.RemoteCertificateValidationCallback = certCallback;
-		using HttpClient http = new(handler) { Timeout = TimeSpan.FromSeconds(5) };
+		// H26: reuse a pooled handler per TLS shape instead of building and discarding one (with
+		// its connection pool) on every readiness sweep.
+		using HttpClient http = BackendHttpClientFactory.CreateProbeClient(
+			options.AllowInvalidCertificates, options.CaCertificatePath, TimeSpan.FromSeconds(5));
 		using HttpResponseMessage response = await http.GetAsync(
 			new Uri(baseUri, "/.well-known/jmap"), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
 		return true;
