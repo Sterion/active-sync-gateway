@@ -240,7 +240,7 @@ public sealed class SendMailHandler(
 		string? itemKey = await Folders.ResolveItemKeyAsync(
 			resolved.Value.Folder, resolved.Value.Store, request.SourceItemId, ct);
 		if (itemKey is not null)
-			await resolved.Value.Store.DeleteItemAsync(resolved.Value.Folder.BackendKey, itemKey, ct, true);
+			await resolved.Value.Store.DeleteItemAsync(resolved.Value.Folder.BackendKey, itemKey, true, ct);
 	}
 }
 

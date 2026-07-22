@@ -75,7 +75,7 @@ public sealed class FolderServiceTests : IDisposable
 			string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task DeleteItemAsync(string folderBackendKey, string itemKey, CancellationToken ct, bool permanent = false) =>
+		public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct) =>
 			throw new NotSupportedException();
 
 		public Task<string> MoveItemAsync(

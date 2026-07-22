@@ -69,7 +69,7 @@ public static class MailboxJanitor
 					foreach (string href in revisions.Keys)
 						try
 						{
-							await store.DeleteItemAsync(folder.BackendKey, href, ct);
+							await store.DeleteItemAsync(folder.BackendKey, href, false, ct);
 						}
 						catch
 						{

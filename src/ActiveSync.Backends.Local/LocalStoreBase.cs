@@ -139,7 +139,7 @@ public abstract class LocalStoreBase(
 		}
 	}
 
-	public async Task DeleteItemAsync(string folderBackendKey, string itemKey, CancellationToken ct, bool permanent = false)
+	public async Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
 	{
 		await using SyncDbContext db = dbFactory.CreateDbContext();
 		LocalItem? row = await FindAsync(db, itemKey, ct).ConfigureAwait(false);

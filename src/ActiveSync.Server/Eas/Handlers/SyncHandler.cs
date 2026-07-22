@@ -525,7 +525,7 @@ public sealed partial class SyncHandler(
 				    store.EasClass.Equals(EasClass.Email, StringComparison.OrdinalIgnoreCase))
 				{
 					await SubmitDraftAsync(context, appData, folder.BackendKey, itemKey, ct);
-					await store.DeleteItemAsync(folder.BackendKey, itemKey, ct, true);
+					await store.DeleteItemAsync(folder.BackendKey, itemKey, true, ct);
 					snapshot.Remove(itemKey);
 					appliedChanges[serverId] = new AppliedClientChange(itemKey, null);
 					return null;
@@ -608,7 +608,7 @@ public sealed partial class SyncHandler(
 					string? deletedIcs = IsCalendarClass(store)
 						? await MeetingInvitationService.CaptureIcsAsync(store, folder.BackendKey, itemKey, ct)
 						: null;
-					await store.DeleteItemAsync(folder.BackendKey, itemKey, ct, permanent: !deletesAsMoves);
+					await store.DeleteItemAsync(folder.BackendKey, itemKey, !deletesAsMoves, ct);
 					snapshot.Remove(itemKey);
 					if (deletedIcs is not null)
 						await invitations.AfterDeleteAsync(context, store, deletedIcs, ct);

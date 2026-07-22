@@ -127,7 +127,7 @@ public abstract class DavStoreBase(
 			?? Guid.NewGuid().ToString();
 	}
 
-	public Task DeleteItemAsync(string folderBackendKey, string itemKey, CancellationToken ct, bool permanent = false)
+	public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
 	{
 		return dav.DeleteAsync(itemKey, ct); // DAV deletes are always permanent
 	}

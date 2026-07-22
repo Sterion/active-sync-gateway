@@ -44,8 +44,10 @@ public interface IContentStore
 	///   Deletes an item. When <paramref name="permanent" /> is true the client asked for a
 	///   hard delete (Sync DeletesAsMoves=0); otherwise a store may move it to Trash. Only mail
 	///   distinguishes the two — DAV and local stores always delete outright.
+	///   K59: the token comes last (convention) and <paramref name="permanent" /> is required —
+	///   an interface method must not carry a caller-invisible default.
 	/// </summary>
-	Task DeleteItemAsync(string folderBackendKey, string itemKey, CancellationToken ct, bool permanent = false);
+	Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct);
 
 	/// <summary>Moves an item to another folder of the same class; returns the new item key.</summary>
 	Task<string> MoveItemAsync(

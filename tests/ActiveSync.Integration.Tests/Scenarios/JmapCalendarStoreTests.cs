@@ -76,7 +76,7 @@ public sealed class JmapCalendarStoreTests
 		}
 		finally
 		{
-			await store.DeleteItemAsync(folderKey, itemKey, CancellationToken.None);
+			await store.DeleteItemAsync(folderKey, itemKey, false, CancellationToken.None);
 		}
 
 		IReadOnlyDictionary<string, string> after =
@@ -122,7 +122,7 @@ public sealed class JmapCalendarStoreTests
 		}
 		finally
 		{
-			await store.DeleteItemAsync(folderKey, itemKey, CancellationToken.None);
+			await store.DeleteItemAsync(folderKey, itemKey, false, CancellationToken.None);
 		}
 	}
 
@@ -161,7 +161,7 @@ public sealed class JmapCalendarStoreTests
 		}
 		finally
 		{
-			await store.DeleteItemAsync(folderKey, itemKey, CancellationToken.None);
+			await store.DeleteItemAsync(folderKey, itemKey, false, CancellationToken.None);
 		}
 	}
 
@@ -205,7 +205,7 @@ public sealed class JmapCalendarStoreTests
 		}
 		finally
 		{
-			await store.DeleteItemAsync(folderKey, itemKey, CancellationToken.None);
+			await store.DeleteItemAsync(folderKey, itemKey, false, CancellationToken.None);
 		}
 	}
 }

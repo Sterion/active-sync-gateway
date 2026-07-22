@@ -290,7 +290,7 @@ public sealed partial class ImapMailBackend(
 		       applicationData.Element(AirSyncBase + "Attachments") is not null;
 	}
 
-	public Task DeleteItemAsync(string folderBackendKey, string itemKey, CancellationToken ct, bool permanent = false)
+	public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
 	{
 		return session.RunAsync(async client =>
 		{

@@ -260,7 +260,7 @@ public sealed class JmapMailStore(
 	}
 
 	public async Task DeleteItemAsync(
-		string folderBackendKey, string itemKey, CancellationToken ct, bool permanent = false)
+		string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string? trashId = permanent ? null : await FindMailboxByRoleAsync(account, "trash", ct).ConfigureAwait(false);

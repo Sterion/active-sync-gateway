@@ -55,4 +55,18 @@ public sealed class ContractSurfaceTests
 	{
 		Assert.False(typeof(BackendException).IsSealed);
 	}
+
+	// K59: DeleteItemAsync put the CancellationToken THIRD (before `bool permanent = false`),
+	// breaking the ct-last convention every other member honours, and used an optional parameter
+	// on an interface method (a compile-time default the implementer cannot see or change). The
+	// token must come last and there must be no optional parameters.
+	[Fact]
+	public void DeleteItemAsync_TakesCancellationTokenLast_WithNoOptionalParameters()
+	{
+		MethodInfo method = typeof(IContentStore).GetMethod(nameof(IContentStore.DeleteItemAsync))!;
+		ParameterInfo[] parameters = method.GetParameters();
+
+		Assert.Equal(typeof(CancellationToken), parameters[^1].ParameterType);
+		Assert.DoesNotContain(parameters, static p => p.IsOptional);
+	}
 }

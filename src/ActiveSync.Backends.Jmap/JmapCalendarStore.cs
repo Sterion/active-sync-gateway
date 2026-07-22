@@ -135,7 +135,7 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 	}
 
 	public async Task DeleteItemAsync(
-		string folderBackendKey, string itemKey, CancellationToken ct, bool permanent = false)
+		string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		using JmapResponse response = await client.CallAsync(Cap, "CalendarEvent/set", new Dictionary<string, object?>

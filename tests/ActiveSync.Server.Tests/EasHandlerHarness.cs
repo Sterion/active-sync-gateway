@@ -173,7 +173,7 @@ public sealed class EasHandlerHarness : IDisposable
 			throw new NotSupportedException();
 		}
 
-		public Task DeleteItemAsync(string folderBackendKey, string itemKey, CancellationToken ct, bool permanent = false)
+		public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
 		{
 			throw new NotSupportedException();
 		}

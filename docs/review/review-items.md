@@ -203,7 +203,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **16. Crypto namespace realignment** — ~~`S2`~~ ~~`K49`~~ **COMPLETE**
 > `ActiveSync.Crypto` ships types in `ActiveSync.Core.*` namespaces, so the slim CLI's "doesn't reference Core" property is invisible in its own source. Do it before the package has external consumers. — Done: `SecretValue`, `EncryptionKeyLoader` (were `ActiveSync.Core.Security`) and `EncryptionOptions` (was `ActiveSync.Core.Options`) now declare `ActiveSync.Crypto`, matching the assembly (and `LocalCliEnvelope`/`LocalCliResult`, already there). The break made the finding visible: `ActiveSync.Cli` no longer compiled with its `using ActiveSync.Core.*` because it never referenced Core. 27 consumers updated to `using ActiveSync.Crypto;`; dead Core usings removed where the moved type was their only reason. Guarded by `DependencyRuleTests.Crypto_TypesDeclareTheCryptoNamespace` (asserts every exported Crypto type sits under `ActiveSync.Crypto`).
 
-**17. Contracts surface** — `K57` `K58` `K59` `K61` ~~`K62`~~ ~~`K64`~~ ~~`K67`~~ ~~`K69`~~ `K71`
+**17. Contracts surface** — `K57` `K58` ~~`K59`~~ `K61` ~~`K62`~~ ~~`K64`~~ ~~`K67`~~ ~~`K69`~~ `K71`
 > NOTE — **Breaking — bundle into one major version bump.** Move host-only types out, split `IContentStore` into optional capabilities, make `CreateConnection` async, fix fail-open `SharedCollection.Parse`, add `ContractVersion`.
 
 **18. WebUi → Core services** — `S3` `C18`
