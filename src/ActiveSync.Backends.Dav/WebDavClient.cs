@@ -133,6 +133,21 @@ public sealed class WebDavClient : IDisposable
 				request.Headers.IfMatch.Add(parsed);
 			return request;
 		}, ct).ConfigureAwait(false);
+
+		// A create-PUT (If-None-Match:*) that comes back 412 means the resource already exists at
+		// this href. The transient retry above replays a PUT whose response was lost, so if the
+		// first attempt actually reached the server the replay lands on the resource it just
+		// created — the create SUCCEEDED. Surfacing the 412 would tell the client the item wasn't
+		// created though it was; instead treat it as success and let the caller (CreateItemAsync ->
+		// ResolveStoredHrefAsync) adopt the stored href/ETag. An update-PUT uses If-Match, so its
+		// 412 (a real ETag conflict / lost update) still surfaces below. (H18)
+		if (ifNoneMatch && response.StatusCode == HttpStatusCode.PreconditionFailed)
+		{
+			_wireLogger?.LogDebug(
+				"DAV create-PUT {Href} returned 412 (already exists — a replayed create); treating as success", href);
+			return null;
+		}
+
 		await EnsureSuccessAsync(response, "PUT", href, ct).ConfigureAwait(false);
 		return response.Headers.ETag?.Tag;
 	}
