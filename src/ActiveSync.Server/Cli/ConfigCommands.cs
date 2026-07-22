@@ -183,10 +183,18 @@ internal sealed class ConfigSetCommand(IAnsiConsole terminal) : SettingsCommandB
 		// database — this command's configuration is the file/env layer only.
 		Dictionary<string, string?> stored = new(
 			await store.LoadAllAsync(cancellationToken), StringComparer.OrdinalIgnoreCase);
+		// The effective view the next startup would validate: file/env under the database overrides.
+		IConfiguration effective = new ConfigurationBuilder()
+			.AddConfiguration(fileConfig)
+			.AddInMemoryCollection(stored)
+			.Build();
 		string? error = SettingKeys.Validate(definition, settings.Value) ??
 		                BackendKeyValidator.Validate(Registry,
 			                key => stored.TryGetValue(key, out string? v) ? v : fileConfig[key],
-			                settings.Key, settings.Value);
+			                settings.Key, settings.Value) ??
+		                (SettingKeys.IsCatalogueKey(definition.Key)
+			                ? SettingKeys.ValidateStartupImpact(effective, definition.Key, settings.Value)
+			                : null);
 		if (error is not null)
 		{
 			await Console.Error.WriteLineAsync(error);

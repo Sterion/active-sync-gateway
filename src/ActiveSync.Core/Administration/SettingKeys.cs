@@ -1,6 +1,9 @@
 using System.Globalization;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Core.Administration;
 
@@ -236,6 +239,47 @@ internal static class SettingKeys
 				Secret: SecretRedaction.IsSecretName(parts[^1]));
 
 		return null;
+	}
+
+	/// <summary>
+	///   Cross-field / startup validation of a pending catalogue write (B1). The catalogue's own
+	///   per-key <see cref="Validate(SettingKey, string)" /> only knows type + single-key bounds; the
+	///   real gate a value must survive is <see cref="ActiveSyncOptionsValidator" />, which startup
+	///   runs against the whole effective configuration and which THROWS on failure — so a value the
+	///   catalogue accepts (e.g. <c>WatchdogSeconds=5</c>, or a <c>MaxHeartbeatSeconds</c> below the
+	///   current Min) can persist, run, then brick the next boot. This applies the pending
+	///   <paramref name="key" />=<paramref name="value" /> on top of the effective configuration, binds
+	///   <see cref="ActiveSyncOptions" /> and runs that same validator, so both the CLI and the web
+	///   editor reject at write time exactly what startup would reject.
+	///
+	///   Only failures this write INTRODUCES are surfaced: a gateway already sitting on an unrelated
+	///   invalid value (a bad file/env setting the operator is mid-fixing) must not have every
+	///   unrelated edit blocked by it. Returns a combined error message, or null when the write leaves
+	///   the configuration no worse than it found it.
+	/// </summary>
+	internal static string? ValidateStartupImpact(IConfiguration effective, string key, string? value)
+	{
+		ActiveSyncOptionsValidator validator = new();
+		IReadOnlyList<string> before = Failures(validator, Bind(effective));
+
+		IConfiguration candidate = new ConfigurationBuilder()
+			.AddConfiguration(effective)
+			.AddInMemoryCollection(new Dictionary<string, string?> { [key] = value })
+			.Build();
+		List<string> introduced = Failures(validator, Bind(candidate))
+			.Where(failure => !before.Contains(failure))
+			.ToList();
+
+		return introduced.Count > 0 ? string.Join(" ", introduced) : null;
+	}
+
+	private static ActiveSyncOptions Bind(IConfiguration config) =>
+		config.GetSection("ActiveSync").Get<ActiveSyncOptions>() ?? new ActiveSyncOptions();
+
+	private static IReadOnlyList<string> Failures(ActiveSyncOptionsValidator validator, ActiveSyncOptions options)
+	{
+		ValidateOptionsResult result = validator.Validate(null, options);
+		return result.Failed ? (result.Failures ?? []).ToList() : [];
 	}
 
 	/// <summary>Validates a value against a key's type/bounds. Returns an error message or null.</summary>

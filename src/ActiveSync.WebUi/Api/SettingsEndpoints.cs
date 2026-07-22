@@ -70,8 +70,13 @@ internal static class SettingsEndpoints
 				return EndpointHelpers.BadRequest($"'{key}' is not a recognized setting");
 			// Backend leafs are strings to the catalogue; their provider knows their real shape.
 			// The configuration here already carries the database layer, so it IS the effective value.
+			// Catalogue keys also run the startup validator (B1) so a delayed-brick value — one the
+			// catalogue accepts but ActiveSyncOptionsValidator would reject at boot — is refused now.
 			if ((SettingKeys.Validate(definition, request.Value) ??
-			     BackendKeyValidator.Validate(registry, k => config[k], key, request.Value))
+			     BackendKeyValidator.Validate(registry, k => config[k], key, request.Value) ??
+			     (SettingKeys.IsCatalogueKey(definition.Key)
+				      ? SettingKeys.ValidateStartupImpact(config, definition.Key, request.Value)
+				      : null))
 			    is { } validationError)
 				return EndpointHelpers.BadRequest(validationError);
 
