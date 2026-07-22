@@ -266,12 +266,14 @@ public sealed partial class SyncHandler
 			new XElement(AS + "CollectionId", collectionId),
 			new XElement(AS + "Status", "1"));
 		EchoClassIfLegacy(response, context, store);
+		// F9: MoreAvailable is emitted immediately after Status — before Responses/Commands — as
+		// Exchange and Z-Push do; WBXML is order-sensitive for strict sequence parsers.
+		if (moreAvailable)
+			response.Add(new XElement(AS + "MoreAvailable"));
 		if (clientResponses.Count > 0)
 			response.Add(new XElement(AS + "Responses", clientResponses));
 		if (serverCommands.Count > 0)
 			response.Add(new XElement(AS + "Commands", serverCommands));
-		if (moreAvailable)
-			response.Add(new XElement(AS + "MoreAvailable"));
 		return new CollectionResult(response, true, null);
 	}
 }

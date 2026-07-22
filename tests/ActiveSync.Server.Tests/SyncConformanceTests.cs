@@ -272,6 +272,35 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Null(collection.Element(AS + "Class"));
 	}
 
+	// ---- F9: MoreAvailable is emitted right after Status, before Commands/Responses ----
+	[Fact]
+	public async Task F9_MoreAvailable_PrecedesCommands()
+	{
+		UserFolder inbox = await RegisterInboxAsync();
+		SyncHandler handler = NewSyncHandler();
+
+		// Two items known to the client, both gone from the backend → two Deletes; a WindowSize of 1
+		// truncates to one and sets MoreAvailable, so the response carries both Commands and MoreAvailable.
+		Device device = await _harness.State.GetOrCreateDeviceAsync(
+			EasHandlerHarness.UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
+			device, inbox.ServerId, "0", CancellationToken.None);
+		await _harness.State.CommitCollectionStateAsync(
+			state!, new Dictionary<string, string> { ["10"] = "x", ["20"] = "y" }, 0, CancellationToken.None);
+
+		XDocument? response = await _harness.RunAsync(handler, "Sync",
+			SyncRequest(inbox.ServerId, "1", new XElement(AS + "WindowSize", "1")));
+
+		XElement collection = response!.Root!.Element(AS + "Collections")!.Element(AS + "Collection")!;
+		List<XElement> children = collection.Elements().ToList();
+		int moreAt = children.FindIndex(e => e.Name.LocalName == "MoreAvailable");
+		int commandsAt = children.FindIndex(e => e.Name.LocalName == "Commands");
+		Assert.True(moreAt >= 0, "MoreAvailable should be present");
+		Assert.True(commandsAt >= 0, "Commands should be present");
+		// Exchange/Z-Push emit MoreAvailable immediately after Status; order matters for strict parsers.
+		Assert.True(moreAt < commandsAt, $"MoreAvailable (index {moreAt}) must precede Commands (index {commandsAt})");
+	}
+
 	private sealed class StubLifetime : IHostApplicationLifetime
 	{
 		public CancellationToken ApplicationStarted => CancellationToken.None;
