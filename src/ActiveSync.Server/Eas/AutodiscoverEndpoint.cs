@@ -64,7 +64,7 @@ public static class AutodiscoverEndpoint
 		ResolvedAccount account = resolver.Resolve(credentials);
 		string? configuredAddress = account.MailAddressIsExplicit ? account.MailAddress : null;
 		string email = configuredAddress ?? await ExtractEmailAsync(http, wireLogger, ct) ?? credentials.UserName;
-		string easUrl = BuildEasUrl(http, options.CurrentValue.PublicUrl);
+		string easUrl = BuildEasUrl(http, options.CurrentValue.Auth, options.CurrentValue.PublicUrl);
 
 		XDocument doc = new(
 			new XDeclaration("1.0", "utf-8", null),
@@ -113,16 +113,19 @@ public static class AutodiscoverEndpoint
 		}
 	}
 
-	private static string BuildEasUrl(HttpContext http, string? publicUrl)
+	internal static string BuildEasUrl(HttpContext http, AuthOptions auth, string? publicUrl)
 	{
 		// A configured PublicUrl wins: it never depends on client-supplied headers.
 		if (!string.IsNullOrWhiteSpace(publicUrl))
 			return publicUrl.TrimEnd('/') + EasEndpoint.Path;
-		// Fallback: honour reverse-proxy headers so the advertised URL is the public one.
-		// These are spoofable by the caller (they only affect the caller's own response);
-		// set ActiveSync:PublicUrl to take them out of the picture entirely.
-		string scheme = http.Request.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? http.Request.Scheme;
-		string? host = http.Request.Headers["X-Forwarded-Host"].FirstOrDefault()
+		// Fallback: honour reverse-proxy headers so the advertised URL is the public one — but ONLY
+		// from a configured Auth:TrustedProxies hop (E1/E10). From a direct/untrusted peer the
+		// forwarded scheme/host are ignored (they would otherwise hand an authenticated client an
+		// attacker-chosen sync URL); set ActiveSync:PublicUrl to pin the advertised URL entirely.
+		bool trusted = EndpointAuth.IsFromTrustedProxy(http, auth);
+		string scheme = (trusted ? http.Request.Headers["X-Forwarded-Proto"].FirstOrDefault() : null)
+		                ?? http.Request.Scheme;
+		string? host = (trusted ? http.Request.Headers["X-Forwarded-Host"].FirstOrDefault() : null)
 		               ?? http.Request.Host.Value;
 		return $"{scheme}://{host}{EasEndpoint.Path}";
 	}

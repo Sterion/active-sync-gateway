@@ -192,7 +192,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **6. WebUi throttle & OIDC admin binding** — ~~`C1`~~ ~~`C4`~~ **COMPLETE**
 > `C1` login success clears only the per-user throttle key, never the IP-wide one, so a busy NAT IP eventually 429s everyone. `C4` OIDC signs in an unbound config-declared admin on a bare login-claim match (mutable `preferred_username` takeover).
 
-**7. Forwarded-header trust** — ~~`E1`~~ `E10`
+**7. Forwarded-header trust** — ~~`E1`~~ ~~`E10`~~ **COMPLETE**
 > `E1` `X-Forwarded-Proto` is trusted from any peer to rewrite the scheme (drives OIDC redirect_uri + Autodiscover URLs) unless `PublicUrl` is set. `E10` Autodiscover reflects `X-Forwarded-Host` into the advertised server URL. Gate both on `Auth:TrustedProxies` like `EndpointAuth` already does.
 
 **8. Protocol version gating & query parsing** — `W3` `W2` `W4`
