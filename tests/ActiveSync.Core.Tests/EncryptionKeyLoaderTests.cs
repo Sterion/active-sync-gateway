@@ -133,6 +133,35 @@ public class EncryptionKeyLoaderTests
 	}
 
 	[Fact]
+	public void NonCanonicalBase64_IsNotUsedAsRawKey()
+	{
+		// K14 (red-first): a value that decodes to 32 bytes but is NOT canonical base64 (here an
+		// embedded space — Convert.FromBase64String ignores whitespace) is a passphrase, not a raw
+		// key. The historical code took the raw path for anything that merely decoded to 32 bytes,
+		// using the low-entropy input verbatim as the AES key with NO PBKDF2 stretching. It must
+		// instead fall through to the passphrase path and be stretched. (A salt is supplied so the
+		// passphrase path derives rather than being K1-refused.)
+		string nonCanonical = RawKeyBase64.Insert(4, " ");
+		byte[] decoded = Convert.FromBase64String(nonCanonical);
+		Assert.Equal(32, decoded.Length);
+
+		byte[]? loaded = Load(nonCanonical, out string? error, salt: TestSalt);
+		Assert.Null(error);
+		Assert.NotNull(loaded);
+		Assert.NotEqual(decoded, loaded); // stretched via PBKDF2, not used verbatim
+	}
+
+	[Fact]
+	public void CanonicalBase64_32Bytes_IsStillUsedVerbatim()
+	{
+		// Regression guard: the documented high-entropy path (openssl rand -base64 32 emits canonical
+		// base64) is unchanged — a canonical 32-byte base64 value is the raw key verbatim, salt-free.
+		byte[]? loaded = Load(RawKeyBase64, out string? error);
+		Assert.Null(error);
+		Assert.Equal(Convert.FromBase64String(RawKeyBase64), loaded);
+	}
+
+	[Fact]
 	public void KeyDerivationSalt_IgnoredForRawBase64Key()
 	{
 		// The raw 32-byte key path skips PBKDF2 entirely, so the salt cannot change it.

@@ -85,11 +85,12 @@ public class EncryptionAtRestTests(GatewayFixture gateway)
 	[BackendFact]
 	public async Task PassphraseKey_EncryptsAndServesLocalItems()
 	{
-		// The key can be ANY string — a passphrase is stretched to the 256-bit key.
+		// A passphrase is stretched to the 256-bit key; K1 requires a per-deployment salt for it.
 		using WebApplicationFactory<Program> passphraseGateway = gateway.CreateIsolatedFactory(
 			new Dictionary<string, string?>
 			{
-				["ActiveSync:Encryption:Key"] = "my simple passphrase key!"
+				["ActiveSync:Encryption:Key"] = "my simple passphrase key!",
+				["ActiveSync:Encryption:KeyDerivationSalt"] = "encryption-at-rest-test-salt"
 			});
 		EasTestClient client = new(
 			passphraseGateway.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }),

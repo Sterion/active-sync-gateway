@@ -124,10 +124,9 @@ public static class EncryptionKeyLoader
 
 	private static byte[] DeriveKey(string material, EncryptionOptions options)
 	{
-		// A value that decodes as base64 to exactly 32 bytes is the raw key (back-compat and
-		// the documented high-entropy path); everything else is a passphrase. A passphrase
-		// that happens to BE valid 32-byte base64 lands on the raw path — deterministic
-		// either way, since both interpretations yield a fixed key.
+		// A CANONICAL base64 value decoding to exactly 32 bytes is the raw key (the documented
+		// high-entropy path); everything else — including a non-canonical base64-shaped passphrase
+		// (K14) — is stretched with PBKDF2.
 		byte[]? raw = TryDecodeRawKey(material);
 		if (raw is not null)
 			return raw;
@@ -169,7 +168,18 @@ public static class EncryptionKeyLoader
 		try
 		{
 			byte[] decoded = Convert.FromBase64String(material);
-			return decoded.Length == KeySize ? decoded : null;
+			if (decoded.Length != KeySize)
+				return null;
+			// K14: take the raw-key interpretation only for CANONICAL base64 — a value that re-encodes
+			// to exactly the same string. Convert.FromBase64String is lenient (it ignores embedded
+			// whitespace and accepts non-zero unused padding bits), so a human passphrase that merely
+			// happens to be base64-decodable to 32 bytes would otherwise be used verbatim as the AES
+			// key with NO PBKDF2 stretching and NO length floor. Requiring canonical base64 routes such
+			// input to the passphrase path instead. 'openssl rand -base64 32' emits canonical base64, so
+			// the documented high-entropy path is unaffected. (A canonical low-entropy base64-32 value
+			// IS still taken verbatim — the raw-key path is by definition unstretched; the length floor
+			// only protects the passphrase path.)
+			return Convert.ToBase64String(decoded) == material ? decoded : null;
 		}
 		catch (FormatException)
 		{
