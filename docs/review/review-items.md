@@ -195,7 +195,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **7. Forwarded-header trust** — ~~`E1`~~ ~~`E10`~~ **COMPLETE**
 > `E1` `X-Forwarded-Proto` is trusted from any peer to rewrite the scheme (drives OIDC redirect_uri + Autodiscover URLs) unless `PublicUrl` is set. `E10` Autodiscover reflects `X-Forwarded-Host` into the advertised server URL. Gate both on `Auth:TrustedProxies` like `EndpointAuth` already does.
 
-**8. Protocol version gating & query parsing** — `W3` `W2` `W4`
+**8. Protocol version gating & query parsing** — ~~`W3`~~ `W2` `W4`
 > `W3` `EasVersion.Parse` (the header path) accepts "99.9", satisfying every `>=V160` gate — the query-byte hole one field over. `W2` host-endianness reads on the little-endian wire format. `W4` unknown query tags skipped rather than rejected. **Protocol layer — read the AGENTS.md hard gate; any table/parse change needs a round-trip test.**
 
 ## Phase 2 — Security hardening (Medium)
@@ -413,7 +413,7 @@ Area S, the cross-cutting structural pass, is given in full below.)*
 ## Area W — WBXML codec & protocol support types (8)
 `W1` **Med** OPAQUE data re-encoded to a full base64 string on the LOH per attachment (decode side) — `Wbxml/WbxmlDecoder.cs:125`.
 `W2` **Med** `EasRequestParameters` reads/writes multibyte fields with host endianness — `Http/EasRequestParameters.cs:147,214`.
-`W3` **Med** `EasVersion.Parse` (header path) accepts "99.9", satisfying every `>=V160` gate — `EasVersion.cs:16`.
+`W3` **Med** `EasVersion.Parse` (header path) accepts "99.9", satisfying every `>=V160` gate — `EasVersion.cs:16`. FIXED (item 8): `Parse` now matches the parsed major/minor against a `Known` allowlist ({2.5, 12.0, 12.1, 14.0, 14.1, 16.0, 16.1}, mirroring the base64 `ProtocolVersionBytes`) and falls back to the wire default `V141` for anything else — so an unknown `MS-ASProtocolVersion` header can no longer clear a `>= V160`/`V161` gate. Proven red-first (`EasVersionTests.Parse_UnknownVersion_FallsBackTo141`).
 `W4` **Low** `FromBase64` silently skips unknown query tags rather than rejecting → hidden desync — `Http/EasRequestParameters.cs:156`.
 `W5` **Low** `ToBase64` writes device-id/type length as one byte (truncates >255) — `Http/EasRequestParameters.cs:217`.
 `W6` **Low** Decoder accepts WBXML 0x01/0x02 though the spec/tables assume 1.3 — `Wbxml/WbxmlDecoder.cs:80`.

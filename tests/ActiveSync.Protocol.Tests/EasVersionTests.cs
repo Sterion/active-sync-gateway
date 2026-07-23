@@ -26,6 +26,23 @@ public sealed class EasVersionTests
 		Assert.Equal(EasVersion.V141, EasVersion.Parse(input));
 	}
 
+	// W3: the base64-query byte path is allowlisted (ProtocolVersionBytes) but the
+	// MS-ASProtocolVersion header path routed through Parse unguarded, so a header of
+	// "99.9" produced EasVersion(99, 9), which cleared every >= V160 / >= V161 gate an
+	// unauthenticated caller never negotiated. Parse must reject any version outside the
+	// known set and fall back to the wire default (14.1) instead.
+	[Theory]
+	[InlineData("99.9")]
+	[InlineData("25.5")]
+	[InlineData("13.0")]
+	[InlineData("16.2")]
+	[InlineData("17.0")]
+	public void Parse_UnknownVersion_FallsBackTo141(string input)
+	{
+		Assert.Equal(EasVersion.V141, EasVersion.Parse(input));
+		Assert.False(EasVersion.Parse(input) >= EasVersion.V160);
+	}
+
 	[Fact]
 	public void Ordering_GatesWork()
 	{

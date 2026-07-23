@@ -13,6 +13,17 @@ public readonly record struct EasVersion(int Major, int Minor) : IComparable<Eas
 	public static readonly EasVersion V160 = new(16, 0);
 	public static readonly EasVersion V161 = new(16, 1);
 
+	/// <summary>
+	///   The EAS protocol versions this gateway recognizes (2.5 / 12.0 are parsed but no longer
+	///   advertised — see EasEndpoint). The <c>MS-ASProtocolVersion</c> header is unauthenticated
+	///   client input and the parsed version gates 16.x behaviour, so <see cref="Parse" /> matches
+	///   against this set rather than trusting arbitrary major/minor: a header of "99.9" used to
+	///   yield <c>EasVersion(99, 9)</c>, clearing every <c>&gt;= V160</c> / <c>&gt;= V161</c> check —
+	///   the same hole the base64-query <c>ProtocolVersionBytes</c> allowlist already closed one
+	///   field over.
+	/// </summary>
+	private static readonly EasVersion[] Known = [new(2, 5), new(12, 0), V121, V140, V141, V160, V161];
+
 	public static EasVersion Parse(string? value)
 	{
 		if (value is null)
@@ -22,7 +33,8 @@ public readonly record struct EasVersion(int Major, int Minor) : IComparable<Eas
 		    !int.TryParse(value.AsSpan(0, dot), out int major) ||
 		    !int.TryParse(value.AsSpan(dot + 1), out int minor))
 			return V141;
-		return new EasVersion(major, minor);
+		EasVersion parsed = new(major, minor);
+		return Array.IndexOf(Known, parsed) >= 0 ? parsed : V141;
 	}
 
 	public int CompareTo(EasVersion other)
