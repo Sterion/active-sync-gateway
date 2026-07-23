@@ -243,7 +243,9 @@ public class MailFlowTests(GatewayFixture gateway)
 					a.ApplicationData.Element(Email + "Subject")?.Value == subject),
 			$"delivery of '{subject}'");
 
-		// EAS Categories → IMAP keywords ("spaced name" sanitizes to an atom).
+		// EAS Categories → IMAP keywords: a valid RFC 3501 atom applies; a non-atom category
+		// ("spaced name") is DROPPED rather than mangled to a colliding "spaced_name" (D6 behaviour
+		// change — mangling collapsed distinct categories and thrashed the revision every Sync).
 		SyncResult change = await clientB.ChangeItemAsync(inboxB, item.ServerId,
 			new XElement(Email + "Categories",
 				new XElement(Email + "Category", "Project-X"),
@@ -253,8 +255,13 @@ public class MailFlowTests(GatewayFixture gateway)
 			{
 				IReadOnlyList<string> keywords =
 					await ImapProbe.MessageKeywordsAsync(TestBackend.User2, "INBOX", subject);
-				return keywords.Contains("Project-X") && keywords.Contains("spaced_name");
-			}, "category keywords on the IMAP message");
+				return keywords.Contains("Project-X");
+			}, "the atom category applied as an IMAP keyword");
+		// The non-atom category was dropped, never stored as a mangled, colliding keyword.
+		IReadOnlyList<string> afterCategories =
+			await ImapProbe.MessageKeywordsAsync(TestBackend.User2, "INBOX", subject);
+		Assert.DoesNotContain("spaced_name", afterCategories);
+		Assert.DoesNotContain("spaced name", afterCategories);
 
 		// A ghosted Change (no Categories element) must leave the keywords alone.
 		Assert.Equal("1", (await clientB.ChangeItemAsync(inboxB, item.ServerId,
