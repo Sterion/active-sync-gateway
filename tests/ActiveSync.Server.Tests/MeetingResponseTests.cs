@@ -91,6 +91,23 @@ public sealed class MeetingResponseTests : IDisposable
 		Assert.Equal(["imap:INBOX/42"], _harness.Session.Store.Deleted);
 	}
 
+	// F1 — once the iTIP reply has been sent, a failure removing the invite mail must NOT report
+	// retryable status 4: the client would retry the whole MeetingResponse and the organizer would
+	// get a SECOND reply (and PARTSTAT would be written twice). The post-send tail is best-effort and
+	// still returns status 1, mirroring ComposeMail.
+	[Fact]
+	public async Task ReplySent_ThenInviteDeleteFails_StaysStatus1()
+	{
+		UserFolder inbox = await InboxAsync();
+		_harness.Session.Mail.RawMessage = InviteMime("evt-1", "organizer@example.test");
+		_harness.Session.Store.DeleteFailWith = () => new BackendException("IMAP hiccup removing invite");
+
+		XDocument? response = await RunAsync($"{inbox.ServerId}:42", inbox.ServerId);
+
+		Assert.Equal("1", StatusOf(response));
+		Assert.Single(_harness.Session.Submit.Sent); // the iTIP reply went out exactly once
+	}
+
 	// F33 — a CollectionId that references a CALENDAR collection (responding to an already-filed
 	// meeting) must read the event from the calendar store, not hand a calendar backend key to the
 	// mail store (which fails). PARTSTAT is written to the calendar the request identified.

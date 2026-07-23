@@ -329,8 +329,16 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>Items a handler asked to delete, so a test can assert removal happened (F35).</summary>
 		public List<string> Deleted { get; } = [];
 
+		/// <summary>
+		///   When set, <see cref="DeleteItemAsync" /> throws this instead of recording — a backend
+		///   hiccup on the post-send invite-mail cleanup that must NOT fail the command (F1).
+		/// </summary>
+		public Func<Exception>? DeleteFailWith { get; set; }
+
 		public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
 		{
+			if (DeleteFailWith is { } fail)
+				throw fail();
 			Deleted.Add($"{folderBackendKey}/{itemKey}");
 			return Task.CompletedTask;
 		}

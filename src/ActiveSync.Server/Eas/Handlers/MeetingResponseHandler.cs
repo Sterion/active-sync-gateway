@@ -159,15 +159,29 @@ public sealed class MeetingResponseHandler(
 					}
 				}
 
-				// Send the iTIP reply to the organizer.
+				// Send the iTIP reply to the organizer. This is the point of no return: the REPLY
+				// (SMTP) and the PARTSTAT write above are irreversible, so nothing after it may report
+				// failure. A Status 4 here would make the client retry the WHOLE MeetingResponse and the
+				// organizer would receive a SECOND reply (and PARTSTAT would be written twice) — the
+				// "post-send failure must not report failure" rule ComposeMail already follows (F1).
 				await SendReplyAsync(context, ics, organizerFallback, subject, userResponse, ct);
 
-				// Exchange removes the meeting-request mail from the Inbox after a response (that is
-				// why CalendarId points the client at the surviving calendar item); leaving it shows
-				// a stale "respond to this invitation" message. Only the mail path has an invite mail
-				// to remove (F35).
-				if (store.EasClass == EasClass.Email)
-					await store.DeleteItemAsync(folder.BackendKey, itemKey, permanent: false, ct);
+				// Past the send everything is best-effort. Exchange removes the meeting-request mail from
+				// the Inbox after a response (that is why CalendarId points the client at the surviving
+				// calendar item); leaving it shows a stale "respond to this invitation" message. Only the
+				// mail path has an invite mail to remove (F35). A cleanup failure must NOT turn a sent
+				// reply into a reported failure (F1) — swallow everything and still return Status 1.
+				try
+				{
+					if (store.EasClass == EasClass.Email)
+						await store.DeleteItemAsync(folder.BackendKey, itemKey, permanent: false, ct);
+				}
+				catch (Exception ex)
+				{
+					logger.LogWarning(ex,
+						"MeetingResponse for {RequestId}: reply sent but removing the invite mail failed",
+						requestId);
+				}
 
 				results.Add(Result("1", calendarId));
 			}
