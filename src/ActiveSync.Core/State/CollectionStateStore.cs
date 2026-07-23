@@ -26,6 +26,8 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 		{
 			if (state is null)
 			{
+				// A brand-new state is added with its defaults (SyncKey 0, null snapshots) so it
+				// exists to be committed; there is no prior generation to lose.
 				state = new CollectionState { DeviceKey = device.Id, CollectionId = collectionId };
 				// DbSet.Add false positive for VSTHRD103 — see GetOrCreateDeviceAsync.
 #pragma warning disable VSTHRD103
@@ -33,13 +35,14 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 #pragma warning restore VSTHRD103
 			}
 
-			state.SyncKey = 0;
-			state.SnapshotCompressed = null;
-			state.PreviousSnapshotCompressed = null;
-			state.LastClientAddsJson = null;
-			state.LastClientChangesJson = null;
-			state.UpdatedUtc = DateTime.UtcNow;
-			await db.SaveChangesAsync(ct).ConfigureAwait(false);
+			// A11/A1/A4: the destructive key-0 reset (wipe both snapshots + ledgers) is DEFERRED to
+			// this collection's own commit (CommitCollectionStateAsync, Initial mode). This method
+			// used to apply the wipe AND SaveChanges it immediately, which (a) destroyed a live
+			// committed generation the instant a spurious/duplicated key 0 arrived, with no undo if
+			// the round then never committed, and (b) flushed the shared request-scoped tracker,
+			// persisting a sibling collection's pending Replay rollback with no replay generation
+			// (the F12 re-delivery bug, reachable across collections). An existing state is returned
+			// UNTOUCHED and reset only at commit time.
 			return (SyncKeyValidation.Initial, state);
 		}
 
@@ -52,22 +55,19 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 			return (SyncKeyValidation.Current, state);
 
 		if (key == state.SyncKey - 1 && state.PreviousSnapshotCompressed is not null)
-		{
-			// Client never saw our last response: roll back one generation.
-			// LastClientAddsJson/LastClientChangesJson are deliberately KEPT — they describe
-			// the commands of the discarded generation, which are exactly the ones the client
-			// is about to re-send.
-			// F12: the rollback is applied to the tracked entity only, NOT SaveChanges'd here.
-			// Persisting it immediately meant a subsequent CommitCollectionStateAsync failure left
-			// the collection rolled back with no replay generation, so the client's next attempt
-			// with the same key validated as Current against the rolled-back snapshot and re-sent
-			// already-delivered items. Deferring it lets the round's own commit persist the
-			// rollback and the new generation atomically — or, if the round never commits, discard it.
-			state.SyncKey = key;
-			state.SnapshotCompressed = state.PreviousSnapshotCompressed;
-			state.PreviousSnapshotCompressed = null;
+			// Client never saw our last response — this is a one-generation Replay.
+			// A1/A4/F12: the rollback is NOT applied to the tracked entity here. Doing so left the
+			// shared request-scoped entity Modified, where a sibling collection's SaveChanges — or a
+			// key-0 reset — would flush the rolled-back-but-uncommitted state with no replay
+			// generation, so the client's next attempt with the same key validated as Current against
+			// the rolled-back snapshot and re-sent already-delivered items. Only the verdict is
+			// returned; CommitCollectionStateAsync applies the rollback in Replay mode, atomically
+			// with the new generation — or, if the round never commits, the entity stays pristine and
+			// the rollback is simply discarded. The snapshot to diff against is the previous
+			// generation; callers read it via ReadPreviousSnapshot when the verdict is Replay (this
+			// mirrors PeekSyncKeyAsync). The applied-command ledger (LastClientAddsJson/ChangesJson)
+			// is likewise untouched: it still describes the generation the client is about to re-send.
 			return (SyncKeyValidation.Replay, state);
-		}
 
 		return (SyncKeyValidation.Invalid, null);
 	}
@@ -137,19 +137,43 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 	}
 
 	public async Task<int> CommitCollectionStateAsync(
-		CollectionState state, Dictionary<string, string> newSnapshot, int filterType, CancellationToken ct,
+		CollectionState state, Dictionary<string, string> newSnapshot, int filterType,
+		SyncKeyValidation validation, CancellationToken ct,
 		Dictionary<string, AppliedClientAdd>? appliedAdds = null,
 		Dictionary<string, AppliedClientChange>? appliedChanges = null)
 	{
-		state.PreviousSnapshotCompressed = state.SnapshotCompressed;
-		state.SnapshotCompressed = SnapshotCodec.Compress(newSnapshot);
+		// The deferred state transition (A1/A11): ValidateSyncKeyAsync no longer mutates the tracked
+		// entity for a Replay or a key-0 reset, so a sibling collection's flush cannot persist a
+		// half-applied rollback. The mutation lands here, atomically with the new generation.
+		switch (validation)
+		{
+			case SyncKeyValidation.Initial:
+				// Deferred key-0 reset: wipe the replay generation and land the fresh one. Net effect
+				// matches the historical wipe-then-increment — SyncKey 1, no previous generation.
+				state.PreviousSnapshotCompressed = null;
+				state.SnapshotCompressed = SnapshotCodec.Compress(newSnapshot);
+				state.SyncKey = 1;
+				break;
+			case SyncKeyValidation.Replay:
+				// Deferred replay rollback: regenerate the lost generation N. The stale current
+				// snapshot is discarded (NOT shifted into Previous); the N-1 Previous is preserved so a
+				// repeated replay still validates; the key stays at N (client sent N-1, gets N back).
+				// This reproduces the old rollback-then-increment exactly, but only on commit.
+				state.SnapshotCompressed = SnapshotCodec.Compress(newSnapshot);
+				break;
+			default: // Current — the steady-state advance.
+				state.PreviousSnapshotCompressed = state.SnapshotCompressed;
+				state.SnapshotCompressed = SnapshotCodec.Compress(newSnapshot);
+				state.SyncKey++;
+				break;
+		}
+
 		state.LastClientAddsJson = appliedAdds is { Count: > 0 }
 			? JsonSerializer.Serialize(appliedAdds, JsonOpts)
 			: null;
 		state.LastClientChangesJson = appliedChanges is { Count: > 0 }
 			? JsonSerializer.Serialize(appliedChanges, JsonOpts)
 			: null;
-		state.SyncKey++;
 		state.FilterType = filterType;
 		state.UpdatedUtc = DateTime.UtcNow;
 		try

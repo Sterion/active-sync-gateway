@@ -188,7 +188,8 @@ public sealed class SyncConformanceTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["10"] = "old" }, 0, CancellationToken.None);
+			state!, new Dictionary<string, string> { ["10"] = "old" }, 0, SyncKeyValidation.Initial,
+			CancellationToken.None);
 
 		// The backend has since moved on: its current revision of item "10" differs from what the
 		// client last acked → a concurrent edit.
@@ -247,7 +248,8 @@ public sealed class SyncConformanceTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["10"] = "x" }, 0, CancellationToken.None);
+			state!, new Dictionary<string, string> { ["10"] = "x" }, 0, SyncKeyValidation.Initial,
+			CancellationToken.None);
 
 		XDocument? response = await _harness.RunAsync(handler, "Sync",
 			SyncRequest(inbox.ServerId, "1"), protocolVersion: "12.1");
@@ -287,7 +289,8 @@ public sealed class SyncConformanceTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["10"] = "x", ["20"] = "y" }, 0, CancellationToken.None);
+			state!, new Dictionary<string, string> { ["10"] = "x", ["20"] = "y" }, 0, SyncKeyValidation.Initial,
+			CancellationToken.None);
 
 		XDocument? response = await _harness.RunAsync(handler, "Sync",
 			SyncRequest(inbox.ServerId, "1", new XElement(AS + "WindowSize", "1")));
@@ -314,12 +317,15 @@ public sealed class SyncConformanceTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["a"] = "1" }, 0, CancellationToken.None);
+			state!, new Dictionary<string, string> { ["a"] = "1" }, 0, SyncKeyValidation.Initial,
+			CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["a"] = "1", ["b"] = "1" }, 0, CancellationToken.None);
+			state!, new Dictionary<string, string> { ["a"] = "1", ["b"] = "1" }, 0, SyncKeyValidation.Current,
+			CancellationToken.None);
 
-		// The client re-sends the one-behind key → Replay. The rollback must live only in the
-		// tracked entity; nothing is persisted until the round's own commit lands.
+		// The client re-sends the one-behind key → Replay. The rollback is DEFERRED to the round's own
+		// commit (A1): validation does not touch the tracked entity, so nothing is persisted until the
+		// round commits.
 		(SyncKeyValidation validation, _) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "1", CancellationToken.None);
 		Assert.Equal(SyncKeyValidation.Replay, validation);

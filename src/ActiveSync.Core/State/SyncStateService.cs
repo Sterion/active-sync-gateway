@@ -62,6 +62,19 @@ public sealed record FolderHierarchyDiff(
 ///     injected <see cref="ISyncDbContextFactory" />) so it never flushes — or, on a re-read,
 ///     poisons — a half-mutated <see cref="CollectionState" />.
 ///   </para>
+///   <para>
+///     COROLLARY (A1/A4/A11): because <see cref="PersistAsync" /> and every sibling collection's
+///     commit flush the WHOLE shared change tracker, no VOLATILE per-round mutation may be left
+///     pending on a tracked entity between the point it is decided and the point its own round
+///     commits — a sibling flush would persist it half-applied. The two such mutations are the
+///     Replay rollback and the key-0 reset of a <see cref="CollectionState" />;
+///     <see cref="ValidateSyncKeyAsync" /> therefore no longer applies them (nor SaveChanges them),
+///     returning only the verdict. <see cref="CommitCollectionStateAsync" /> applies the transition
+///     for the verdict's mode (Initial/Replay/Current) at that collection's own commit, so a round
+///     that never commits leaves the prior generation intact. The only mutations that may safely be
+///     in flight for <see cref="PersistAsync" /> to flush are idempotent/monotonic device-row
+///     fields (last-seen, cached request shape, policy key).
+///   </para>
 /// </summary>
 public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? dbContextFactory = null)
 {
@@ -129,10 +142,12 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 		=> _collections.PeekSyncKeyAsync(device, collectionId, clientSyncKey, ct);
 
 	public Task<int> CommitCollectionStateAsync(
-		CollectionState state, Dictionary<string, string> newSnapshot, int filterType, CancellationToken ct,
+		CollectionState state, Dictionary<string, string> newSnapshot, int filterType,
+		SyncKeyValidation validation, CancellationToken ct,
 		Dictionary<string, AppliedClientAdd>? appliedAdds = null,
 		Dictionary<string, AppliedClientChange>? appliedChanges = null)
-		=> _collections.CommitCollectionStateAsync(state, newSnapshot, filterType, ct, appliedAdds, appliedChanges);
+		=> _collections.CommitCollectionStateAsync(
+			state, newSnapshot, filterType, validation, ct, appliedAdds, appliedChanges);
 
 	public Task<CollectionState?> GetCollectionStateAsync(Device device, string collectionId, CancellationToken ct)
 		=> _collections.GetCollectionStateAsync(device, collectionId, ct);

@@ -43,9 +43,11 @@ public sealed class MoveItemsSnapshotTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["10"] = "x" }, 0, CancellationToken.None);
+			state!, new Dictionary<string, string> { ["10"] = "x" }, 0, SyncKeyValidation.Initial,
+			CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["10"] = "x" }, 0, CancellationToken.None);
+			state!, new Dictionary<string, string> { ["10"] = "x" }, 0, SyncKeyValidation.Current,
+			CancellationToken.None);
 
 		MoveItemsHandler handler = new(
 			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),

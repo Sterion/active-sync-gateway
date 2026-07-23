@@ -42,7 +42,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.Equal(SyncKeyValidation.Initial, validation);
 		Assert.NotNull(state);
 		int key1 = await _service.CommitCollectionStateAsync(
-			state, new Dictionary<string, string> { ["a"] = "1" }, 0, CancellationToken.None);
+			state, new Dictionary<string, string> { ["a"] = "1" }, 0, SyncKeyValidation.Initial, CancellationToken.None);
 		Assert.Equal(1, key1);
 
 		// Current key accepted
@@ -52,18 +52,92 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.Equal("1", SyncStateService.ReadSnapshot(state)["a"]);
 
 		int key2 = await _service.CommitCollectionStateAsync(
-			state, new Dictionary<string, string> { ["a"] = "1", ["b"] = "2" }, 0, CancellationToken.None);
+			state, new Dictionary<string, string> { ["a"] = "1", ["b"] = "2" }, 0, SyncKeyValidation.Current,
+			CancellationToken.None);
 		Assert.Equal(2, key2);
 
-		// Replay: client resends the previous key → state rolls back one generation
+		// Replay: client resends the previous key. The rollback is now DEFERRED to the round's own
+		// commit (A1), so the tracked entity is NOT mutated by validation — the snapshot to diff
+		// against is the previous generation, read via ReadPreviousSnapshot (mirrors PeekSyncKeyAsync).
 		(validation, state) = await _service.ValidateSyncKeyAsync(device, "5", "1", CancellationToken.None);
 		Assert.Equal(SyncKeyValidation.Replay, validation);
 		Assert.NotNull(state);
-		Assert.False(SyncStateService.ReadSnapshot(state).ContainsKey("b"));
+		Assert.False(SyncStateService.ReadPreviousSnapshot(state).ContainsKey("b"));
 
 		// Unknown key → invalid
 		(validation, _) = await _service.ValidateSyncKeyAsync(device, "5", "42", CancellationToken.None);
 		Assert.Equal(SyncKeyValidation.Invalid, validation);
+	}
+
+	[Fact]
+	public async Task ReplayRollback_NotCorruptedBySiblingCollectionFlush()
+	{
+		// A1: every <Collection> of one Sync request runs on ONE request-scoped context. Collection A
+		// is a Replay (the client re-sent the one-behind key); its one-generation rollback must live
+		// only until A's OWN commit. A sibling collection B committing — or resetting on key 0 — in the
+		// same request must NOT flush A's rolled-back-but-uncommitted state. If it does, A is stranded
+		// with no replay generation, so A's next same-key attempt validates as Current and re-delivers
+		// already-sent items (the F12 bug, made reachable across collections). Client-controlled
+		// collection order makes this reachable.
+		Device device = await _service.GetOrCreateDeviceAsync("u@a1x", "DEV1", "Phone", CancellationToken.None);
+
+		// Seed collection A at SyncKey 2 with a live previous (SyncKey-1) generation, directly.
+		await using (SqliteSyncDbContext seed = StateTestSupport.NewContext(_connection))
+		{
+			CollectionState a = new() { DeviceKey = device.Id, CollectionId = "A", SyncKey = 2 };
+			SyncStateService.WriteSnapshot(a, new Dictionary<string, string> { ["a"] = "1", ["b"] = "2" });
+			SyncStateService.WritePreviousSnapshot(a, new Dictionary<string, string> { ["a"] = "1" });
+			await seed.CollectionStates.AddAsync(a, CancellationToken.None);
+			await seed.SaveChangesAsync(CancellationToken.None);
+		}
+
+		// A: client re-sends the one-behind key → Replay. This round never reaches A's own commit.
+		(SyncKeyValidation validation, _) =
+			await _service.ValidateSyncKeyAsync(device, "A", "1", CancellationToken.None);
+		Assert.Equal(SyncKeyValidation.Replay, validation);
+
+		// B: a sibling collection resets on key 0, then the request flushes the shared tracker.
+		await _service.ValidateSyncKeyAsync(device, "B", "0", CancellationToken.None);
+		await _service.PersistAsync(CancellationToken.None);
+
+		// A's persisted state must be untouched: still key 2, replay generation intact.
+		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
+		CollectionState persistedA = await verify.CollectionStates.AsNoTracking()
+			.SingleAsync(c => c.DeviceKey == device.Id && c.CollectionId == "A");
+		Assert.Equal(2, persistedA.SyncKey);
+		Assert.NotNull(persistedA.PreviousSnapshotCompressed);
+	}
+
+	[Fact]
+	public async Task KeyZeroReset_Deferred_DoesNotDestroyLiveStateOnAbandonedRound()
+	{
+		// A11: a spurious/duplicated client key 0 must not wipe live snapshot + ledger state until the
+		// round's own commit. ValidateSyncKeyAsync used to SaveChanges the wipe immediately, so a key 0
+		// whose round never commits (or a key 0 processed before a sibling that then flushes)
+		// destroyed the collection's committed generation with no undo.
+		Device device = await _service.GetOrCreateDeviceAsync("u@a11", "DEV1", "Phone", CancellationToken.None);
+
+		await using (SqliteSyncDbContext seed = StateTestSupport.NewContext(_connection))
+		{
+			CollectionState c = new() { DeviceKey = device.Id, CollectionId = "C", SyncKey = 2 };
+			SyncStateService.WriteSnapshot(c, new Dictionary<string, string> { ["a"] = "1", ["b"] = "2" });
+			SyncStateService.WritePreviousSnapshot(c, new Dictionary<string, string> { ["a"] = "1" });
+			await seed.CollectionStates.AddAsync(c, CancellationToken.None);
+			await seed.SaveChangesAsync(CancellationToken.None);
+		}
+
+		// A key-0 request arrives but the round is abandoned before its own commit.
+		(SyncKeyValidation validation, _) =
+			await _service.ValidateSyncKeyAsync(device, "C", "0", CancellationToken.None);
+		Assert.Equal(SyncKeyValidation.Initial, validation);
+		await _service.PersistAsync(CancellationToken.None); // an unrelated flush in the same request
+
+		// The committed generation survives — nothing was wiped.
+		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
+		CollectionState persisted = await verify.CollectionStates.AsNoTracking()
+			.SingleAsync(c => c.DeviceKey == device.Id && c.CollectionId == "C");
+		Assert.Equal(2, persisted.SyncKey);
+		Assert.True(SyncStateService.ReadSnapshot(persisted).ContainsKey("b"));
 	}
 
 	[Fact]
@@ -74,7 +148,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// must return a null state (A17).
 		Device device = await _service.GetOrCreateDeviceAsync("u@a17", "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? seed) = await _service.ValidateSyncKeyAsync(device, "5", "0", CancellationToken.None);
-		await _service.CommitCollectionStateAsync(seed!, [], 0, CancellationToken.None);
+		await _service.CommitCollectionStateAsync(seed!, [], 0, SyncKeyValidation.Initial, CancellationToken.None);
 
 		(SyncKeyValidation validation, CollectionState? state) =
 			await _service.ValidateSyncKeyAsync(device, "5", "999", CancellationToken.None);
@@ -88,13 +162,13 @@ public sealed class SyncStateServiceTests : IDisposable
 		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? state) = await _service.ValidateSyncKeyAsync(device, "7", "0", CancellationToken.None);
 		Assert.NotNull(state);
-		await _service.CommitCollectionStateAsync(state, [], 0, CancellationToken.None);
+		await _service.CommitCollectionStateAsync(state, [], 0, SyncKeyValidation.Initial, CancellationToken.None);
 
 		// The request that produces key 2 applied one client Add.
 		(_, state) = await _service.ValidateSyncKeyAsync(device, "7", "1", CancellationToken.None);
 		Assert.NotNull(state);
 		await _service.CommitCollectionStateAsync(state,
-			new Dictionary<string, string> { ["item1"] = "r1" }, 0, CancellationToken.None,
+			new Dictionary<string, string> { ["item1"] = "r1" }, 0, SyncKeyValidation.Current, CancellationToken.None,
 			new Dictionary<string, AppliedClientAdd> { ["c1"] = new AppliedClientAdd("item1", "r1") });
 
 		// Lost response: the client retries with key 1 — the rollback keeps the applied-Add
@@ -110,7 +184,7 @@ public sealed class SyncStateServiceTests : IDisposable
 
 		// A commit without client Adds clears the map — it described the discarded generation.
 		await _service.CommitCollectionStateAsync(rolledBack,
-			new Dictionary<string, string> { ["item1"] = "r1" }, 0, CancellationToken.None);
+			new Dictionary<string, string> { ["item1"] = "r1" }, 0, SyncKeyValidation.Replay, CancellationToken.None);
 		(_, CollectionState? after) = await _service.ValidateSyncKeyAsync(device, "7", "2", CancellationToken.None);
 		Assert.NotNull(after);
 		Assert.Empty(SyncStateService.ReadAppliedAdds(after));
@@ -123,13 +197,13 @@ public sealed class SyncStateServiceTests : IDisposable
 		(_, CollectionState? state) = await _service.ValidateSyncKeyAsync(device, "9", "0", CancellationToken.None);
 		Assert.NotNull(state);
 		await _service.CommitCollectionStateAsync(state,
-			new Dictionary<string, string> { ["item1"] = "r1" }, 0, CancellationToken.None);
+			new Dictionary<string, string> { ["item1"] = "r1" }, 0, SyncKeyValidation.Initial, CancellationToken.None);
 
 		// The request that produces key 2 applied one client Change.
 		(_, state) = await _service.ValidateSyncKeyAsync(device, "9", "1", CancellationToken.None);
 		Assert.NotNull(state);
 		await _service.CommitCollectionStateAsync(state,
-			new Dictionary<string, string> { ["item1"] = "r2" }, 0, CancellationToken.None,
+			new Dictionary<string, string> { ["item1"] = "r2" }, 0, SyncKeyValidation.Current, CancellationToken.None,
 			appliedChanges: new Dictionary<string, AppliedClientChange>
 			{
 				["41:7"] = new AppliedClientChange("item1", "r2")
@@ -147,7 +221,7 @@ public sealed class SyncStateServiceTests : IDisposable
 
 		// A commit without client Changes clears the map — it described the discarded generation.
 		await _service.CommitCollectionStateAsync(rolledBack,
-			new Dictionary<string, string> { ["item1"] = "r2" }, 0, CancellationToken.None);
+			new Dictionary<string, string> { ["item1"] = "r2" }, 0, SyncKeyValidation.Replay, CancellationToken.None);
 		(_, CollectionState? after) = await _service.ValidateSyncKeyAsync(device, "9", "2", CancellationToken.None);
 		Assert.NotNull(after);
 		Assert.Empty(SyncStateService.ReadAppliedChanges(after));
@@ -364,7 +438,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		(_, CollectionState? seed) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
 		Assert.NotNull(seed);
 		await _service.CommitCollectionStateAsync(seed, new Dictionary<string, string> { ["a"] = "1" }, 0,
-			CancellationToken.None);
+			SyncKeyValidation.Initial, CancellationToken.None);
 
 		// A second request (its own context, same DB) loads the same generation...
 		DbContextOptions<SqliteSyncDbContext> options = new DbContextOptionsBuilder<SqliteSyncDbContext>()
@@ -379,13 +453,15 @@ public sealed class SyncStateServiceTests : IDisposable
 
 		// A commits first and wins.
 		int keyA = await _service.CommitCollectionStateAsync(stateA,
-			new Dictionary<string, string> { ["a"] = "1", ["fromA"] = "2" }, 0, CancellationToken.None);
+			new Dictionary<string, string> { ["a"] = "1", ["fromA"] = "2" }, 0, SyncKeyValidation.Current,
+			CancellationToken.None);
 		Assert.Equal(2, keyA);
 
 		// B committing off the now-stale generation is rejected, not silently applied.
 		BackendException ex = await Assert.ThrowsAsync<BackendException>(() =>
 			service2.CommitCollectionStateAsync(stateB,
-				new Dictionary<string, string> { ["a"] = "1", ["fromB"] = "3" }, 0, CancellationToken.None));
+				new Dictionary<string, string> { ["a"] = "1", ["fromB"] = "3" }, 0, SyncKeyValidation.Current,
+				CancellationToken.None));
 		Assert.Contains("Concurrent sync", ex.Message);
 
 		// A's write survived intact — no lost update.
@@ -405,7 +481,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		(_, CollectionState? seed) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
 		Assert.NotNull(seed);
 		await _service.CommitCollectionStateAsync(seed, new Dictionary<string, string> { ["a"] = "1" }, 0,
-			CancellationToken.None);
+			SyncKeyValidation.Initial, CancellationToken.None);
 
 		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
 		SyncStateService service2 = new(db2);
@@ -416,11 +492,13 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.NotNull(stateB);
 
 		await _service.CommitCollectionStateAsync(stateA,
-			new Dictionary<string, string> { ["a"] = "1", ["fromA"] = "2" }, 0, CancellationToken.None);
+			new Dictionary<string, string> { ["a"] = "1", ["fromA"] = "2" }, 0, SyncKeyValidation.Current,
+			CancellationToken.None);
 
 		await Assert.ThrowsAsync<BackendException>(() =>
 			service2.CommitCollectionStateAsync(stateB,
-				new Dictionary<string, string> { ["fromB"] = "3" }, 0, CancellationToken.None));
+				new Dictionary<string, string> { ["fromB"] = "3" }, 0, SyncKeyValidation.Current,
+				CancellationToken.None));
 
 		Assert.Equal(EntityState.Unchanged, db2.Entry(stateB).State);
 	}
@@ -482,7 +560,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		(_, CollectionState? state) =
 			await service.ValidateSyncKeyAsync(device, folder.ServerId, "0", CancellationToken.None);
 		Assert.NotNull(state);
-		await service.CommitCollectionStateAsync(state, [], 0, CancellationToken.None);
+		await service.CommitCollectionStateAsync(state, [], 0, SyncKeyValidation.Initial, CancellationToken.None);
 
 		// Mutate the snapshot in memory but do NOT persist it.
 		SyncStateService.WriteSnapshot(state, new Dictionary<string, string> { ["dirty"] = "1" });
@@ -504,7 +582,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		Device device = await _service.GetOrCreateDeviceAsync("u@a4", "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? state) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
 		Assert.NotNull(state);
-		await _service.CommitCollectionStateAsync(state, [], 0, CancellationToken.None);
+		await _service.CommitCollectionStateAsync(state, [], 0, SyncKeyValidation.Initial, CancellationToken.None);
 
 		// A realistic, highly repetitive snapshot (the keys share a prefix — gzip's sweet spot).
 		Dictionary<string, string> big = new(StringComparer.Ordinal);
@@ -512,7 +590,7 @@ public sealed class SyncStateServiceTests : IDisposable
 			big[$"7:mailmessage-{i:D6}"] = i % 2 == 0 ? "100" : "101|work,personal";
 		(_, state) = await _service.ValidateSyncKeyAsync(device, "c", "1", CancellationToken.None);
 		Assert.NotNull(state);
-		await _service.CommitCollectionStateAsync(state, big, 0, CancellationToken.None);
+		await _service.CommitCollectionStateAsync(state, big, 0, SyncKeyValidation.Current, CancellationToken.None);
 
 		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
 		CollectionState persisted = await verify.CollectionStates.AsNoTracking()

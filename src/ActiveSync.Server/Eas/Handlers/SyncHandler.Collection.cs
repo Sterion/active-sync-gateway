@@ -59,7 +59,7 @@ public sealed partial class SyncHandler
 		{
 			state.OptionsJson = collectionOptions.ToJson();
 			int initialKey = await context.State.CommitCollectionStateAsync(
-				state, [], collectionOptions.FilterType, ct);
+				state, [], collectionOptions.FilterType, SyncKeyValidation.Initial, ct);
 			XElement initial = new(AS + "Collection",
 				new XElement(AS + "SyncKey", initialKey.ToString()),
 				new XElement(AS + "CollectionId", collectionId),
@@ -82,7 +82,12 @@ public sealed partial class SyncHandler
 		// explicit "0" requests a permanent delete.
 		bool deletesAsMoves = collectionElement.Element(AS + "DeletesAsMoves")?.Value != "0";
 
-		Dictionary<string, string> snapshot = SyncStateService.ReadSnapshot(state);
+		// On a Replay the entity is NOT rolled back until this collection's own commit (A1), so the
+		// snapshot to diff against is the previous generation, read explicitly here (mirrors
+		// PeekSyncKeyAsync). Current diffs against the live snapshot.
+		Dictionary<string, string> snapshot = validation == SyncKeyValidation.Replay
+			? SyncStateService.ReadPreviousSnapshot(state)
+			: SyncStateService.ReadSnapshot(state);
 		List<XElement> clientResponses = new();
 		bool snapshotDirty = false;
 
@@ -285,7 +290,8 @@ public sealed partial class SyncHandler
 
 		state.OptionsJson = collectionOptions.ToJson();
 		int newKey = await context.State.CommitCollectionStateAsync(
-			state, newSnapshot, collectionOptions.FilterType, ct, ledger.AppliedAdds, ledger.AppliedChanges);
+			state, newSnapshot, collectionOptions.FilterType, validation, ct,
+			ledger.AppliedAdds, ledger.AppliedChanges);
 
 		XElement response = new(AS + "Collection",
 			new XElement(AS + "SyncKey", newKey.ToString()),
