@@ -46,3 +46,39 @@ compiles+passes) ✓.
   `KeyDerivationSalt` required for passphrases. All consistent with the finding; no source touched outside
   the crypto/security seam.
 - No coverage-only tests (all three proven red-first). No new findings filed.
+
+---
+
+## Item 2 — Sync-state flush integrity [LIVE]
+**Findings:** `A1` `A4` `A11`
+**Commits:** `8573644` (A1, A4, A11 — one atomic commit; see note)
+**Verification:** integrity items=32 live=10 assigned=unique=132 dupes=0 ✓ · cursor → item 3 ✓ ·
+build clean (0 warnings) ✓ · unit suite **1027 passed, 0 skipped** (Protocol 78 · Core 635 · WebUi 71 ·
+Server 243; +2 over item 1) ✓ · **live suite (independent, fresh clean-volume Stalwart): 141 passed, 0
+skipped** ✓ (LIVE requirement met — real backend, passed > 0) · diffs independently inspected — fix
+matches the A1 recommended remedy exactly ✓.
+**Notes:**
+- **Single commit for the cluster — accepted.** A1/A4/A11 are one intertwined change: A4 is the
+  shared-tracker flush coupling, A1 is the cross-collection re-delivery it enables (the F12 bug reachable
+  across collections), A11 is the same key-0 destroy-live-state hazard. The fix — **defer the Replay
+  rollback and the key-0 reset out of `ValidateSyncKeyAsync` into the collection's own
+  `CommitCollectionStateAsync` via a new `validation` mode** — resolves all three in one edit that cannot be
+  meaningfully split. Protocol step 2 permits a "tight cluster" commit; all three IDs are in the subject.
+  Confirmed in the diff: `ValidateSyncKeyAsync` no longer mutates the tracked entity or calls
+  `SaveChangesAsync`; the Initial/Replay/Current transition is applied atomically with the new generation
+  in `CommitCollectionStateAsync`. Net SyncKey/snapshot outcomes are byte-identical to before.
+- **A1 & A11 proven red-first** (`ReplayRollback_NotCorruptedBySiblingCollectionFlush`,
+  `KeyZeroReset_Deferred_DoesNotDestroyLiveStateOnAbandonedRound` — both failed on unmodified code with the
+  described symptom, green after fix). **A4 is coverage, not an independent red:** it has no harmful symptom
+  beyond A1's cross-collection flush, so it is proven by A1's sibling-flush mechanism plus the
+  transaction-policy corollary documented in `SyncStateService`. Correctly labelled coverage by the worker.
+- **Breaking (internal only):** `CommitCollectionStateAsync` gained a required `validation` parameter. It is
+  a host-only method — no plugin/contract surface — and all internal call sites were updated in the same
+  commit. Not a published-contract break.
+- **Judgment call — defer-to-commit vs per-collection short-lived contexts.** The worker took A1's second
+  suggested remedy (defer into the commit) over the first (short-lived context per collection). I concur:
+  it preserves the atomic per-collection commit semantics and centralizes the state transition; the only
+  cost is the wider `CommitCollectionStateAsync` signature. Could reasonably have gone the other way.
+- **Behaviour-test rewrite (not weakened):** one `SyncKeyLifecycle` assertion now reads the post-Replay diff
+  base via `ReadPreviousSnapshot` (the entity is no longer rolled back at validation time); the round-1
+  `F12_ReplayRollback_IsNotPersistedBeforeCommit` guard still passes, comment updated to reflect deferral.
