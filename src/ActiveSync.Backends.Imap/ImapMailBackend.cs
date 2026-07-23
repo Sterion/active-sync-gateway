@@ -575,20 +575,23 @@ public sealed partial class ImapMailBackend(
 	}
 
 	/// <summary>
-	///   EAS categories are free text while IMAP keywords are atoms: replace anything an
-	///   atom cannot carry (spaces, controls, specials) with '_'. Server→client needs no
-	///   inverse — every atom is already a valid category string.
+	///   EAS categories are free text while IMAP keywords are RFC 3501 atoms. A category that is
+	///   already a valid atom is kept verbatim; one carrying anything an atom cannot hold (spaces,
+	///   controls, specials) is DROPPED — the empty string, which the caller filters out. The old
+	///   char-by-char '_' substitution collapsed distinct categories ("a b" and "a_b") onto the same
+	///   keyword: the server-derived category then never matched the client's original, thrashing the
+	///   mail revision string every Sync (D6). Dropping a non-round-trippable category loses it (IMAP
+	///   keywords fundamentally cannot carry spaces/specials) but never corrupts a *different*
+	///   category, so the diff no longer churns. Server→client needs no inverse — every stored atom is
+	///   already a valid category string.
 	/// </summary>
-	private static string SanitizeKeyword(string category)
+	internal static string SanitizeKeyword(string category)
 	{
-		char[] sanitized = new char[category.Length];
-		for (int i = 0; i < category.Length; i++)
-		{
-			char c = category[i];
-			sanitized[i] = c > ' ' && c < (char)127 && !@"(){%*""\[]".Contains(c) ? c : '_';
-		}
+		foreach (char c in category)
+			if (c <= ' ' || c >= (char)127 || @"(){%*""\[]".Contains(c))
+				return string.Empty;
 
-		return new string(sanitized);
+		return category;
 	}
 
 	public static string MakeFileReference(string folderBackendKey, string itemKey, int attachmentIndex)

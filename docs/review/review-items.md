@@ -180,7 +180,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 > `A1` a deferred Replay rollback on one collection is flushed with no replay generation when a sibling collection commits in the same request → the client re-receives already-delivered items (the exact F12 failure). `A4`/`A11` are the shared-context flush coupling that makes it reachable. Decide the per-round transaction/isolation policy here. Needs a real backend to drive a multi-collection Sync.
 > **Resolution:** the per-round policy is *no volatile mutation pending on the shared tracker between decision and its own commit.* `ValidateSyncKeyAsync` no longer mutates the tracked entity for a Replay (`A1`) or a key-0 reset (`A11`), nor SaveChanges either — it returns only the verdict. `CommitCollectionStateAsync` gained a `SyncKeyValidation validation` parameter (**breaking** to that internal method signature; host-only, no plugin surface) and applies the Initial/Replay/Current transition atomically with the new generation, so a round that never commits leaves the prior generation intact and a sibling flush cannot persist a half-applied rollback (`A4`). Behaviour is otherwise byte-identical (net SyncKey/snapshot outcomes unchanged); the Replay diff base is now read via `ReadPreviousSnapshot` in the handler. Verified live: full integration suite 141 passed / 0 skipped on Stalwart.
 
-**3. IMAP send & category integrity** [LIVE] — ~~`D1`~~ `D6` `F1`
+**3. IMAP send & category integrity** [LIVE] — ~~`D1`~~ ~~`D6`~~ `F1`
 > `F1` a post-reply failure in MeetingResponse reports retryable → duplicate iTIP REPLY + double PARTSTAT on retry. `D1` no SMTP MaxSize preflight. `D6` category sanitization collapses distinct EAS categories → perpetual revision churn. `MeetingResponseHandler` + `SmtpSubmitBackend` + `ImapMailBackend`.
 
 **4. JMAP submission & revision integrity** [LIVE] — `H1` `H5`
@@ -347,7 +347,7 @@ Area S, the cross-cutting structural pass, is given in full below.)*
 `D3` **Med** `AppendPreserved` can duplicate EMAIL lines already written by the managed rewrite — `Common/Converters/ContactConverter.cs:262`.
 `D4` **Med** Type-4 (full MIME) body corrupted by the plaintext byte-cut truncator — `Common/Converters/MailConverter.cs:147`.
 `D5` **Med** All-day events emit `AsUtc` start/end, shifting a non-UTC-anchored all-day event a day — `Common/Converters/CalendarConverter.cs:44`.
-`D6` **Med** `SanitizeKeyword` collapses distinct categories → perpetual revision churn — `Imap/ImapMailBackend.cs:582`.
+`D6` **Med** `SanitizeKeyword` collapses distinct categories → perpetual revision churn — `Imap/ImapMailBackend.cs:582`. FIXED: `SanitizeKeyword` now DROPS a non-atom category (returns empty, caller filters) instead of '_'-mangling it, so two distinct categories can't collide. BEHAVIOUR CHANGE: a category with a space/special (e.g. "Follow Up") is no longer written to IMAP as a keyword at all — inherent since IMAP atoms can't carry them; the prior behaviour stored a lossy, churning "Follow_Up".
 `D7` **Low** `MoveItemAsync` surfaces an unknown destination as an unhandled exception — `Imap/ImapMailBackend.cs:341`.
 `D8` **Low** `ForceFrom` silently no-ops (submits client From) when `MailAddress` is unset — `Smtp/SmtpSubmitBackend.cs:27`.
 `D9` **Low** Sieve sends AUTHENTICATE PLAIN without checking advertised mechanisms — `Sieve/ManageSieveClient.cs:76`.
