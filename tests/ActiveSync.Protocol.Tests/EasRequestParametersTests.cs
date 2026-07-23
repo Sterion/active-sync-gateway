@@ -159,6 +159,57 @@ public class EasRequestParametersTests
 			() => EasRequestParameters.FromBase64(Convert.ToBase64String(ms.ToArray())));
 	}
 
+	[Fact]
+	public void Base64Query_UnknownFieldTag_IsRejected()
+	{
+		// W4: the field-loop switch had no default case, so an unknown tag was silently
+		// consumed (length-prefixed) and the parse "succeeded" with wrong/missing values --
+		// a misaligned or hostile query hid its desync as success instead of a clean 400.
+		MemoryStream ms = new();
+		ms.WriteByte(141);
+		ms.WriteByte(0); // Sync
+		ms.Write(BitConverter.GetBytes((ushort)0));
+		ms.WriteByte(0); // no device id
+		ms.WriteByte(0); // no policy key
+		ms.WriteByte(0); // no device type
+		ms.WriteByte(99); // unknown field tag
+		ms.WriteByte(1); // length
+		ms.WriteByte(0x00); // value
+
+		Assert.Throws<FormatException>(
+			() => EasRequestParameters.FromBase64(Convert.ToBase64String(ms.ToArray())));
+	}
+
+	[Fact]
+	public void Base64Query_MultiByteFields_AreLittleEndianOnTheWire()
+	{
+		// W2 COVERAGE (not red-first): MS-ASHTTP packs the locale and policy key little-endian,
+		// but the codec read/wrote them with BitConverter (host endianness). On a little-endian
+		// host (every CI/dev arm64/amd64 box) BitConverter and the little-endian primitives agree,
+		// so this asserts the on-the-wire bytes are explicitly little-endian to guard the format
+		// against a big-endian regression; it passes with and without the W2 fix on LE hardware.
+		EasRequestParameters original = new()
+		{
+			Command = "Sync",
+			ProtocolVersion = "16.1",
+			DeviceId = "DEV1",
+			DeviceType = "SP",
+			PolicyKey = 0x01020304
+		};
+
+		byte[] wire = Convert.FromBase64String(original.ToBase64());
+
+		// Layout: [version][command][locale:2][devIdLen][devId][policyLen][policyKey:4]...
+		Assert.Equal(0x09, wire[2]); // locale 0x0409 low byte first
+		Assert.Equal(0x04, wire[3]); // locale high byte second
+		int policyKeyOffset = 4 + 1 + 4 /* devIdLen + "DEV1" */ + 1 /* policyLen */;
+		Assert.Equal(new byte[] { 0x04, 0x03, 0x02, 0x01 }, wire[policyKeyOffset..(policyKeyOffset + 4)]);
+
+		// And the decode side reads that little-endian layout back to the same value.
+		EasRequestParameters parsed = EasRequestParameters.FromBase64(original.ToBase64());
+		Assert.Equal(0x01020304u, parsed.PolicyKey);
+	}
+
 	[Theory]
 	[InlineData(25, "2.5")]
 	[InlineData(120, "12.0")]

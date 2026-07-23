@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 
 namespace ActiveSync.Protocol.Http;
@@ -144,7 +145,7 @@ public sealed record EasRequestParameters
 		if (policyKeyLength is not (0 or 4))
 			throw new FormatException($"Invalid policy key length {policyKeyLength} (expected 0 or 4).");
 		uint policyKey = policyKeyLength == 4
-			? BitConverter.ToUInt32(NextSpan(4))
+			? BinaryPrimitives.ReadUInt32LittleEndian(NextSpan(4))
 			: 0;
 
 		byte deviceTypeLength = Next();
@@ -173,6 +174,12 @@ public sealed record EasRequestParameters
 					acceptMultiPart = (options & 0x02) != 0;
 					break;
 				case 8: user = Encoding.UTF8.GetString(value); break;
+				default:
+					// An unknown tag means the cursor is either misaligned (a length byte read as a
+					// tag) or the request is hand-crafted. Either way the remaining fields can no
+					// longer be trusted, so reject it as malformed (→ 400) instead of parsing
+					// "successfully" with silently wrong values.
+					throw new FormatException($"Unknown query field tag {tag}.");
 			}
 		}
 
@@ -208,10 +215,13 @@ public sealed record EasRequestParameters
 		byte versionByte = (byte)(int.Parse(versionParts[0]) * 10 +
 		                          (versionParts.Length > 1 ? int.Parse(versionParts[1]) : 0));
 
+		Span<byte> multi = stackalloc byte[4];
+
 		using MemoryStream ms = new();
 		ms.WriteByte(versionByte);
 		ms.WriteByte((byte)commandCode);
-		ms.Write(BitConverter.GetBytes((ushort)0x0409)); // locale en-US
+		BinaryPrimitives.WriteUInt16LittleEndian(multi, 0x0409); // locale en-US
+		ms.Write(multi[..2]);
 
 		byte[] deviceId = Encoding.ASCII.GetBytes(DeviceId);
 		ms.WriteByte((byte)deviceId.Length);
@@ -220,7 +230,8 @@ public sealed record EasRequestParameters
 		if (PolicyKey != 0)
 		{
 			ms.WriteByte(4);
-			ms.Write(BitConverter.GetBytes(PolicyKey));
+			BinaryPrimitives.WriteUInt32LittleEndian(multi, PolicyKey);
+			ms.Write(multi);
 		}
 		else
 		{

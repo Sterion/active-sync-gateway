@@ -195,7 +195,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **7. Forwarded-header trust** — ~~`E1`~~ ~~`E10`~~ **COMPLETE**
 > `E1` `X-Forwarded-Proto` is trusted from any peer to rewrite the scheme (drives OIDC redirect_uri + Autodiscover URLs) unless `PublicUrl` is set. `E10` Autodiscover reflects `X-Forwarded-Host` into the advertised server URL. Gate both on `Auth:TrustedProxies` like `EndpointAuth` already does.
 
-**8. Protocol version gating & query parsing** — ~~`W3`~~ `W2` `W4`
+**8. Protocol version gating & query parsing** — ~~`W3`~~ ~~`W2`~~ ~~`W4`~~ **COMPLETE**
 > `W3` `EasVersion.Parse` (the header path) accepts "99.9", satisfying every `>=V160` gate — the query-byte hole one field over. `W2` host-endianness reads on the little-endian wire format. `W4` unknown query tags skipped rather than rejected. **Protocol layer — read the AGENTS.md hard gate; any table/parse change needs a round-trip test.**
 
 ## Phase 2 — Security hardening (Medium)
@@ -412,9 +412,9 @@ Area S, the cross-cutting structural pass, is given in full below.)*
 
 ## Area W — WBXML codec & protocol support types (8)
 `W1` **Med** OPAQUE data re-encoded to a full base64 string on the LOH per attachment (decode side) — `Wbxml/WbxmlDecoder.cs:125`.
-`W2` **Med** `EasRequestParameters` reads/writes multibyte fields with host endianness — `Http/EasRequestParameters.cs:147,214`.
+`W2` **Med** `EasRequestParameters` reads/writes multibyte fields with host endianness — `Http/EasRequestParameters.cs:147,214`. FIXED (item 8): the policy-key read (`FromBase64`) and the locale + policy-key writes (`ToBase64`) now use `BinaryPrimitives.{Read,Write}UInt{16,32}LittleEndian` instead of `BitConverter` (host endianness), matching MS-ASHTTP's little-endian wire format. Test is COVERAGE, not red-first: the bug is latent on little-endian hosts (every CI/dev arm64/amd64 box), where `BitConverter` and the little-endian primitives are identical, so it cannot be exhibited here; the test pins the on-the-wire bytes to explicit LE to guard against a big-endian regression.
 `W3` **Med** `EasVersion.Parse` (header path) accepts "99.9", satisfying every `>=V160` gate — `EasVersion.cs:16`. FIXED (item 8): `Parse` now matches the parsed major/minor against a `Known` allowlist ({2.5, 12.0, 12.1, 14.0, 14.1, 16.0, 16.1}, mirroring the base64 `ProtocolVersionBytes`) and falls back to the wire default `V141` for anything else — so an unknown `MS-ASProtocolVersion` header can no longer clear a `>= V160`/`V161` gate. Proven red-first (`EasVersionTests.Parse_UnknownVersion_FallsBackTo141`).
-`W4` **Low** `FromBase64` silently skips unknown query tags rather than rejecting → hidden desync — `Http/EasRequestParameters.cs:156`.
+`W4` **Low** `FromBase64` silently skips unknown query tags rather than rejecting → hidden desync — `Http/EasRequestParameters.cs:156`. FIXED (item 8): the field-loop `switch` gained a `default:` that throws `FormatException` on an unknown tag, so a misaligned/hostile query surfaces as a clean 400 instead of "succeeding" with silently wrong values (2.x-only tags 2/5 remain explicit no-op cases). Proven red-first (`EasRequestParametersTests.Base64Query_UnknownFieldTag_IsRejected`).
 `W5` **Low** `ToBase64` writes device-id/type length as one byte (truncates >255) — `Http/EasRequestParameters.cs:217`.
 `W6` **Low** Decoder accepts WBXML 0x01/0x02 though the spec/tables assume 1.3 — `Wbxml/WbxmlDecoder.cs:80`.
 `W7` **Nit** `WriteElement` computes `text` used only in the opaque branch, triple-enumerating nodes — `Wbxml/WbxmlEncoder.cs:68`.
