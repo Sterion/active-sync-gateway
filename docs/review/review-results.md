@@ -82,3 +82,37 @@ matches the A1 recommended remedy exactly ✓.
 - **Behaviour-test rewrite (not weakened):** one `SyncKeyLifecycle` assertion now reads the post-Replay diff
   base via `ReadPreviousSnapshot` (the entity is no longer rolled back at validation time); the round-1
   `F12_ReplayRollback_IsNotPersistedBeforeCommit` guard still passes, comment updated to reflect deferral.
+
+---
+
+## Item 3 — IMAP send & category integrity [LIVE]
+**Findings:** `D1` `D6` `F1`
+**Commits:** `25344fe` (D1) · `b4f580c` + `c3c1cfc` (D6 fix + live-test alignment) · `1c64d4a` (F1)
+**Verification:** integrity items=32 live=10 assigned=unique=132 dupes=0 encoding=0 ✓ · cursor → item 4 ✓ ·
+one commit per finding, ID in subject ✓ · build clean (0 warnings) ✓ · unit suite **1037 passed, 0 skipped**
+(Protocol 78 · Core 644 · WebUi 71 · Server 244; +10 over item 2) ✓ · **live suite (independent, fresh
+clean-volume Stalwart): 141 passed, 0 skipped** ✓ · diffs independently inspected — each fix matches the
+finding's remedy ✓.
+**Notes:**
+- **D6 & F1 proven red-first; D1 is coverage (justified).** D6 red: `"a b"` mangled to `"a_b"` colliding
+  with a real `"a_b"` on unmodified code. F1 red: post-send invite-delete failure returned Status 4
+  (retryable → duplicate REPLY + double PARTSTAT) on unmodified code, now Status 1. **D1 is coverage-not-
+  proof:** the true symptom (streaming full DATA before a 552) requires a live MSA advertising a small
+  `MaxSize`, which the unit env can't exhibit — the worker labelled it coverage and unit-tested the boundary
+  helper (`EnsureWithinMaxSize`). Follows the repo's existing SMTP-finding precedent (D9). Diff confirms the
+  preflight throws a non-retryable `BackendException` before `SendAsync`.
+- **D6 is a deliberate behaviour change (disclosed):** a non-atom category (e.g. "Follow Up") is no longer
+  written to IMAP at all, rather than stored as a lossy churning `Follow_Up`. Inherent — IMAP atoms cannot
+  carry spaces/specials, no lossless option exists. This forced a rewrite of the live
+  `MailFlowTests.Categories_RoundTripAsImapKeywords_AndGhostedChangeLeavesThem`, which encoded the old
+  mangle behaviour; the pre-rewrite live run showed exactly 1 failure (that test), confirming the blast
+  radius is contained. Rewrite (`c3c1cfc`) is not a weakening — it now asserts the atom category applies and
+  the non-atom one is absent.
+- **F1 tail swallows all exceptions including OCE** (unlike the outer catch, which filters OCE) — matches
+  `ComposeMailHandlerBase`'s post-submit tail: a cancellation after the reply is sent must still report
+  success or the client resends. Consistent with the established pattern.
+- **Test scaffolding (non-production, disclosed):** added a `DeleteFailWith` hook to the handler harness's
+  `RecordingStore` to drive F1's failure path (no existing test behaviour changed), and
+  `InternalsVisibleTo("ActiveSync.Core.Tests")` on the Imap + Smtp csprojs to unit-test the two internal
+  helpers — matching the existing Dav/Jmap pattern. No production surface widened.
+- No new findings filed.
