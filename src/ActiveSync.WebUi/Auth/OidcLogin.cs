@@ -52,21 +52,36 @@ internal static class OidcLogin
 
 			// The login claim is user-mutable at several common IdPs, so a bound account is
 			// keyed on the immutable subject and a login match alone never suffices.
+			bool subjectBound;
 			if (!string.IsNullOrEmpty(account.Options.OidcSubject))
 			{
 				if (!string.Equals(account.Options.OidcSubject, subject, StringComparison.Ordinal))
 					return new Verdict(false, login, false, false,
 						"the token's subject does not match the subject bound to this account");
+				subjectBound = true;
 			}
 			else if (!string.IsNullOrEmpty(subject) && account.FromDatabase && bindSubjectAsync is not null)
 			{
 				// Trust on first use — and only for database accounts: binding a config-declared
 				// one would mint a database row that shadows its configuration entry.
 				await bindSubjectAsync(login, subject);
+				subjectBound = true;
+			}
+			else
+			{
+				// Unbound: a config-declared account (never written to, so it can never TOFU-bind),
+				// or a ticket with no subject. Only the mutable login claim identifies this session.
+				subjectBound = false;
 			}
 
-			return new Verdict(true, login, account.Options.Admin == true || claimAdmin, false, null,
-				claimAdmin && account.Options.Admin != true);
+			// A config-declared account's own Admin flag must NOT be honored while it is unbound: a
+			// login match alone would let a directory user who renames themselves onto the admin's
+			// login inherit admin (the mutable-preferred_username takeover). Database accounts are
+			// out of scope — they TOFU-bind on first use, which is their established trust model.
+			// The IdP admin claim (claimAdmin) is a per-ticket assertion and stays independent.
+			bool accountAdmin = account.Options.Admin == true && (account.FromDatabase || subjectBound);
+			return new Verdict(true, login, accountAdmin || claimAdmin, false, null,
+				claimAdmin && !accountAdmin);
 		}
 
 		if (!oidc.AutoProvision)

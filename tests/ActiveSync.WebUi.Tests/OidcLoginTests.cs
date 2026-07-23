@@ -227,6 +227,38 @@ public sealed class OidcLoginTests
 	}
 
 	[Fact]
+	public async Task UnboundConfigAdmin_IsNotGrantedAdmin_OnLoginClaimAlone()
+	{
+		// C4: a config-declared account is never written to, so it can never TOFU-bind a subject —
+		// it stays keyed on the user-MUTABLE login claim. Honoring its Admin flag on a bare login
+		// match is exactly the preferred_username takeover the subject binding exists to stop: a
+		// directory user who renames themselves onto the admin's login would inherit admin. The
+		// account may still sign in (as a plain user), but the admin bit must be withheld until the
+		// operator binds a subject.
+		Dictionary<string, MergedAccount> configAdmin = new(StringComparer.OrdinalIgnoreCase)
+		{
+			["root"] = new MergedAccount(new AccountOptions { Admin = true }, false, false)
+		};
+		OidcLogin.Verdict unbound = await OidcLogin.EvaluateAsync(
+			Ticket(("preferred_username", "root"), ("sub", "sub-anyone")),
+			Oidc(), configAdmin, NoProvision());
+		Assert.True(unbound.Allowed);
+		Assert.False(unbound.IsAdmin);
+
+		// Once the operator binds the subject in config, the admin flag is honored again — the
+		// subject-match check now guarantees it really is the bound identity.
+		Dictionary<string, MergedAccount> boundConfigAdmin = new(StringComparer.OrdinalIgnoreCase)
+		{
+			["root"] = new MergedAccount(
+				new AccountOptions { Admin = true, OidcSubject = "sub-root" }, false, false)
+		};
+		OidcLogin.Verdict bound = await OidcLogin.EvaluateAsync(
+			Ticket(("preferred_username", "root"), ("sub", "sub-root")),
+			Oidc(), boundConfigAdmin, NoProvision());
+		Assert.True(bound is { Allowed: true, IsAdmin: true });
+	}
+
+	[Fact]
 	public async Task AutoProvisionedAccount_IsBoundToTheSubject_Immediately()
 	{
 		List<(string Login, AccountOptions Entry)> provisioned = [];

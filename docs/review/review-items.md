@@ -189,7 +189,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **5. Account-row case collation** — ~~`B1`~~ ~~`B8`~~ **COMPLETE**
 > `B1` two BINARY-distinct rows (`Phone1`/`phone1`) coexist under the unique index but collapse last-write-wins into the OrdinalIgnoreCase load map, silently dropping a user's overrides. `B8` the `ToLower()` predicates can't see the pair. Fix case-folded uniqueness at the DB layer (needs a migration on both providers). **Before starting, read [`claimed-fixed-but-not.md`](claimed-fixed-but-not.md) §1** — round 1 already "fixed" this (`B2`, commit `ca03f49`) with `.ToLower()` lookup predicates only, which is exactly why the collapse survives; the fix must change the index/storage casing + migrate existing duplicates, not add another lookup-level compare.
 
-**6. WebUi throttle & OIDC admin binding** — ~~`C1`~~ `C4`
+**6. WebUi throttle & OIDC admin binding** — ~~`C1`~~ ~~`C4`~~ **COMPLETE**
 > `C1` login success clears only the per-user throttle key, never the IP-wide one, so a busy NAT IP eventually 429s everyone. `C4` OIDC signs in an unbound config-declared admin on a bare login-claim match (mutable `preferred_username` takeover).
 
 **7. Forwarded-header trust** — `E1` `E10`
@@ -333,7 +333,7 @@ Area S, the cross-cutting structural pass, is given in full below.)*
 `C1` **High** Login success clears only the per-user throttle key → a busy NAT IP 429s everyone — `Auth/AuthEndpoints.cs:146`. FIXED (item 6): `LoginAsync` now calls `throttle.RecordSuccess(addressKey)` alongside `RecordSuccess(userKey)` on a successful login, so a valid sign-in clears the accrued IP-wide counter and a shared egress IP no longer locks out everyone behind it. Proven red-first through the real login endpoint (`WebLoginThrottleTests`).
 `C2` **Med** Backend `/test` probe is an SSRF reachability oracle for arbitrary operator hosts — `Api/BackendsEndpoints.cs:178`.
 `C3` **Med** `DELETE /admin/api/shares` doesn't normalize/validate the login (can't delete what POST created) — `Api/SharesEndpoints.cs:60`.
-`C4` **Med** OIDC signs in an unbound config-declared admin on a bare login-claim match — `Auth/OidcLogin.cs:61`.
+`C4` **Med** OIDC signs in an unbound config-declared admin on a bare login-claim match — `Auth/OidcLogin.cs:61`. FIXED (item 6): `EvaluateAsync` now tracks whether a subject was bound (matched or just TOFU-recorded) and honors an account's own `Admin` flag only when `account.FromDatabase || subjectBound` — so a config-declared account (which can never TOFU-bind, staying keyed on the mutable login claim) is NOT granted admin until the operator sets `OidcSubject`. Chosen the surgical "refuse the admin bit" over "refuse sign-in": the account still signs in as a plain user (matching the existing documented behaviour that unbound config accounts may sign in), only the admin capability is withheld. Database accounts are unchanged (TOFU-bind is their established model); the per-ticket IdP admin claim stays independent. Proven red-first (`OidcLoginTests.UnboundConfigAdmin_IsNotGrantedAdmin_OnLoginClaimAlone`).
 `C5` **Low** Portal `me`/`backends/meta` echo the admin-set backend username to a non-admin — `Api/PortalEndpoints.cs:48`.
 `C6` **Low** Session-revocation latency is `max(60s, UsersRefreshSeconds)`, not the documented 60s — `Auth/SessionValidation.cs:131`.
 `C7` **Low** Provider name stored verbatim (casing) though resolved case-insensitively — `Api/BackendsEndpoints.cs:261`.
