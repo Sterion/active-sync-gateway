@@ -213,3 +213,30 @@ auth-change blast-radius rule; the EAS Basic-auth pipeline is confirmed untouche
   and database accounts are correctly left unchanged. Confirmed in the diff: `accountAdmin = Admin == true
   && (FromDatabase || subjectBound)`.
 - Both proven red-first; no coverage-only tests. No new findings filed.
+
+---
+
+## Item 7 — Forwarded-header trust
+**Findings:** `E1` `E10`
+**Commits:** `e962c7b` (E1) · `01022de` (E10)
+**Verification:** integrity items=32 live=10 assigned=unique=132 dupes=0 encoding=0 ✓ · cursor → item 8 ✓ ·
+one commit per finding, ID in subject ✓ · build clean (0 warnings) ✓ · unit suite **1052 passed, 0 skipped**
+(Protocol 78 · Core 650 · WebUi 73 · Server 251; Server +7) ✓ · **live suite (independent, fresh
+clean-volume Stalwart): 141 passed, 0 skipped** — ran per the request-pipeline-change rule (this is exactly
+the "cookie-policy broke 23 tests" class); the EAS pipeline is unbroken ✓ · diffs inspected ✓.
+**Notes:**
+- **Both proven red-first** at the real decision seams. E1: `X-Forwarded-Proto` from an untrusted peer
+  rewrote `Request.Scheme` to `https` on unmodified code (`ResolveRequestScheme`); now gated. E10:
+  `X-Forwarded-Host: evil.example.com` leaked into the advertised Autodiscover EAS URL on unmodified code
+  (`BuildEasUrl`); now gated. Both verified against the pre-fix behaviour extracted into the seam.
+- **Shared mechanism confirmed:** a new `EndpointAuth.IsFromTrustedProxy(HttpContext, AuthOptions)`
+  (`src/ActiveSync.Server/Eas/EndpointAuth.cs:72`) reuses the private `Normalize`/`IsTrusted` peer-trust
+  logic that `ClientKey` already applies to `X-Forwarded-For` — so scheme/host trust and throttle-key trust
+  share one gate. `PublicUrl` still wins from any peer (never depends on client headers); with no trusted
+  proxies configured (the default) forwarded headers are ignored entirely. Exactly what E1/E10 asked for.
+- **Behaviour change (hardening, disclosed):** a deployment that relied on `X-Forwarded-Proto/Host` being
+  honoured with `PublicUrl` unset AND its proxy not listed in `Auth:TrustedProxies` will now see those
+  headers ignored — the documented remedy (set `PublicUrl` or list the proxy) already matches how
+  `EndpointAuth.ClientKey` behaves. `BuildEasUrl` visibility widened private→internal for testing only; no
+  breaking API change.
+- Both proven red-first; no coverage-only tests. No new findings filed.
