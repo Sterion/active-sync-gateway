@@ -240,3 +240,44 @@ the "cookie-policy broke 23 tests" class); the EAS pipeline is unbroken ✓ · d
   `EndpointAuth.ClientKey` behaves. `BuildEasUrl` visibility widened private→internal for testing only; no
   breaking API change.
 - Both proven red-first; no coverage-only tests. No new findings filed.
+
+---
+
+## Item 8 — Protocol version gating & query parsing
+**Findings:** `W3` `W2` `W4`
+**Commits:** `ba7a5ca` (W3) · `c2b12fd` (W2 + W4 — tight cluster, both in `EasRequestParameters.cs`)
+**Verification:** integrity items=32 live=10 assigned=unique=132 dupes=0 encoding=0 ✓ · cursor → item 9 ✓ ·
+IDs in subjects ✓ · build clean (0 warnings) ✓ · unit suite **1059 passed, 0 skipped** (Protocol 85 · Core
+650 · WebUi 73 · Server 251; Protocol +7) ✓ · no live suite required (not LIVE; no migration/auth/pipeline
+change) ✓ · diffs inspected ✓.
+**Notes:**
+- **Protocol hard gate honoured.** These are parse-path changes, NOT WBXML code-page table changes, so the
+  "every table change needs a round-trip test" rule does not apply — but each parse change still got a
+  dedicated test. Confirmed no `WbxmlCodePages` edits in the diff.
+- **W3 & W4 proven red-first; W2 is coverage (justified).** W3: `EasVersion.Parse` returned `99.9`/`25.5`
+  verbatim (satisfying every `>=V160` gate) on unmodified code; now an exact `(major,minor)` allowlist
+  mirroring `ProtocolVersionBytes` ({2.5,12.0,12.1,14.0,14.1,16.0,16.1}) degrades anything unknown to
+  `V141`. W4: an unknown base64 query field tag parsed silently before; now `default: throw FormatException`
+  → clean 400. **W2 is coverage-not-proof:** `BitConverter`→`BinaryPrimitives.*LittleEndian` for the locale
+  + policy-key fields is latent on little-endian hosts (this amd64 box), where the two are byte-identical, so
+  the bug cannot be exhibited; the test pins the on-the-wire bytes to explicit LE to guard a big-endian
+  regression. Correctly labelled coverage by the worker in both the test and the note.
+- **Behaviour changes (intended, disclosed):** (1) an `MS-ASProtocolVersion` header outside the known set now
+  degrades to 14.1 rather than being honoured verbatim; (2) a base64 query with an unknown field tag now
+  returns 400 instead of parsing with wrong values. No breaking API change.
+- **Judgment call (W3) — fall back to `V141` rather than throw at the header call site.** The detail offered
+  either; falling back keeps `Parse` total and matches the existing unparsable-input behaviour (non-
+  disruptive). Exact allowlist over the looser "reject majors outside {2,12,14,16}", so 16.2/14.5 also
+  degrade. I concur.
+- No new findings filed.
+
+---
+
+## Run summary — items 1–8 (Phase 1 complete)
+All eight Phase-1 items landed and independently verified. Final unit suite **1059 passed, 0 skipped**
+(baseline 1020; +39 tests). Build 0 warnings throughout. LIVE / migration / auth / pipeline items (2, 3, 4,
+5, 6, 7) each verified against a **fresh clean-volume Stalwart** with the **full** integration suite at
+**141 passed, 0 skipped** — never a skipped-suite pass. Every finding proven red-first except four
+coverage-labelled tests (D1 live-MSA-only, A4 coupling-of-A1, W2 LE-host-latent) — each justified and marked.
+Breaking changes (K1 re-key, B1/B8 case-fold + migration, H5 revision re-sync, C4 admin-bit, D6 category
+drop, E1/E10 header gating) are recorded per finding. Cursor rests at item 9 (Phase 2).
