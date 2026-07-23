@@ -192,7 +192,7 @@ docker run -p 443:5443 -p 5080:5080 -v activesync-data:/data \
   -e ActiveSync__Backends__MailStore__Host=imap.example.com \
   -e ActiveSync__Backends__MailSubmit__Provider=smtp \
   -e ActiveSync__Backends__MailSubmit__Host=smtp.example.com \
-  -e ActiveSync__Encryption__Key='any passphrase - or a key from: openssl rand -base64 32' \
+  -e ActiveSync__Encryption__Key="$(openssl rand -base64 32)" \
   activesync-gateway
 ```
 
@@ -267,7 +267,7 @@ file instead, edit `src/ActiveSync.Server/appsettings.json`:
     "Oof":        { "Provider": "sieve",  "Host": "mail.example.com", "Port": 4190 }  // optional; out-of-office
   },
   "Database": { "Provider": "Sqlite", "ConnectionString": "Data Source=activesync.db" },
-  "Encryption": { "Key": "<any passphrase — or a raw key from: openssl rand -base64 32>" },
+  "Encryption": { "Key": "<a raw key from: openssl rand -base64 32; a passphrase also needs KeyDerivationSalt>" },
   "Eas": { "MaxHeartbeatSeconds": 1770, "DavPollSeconds": 60, "WatchdogSeconds": 60 }
 }
 ```

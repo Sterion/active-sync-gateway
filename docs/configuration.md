@@ -154,25 +154,28 @@ Credentials default to the user's effective MailStore login; a per-user
 
 Content stored in the gateway database (Notes always; Contacts/Calendar/Tasks when no DAV
 backend is configured) is encrypted with AES-256-GCM. A key is **mandatory** — startup
-fails without one unless `AllowPlaintext` is set explicitly. **The key can be any string**:
-a base64 value decoding to exactly 32 bytes is used as the raw 256-bit key, anything else
-is treated as a passphrase and stretched to 256 bits with PBKDF2-SHA256. For maximum
-entropy generate a raw key with `openssl rand -base64 32` (PowerShell:
-`[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))`);
-a passphrase must be at least 8 characters (startup fails below that), and passphrases
-shorter than 12 characters load but are called out in the startup banner.
+fails without one unless `AllowPlaintext` is set explicitly. **The recommended key is a raw
+32-byte key** from `openssl rand -base64 32` (PowerShell:
+`[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))`):
+a canonical base64 value decoding to exactly 32 bytes is used as the raw 256-bit key with no
+stretching and needs no salt. Anything else is treated as a passphrase and stretched to 256
+bits with PBKDF2-SHA256 — and a passphrase **requires** a per-deployment
+`KeyDerivationSalt` (startup fails without one), because a fixed global salt would let one
+precomputed rainbow table recover every default deployment's key. A passphrase must also be at
+least 8 characters (startup fails below that), and passphrases shorter than 12 characters load
+but are called out in the startup banner.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `Key` | `null` | Master key, inline — a raw base64 32-byte key or any passphrase. Mutually exclusive with `KeyFile`. |
+| `Key` | `null` | Master key, inline — a raw base64 32-byte key (recommended) or a passphrase (then `KeyDerivationSalt` is required). Mutually exclusive with `KeyFile`. |
 | `KeyFile` | `null` | Path to a file containing the key (same raw-or-passphrase interpretation) — the right choice with docker secrets (`/run/secrets/...`). |
-| `KeyDerivationSalt` | `null` | Optional per-deployment salt for the **passphrase** path, so one precomputed rainbow table cannot cover every deployment. Supply it identically wherever the key is derived (the gateway and the slim `eas` client both derive from config alone — nothing is stored). Ignored on the raw base64 key path, which skips PBKDF2. Changing it changes the derived key (one-time re-encrypt of stored local content). |
+| `KeyDerivationSalt` | `null` | **Required** per-deployment salt for the **passphrase** path, so one precomputed rainbow table cannot cover every deployment (a passphrase without it is refused at startup). Supply it identically wherever the key is derived (the gateway and the slim `eas` client both derive from config alone — nothing is stored). Ignored on the raw base64 key path, which skips PBKDF2. Changing it changes the derived key (one-time re-encrypt of stored local content). |
 | `AllowPlaintext` | `false` | Explicitly store local content unencrypted (dev/test only; shouted in the startup banner). Ignored when a key is configured. |
 
-A raw base64 32-byte key is immune to rainbow tables (no PBKDF2); with a passphrase, set a
-unique `KeyDerivationSalt` per deployment. Losing the key (or the salt) makes the stored local
-content unrecoverable (drop the database and let devices re-upload); key rotation is not
-supported yet.
+A raw base64 32-byte key is immune to rainbow tables (no PBKDF2) and is the simplest choice;
+a passphrase must carry a unique `KeyDerivationSalt` per deployment. Losing the key (or the
+salt) makes the stored local content unrecoverable (drop the database and let devices
+re-upload); key rotation is not supported yet.
 
 ## `Eas` (protocol tuning)
 

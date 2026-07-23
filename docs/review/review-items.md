@@ -173,7 +173,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 ## Phase 1 — Security & data-integrity Highs
 *The residual Highs. Start here.*
 
-**1. Encryption key derivation & content AAD** — `K1` `K2` `K14`
+**1. Encryption key derivation & content AAD** — ~~`K1`~~ `K2` `K14`
 > `K1` every default deployment stretches its passphrase against one publicly-known salt → one rainbow table recovers the master key (which decrypts everything at rest). `K2` the content-protector AAD is not injective, so a newline in a login collides cross-collection. `K14` a base64-shaped passphrase skips PBKDF2 and the length floor. All in `Crypto`/`Security`. **Breaking** (K1 re-keys passphrase deployments) — see Standing context. **Before starting `K1`, read [`claimed-fixed-but-not.md`](claimed-fixed-but-not.md) §2** — round 1 already "fixed" this (`K45`, commit `41a476d`) with an *opt-in* `KeyDerivationSalt` that left the fixed salt as the default; do not repeat that — the default path must be safe with no operator action.
 
 **2. Sync-state flush integrity** [LIVE] — `A1` `A4` `A11`

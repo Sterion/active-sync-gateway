@@ -5,12 +5,16 @@ namespace ActiveSync.Crypto;
 
 /// <summary>
 ///   Loads the local-content encryption key from configuration. The value may be ANY
-///   string: base64 decoding to exactly 32 bytes is used as the raw key (the high-entropy
-///   path: 'openssl rand -base64 32'); anything else is treated as a passphrase and
-///   stretched to 32 bytes with PBKDF2-SHA256 over a fixed application salt (deterministic,
-///   so no salt needs storing). Shared by startup validation, DI and the protect verb so
-///   the rules exist exactly once. Whitespace-only values are treated as absent (empty
-///   placeholders in appsettings.json).
+///   string: canonical base64 decoding to exactly 32 bytes is used as the raw key (the
+///   high-entropy path: 'openssl rand -base64 32'); anything else is treated as a passphrase
+///   and stretched to 32 bytes with PBKDF2-SHA256 over the PER-DEPLOYMENT salt from
+///   <see cref="EncryptionOptions.KeyDerivationSalt" />. The passphrase path is REFUSED when
+///   that salt is unset (K1): a single global application salt would let one precomputed
+///   rainbow table recover the master key of every default deployment, so the default is
+///   fail-closed rather than silently sharing a salt. Derivation stays deterministic from
+///   configuration alone (nothing is stored), so the gateway and the slim CLI derive the same
+///   key. Shared by startup validation, DI and the protect verb so the rules exist exactly
+///   once. Whitespace-only values are treated as absent (empty placeholders in appsettings.json).
 /// </summary>
 public static class EncryptionKeyLoader
 {
@@ -25,7 +29,6 @@ public static class EncryptionKeyLoader
 
 	private const int KeySize = 32;
 	private const int DerivationIterations = 200_000;
-	private static readonly byte[] DerivationSalt = Encoding.UTF8.GetBytes("ActiveSync.Encryption.KeyDerivation.v1");
 
 	/// <summary>
 	///   Returns the 32-byte key, or null with <paramref name="error" /> set when the
@@ -39,12 +42,27 @@ public static class EncryptionKeyLoader
 		string? material = LoadKeyMaterial(options, out error);
 		if (material is null)
 			return null;
+		bool isPassphrase = TryDecodeRawKey(material) is null;
+
 		// K46: a passphrase (anything that is not a raw base64 32-byte key) must clear a hard length
 		// floor, not merely earn a warning. A too-short passphrase is a refusal.
-		if (TryDecodeRawKey(material) is null && material.Length < MinPassphraseLength)
+		if (isPassphrase && material.Length < MinPassphraseLength)
 		{
 			error = $"ActiveSync:Encryption: the key passphrase must be at least {MinPassphraseLength} " +
 			        "characters, or supply a base64 32-byte key ('openssl rand -base64 32').";
+			return null;
+		}
+
+		// K1: a passphrase must be stretched against a PER-DEPLOYMENT salt. Without one, PBKDF2 would
+		// fall back to a single global salt shared by every deployment, so one precomputed rainbow
+		// table recovers every default gateway's master key. Refuse rather than silently derive
+		// against a fixed salt — the default is fail-closed. A raw base64 32-byte key skips PBKDF2 and
+		// needs no salt.
+		if (isPassphrase && string.IsNullOrWhiteSpace(options.KeyDerivationSalt))
+		{
+			error = "ActiveSync:Encryption: a passphrase key requires ActiveSync:Encryption:KeyDerivationSalt " +
+			        "(a per-deployment value; supply it identically wherever the key is derived), or supply a " +
+			        "base64 32-byte key ('openssl rand -base64 32') which needs no salt.";
 			return null;
 		}
 
@@ -132,18 +150,18 @@ public static class EncryptionKeyLoader
 	}
 
 	/// <summary>
-	///   The PBKDF2 salt for passphrase stretching. K45: when an operator supplies
-	///   <see cref="EncryptionOptions.KeyDerivationSalt" />, the salt is deployment-specific
-	///   (bound under a fixed context so even a short operator value yields a full-width salt), so
-	///   one precomputed table does not cover every deployment. Unset keeps the historical fixed
-	///   application salt for back-compat. Deterministic either way — nothing is stored.
+	///   The PBKDF2 salt for passphrase stretching, derived from the operator's per-deployment
+	///   <see cref="EncryptionOptions.KeyDerivationSalt" /> (bound under a fixed context so even a
+	///   short operator value yields a full-width salt), so one precomputed table does not cover
+	///   every deployment. K1: there is deliberately NO fixed application-salt fallback — a passphrase
+	///   without a salt is refused upstream in <see cref="TryLoadKey" />, so this is only reached with
+	///   a non-empty salt. Deterministic — nothing is stored.
 	/// </summary>
 	private static byte[] ResolveSalt(EncryptionOptions options)
 	{
-		if (string.IsNullOrWhiteSpace(options.KeyDerivationSalt))
-			return DerivationSalt;
+		string salt = options.KeyDerivationSalt!.Trim();
 		return SHA256.HashData(
-			Encoding.UTF8.GetBytes("ActiveSync.Encryption.KeyDerivation.v1:" + options.KeyDerivationSalt.Trim()));
+			Encoding.UTF8.GetBytes("ActiveSync.Encryption.KeyDerivation.v1:" + salt));
 	}
 
 	private static byte[]? TryDecodeRawKey(string material)

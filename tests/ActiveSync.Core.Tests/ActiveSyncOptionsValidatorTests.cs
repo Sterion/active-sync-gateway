@@ -120,13 +120,27 @@ public class ActiveSyncOptionsValidatorTests
 	[Theory]
 	[InlineData("dG9vc2hvcnQ=")] // valid base64 but not 32 bytes → treated as a passphrase
 	[InlineData("!!!not-base64!!!")] // not base64 at all → passphrase
-	[InlineData("passphrase")] // a passphrase at/above the length floor is accepted
-	public void AnyKeyString_IsAcceptedAsAPassphrase(string key)
+	[InlineData("passphrase")] // a passphrase at/above the length floor
+	public void AnyPassphrase_WithDerivationSalt_IsAccepted(string key)
 	{
+		// K1: a passphrase is accepted only alongside a per-deployment KeyDerivationSalt.
 		ActiveSyncOptions options = Valid();
-		options.Encryption = new EncryptionOptions { Key = key };
+		options.Encryption = new EncryptionOptions { Key = key, KeyDerivationSalt = "deployment-salt" };
 		ValidateOptionsResult result = Validator.Validate(null, options);
 		Assert.True(result.Succeeded, string.Join(";", result.Failures ?? []));
+	}
+
+	[Fact]
+	public void Passphrase_WithoutDerivationSalt_FailsStartup()
+	{
+		// Behaviour change (K1): a passphrase with no KeyDerivationSalt is refused — it would
+		// otherwise stretch against a single global salt shared by every deployment. The raw
+		// base64-key path (openssl rand -base64 32) still needs no salt.
+		ActiveSyncOptions options = Valid();
+		options.Encryption = new EncryptionOptions { Key = "a decent looking passphrase" };
+		ValidateOptionsResult result = Validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains("KeyDerivationSalt", string.Join(";", result.Failures!));
 	}
 
 	[Fact]

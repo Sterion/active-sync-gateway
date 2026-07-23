@@ -8,10 +8,14 @@ public class EncryptionKeyLoaderTests
 	private static readonly string RawKeyBase64 = Convert.ToBase64String(
 		Enumerable.Range(0, 32).Select(i => (byte)i).ToArray());
 
-	private static byte[]? Load(string? key, out string? error, string? keyFile = null)
+	// K1: a passphrase now requires a per-deployment salt. Tests that exercise the passphrase path
+	// supply this so they derive a key instead of being fail-closed refused.
+	private const string TestSalt = "unit-test-deployment-salt";
+
+	private static byte[]? Load(string? key, out string? error, string? keyFile = null, string? salt = null)
 	{
 		return EncryptionKeyLoader.TryLoadKey(
-			new EncryptionOptions { Key = key, KeyFile = keyFile }, out error);
+			new EncryptionOptions { Key = key, KeyFile = keyFile, KeyDerivationSalt = salt }, out error);
 	}
 
 	[Fact]
@@ -25,13 +29,13 @@ public class EncryptionKeyLoaderTests
 	[Fact]
 	public void Passphrase_DerivesDeterministic32Bytes()
 	{
-		byte[]? first = Load("correct horse battery staple", out string? error);
-		byte[]? second = Load("correct horse battery staple", out _);
+		byte[]? first = Load("correct horse battery staple", out string? error, salt: TestSalt);
+		byte[]? second = Load("correct horse battery staple", out _, salt: TestSalt);
 		Assert.Null(error);
 		Assert.NotNull(first);
 		Assert.Equal(32, first.Length);
 		Assert.Equal(first, second); // deterministic — the same config always yields the same key
-		Assert.NotEqual(first, Load("correct horse battery stapler", out _)); // input-sensitive
+		Assert.NotEqual(first, Load("correct horse battery stapler", out _, salt: TestSalt)); // input-sensitive
 	}
 
 	[Fact]
@@ -39,8 +43,9 @@ public class EncryptionKeyLoaderTests
 	{
 		// Behaviour change (K46): there is now a hard minimum passphrase length. A passphrase at or
 		// above the floor (but still under the 12-char warn threshold) loads and is usable — the
-		// warning is the only pushback in that band (was "even 'pass' is accepted").
-		byte[]? key = Load("passpass", out string? error); // 8 chars
+		// warning is the only pushback in that band (was "even 'pass' is accepted"). K1: it also needs
+		// a per-deployment salt to be accepted.
+		byte[]? key = Load("passpass", out string? error, salt: TestSalt); // 8 chars
 		Assert.Null(error);
 		Assert.NotNull(key);
 		Assert.Equal(32, key.Length);
@@ -83,15 +88,31 @@ public class EncryptionKeyLoaderTests
 		File.WriteAllText(path, "my file-mounted passphrase\n");
 		try
 		{
-			byte[]? fromFile = Load(null, out string? error, path);
+			byte[]? fromFile = Load(null, out string? error, keyFile: path, salt: TestSalt);
 			Assert.Null(error);
 			// Identical derivation whether the passphrase arrives inline or via file.
-			Assert.Equal(Load("my file-mounted passphrase", out _), fromFile);
+			Assert.Equal(Load("my file-mounted passphrase", out _, salt: TestSalt), fromFile);
 		}
 		finally
 		{
 			File.Delete(path);
 		}
+	}
+
+	[Fact]
+	public void Passphrase_WithoutKeyDerivationSalt_IsRejected()
+	{
+		// K1 (red-first): a passphrase (anything but a raw base64 32-byte key) must be stretched
+		// against a PER-DEPLOYMENT salt. The historical code fell back to a single global fixed salt
+		// whenever KeyDerivationSalt was unset, so one precomputed rainbow table recovered the master
+		// key of every default deployment. The passphrase path is now REFUSED with an actionable error
+		// unless the operator supplies KeyDerivationSalt (or switches to a raw base64 key). The default
+		// is fail-closed — it can never silently use the global salt.
+		byte[]? key = EncryptionKeyLoader.TryLoadKey(
+			new EncryptionOptions { Key = "correct horse battery staple" }, out string? error);
+		Assert.Null(key);
+		Assert.NotNull(error);
+		Assert.Contains("KeyDerivationSalt", error);
 	}
 
 	[Fact]
@@ -104,12 +125,8 @@ public class EncryptionKeyLoaderTests
 			new EncryptionOptions { Key = "shared passphrase", KeyDerivationSalt = "deployment-a" }, out _);
 		byte[]? b = EncryptionKeyLoader.TryLoadKey(
 			new EncryptionOptions { Key = "shared passphrase", KeyDerivationSalt = "deployment-b" }, out _);
-		byte[]? none = EncryptionKeyLoader.TryLoadKey(
-			new EncryptionOptions { Key = "shared passphrase" }, out _);
 
 		Assert.NotEqual(a, b);
-		Assert.NotEqual(a, none);
-		Assert.NotEqual(b, none);
 		// Deterministic within a deployment: same passphrase + same salt = same key.
 		Assert.Equal(a, EncryptionKeyLoader.TryLoadKey(
 			new EncryptionOptions { Key = "shared passphrase", KeyDerivationSalt = "deployment-a" }, out _));
@@ -134,18 +151,18 @@ public class EncryptionKeyLoaderTests
 		// byte-based path yields the SAME key (UTF-8 bytes == the string overload's own encoding),
 		// i.e. the change is behaviour-preserving. The origin string (config-bound Key, or the key
 		// file text) stays unzeroable and is the documented residual.
-		byte[]? a = Load("a stable passphrase value", out string? error);
+		byte[]? a = Load("a stable passphrase value", out string? error, salt: TestSalt);
 		Assert.Null(error);
 		Assert.NotNull(a);
 		Assert.Equal(32, a.Length);
-		Assert.Equal(a, Load("a stable passphrase value", out _));
+		Assert.Equal(a, Load("a stable passphrase value", out _, salt: TestSalt));
 	}
 
 	[Fact]
 	public void PassphraseAndRawKey_YieldDifferentKeys()
 	{
 		// The derived key never accidentally equals raw-key material.
-		byte[]? derived = Load("some passphrase that is long", out _);
+		byte[]? derived = Load("some passphrase that is long", out _, salt: TestSalt);
 		Assert.NotEqual(Convert.ToBase64String(derived!), RawKeyBase64);
 	}
 }
