@@ -60,6 +60,14 @@ public sealed class SmtpSubmitBackend(
 				credentials.UserName, attempt, TransientRetry.DelaysMs.Length);
 		}).ConfigureAwait(false);
 
+		// RFC 1870 SIZE preflight (D1): if the server advertised a maximum message size and this
+		// message exceeds it, the send is doomed — but SendAsync would stream the entire DATA body
+		// first, and the resulting 552 is indistinguishable from a transient blip. Fail fast with a
+		// distinct, non-retryable BackendException carrying the size hint; at the EAS layer this maps
+		// to ComposeMail Status 120 (permanent), which is correct — a too-big message never succeeds
+		// on retry, and the DATA transfer is spared.
+		EnsureWithinMaxSize(mime.LongLength, smtp.Capabilities, smtp.MaxSize);
+
 		await smtp.SendAsync(message, ct).ConfigureAwait(false); // NOT retried — submission is not idempotent
 
 		// The mail is accepted at this point. The QUIT teardown must NOT be able to fail the
@@ -76,6 +84,19 @@ public sealed class SmtpSubmitBackend(
 		}
 
 		logger.LogInformation("Sent message {MessageId} for {User}", message.MessageId, credentials.UserName);
+	}
+
+	/// <summary>
+	///   Enforces the SMTP server's advertised maximum message size (RFC 1870 SIZE) before the DATA
+	///   phase. Throws a non-retryable <see cref="BackendException" /> when the server advertised the
+	///   SIZE capability with a positive limit and the message exceeds it; otherwise a no-op (no
+	///   advertised SIZE, or an advertised-but-unlimited <c>MaxSize == 0</c>).
+	/// </summary>
+	internal static void EnsureWithinMaxSize(long mimeLength, SmtpCapabilities capabilities, uint maxSize)
+	{
+		if ((capabilities & SmtpCapabilities.Size) != 0 && maxSize > 0 && mimeLength > maxSize)
+			throw new BackendException(
+				$"Message size {mimeLength} bytes exceeds the SMTP server's maximum of {maxSize} bytes (RFC 1870 SIZE).");
 	}
 
 	private static bool IsTransientSmtp(Exception ex, CancellationToken ct)
