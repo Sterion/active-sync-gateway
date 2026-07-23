@@ -62,6 +62,21 @@ internal static class EndpointAuth
 	}
 
 	/// <summary>
+	///   Whether this request ARRIVED from a configured <see cref="AuthOptions.TrustedProxies" />
+	///   hop, and so its forwarded headers (<c>X-Forwarded-Proto</c>, <c>X-Forwarded-Host</c>) may be
+	///   honoured. Mirrors the peer-trust decision in <see cref="ClientKey" />: the check is on the
+	///   transport peer, never on the header, so a direct attacker cannot self-certify a spoofed
+	///   header. With no trusted proxies configured (the default) this is always false — a direct
+	///   deployment must not let any caller rewrite the scheme or advertised host.
+	/// </summary>
+	public static bool IsFromTrustedProxy(HttpContext http, AuthOptions auth)
+	{
+		return Normalize(http.Connection.RemoteIpAddress) is { } peer &&
+		       auth.TrustedProxies.Count > 0 &&
+		       IsTrusted(peer, auth.TrustedProxies);
+	}
+
+	/// <summary>
 	///   X-Forwarded-For entries, in order. Hard-capped: the header is unauthenticated input
 	///   and the values feed throttle keys, so a long chain must not become work per request.
 	/// </summary>

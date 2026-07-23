@@ -195,8 +195,10 @@ public static class WebApplicationExtensions
 	///   the handler derives from the scheme at BOTH the authorize step and the token exchange, so the
 	///   identity provider is never handed an http callback. <see cref="ActiveSyncOptions.PublicUrl" />
 	///   wins (it never depends on client-supplied headers); otherwise <c>X-Forwarded-Proto</c> is
-	///   trusted. Host and <c>RemoteIpAddress</c> are left untouched, so the /cli loopback gate and the
-	///   auth throttle are unaffected.
+	///   honoured ONLY when the request arrived from a configured <see cref="AuthOptions.TrustedProxies" />
+	///   hop (E1) — from a direct/untrusted peer the header is ignored, so an attacker cannot force the
+	///   scheme to https. Host and <c>RemoteIpAddress</c> are left untouched, so the /cli loopback gate
+	///   and the auth throttle are unaffected.
 	/// </summary>
 	public static WebApplication UsePublicScheme(this WebApplication app)
 	{
@@ -207,12 +209,28 @@ public static class WebApplicationExtensions
 			app.Services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>();
 		app.Use(async (context, next) =>
 		{
-			string? publicUrl = options.CurrentValue.PublicUrl;
-			if (ResolvePublicScheme(publicUrl, context.Request.Headers["X-Forwarded-Proto"].FirstOrDefault()) is { } scheme)
+			if (ResolveRequestScheme(context, options.CurrentValue) is { } scheme)
 				context.Request.Scheme = scheme;
 			await next();
 		});
 		return app;
+	}
+
+	/// <summary>
+	///   The scheme to force onto a live request, or null to keep its own. A configured
+	///   <see cref="ActiveSyncOptions.PublicUrl" /> wins from any peer (it never depends on
+	///   client-supplied headers); otherwise <c>X-Forwarded-Proto</c> is honoured ONLY when the
+	///   request arrived from a configured <see cref="AuthOptions.TrustedProxies" /> hop — mirroring
+	///   the peer-trust gate <c>EndpointAuth.ClientKey</c> applies to <c>X-Forwarded-For</c>, so a
+	///   direct attacker cannot force <c>Request.Scheme=https</c> (which drives the OIDC
+	///   <c>redirect_uri</c> and every absolute Autodiscover URL).
+	/// </summary>
+	internal static string? ResolveRequestScheme(HttpContext context, ActiveSyncOptions options)
+	{
+		string? forwardedProto = EndpointAuth.IsFromTrustedProxy(context, options.Auth)
+			? context.Request.Headers["X-Forwarded-Proto"].FirstOrDefault()
+			: null;
+		return ResolvePublicScheme(options.PublicUrl, forwardedProto);
 	}
 
 	/// <summary>
