@@ -8,6 +8,7 @@ using ActiveSync.Crypto;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Core.Tests;
@@ -326,6 +327,97 @@ public sealed class AccountStoreTests : IDisposable
 			await _store.ListAsync(CancellationToken.None);
 		Assert.Equal(["a", "b"], all.Select(e => e.UserName));
 		Assert.All(all, e => Assert.True(e.Valid));
+	}
+
+	[Fact]
+	public async Task Upsert_NormalizesStoredCasing_SoIndexAndLookupAgree()
+	{
+		// B1/B8: the stored UserName must be canonical (lowercase) so the raw unique index enforces
+		// case-folded uniqueness and lookups are exact (index seek), not a non-sargable LOWER() scan
+		// that leaves the case-variant pair reachable. Round 1's fix only added LOWER() to the read
+		// predicates; it never normalized the stored value.
+		await _store.UpsertAsync("PHONE1", new AccountOptions { MailAddress = "x@x" }, CancellationToken.None);
+
+		await using SyncDbContext db = _factory.CreateDbContext();
+		AccountEntry row = await db.AccountEntries.AsNoTracking().SingleAsync();
+		Assert.Equal("phone1", row.UserName);
+	}
+
+	[Fact]
+	public async Task LoadAll_WarnsOnCaseVariantDuplicate_InsteadOfSilentlyDropping()
+	{
+		// B1: two case-only-variant rows can coexist under the raw unique index (a pre-fix pair, a
+		// restored dump, or a direct DB write). LoadAllAsync collapsed them into an OrdinalIgnoreCase
+		// dictionary, silently discarding one user's entire override set. The collapse must be SURFACED.
+		await using (SyncDbContext db = _factory.CreateDbContext())
+		{
+#pragma warning disable VSTHRD103
+			db.AccountEntries.Add(new AccountEntry { UserName = "phone1", Json = "{}", UpdatedUtc = DateTime.UtcNow });
+			db.AccountEntries.Add(new AccountEntry { UserName = "Phone1", Json = "{}", UpdatedUtc = DateTime.UtcNow });
+#pragma warning restore VSTHRD103
+			await db.SaveChangesAsync();
+		}
+
+		CapturingLogger logger = new();
+		await _store.LoadAllAsync(logger, CancellationToken.None);
+
+		Assert.Contains(logger.Lines, l => l.Level == LogLevel.Warning);
+	}
+
+	[Fact]
+	public async Task Migration_DedupSql_CollapsesCaseVariantPair_KeepingNewestAndFolding()
+	{
+		// Proves the NormalizeAccountUserNameCasing data migration's dedup+fold SQL on POPULATED data
+		// (the full-suite Migrate() only exercises it on empty DBs). Two case-variant rows are seeded
+		// directly — the raw unique index allows the pair — then the migration's two statements must
+		// collapse them to the most-recently-updated survivor, case-folded. SQL mirrors the migration.
+		DateTime older = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+		DateTime newer = new(2026, 2, 2, 0, 0, 0, DateTimeKind.Utc);
+		await using (SyncDbContext db = _factory.CreateDbContext())
+		{
+#pragma warning disable VSTHRD103
+			db.AccountEntries.Add(new AccountEntry { UserName = "phone1", Json = "{\"m\":\"old\"}", UpdatedUtc = older });
+			db.AccountEntries.Add(new AccountEntry { UserName = "PHONE1", Json = "{\"m\":\"new\"}", UpdatedUtc = newer });
+#pragma warning restore VSTHRD103
+			await db.SaveChangesAsync();
+		}
+
+		await using (SyncDbContext db = _factory.CreateDbContext())
+		{
+			await db.Database.ExecuteSqlRawAsync(
+				"""
+				DELETE FROM "AccountEntries"
+				WHERE "Id" NOT IN (
+				    SELECT a."Id" FROM "AccountEntries" a
+				    WHERE NOT EXISTS (
+				        SELECT 1 FROM "AccountEntries" b
+				        WHERE lower(b."UserName") = lower(a."UserName")
+				          AND (b."UpdatedUtc" > a."UpdatedUtc"
+				               OR (b."UpdatedUtc" = a."UpdatedUtc" AND b."Id" > a."Id"))
+				    )
+				);
+				""");
+			await db.Database.ExecuteSqlRawAsync(
+				"""UPDATE "AccountEntries" SET "UserName" = lower("UserName") WHERE "UserName" <> lower("UserName");""");
+		}
+
+		await using (SyncDbContext db = _factory.CreateDbContext())
+		{
+			AccountEntry survivor = await db.AccountEntries.AsNoTracking().SingleAsync();
+			Assert.Equal("phone1", survivor.UserName);
+			Assert.Equal("{\"m\":\"new\"}", survivor.Json);  // the newer row won
+		}
+	}
+
+	private sealed class CapturingLogger : ILogger
+	{
+		public List<(LogLevel Level, string Message)> Lines { get; } = [];
+		public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+		public bool IsEnabled(LogLevel logLevel) => true;
+
+		public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
+			Exception? exception, Func<TState, Exception?, string> formatter) =>
+			Lines.Add((logLevel, formatter(state, exception)));
 	}
 
 	private sealed class TestContextFactory(SqliteConnection connection) : ISyncDbContextFactory

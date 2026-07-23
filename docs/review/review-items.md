@@ -186,7 +186,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **4. JMAP submission & revision integrity** [LIVE] — ~~`H1`~~ ~~`H5`~~ **COMPLETE**
 > `H1` a failed JMAP send leaves an orphan `$draft` in Drafts that then syncs to the device. `H5` contact/calendar revision is a hash of raw JSON whose member order is server-defined → the diff can re-send the entire collection on a re-serialization. Verify against the `stalwart` JMAP stack.
 
-**5. Account-row case collation** — `B1` `B8`
+**5. Account-row case collation** — ~~`B1`~~ ~~`B8`~~ **COMPLETE**
 > `B1` two BINARY-distinct rows (`Phone1`/`phone1`) coexist under the unique index but collapse last-write-wins into the OrdinalIgnoreCase load map, silently dropping a user's overrides. `B8` the `ToLower()` predicates can't see the pair. Fix case-folded uniqueness at the DB layer (needs a migration on both providers). **Before starting, read [`claimed-fixed-but-not.md`](claimed-fixed-but-not.md) §1** — round 1 already "fixed" this (`B2`, commit `ca03f49`) with `.ToLower()` lookup predicates only, which is exactly why the collapse survives; the fix must change the index/storage casing + migrate existing duplicates, not add another lookup-level compare.
 
 **6. WebUi throttle & OIDC admin binding** — `C1` `C4`
@@ -315,14 +315,14 @@ Area S, the cross-cutting structural pass, is given in full below.)*
 **Verified correct:** SaveChanges override placement; concurrency-token stamping set + reload-on-conflict; F12 deferred-Replay rationale (within one collection); unique-violation narrowing; FolderRegistry retry detaches only `UserFolder`; DavItemMap short-lived-context isolation; lease refcounting survives idle eviction; `LastUsedUtc` Interlocked; timer body fully try/caught; value-comparing `TryRemove`; DisposeAsync detaches handlers; `PeekSyncKeyAsync` read-only.
 
 ## Area B — Core: Accounts / Administration / Settings / Options (12)
-`B1` **High** Case-only-duplicate account rows collapse last-write-wins, dropping a user's overrides — `Accounts/AccountStore.cs:43`.
+`B1` **High** Case-only-duplicate account rows collapse last-write-wins, dropping a user's overrides — `Accounts/AccountStore.cs:43`. FIXED (item 5): `AccountStore` now STORES `UserName` case-folded (`NormalizeLogin` = `ToLowerInvariant`), so the raw unique index enforces case-folded uniqueness (the store can no longer create a case-variant pair); `LoadAllAsync` additionally WARNS instead of silently dropping if it ever meets an out-of-band pair. Data migration `NormalizeAccountUserNameCasing` (both providers) collapses any existing case-variant pair to the most-recently-updated survivor, then case-folds. BEHAVIOUR/BREAKING: stored/displayed `UserName` is now always lowercase; on upgrade existing mixed-case rows are folded and duplicates collapsed (one-time, deterministic).
 `B2` **Med** Negative `UsersRefreshSeconds` polls every request though docs say it disables pickup — `Settings/ChangeStampRefreshGate.cs:33`.
 `B3` **Med** Startup-impact validation can't catch a backend/user-validator brick — `Administration/SettingKeys.cs:271`.
 `B4` **Med** `EnsureFreshAsync`/`OnRolesChanged` race on `_snapshot`; a stale refresh overwrites a newer one — `Accounts/AccountResolver.cs:117,170`.
 `B5` **Low** `Users` config secrets unsealed and retained in the long-lived snapshot — `Accounts/AccountResolver.cs:446`.
 `B6` **Low** SQLite "missing table" detected by a localized message substring — `Settings/DbSettingsLoader.cs:72`.
 `B7` **Low** Legacy `sieve.enabled` upgrade yields an un-authenticable Oof row with no Host — `Administration/LegacyAccountJson.cs:108`.
-`B8` **Low** Upsert/delete `ToLower()` predicates defeat the index and can't see the B1 pair — `Accounts/AccountStore.cs:57`.
+`B8` **Low** Upsert/delete `ToLower()` predicates defeat the index and can't see the B1 pair — `Accounts/AccountStore.cs:57`. FIXED (item 5): Get/Upsert/Delete now match `a.UserName == NormalizeLogin(login)` — an exact index seek against the case-folded stored value (sargable), replacing the non-sargable `a.UserName.ToLower() == login.ToLower()` full scan.
 `B9` **Low** `SecretRedaction` markers omit PrivateKey/ClientAuth/Signature → cleartext render — `Administration/SecretRedaction.cs:24`.
 `B10` **Nit** `ResolvedAccount.OrderedRoles` lazy cache not thread-safe on a shared record — `Accounts/ResolvedAccount.cs:23`.
 `B11` **Nit** `ValidateEntry` emits redundant "sealed but no key" per secret when the key won't load — `Accounts/AccountResolver.cs:260`.
