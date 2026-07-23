@@ -189,7 +189,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **5. Account-row case collation** — ~~`B1`~~ ~~`B8`~~ **COMPLETE**
 > `B1` two BINARY-distinct rows (`Phone1`/`phone1`) coexist under the unique index but collapse last-write-wins into the OrdinalIgnoreCase load map, silently dropping a user's overrides. `B8` the `ToLower()` predicates can't see the pair. Fix case-folded uniqueness at the DB layer (needs a migration on both providers). **Before starting, read [`claimed-fixed-but-not.md`](claimed-fixed-but-not.md) §1** — round 1 already "fixed" this (`B2`, commit `ca03f49`) with `.ToLower()` lookup predicates only, which is exactly why the collapse survives; the fix must change the index/storage casing + migrate existing duplicates, not add another lookup-level compare.
 
-**6. WebUi throttle & OIDC admin binding** — `C1` `C4`
+**6. WebUi throttle & OIDC admin binding** — ~~`C1`~~ `C4`
 > `C1` login success clears only the per-user throttle key, never the IP-wide one, so a busy NAT IP eventually 429s everyone. `C4` OIDC signs in an unbound config-declared admin on a bare login-claim match (mutable `preferred_username` takeover).
 
 **7. Forwarded-header trust** — `E1` `E10`
@@ -330,7 +330,7 @@ Area S, the cross-cutting structural pass, is given in full below.)*
 **Verified correct:** fail-closed on invalid rows (+ `Enabled==false` honored); host-controlled/bootstrap key enforcement (write + read paths); empty gateway password can't hash; NaN/Infinity rejected + cadence clamp; timing-safe pinned/gateway compares; log-injection safety (`Contains` not `Like`, login validation); DB-outage resilience keeps last-good; connection-string secret redaction; provider-validation memoization; live role rebuild validated like startup; OIDC AdminClaim/Value pairing; legacy row deserialized-first.
 
 ## Area C — WebUi (9)
-`C1` **High** Login success clears only the per-user throttle key → a busy NAT IP 429s everyone — `Auth/AuthEndpoints.cs:146`.
+`C1` **High** Login success clears only the per-user throttle key → a busy NAT IP 429s everyone — `Auth/AuthEndpoints.cs:146`. FIXED (item 6): `LoginAsync` now calls `throttle.RecordSuccess(addressKey)` alongside `RecordSuccess(userKey)` on a successful login, so a valid sign-in clears the accrued IP-wide counter and a shared egress IP no longer locks out everyone behind it. Proven red-first through the real login endpoint (`WebLoginThrottleTests`).
 `C2` **Med** Backend `/test` probe is an SSRF reachability oracle for arbitrary operator hosts — `Api/BackendsEndpoints.cs:178`.
 `C3` **Med** `DELETE /admin/api/shares` doesn't normalize/validate the login (can't delete what POST created) — `Api/SharesEndpoints.cs:60`.
 `C4` **Med** OIDC signs in an unbound config-declared admin on a bare login-claim match — `Auth/OidcLogin.cs:61`.
