@@ -82,6 +82,20 @@ public class LocalContentProtectorTests
 	}
 
 	[Fact]
+	public void ControlCharInIdentity_Rejected_ClosingAadCollision()
+	{
+		// K2 (red-first): the AAD is "userName + \n + collection" — the sole guard against replaying a
+		// ciphertext row under a different (user, collection). That "\n"-join is NOT injective: the
+		// distinct pairs ("a\nb","c") and ("a","b\nc") both encode to the bytes of "a\nb\nc", so a row
+		// sealed for one identity decrypts under the other (gateway logins arrive as an
+		// attacker-influenced HTTP Basic username). The protector must reject a control character —
+		// the "\n" delimiter in particular — in either part, making that collision unconstructable.
+		using LocalContentProtector protector = LocalContentProtector.CreateProtected(Key());
+		Assert.Throws<ArgumentException>(() => protector.Protect(Vcard, "a\nb", "c"));
+		Assert.Throws<ArgumentException>(() => protector.Protect(Vcard, "a", "b\nc"));
+	}
+
+	[Fact]
 	public void EmptyString_RoundTrips()
 	{
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(Key());

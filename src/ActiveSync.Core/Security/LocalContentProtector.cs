@@ -116,10 +116,28 @@ public sealed class LocalContentProtector : IDisposable
 			CryptographicOperations.ZeroMemory(_key);
 	}
 
-	// Same "\n"-joined idiom as the BackendSessionFactory session keys.
+	// K2: the AAD binds a ciphertext row to its (user, collection) so it cannot be replayed under
+	// another identity. "\n" is the field delimiter, so a control character (the "\n" itself in
+	// particular) inside either part would make the encoding non-injective — ("a\nb","c") and
+	// ("a","b\nc") would both encode to "a\nb\nc" and cross-decrypt. The user name arrives as an
+	// attacker-influenced HTTP Basic login, so reject any C0 control character in either part; the
+	// "\n"-join is then unambiguous. Legitimate logins and the fixed internal collection names never
+	// contain control characters.
 	private static byte[] Aad(string userName, string collection)
 	{
+		RejectControlChars(userName, nameof(userName));
+		RejectControlChars(collection, nameof(collection));
 		return Encoding.UTF8.GetBytes(userName + "\n" + collection);
+	}
+
+	private static void RejectControlChars(string value, string part)
+	{
+		foreach (char c in value)
+		{
+			if (c < ' ')
+				throw new ArgumentException(
+					$"LocalContentProtector {part} must not contain control characters.", part);
+		}
 	}
 
 	private static BackendException UndecryptableRow(Exception? inner)
