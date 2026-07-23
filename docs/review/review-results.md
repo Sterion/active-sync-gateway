@@ -185,3 +185,31 @@ SQLite temp DBs ✓ · diffs independently inspected ✓.
 - **Scope discipline:** round-1 B2 also touched `GlobalSetting.Key`; the worker correctly stayed inside the
   item (B1/B8 are `AccountStore`/`AccountEntry` only) and did not touch `GlobalSettingStore`.
 - No new findings filed.
+
+---
+
+## Item 6 — WebUi throttle & OIDC admin binding
+**Findings:** `C1` `C4`
+**Commits:** `12837d3` (C1) · `b3da969` (C4)
+**Verification:** integrity items=32 live=10 assigned=unique=132 dupes=0 encoding=0 ✓ · cursor → item 7 ✓ ·
+one commit per finding, ID in subject ✓ · build clean (0 warnings) ✓ · unit suite **1045 passed, 0 skipped**
+(Protocol 78 · Core 650 · WebUi 73 · Server 244; WebUi +2) ✓ · **live suite (independent, fresh
+clean-volume Stalwart): 141 passed, 0 skipped** — ran despite worker's WebUi-only scoping, per the
+auth-change blast-radius rule; the EAS Basic-auth pipeline is confirmed untouched ✓ · diffs inspected ✓.
+**Notes:**
+- **Both proven red-first.** C1: a legitimate user sharing a NAT IP with a stream of failed logins got 429
+  on unmodified code (the IP-wide `addressKey` counter never cleared on success); fix adds
+  `throttle.RecordSuccess(addressKey)` — driven through the real `WebUiHost` TestServer login endpoint. C4:
+  an unbound config-declared admin returned `IsAdmin: true` on a bare login-claim match before the fix,
+  `false` after; a bound config admin still gets admin. Both diffs confirm the remedy.
+- **Breaking (disclosed):** C4 withholds the admin capability from an unbound config-declared account under
+  OIDC until the operator sets `OidcSubject` (per webui.md:82-85). The account still signs in as a plain
+  user — only the admin bit is withheld.
+- **Judgment call (C4) — refuse the admin bit, not the whole sign-in.** The detail offered both. The worker
+  chose the surgical option because an existing test asserts an unbound config account (carol) IS allowed to
+  sign in, and the finding's closing clause scopes the requirement to the *admin* bit; refusing sign-in
+  would contradict that tested behaviour and could lock out operators who deliberately use an immutable
+  `LoginClaim` (webui.md's supported alternative to binding). I concur — the per-ticket IdP `claimAdmin`
+  and database accounts are correctly left unchanged. Confirmed in the diff: `accountAdmin = Admin == true
+  && (FromDatabase || subjectBound)`.
+- Both proven red-first; no coverage-only tests. No new findings filed.
