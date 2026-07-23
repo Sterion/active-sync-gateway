@@ -116,3 +116,31 @@ finding's remedy ✓.
   `InternalsVisibleTo("ActiveSync.Core.Tests")` on the Imap + Smtp csprojs to unit-test the two internal
   helpers — matching the existing Dav/Jmap pattern. No production surface widened.
 - No new findings filed.
+
+---
+
+## Item 4 — JMAP submission & revision integrity [LIVE]
+**Findings:** `H1` `H5`
+**Commits:** `32dbe80` (H1) · `145a6c4` (H5)
+**Verification:** integrity items=32 live=10 assigned=unique=132 dupes=0 encoding=0 ✓ · cursor → item 5 ✓ ·
+one commit per finding, ID in subject ✓ · build clean (0 warnings) ✓ · unit suite **1040 passed, 0 skipped**
+(Protocol 78 · Core 647 · WebUi 71 · Server 244; +3 over item 3) ✓ · **live suite (independent, fresh
+clean-volume Stalwart): 141 passed, 0 skipped** ✓ · diffs independently inspected — both fixes match the
+finding remedies ✓.
+**Notes:**
+- **Both proven red-first.** H1: `Send_SubmissionRejected_DestroysStagedDraft_AndThrows` failed on
+  unmodified code (staged `$draft` survived a `notCreated` rejection); now `SendAsync` issues a best-effort
+  `Email/set destroy` on the staged import before throwing. H5: `GetItemRevisions_IsIndependentOfMemberOrder`
+  (added to both contact & calendar store tests) failed on unmodified code (member-order re-serialization
+  flipped the SHA-256); now both `Revision` methods delegate to a shared `JmapRevision.Compute` that hashes a
+  canonical serialization (object members sorted by name, array order preserved). Diffs confirm both.
+- **Breaking (self-healing, disclosed):** H5 changes the revision string for every JMAP contact/calendar
+  item, so on upgrade each item's stored snapshot revision mismatches once → a one-time full re-sync of those
+  collections. Harmless, self-heals on the next round, acceptable per Standing context.
+- **H1 cleanup can't mask the error:** the destroy is try/catch, re-propagates `OperationCanceledException`,
+  and a destroy failure only logs a warning — so a rejected submission always still surfaces its
+  non-retryable error (never flips to a retry). No API change.
+- **Judgment call (H5):** full recursive canonicalization over the detail's alternative of hashing a stable
+  server field (`updated`/`sequence`). I concur — the server field isn't guaranteed present across JMAP
+  servers, whereas canonicalization is provider-agnostic and robust. Reasonable either way.
+- No new findings filed.
