@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
@@ -360,10 +358,9 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		return _account = session.PrimaryAccount(JmapCapabilities.Calendars);
 	}
 
-	private static string Revision(JsonElement jsEvent)
-	{
-		return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(jsEvent.GetRawText())), 0, 8);
-	}
+	// H5: hash a canonical form (members sorted), not the raw text, so a server re-ordering the same
+	// event JSON does not flip the revision and re-sync the whole calendar.
+	private static string Revision(JsonElement jsEvent) => JmapRevision.Compute(jsEvent);
 
 	private static void EnsureNotIn(JsonElement setResult, string bucket, string id)
 	{

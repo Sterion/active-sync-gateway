@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using ActiveSync.Contracts;
@@ -286,11 +284,9 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		return _account = session.PrimaryAccount(JmapCapabilities.Contacts);
 	}
 
-	private static string Revision(JsonElement card)
-	{
-		byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(card.GetRawText()));
-		return Convert.ToHexString(hash, 0, 8);
-	}
+	// H5: hash a canonical form (members sorted), not the raw text, so a server re-ordering the same
+	// card JSON does not flip the revision and re-sync the whole address book.
+	private static string Revision(JsonElement card) => JmapRevision.Compute(card);
 
 	private static void EnsureNotIn(JsonElement setResult, string bucket, string id)
 	{

@@ -183,7 +183,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **3. IMAP send & category integrity** [LIVE] — ~~`D1`~~ ~~`D6`~~ ~~`F1`~~ **COMPLETE**
 > `F1` a post-reply failure in MeetingResponse reports retryable → duplicate iTIP REPLY + double PARTSTAT on retry. `D1` no SMTP MaxSize preflight. `D6` category sanitization collapses distinct EAS categories → perpetual revision churn. `MeetingResponseHandler` + `SmtpSubmitBackend` + `ImapMailBackend`.
 
-**4. JMAP submission & revision integrity** [LIVE] — ~~`H1`~~ `H5`
+**4. JMAP submission & revision integrity** [LIVE] — ~~`H1`~~ ~~`H5`~~ **COMPLETE**
 > `H1` a failed JMAP send leaves an orphan `$draft` in Drafts that then syncs to the device. `H5` contact/calendar revision is a hash of raw JSON whose member order is server-defined → the diff can re-send the entire collection on a re-serialization. Verify against the `stalwart` JMAP stack.
 
 **5. Account-row case collation** — `B1` `B8`
@@ -400,7 +400,7 @@ Area S, the cross-cutting structural pass, is given in full below.)*
 `H2` **Med** CalDAV create always does a full pre-PUT enumeration (contradicts H13) — `Dav/DavStoreBase.cs:98`.
 `H3` **Med** JSCalendar duration off by an hour across DST (floating wall-clock subtraction) — `Jmap/JsCalendarConverter.cs:175`.
 `H4` **Med** Non-birth (wedding) anniversaries destroyed on every contact edit — `Jmap/JsContactConverter.cs:42,285`.
-`H5` **Med** Contact/calendar revision hashes raw JSON whose member order is server-defined → full re-sync — `Jmap/JmapContactStore.cs:289`, `Jmap/JmapCalendarStore.cs:363`.
+`H5` **Med** Contact/calendar revision hashes raw JSON whose member order is server-defined → full re-sync — `Jmap/JmapContactStore.cs:289`, `Jmap/JmapCalendarStore.cs:363`. FIXED: both `Revision` methods now hash a CANONICAL serialization (new `JmapRevision.Compute` — object members sorted by name, array order preserved, scalars verbatim, no insignificant whitespace) so a server re-ordering the same JSON no longer flips the revision. BEHAVIOUR NOTE: the revision string for a given item now differs from the pre-fix hash, so on upgrade every JMAP contact/calendar item's stored snapshot revision mismatches once → a one-time full re-sync of those collections (harmless, self-healing; acceptable per Standing context).
 `H6` **Low** SSE watcher signals per `data:` line without buffering a full record (ping mis-latch) — `Jmap/JmapEventSourceWatcher.cs:95`.
 `H7` **Low** Delete-to-trash/MoveItem replace `mailboxIds` wholesale, losing multi-mailbox membership — `Jmap/JmapMailStore.cs:322,344`.
 `H8` **Low** JSCalendar recurrence `until` written as naive local though parsed as UTC — `Jmap/JsCalendarConverter.cs:274`.

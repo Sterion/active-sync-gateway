@@ -91,6 +91,41 @@ public sealed class JmapCalendarStoreUnitTests
 		Assert.False(sawFullFetch); // the poll must not pull full event bodies
 	}
 
+	// H5: item revisions used to be a SHA-256 of the raw CalendarEvent JSON text, sensitive to member
+	// ORDER and whitespace (both server-defined for a JSON object). A permitted re-serialization
+	// flipped every event's revision, re-syncing the whole calendar. Two logically identical events
+	// whose members differ only in order MUST hash to the same revision. Red-first: over the raw text
+	// the two revisions differ.
+	[Fact]
+	public async Task GetItemRevisions_IsIndependentOfMemberOrder()
+	{
+		const string ordered =
+			"""{"id":"E1","calendarIds":{"C1":true},"title":"Sync","start":"2024-01-01T09:00:00","duration":"PT1H"}""";
+		const string reordered =
+			"""{"duration":"PT1H","start":"2024-01-01T09:00:00","title":"Sync","calendarIds":{"C1":true},"id":"E1"}""";
+
+		string first = await RevisionOfSingleEvent(ordered);
+		string second = await RevisionOfSingleEvent(reordered);
+
+		Assert.Equal(first, second);
+	}
+
+	private static async Task<string> RevisionOfSingleEvent(string eventJson)
+	{
+		StubHandler stub = new(request =>
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			return Json(
+				$"{{\"methodResponses\":[[\"CalendarEvent/get\",{{\"accountId\":\"c\",\"state\":\"s\",\"list\":[{eventJson}]}},\"0\"]],\"sessionState\":\"x\"}}");
+		});
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapCalendarStore store = new(client, "u@example.test", pollSeconds: 1);
+		IReadOnlyDictionary<string, string> revs = await store.GetItemRevisionsAsync(
+			"jmap-cal:C1", ContentFilter.All, CancellationToken.None);
+		return revs["E1"];
+	}
+
 	private static HttpResponseMessage Json(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)

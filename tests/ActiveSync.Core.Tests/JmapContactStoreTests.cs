@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using ActiveSync.Backends.Jmap;
+using ActiveSync.Contracts;
 
 namespace ActiveSync.Core.Tests;
 
@@ -53,6 +54,41 @@ public sealed class JmapContactStoreTests
 
 		Assert.Contains("jmap-contact:B1", changed);
 		Assert.False(sawFullFetch);
+	}
+
+	// H5: item revisions used to be a SHA-256 of the raw ContactCard JSON text, which is sensitive to
+	// member ORDER and whitespace — both server-defined for a JSON object. A permitted re-serialization
+	// flipped every card's revision, so the diff engine (which treats the revision map as the whole
+	// truth) re-sent the entire address book. Two logically identical cards whose members differ only
+	// in order MUST hash to the same revision. Red-first: over the raw text the two revisions differ.
+	[Fact]
+	public async Task GetItemRevisions_IsIndependentOfMemberOrder()
+	{
+		const string ordered =
+			"""{"id":"K1","addressBookIds":{"B1":true},"name":{"full":"Jane Doe"},"emails":{"e1":{"address":"jane@x.test"}}}""";
+		const string reordered =
+			"""{"emails":{"e1":{"address":"jane@x.test"}},"name":{"full":"Jane Doe"},"addressBookIds":{"B1":true},"id":"K1"}""";
+
+		string first = await RevisionOfSingleCard(ordered);
+		string second = await RevisionOfSingleCard(reordered);
+
+		Assert.Equal(first, second);
+	}
+
+	private static async Task<string> RevisionOfSingleCard(string cardJson)
+	{
+		StubHandler stub = new(request =>
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			return Json(
+				$"{{\"methodResponses\":[[\"ContactCard/get\",{{\"accountId\":\"c\",\"state\":\"s\",\"list\":[{cardJson}]}},\"0\"]],\"sessionState\":\"x\"}}");
+		});
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapContactStore store = new(client, pollSeconds: 1);
+		IReadOnlyDictionary<string, string> revs = await store.GetItemRevisionsAsync(
+			"jmap-contact:B1", ContentFilter.All, CancellationToken.None);
+		return revs["K1"];
 	}
 
 	private static HttpResponseMessage Json(string body)
