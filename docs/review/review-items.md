@@ -183,7 +183,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **3. IMAP send & category integrity** [LIVE] — ~~`D1`~~ ~~`D6`~~ ~~`F1`~~ **COMPLETE**
 > `F1` a post-reply failure in MeetingResponse reports retryable → duplicate iTIP REPLY + double PARTSTAT on retry. `D1` no SMTP MaxSize preflight. `D6` category sanitization collapses distinct EAS categories → perpetual revision churn. `MeetingResponseHandler` + `SmtpSubmitBackend` + `ImapMailBackend`.
 
-**4. JMAP submission & revision integrity** [LIVE] — `H1` `H5`
+**4. JMAP submission & revision integrity** [LIVE] — ~~`H1`~~ `H5`
 > `H1` a failed JMAP send leaves an orphan `$draft` in Drafts that then syncs to the device. `H5` contact/calendar revision is a hash of raw JSON whose member order is server-defined → the diff can re-send the entire collection on a re-serialization. Verify against the `stalwart` JMAP stack.
 
 **5. Account-row case collation** — `B1` `B8`
@@ -396,7 +396,7 @@ Area S, the cross-cutting structural pass, is given in full below.)*
 **Verified correct:** SyncKey Status-3 resets to 0 (no resync loop), transient keeps the key; N−1 replay (item + folder); windowing (deletes first, SoftDelete vs Delete); echo suppression on all client commands + both MoveItems ends; conflict detection (Status 7); send/submit idempotency ordering (submit the single failure point); degraded-send guards (Status 150); Provision handshake (key + ack Status, PolicyType); MoveItems statuses (3=success); Find/Search paging (MaxFetch short-circuit, Total, Range); iMIP triggers + three duplicate guards; MIMESupport/BodyPreference ladder; Class echo ≤12.1; N+1 mitigations (batched GetItems, DAV pre-resolve, concurrent GAL/free-busy); long-poll deadline correctness; ct-last.
 
 ## Area H — Backends: JMAP / DAV (12)
-`H1` **High** Failed JMAP send leaves an orphan `$draft` in Drafts (syncs to device) — `Jmap/JmapMailSubmit.cs:75,91`.
+`H1` **High** Failed JMAP send leaves an orphan `$draft` in Drafts (syncs to device) — `Jmap/JmapMailSubmit.cs:75,91`. FIXED: on the `notCreated` submission path the store now issues an `Email/set destroy` for the staged import's server id before throwing (best-effort try/catch — a cleanup failure logs a warning and does not mask the non-retryable submission error, so it can't turn a rejection into a retry).
 `H2` **Med** CalDAV create always does a full pre-PUT enumeration (contradicts H13) — `Dav/DavStoreBase.cs:98`.
 `H3` **Med** JSCalendar duration off by an hour across DST (floating wall-clock subtraction) — `Jmap/JsCalendarConverter.cs:175`.
 `H4` **Med** Non-birth (wedding) anniversaries destroyed on every contact edit — `Jmap/JsContactConverter.cs:42,285`.

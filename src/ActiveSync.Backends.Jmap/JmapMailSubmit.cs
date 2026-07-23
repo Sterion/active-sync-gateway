@@ -93,10 +93,41 @@ public sealed class JmapMailSubmit(
 		    notCreated.TryGetProperty("s", out JsonElement error))
 		{
 			string type = error.TryGetProperty("type", out JsonElement t) ? t.GetString() ?? "unknown" : "unknown";
+			// H1: the submission was rejected, so onSuccessDestroyEmail (keyed off the submission's
+			// success) never fired and the staged copy still sits in Drafts — it would sync to the
+			// device as a phantom draft. Destroy it before throwing. Best-effort: a cleanup failure
+			// must not mask the real submission error.
+			await DestroyStagedDraftAsync(accountId, response.Arguments("0"), ct).ConfigureAwait(false);
 			throw new BackendException($"JMAP EmailSubmission failed: {type}.");
 		}
 
 		logger.LogInformation("Submitted message via JMAP for {From}", from);
+	}
+
+	/// <summary>
+	///   Destroys the temporary imported email (creation id "m") staged in Drafts, given the
+	///   <c>Email/import</c> call's result. Swallows any failure — the caller is already throwing the
+	///   submission error and a cleanup hiccup must not turn a non-retryable rejection into a retry.
+	/// </summary>
+	private async Task DestroyStagedDraftAsync(string accountId, JsonElement importResult, CancellationToken ct)
+	{
+		try
+		{
+			if (!importResult.TryGetProperty("created", out JsonElement created) ||
+			    !created.TryGetProperty("m", out JsonElement made) ||
+			    !made.TryGetProperty("id", out JsonElement idElement) ||
+			    idElement.GetString() is not { Length: > 0 } emailId)
+				return;
+			using JmapResponse _ = await client.CallAsync(Cap, "Email/set", new Dictionary<string, object?>
+			{
+				["accountId"] = accountId,
+				["destroy"] = new[] { emailId }
+			}, ct).ConfigureAwait(false);
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			logger.LogWarning(ex, "JMAP: could not remove the staged draft after a submission failure");
+		}
 	}
 
 	private async Task<string> AccountAsync(CancellationToken ct)
