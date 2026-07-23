@@ -144,3 +144,44 @@ finding remedies ✓.
   server field (`updated`/`sequence`). I concur — the server field isn't guaranteed present across JMAP
   servers, whereas canonicalization is provider-agnostic and robust. Reasonable either way.
 - No new findings filed.
+
+---
+
+## Item 5 — Account-row case collation
+**Findings:** `B1` `B8`
+**Commits:** `8c1b99a` (B1 + B8 — one commit; inseparable, same storage-normalization change)
+**Verification:** integrity items=32 live=10 assigned=unique=132 dupes=0 encoding=0 ✓ · cursor → item 6 ✓ ·
+both IDs in subject ✓ · **both-provider migrations present** (Sqlite `20260723013353_` + Npgsql
+`20260723013410_NormalizeAccountUserNameCasing`) ✓ · build clean (0 warnings) ✓ · unit suite **1043 passed,
+0 skipped** (Protocol 78 · Core 650 · WebUi 71 · Server 244; +3 over item 4) ✓ · **live suite (independent,
+fresh clean-volume Stalwart): 141 passed, 0 skipped** — the new migration applies cleanly in-chain on fresh
+SQLite temp DBs ✓ · diffs independently inspected ✓.
+**Notes:**
+- **This is the fix `claimed-fixed-but-not.md §1` demanded.** Round 1's B2 added only `.ToLower()` lookup
+  predicates, leaving the raw BINARY unique index and `LoadAllAsync` collapse intact. The worker instead
+  **changes stored casing**: `AccountStore.NormalizeLogin` (`ToLowerInvariant`) folds `UserName` on every
+  write, so the existing raw unique index now enforces case-folded uniqueness (the store can no longer create
+  a case-variant pair — B1's primary remedy); Get/Upsert/Delete predicates become exact `UserName ==
+  normalized` index seeks (closes B8's non-sargable scan); `LoadAllAsync` warns instead of silently dropping
+  an out-of-band pair (defense in depth). Confirmed in the diff.
+- **Data migration verified on both providers.** `NormalizeAccountUserNameCasing` (data-only, model snapshot
+  unchanged) collapses each existing case-variant pair to the most-recently-updated survivor (tie-break
+  highest Id) **before** case-folding — correct ordering, since folding first would collide on the unique
+  index. Applies cleanly on real SQLite via the live suite (141/0). Postgres migration exercised only in CI
+  (`AS_TEST_PG`, unset locally) — the GitHub `integration` legs will apply it.
+- **B1 & B8 proven red-first**, plus a dedicated migration-SQL-on-populated-data test
+  (`Migration_DedupSql_CollapsesCaseVariantPair_KeepingNewestAndFolding`) — proof, not mere coverage, since
+  the fixture `Migrate()` only runs the migration on empty DBs. Correctly reasoned by the worker.
+- **Breaking (disclosed):** stored/displayed `UserName` is now always lowercase (`eas users` / admin list
+  render lowercase); existing mixed-case rows fold and any duplicate collapses once, deterministically, on
+  upgrade. Acceptable per Standing context.
+- **Judgment call — normalize-on-write vs case-insensitive index (NOCASE/citext/functional).** Worker chose
+  normalize-on-write because tests build schema model-driven (`EnsureCreated`) while production uses
+  migrations, and a case-insensitive index would need provider-specific model config diverging between the
+  two paths; normalize-on-write is uniform across both providers and is one of B1's two endorsed options. I
+  concur. Residual: a raw out-of-band DB write could still insert a variant pair — covered by the
+  `LoadAllAsync` warning. SQLite `lower()` folds ASCII-only (Postgres is Unicode-aware); non-ASCII SQLite
+  logins fold on their next write — accepted edge, logins are overwhelmingly ASCII/email.
+- **Scope discipline:** round-1 B2 also touched `GlobalSetting.Key`; the worker correctly stayed inside the
+  item (B1/B8 are `AccountStore`/`AccountEntry` only) and did not touch `GlobalSettingStore`.
+- No new findings filed.
