@@ -106,6 +106,17 @@ public sealed partial class ImapMailBackend(
 			IList<UniqueId> uids = await folder.SearchAsync(query, ct).ConfigureAwait(false);
 			if (uids.Count == 0)
 				return new Dictionary<string, string>();
+			// D15: unlike JMAP's Email/get (bounded by maxObjectsInGet, which forces the H8
+			// page-at-500 mitigation), IMAP has no per-command object cap, and this FETCH asks
+			// only for UID+Flags — no bodies — so even a large mailbox is cheap. Splitting it
+			// into multiple session.RunAsync calls would release ImapSession's per-session gate
+			// BETWEEN pages, letting a concurrent Sync/Ping interleave — but a delivery or
+			// expunge landing between pages would then stitch the revision map together from two
+			// different mailbox states, silently breaking the "the revision map is the whole
+			// truth" invariant (AGENTS.md, Sync model) that the diff engine relies on. One atomic
+			// FETCH trades a longer single gate hold for a revision map that is always internally
+			// consistent — deliberately not paged, unlike the H8 mail *listing* it otherwise
+			// mirrors.
 			IList<IMessageSummary> summaries = await folder
 				.FetchAsync(uids, MessageSummaryItems.UniqueId | MessageSummaryItems.Flags, ct)
 				.ConfigureAwait(false);
