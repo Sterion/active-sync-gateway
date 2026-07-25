@@ -45,21 +45,8 @@ public sealed class DependencyRuleTests
 		Assert.DoesNotContain("ActiveSync.Core", referenced);
 	}
 
-	// S4: MergedFreeBusy builds the MS-ASCMD digit string — pure protocol logic with no EF/Core-state
-	// dependency, so it does not belong in Core. Its one project dependency is BusyPeriod, a Contracts
-	// capability model, so it moves to Contracts (the lowest layer the dependency rule permits it to
-	// sit in). The finding named ActiveSync.Protocol, but Protocol references nothing project-wise and
-	// cannot see BusyPeriod; relocating BusyPeriod there would be a breaking plugin-contract change
-	// owned by item 17. Contracts honours the finding's intent — out of Core, into a fuzzable leaf.
-	[Fact]
-	public void MergedFreeBusy_MovedFromCoreToContracts()
-	{
-		System.Reflection.Assembly core = typeof(Core.Backend.BackendProviderRegistry).Assembly;
-		System.Reflection.Assembly contracts = typeof(BusyPeriod).Assembly;
-
-		Assert.Null(core.GetType("ActiveSync.Core.Backend.MergedFreeBusy"));
-		Assert.NotNull(contracts.GetType("ActiveSync.Contracts.MergedFreeBusy"));
-	}
+	// S4: MergedFreeBusy_MovedFromCoreToContracts (round-1 guard) is replaced in the S5 block below —
+	// item 17 (round 2) moves MergedFreeBusy back to Core; see MergedFreeBusy_MovedFromContractsToCore.
 
 	// S4: CollectionDiff is the differential-sync windowing algorithm — pure protocol logic depending
 	// on nothing but BCL types and its own records. It belongs in ActiveSync.Protocol, where it is also
@@ -72,6 +59,20 @@ public sealed class DependencyRuleTests
 
 		Assert.Null(core.GetType("ActiveSync.Core.Sync.CollectionDiff"));
 		Assert.NotNull(protocol.GetType("ActiveSync.Protocol.Sync.CollectionDiff"));
+	}
+
+	// S9 (round 2): WireLog is BCL-only and a plugin never calls it — Backends.Common and Server use
+	// it to sanitize wire-log dumps, but nothing in the published plugin contract references it. It
+	// shrinks the Contracts surface by moving to ActiveSync.Protocol (below Contracts, where Protocol's
+	// "depends on nothing project-wise" rule already fits a BCL-only string helper).
+	[Fact]
+	public void WireLog_MovedFromContractsToProtocol()
+	{
+		System.Reflection.Assembly contracts = typeof(BusyPeriod).Assembly;
+		System.Reflection.Assembly protocol = typeof(ActiveSync.Protocol.Wbxml.WbxmlEncoder).Assembly;
+
+		Assert.Null(contracts.GetType("ActiveSync.Contracts.WireLog"));
+		Assert.NotNull(protocol.GetType("ActiveSync.Protocol.WireLog"));
 	}
 
 	// S8: ActiveSync.Backends.Common is a published, plugin-facing package. Its types must sit under a

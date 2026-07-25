@@ -1,6 +1,6 @@
-using ActiveSync.Contracts;
+using ActiveSync.Protocol;
 
-namespace ActiveSync.Core.Tests;
+namespace ActiveSync.Protocol.Tests;
 
 public sealed class WireLogTests
 {

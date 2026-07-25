@@ -1,4 +1,4 @@
-using ActiveSync.Contracts;
+using ActiveSync.Protocol;
 using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Backends.Common;

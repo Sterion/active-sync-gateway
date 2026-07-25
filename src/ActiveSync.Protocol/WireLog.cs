@@ -1,4 +1,4 @@
-namespace ActiveSync.Contracts;
+namespace ActiveSync.Protocol;
 
 /// <summary>
 ///   Helpers for the Verbose (Trace) wire-logging tier. Payload dumps are size-capped so a
