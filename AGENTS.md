@@ -128,8 +128,8 @@ src/ActiveSync.Crypto/      BCL-only master-key primitives: EncryptionKeyLoader 
                             passphrase → 32-byte key), SecretValue (enc:v1: AES-GCM seal of
                             config secrets), LocalCliEnvelope (the sealed /cli request),
                             EncryptionOptions. Depends on NOTHING. Shared by Core AND the slim
-                            eas client (so the client can seal without Core's heavy graph);
-                            published as a plugin-contract package.
+                            eas client (so the client can seal without Core's heavy graph).
+                            In-repo only — NOT published (packed until 1.1.2).
 src/ActiveSync.Core/        Provider engine (BackendProviderRegistry, CompositeBackendSession,
                             BackendSessionFactory), EF Core state store, diff engine, options.
                             Depends on Contracts + Protocol + Crypto (+ EF Core / config-binder
@@ -439,7 +439,7 @@ process-statically). The client targets `127.0.0.1` (never "localhost" — the g
 and a `::1`-first resolve costs a ~2 s failed connect) and falls back to `dotnet
 ActiveSync.Server.dll` when no gateway answers; `serve`/`protect` always run locally,
 `EAS_NO_FORWARD=1` forces all-local. `EncryptionKeyLoader`/`SecretValue` live in the BCL-only
-`ActiveSync.Crypto` assembly (shared by Core + the client; a 4th published contract package).
+`ActiveSync.Crypto` assembly (shared by Core + the client; in-repo only, not published).
 **Database-declared accounts**: `AccountEntry` rows (serialized `AccountOptions` JSON,
 managed by `AccountStore` / the `eas user` branch) REPLACE the whole config entry for the
 same login. Every store mutation bumps the single `AccountsStamp` row in the same
@@ -539,9 +539,12 @@ derive an address from `UserName` with `Contains('@')`.
   adds its providers. Fail-fast (corrupt/incompatible/no-entry aborts startup; empty dir =
   no-op), major-version-gated against **`ActiveSync.Contracts`** (the loader keys the gate off
   `typeof(IGatewayPlugin).Assembly`, which now IS Contracts). Wired in ProgramServer AND
-  CliServices before the container is built. Contracts/Protocol/Core/Backends.Common are packed to
-  NuGet on tagged CI; a plugin references **ActiveSync.Contracts** alone (+ Backends.Common only for
-  the converters). See docs/plugins.md (contract NOT ABI-stable pre-2.0).
+  CliServices before the container is built. ONLY Contracts + Protocol are packed to NuGet on
+  tagged CI — Core/Crypto/Backends.Common were unpublished and deleted from GitHub Packages
+  (2026-07-25), so a plugin references **ActiveSync.Contracts** alone. Package metadata lives in
+  `Directory.Build.targets` gated on `IsPackable` (a .props gate would evaluate too early), so a
+  host-only assembly carries no license/authors at all. See docs/plugins.md (contract NOT
+  ABI-stable pre-2.0).
 - One `CompositeBackendSession` per (user, deviceId), cached in `BackendSessionFactory`
   with idle eviction; auth verdicts are cached ~5 minutes. Content roles are optional —
   when a role has no configured provider it falls back to the **local store** (below), so

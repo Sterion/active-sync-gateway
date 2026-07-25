@@ -21,14 +21,11 @@ when configured) — pin the **exact minor** you target (see *Versioning* below)
   tiny assembly that pulls in only `ActiveSync.Protocol` (EAS constants) and the
   Microsoft.Extensions config/DI abstractions — **not** Core, Crypto or EF Core.
 
-Optionally, also reference:
-
-- `ActiveSync.Backends.Common` — the MIME/iCalendar/vCard converters and TLS/wire-logging
-  helpers. Only needed if your provider speaks MIME/iCalendar/vCard.
-- `ActiveSync.Crypto` — the master-key sealing primitive (`SecretValue`). Only needed if your
-  provider seals a secret of its **own** at rest; the host already seals and unseals the role
-  credential for you (see *Describing your settings* below). Contracts deliberately carries no
-  crypto, so this is an explicit, separate reference.
+That is the entire published surface — `ActiveSync.Contracts` plus the `ActiveSync.Protocol`
+it pulls in. The gateway's other assemblies (`ActiveSync.Core`, `ActiveSync.Crypto`,
+`ActiveSync.Backends.Common`) are host implementation detail and are **not** published, so a
+plugin brings its own MIME/iCalendar/vCard handling and its own sealing if it needs them.
+They were packed up to 1.1.2 and withdrawn; nothing replaces them.
 
 A plugin assembly contains:
 
@@ -148,8 +145,9 @@ per-user key (not a `Secret` field of your own), and the host seals it on write 
 before your provider sees it**, handing it to you in plaintext as
 `context.Roles[…].Credentials.Password`. Any other `Secret` field you declare is stored as entered
 and bound to your options in plaintext. If your provider needs to seal an *additional* secret of its
-own at rest, reference **`ActiveSync.Crypto`** (`SecretValue`) alongside `ActiveSync.Contracts` —
-Contracts carries no crypto on purpose, so sealing is always an explicit, separate dependency.
+own at rest, bring your own primitive (e.g. `System.Security.Cryptography.AesGcm` under a key from
+your own settings) — Contracts carries no crypto on purpose, and the gateway's internal sealing
+assembly is not published.
 
 `SelfServiceEditable` decides whether a **non-admin** account holder may set the field for their
 own account in the user portal. It defaults to `false`, so your provider is administration-only
@@ -182,7 +180,7 @@ any private dependencies beside it.
     SomePrivateDep.dll     <- private dependencies, if any
 ```
 
-Do **not** ship copies of `ActiveSync.Contracts`/`Protocol`/`Backends.Common` or the framework
+Do **not** ship copies of `ActiveSync.Contracts`/`ActiveSync.Protocol` or the framework
 in your plugin directory — the loader resolves those from the host so your types unify
 with the gateway's (a private copy would make `IBackendProvider` a different type and the
 provider would be ignored). Mark those package references `<Private>false</Private>` (or

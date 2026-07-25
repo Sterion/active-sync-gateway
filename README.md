@@ -762,6 +762,6 @@ src/
 **Backend plugins.** Backends are named *providers* that fill *roles*; a new backend (e.g.
 a Microsoft Graph bridge, or your own) is just another provider assembly. Out-of-repo plugins
 drop into `/app/plugins` and register themselves — no fork required. A plugin references the
-one small **`ActiveSync.Contracts`** package (published to NuGet per release; optionally
-`ActiveSync.Backends.Common` for the MIME/iCal/vCard converters). See
+one small **`ActiveSync.Contracts`** package (published to NuGet per release; it pulls in
+`ActiveSync.Protocol` and nothing else). See
 **[docs/plugins.md](docs/plugins.md)**.

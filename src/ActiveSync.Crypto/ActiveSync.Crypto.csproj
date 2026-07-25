@@ -10,12 +10,7 @@
 		<RootNamespace>ActiveSync.Crypto</RootNamespace>
 	</PropertyGroup>
 
-	<!-- Published: Core (the plugin contract) depends on it, and plugin authors seal config
-	     secrets with SecretValue. Packs alongside Protocol/Core/Backends.Common in CI. -->
-	<PropertyGroup>
-		<IsPackable>true</IsPackable>
-		<PackageId>ActiveSync.Crypto</PackageId>
-		<Description>ActiveSync Gateway — master-key primitives (EncryptionKeyLoader, SecretValue) for sealing config secrets and local content at rest.</Description>
-	</PropertyGroup>
+	<!-- Host-only, NOT published (packed until 1.1.2): a plugin references ActiveSync.Contracts
+	     alone, which deliberately carries no crypto. -->
 
 </Project>

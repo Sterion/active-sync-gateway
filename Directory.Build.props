@@ -9,23 +9,12 @@
 	</PropertyGroup>
 
 	<!-- NuGet: nothing packs unless a project opts in with <IsPackable>true</IsPackable>.
-	     The plugin contract assemblies (Protocol, Crypto, Core, Backends.Common) do; see the CI
-	     pack/push step. Metadata lives here so the packages stay consistent. -->
+	     Exactly two do — ActiveSync.Contracts (the plugin contract) and ActiveSync.Protocol
+	     (its single dependency); see the CI pack/push step. The package METADATA (authors,
+	     license, repository URLs, symbols) lives in Directory.Build.targets gated on
+	     IsPackable, so a host-only assembly carries no packaging identity at all. -->
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
-		<Authors>Sterion</Authors>
-		<Company>Sterion</Company>
-		<Product>ActiveSync Gateway</Product>
-		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<PackageProjectUrl>https://github.com/Sterion/active-sync-gateway</PackageProjectUrl>
-		<RepositoryUrl>https://github.com/Sterion/active-sync-gateway.git</RepositoryUrl>
-		<RepositoryType>git</RepositoryType>
-		<PublishRepositoryUrl>true</PublishRepositoryUrl>
-		<IncludeSymbols>true</IncludeSymbols>
-		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
-		<!-- One folder for every produced package (only packable projects emit). Lets a
-		     local `dotnet pack ActiveSync.slnx` land where CI expects; CI's explicit -o wins. -->
-		<PackageOutputPath>$(MSBuildThisFileDirectory)artifacts\nupkg</PackageOutputPath>
 		<!-- `dotnet pack ActiveSync.slnx` intentionally skips the app/test/backend projects;
 		     don't warn about each one — IsPackable is the deliberate allow-list. -->
 		<WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>

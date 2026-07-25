@@ -1,0 +1,30 @@
+<Project>
+
+	<!-- NuGet package metadata for the ONLY published projects: ActiveSync.Contracts (the
+	     plugin contract) and ActiveSync.Protocol (its single dependency). Kept in one place so
+	     the two packages stay consistent.
+
+	     This lives in .targets rather than Directory.Build.props on purpose: .props is imported
+	     BEFORE the project body, so a PropertyGroup gated on IsPackable there would read the
+	     default (false) and never match — properties evaluate in document order. .targets is
+	     imported after, so the gate works and a host-only assembly (Core, Crypto,
+	     Backends.Common, the backends, Server, WebUi, tests) carries no Authors, no license and
+	     no repository metadata at all. The SourceLink ItemGroup can stay in .props because ITEMS
+	     are evaluated after every property, so its identical condition resolves correctly. -->
+	<PropertyGroup Condition="'$(IsPackable)' == 'true'">
+		<Authors>Sterion</Authors>
+		<Company>Sterion</Company>
+		<Product>ActiveSync Gateway</Product>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageProjectUrl>https://github.com/Sterion/active-sync-gateway</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/Sterion/active-sync-gateway.git</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<!-- One folder for every produced package. Lets a local `dotnet pack ActiveSync.slnx`
+		     land where CI expects; CI's explicit -o wins. -->
+		<PackageOutputPath>$(MSBuildThisFileDirectory)artifacts\nupkg</PackageOutputPath>
+	</PropertyGroup>
+
+</Project>
