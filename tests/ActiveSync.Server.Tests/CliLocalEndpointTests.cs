@@ -302,6 +302,31 @@ public sealed class CliLocalEndpointTests : IDisposable
 		Assert.True(LocalCliEnvelope.TryOpen(recent, key, now, LocalCliEndpoint.AuthWindowMs, out _));
 	}
 
+	// K16 — N/A for red-first: this is a new opt-in capability, not a fix for defective behavior
+	// (LocalCliEndpoint's own ReplayCache already enforced single-use correctly; there was nothing
+	// wrong to reproduce). TryOpen previously enforced only the timestamp window and left single-use
+	// entirely to the caller's own bookkeeping — undocumented beyond the type's summary. This proves
+	// the new `seenNonces` parameter makes ONE call to TryOpen self-enforcing: a second open of the
+	// same nonce is rejected even with no external replay cache involved.
+	[Fact]
+	public void TryOpen_WithSeenNonces_RejectsASecondOpen_OfTheSameEnvelope_WithNoExternalReplayCache()
+	{
+		byte[] key = NewKey();
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		string sealed_ = LocalCliEnvelope.Create(["users"], null, now).Seal(key);
+		HashSet<string> seenNonces = new(StringComparer.Ordinal);
+
+		Assert.True(LocalCliEnvelope.TryOpen(sealed_, key, now, LocalCliEndpoint.AuthWindowMs, out LocalCliEnvelope? first, seenNonces));
+		Assert.NotNull(first);
+		Assert.False(LocalCliEnvelope.TryOpen(sealed_, key, now, LocalCliEndpoint.AuthWindowMs, out LocalCliEnvelope? second, seenNonces));
+		Assert.Null(second);
+
+		// Omitting seenNonces (the default) keeps the historical window-only behavior — the same
+		// envelope opens repeatedly with no tracking at all.
+		Assert.True(LocalCliEnvelope.TryOpen(sealed_, key, now, LocalCliEndpoint.AuthWindowMs, out _));
+		Assert.True(LocalCliEnvelope.TryOpen(sealed_, key, now, LocalCliEndpoint.AuthWindowMs, out _));
+	}
+
 	[Fact]
 	public void Envelope_MintsAFreshNonceEachTime_AndRejectsOneWithout()
 	{

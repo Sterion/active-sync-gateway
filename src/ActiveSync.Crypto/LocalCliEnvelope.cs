@@ -38,8 +38,21 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 	///   bound is deliberately asymmetric: an absolute-value window accepts a future timestamp just
 	///   as readily as a past one, which doubles the time a captured envelope stays live. Returns
 	///   false — never throws — on any malformed or unauthenticated input.
+	///
+	///   <para>
+	///     K16: this method enforces the timestamp WINDOW only — it does not by itself make an
+	///     envelope single-use. "An envelope runs exactly once" (see the type doc) is a property of
+	///     the CALLER's replay tracking (e.g. <c>LocalCliEndpoint.ReplayCache</c>), not of
+	///     <see cref="TryOpen(string?, byte[], long, long, out LocalCliEnvelope?)" /> itself — a
+	///     caller that omits its own nonce tracking silently loses single-use, keeping only the
+	///     time bound. Pass <paramref name="seenNonces" /> to make THIS call self-enforcing: a nonce
+	///     already present is rejected as a replay and a fresh one is recorded atomically with the
+	///     open, so the contract no longer depends on the caller remembering to wire its own set.
+	///   </para>
 	/// </summary>
-	public static bool TryOpen(string? sealedValue, byte[] key, long nowUnixMs, long windowMs, out LocalCliEnvelope? envelope)
+	public static bool TryOpen(
+		string? sealedValue, byte[] key, long nowUnixMs, long windowMs, out LocalCliEnvelope? envelope,
+		ISet<string>? seenNonces = null)
 	{
 		envelope = null;
 		if (string.IsNullOrEmpty(sealedValue))
@@ -62,6 +75,10 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 		if (decoded.TimestampUnixMs - nowUnixMs > FutureSkewMs)
 			return false;
 		if (nowUnixMs - decoded.TimestampUnixMs > windowMs)
+			return false;
+		// Self-enforcing single-use: Add returns false when the nonce is already present, so a
+		// replayed envelope is rejected here even if the caller never wired its own tracking.
+		if (seenNonces is not null && !seenNonces.Add(decoded.Nonce))
 			return false;
 
 		envelope = decoded;
