@@ -286,6 +286,7 @@ public partial class Program
 		builder.Services.AddHostedService<SettingsRefreshService>();
 		builder.Services.AddHostedService<LogRetentionService>();
 		builder.Services.AddHostedService<FolderRetentionService>();
+		builder.Services.AddSingleton(TimeProvider.System);
 		builder.Services.AddSingleton<AuthThrottle>();
 		builder.Services.AddSingleton<LocalChangeNotifier>();
 		builder.Services.AddBackendProviders();

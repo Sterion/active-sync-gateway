@@ -11,7 +11,7 @@ public class AuthThrottleTests
 		return new AuthThrottle(TestOptionsMonitor.Of(new ActiveSyncOptions
 		{
 			Auth = new AuthOptions { MaxFailures = maxFailures, FailureWindowSeconds = windowSeconds }
-		}));
+		}), TimeProvider.System);
 	}
 
 	[Fact]
@@ -54,7 +54,7 @@ public class AuthThrottleTests
 		// settings change takes effect without rebuilding the singleton (the Phase 3 contract).
 		TestOptionsMonitor.Mutable<ActiveSyncOptions> monitor =
 			new(new ActiveSyncOptions { Auth = new AuthOptions { MaxFailures = 0 } });
-		AuthThrottle throttle = new(monitor);
+		AuthThrottle throttle = new(monitor, TimeProvider.System);
 
 		for (int i = 0; i < 10; i++)
 			throttle.RecordFailure("1.2.3.4");
@@ -142,5 +142,49 @@ public class AuthThrottleTests
 			throttle.RecordFailure(ip); // rotation feeds the shared per-address counter
 		Assert.NotNull(throttle.BlockedForSeconds(ip, throttle.IpWideLimit));
 		Assert.Null(throttle.BlockedForSeconds($"{ip}\nfresh")); // a new user has no block yet
+	}
+
+	[Fact]
+	public void WindowExpiry_IsDrivenByInjectedTimeProvider_NotTheWallClock()
+	{
+		// K9: AuthThrottle read DateTime.UtcNow directly, so window-expiry/retry-after/prune
+		// cadence could only be exercised by waiting on the real clock (untestable
+		// deterministically). Injecting TimeProvider lets a fake clock prove expiry without
+		// any Thread.Sleep — this constructor overload does not exist on unmodified code.
+		FakeTimeProvider clock = new(DateTimeOffset.UtcNow);
+		AuthThrottle throttle = new(TestOptionsMonitor.Of(new ActiveSyncOptions
+		{
+			Auth = new AuthOptions { MaxFailures = 1, FailureWindowSeconds = 60 }
+		}), clock);
+
+		throttle.RecordFailure("1.2.3.4");
+		Assert.NotNull(throttle.BlockedForSeconds("1.2.3.4"));
+
+		clock.Advance(TimeSpan.FromSeconds(61));
+		Assert.Null(throttle.BlockedForSeconds("1.2.3.4")); // window expired per the fake clock
+	}
+
+	[Fact]
+	public void Prune_UnderConcurrentAccess_StaysConsistent()
+	{
+		// K8 (COVERAGE, not red-first): `_nextPruneUtc` was a plain, non-atomic `DateTime`
+		// mutated under a bare check-then-set race in Prune(). A genuine torn read of an 8-byte
+		// field needs a 32-bit process to trigger deterministically — this suite runs 64-bit, so
+		// the original symptom cannot be exhibited here. This exercises the fixed
+		// Interlocked-backed cadence under real concurrency: many threads driving Prune()
+		// concurrently must neither throw nor blow the scan cadence out to "every failure".
+		FakeTimeProvider clock = new(DateTimeOffset.UtcNow);
+		AuthThrottle throttle = new(TestOptionsMonitor.Of(new ActiveSyncOptions
+		{
+			Auth = new AuthOptions { MaxFailures = 3, FailureWindowSeconds = 3600 }
+		}), clock);
+
+		Parallel.For(0, 32, i =>
+		{
+			for (int j = 0; j < 500; j++)
+				throttle.RecordFailure($"203.0.113.9\nuser{i}-{j}@example.com");
+		});
+
+		Assert.InRange(throttle.PruneScans, 0, 20);
 	}
 }

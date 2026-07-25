@@ -15,7 +15,7 @@ namespace ActiveSync.Core.Security;
 ///   WAF. Both halves of a key are unauthenticated input, so the table is hard-capped at
 ///   <see cref="MaxTrackedKeys" /> and cleaned at most once every <see cref="PruneIntervalSeconds" />.
 /// </summary>
-public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options)
+public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options, TimeProvider timeProvider)
 {
 	/// <summary>The per-address ceiling is this many times the per-(address, user) limit.</summary>
 	private const int IpWideFactor = 5;
@@ -32,7 +32,17 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options)
 	private readonly ConcurrentDictionary<string, Entry> _failures = new();
 
 	private long _pruneScans;
-	private DateTime _nextPruneUtc = DateTime.MinValue;
+
+	/// <summary>
+	///   UTC ticks of the next allowed prune scan, 0 (== <see cref="DateTime.MinValue" />) until
+	///   the first call. K8: a plain <c>DateTime</c> field here was mutated by a bare
+	///   check-then-set under concurrent <see cref="RecordFailure" /> calls — not just a benign
+	///   double-scan race, but a torn 8-byte read/write with no atomicity guarantee, able to
+	///   observe a garbage timestamp (far-future → pruning wedges off; far-past → the O(n) scan
+	///   the cap exists to avoid runs on every failure). Stored as ticks and accessed only via
+	///   <see cref="Interlocked" /> so both the read and the write are atomic.
+	/// </summary>
+	private long _nextPruneTicks;
 
 	private AuthOptions Options => options.CurrentValue.Auth;
 
@@ -58,12 +68,13 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options)
 			return null;
 		if (!_failures.TryGetValue(key, out Entry? entry))
 			return null;
+		DateTime now = timeProvider.GetUtcNow().UtcDateTime;
 		lock (entry)
 		{
 			DateTime windowEnd = entry.WindowStartUtc.AddSeconds(Options.FailureWindowSeconds);
-			if (windowEnd <= DateTime.UtcNow || entry.Count < limit)
+			if (windowEnd <= now || entry.Count < limit)
 				return null;
-			return Math.Max(1, (int)(windowEnd - DateTime.UtcNow).TotalSeconds);
+			return Math.Max(1, (int)(windowEnd - now).TotalSeconds);
 		}
 	}
 
@@ -72,6 +83,7 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options)
 		if (Options.MaxFailures <= 0)
 			return;
 
+		DateTime now = timeProvider.GetUtcNow().UtcDateTime;
 		if (!_failures.TryGetValue(key, out Entry? entry))
 		{
 			// Only a key we have never seen can grow the table, so this is the only path that
@@ -83,14 +95,14 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options)
 			Prune();
 			if (_failures.Count >= MaxTrackedKeys)
 				return;
-			entry = _failures.GetOrAdd(key, _ => new Entry { WindowStartUtc = DateTime.UtcNow });
+			entry = _failures.GetOrAdd(key, _ => new Entry { WindowStartUtc = now });
 		}
 
 		lock (entry)
 		{
-			if (entry.WindowStartUtc.AddSeconds(Options.FailureWindowSeconds) <= DateTime.UtcNow)
+			if (entry.WindowStartUtc.AddSeconds(Options.FailureWindowSeconds) <= now)
 			{
-				entry.WindowStartUtc = DateTime.UtcNow;
+				entry.WindowStartUtc = now;
 				entry.Count = 0;
 			}
 
@@ -106,15 +118,17 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options)
 	/// <summary>
 	///   Reclaims keys whose window has expired — they carry no state worth keeping. Rate-limited
 	///   to one scan per <see cref="PruneIntervalSeconds" /> so the O(n) walk cannot be driven once
-	///   per request, and <see cref="MaxTrackedKeys" /> bounds the n it walks. The interval stamp is
-	///   deliberately unsynchronized: the worst a race costs is a second concurrent scan.
+	///   per request, and <see cref="MaxTrackedKeys" /> bounds the n it walks. The interval stamp
+	///   is read and written only through <see cref="Interlocked" /> (see
+	///   <see cref="_nextPruneTicks" />); the check-then-set as a whole is still racy by design —
+	///   the worst that costs is a second concurrent scan, not a torn/garbage timestamp.
 	/// </summary>
 	private void Prune()
 	{
-		DateTime now = DateTime.UtcNow;
-		if (now < _nextPruneUtc)
+		DateTime now = timeProvider.GetUtcNow().UtcDateTime;
+		if (now.Ticks < Interlocked.Read(ref _nextPruneTicks))
 			return;
-		_nextPruneUtc = now.AddSeconds(PruneIntervalSeconds);
+		Interlocked.Exchange(ref _nextPruneTicks, now.AddSeconds(PruneIntervalSeconds).Ticks);
 		Interlocked.Increment(ref _pruneScans);
 		DateTime cutoff = now.AddSeconds(-Options.FailureWindowSeconds);
 		foreach ((string key, Entry entry) in _failures)

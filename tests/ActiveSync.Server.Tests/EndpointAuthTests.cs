@@ -13,7 +13,7 @@ public class EndpointAuthTests
 {
 	private static AuthThrottle Throttle()
 	{
-		return new AuthThrottle(TestOptionsMonitor.Of(new ActiveSyncOptions()));
+		return new AuthThrottle(TestOptionsMonitor.Of(new ActiveSyncOptions()), TimeProvider.System);
 	}
 
 	// ---------- E3: the throttle key behind a reverse proxy ----------

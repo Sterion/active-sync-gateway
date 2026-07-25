@@ -105,6 +105,7 @@ internal sealed class WebUiHost : IAsyncDisposable
 		builder.Services.AddSingleton(provider => new AccountResolver(
 			provider.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>(),
 			rolesProvider, registry, provider.GetRequiredService<AccountStore>()));
+		builder.Services.AddSingleton(TimeProvider.System);
 		builder.Services.AddSingleton<AuthThrottle>();
 		builder.Services.AddSingleton(new GlobalSettingStore(factory));
 		builder.Services.AddSingleton(LocalContentProtector.CreatePlaintext());
