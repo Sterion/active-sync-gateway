@@ -19,6 +19,15 @@ public static class GatewayPasswordHasher
 	private const int HashSize = 32;
 	private const int MinIterations = 100_000;
 
+	/// <summary>
+	///   Upper bound on an accepted stored iteration count (K3). Without this, an attacker who
+	///   can write an account row (e.g. a lower-privilege path that accepts a pre-hashed
+	///   "pbkdf2$..." value verbatim) can store "pbkdf2$2000000000$..." and turn every login
+	///   verify against that account into a multi-second PBKDF2 run — a password-verify
+	///   denial-of-service against the request thread.
+	/// </summary>
+	private const int MaxIterations = 10_000_000;
+
 	public static string Hash(string password, int iterations = DefaultIterations)
 	{
 		byte[] salt = RandomNumberGenerator.GetBytes(SaltSize);
@@ -74,9 +83,9 @@ public static class GatewayPasswordHasher
 			return false;
 		}
 
-		if (!int.TryParse(parts[0], out iterations) || iterations < MinIterations)
+		if (!int.TryParse(parts[0], out iterations) || iterations < MinIterations || iterations > MaxIterations)
 		{
-			error = $"iteration count must be a number >= {MinIterations}";
+			error = $"iteration count must be a number between {MinIterations} and {MaxIterations}";
 			return false;
 		}
 
@@ -91,9 +100,13 @@ public static class GatewayPasswordHasher
 			return false;
 		}
 
-		if (salt.Length < 8 || hash.Length < 16)
+		// K15: enforce the generator's own sizes, not a looser floor — Hash() always emits a
+		// SaltSize-byte salt and a HashSize-byte hash, so anything shorter is weaker than
+		// anything this hasher would ever produce (an externally-supplied or lower-privilege-
+		// written value must not be accepted just because it clears a lower bar).
+		if (salt.Length < SaltSize || hash.Length < HashSize)
 		{
-			error = "salt or hash is too short";
+			error = $"salt or hash is too short (must be at least {SaltSize}/{HashSize} bytes)";
 			return false;
 		}
 
