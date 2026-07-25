@@ -6,11 +6,13 @@ namespace ActiveSync.Core.Tests;
 
 /// <summary>
 ///   F2: the send-dedup primitive (<see cref="SyncStateService.TryClaimSendAsync" /> /
-///   <see cref="SentCommandToken" />) that <c>SyncHandler.ApplyClientCommandAsync</c> uses to
-///   durably claim an irreversible send BEFORE it happens, independently of the round's own
-///   SyncKey/ledger commit. Coverage of the primitive's own contract — the handler-level crash
-///   scenario is proven red-first in <c>DraftSubmitIdempotencyTests</c>; there is no "unmodified"
-///   baseline for this brand-new type to reproduce against, so these are N/A for red-first.
+///   <see cref="SyncStateService.MarkSendCompletedAsync" /> / <see cref="SentCommandToken" />) that
+///   <c>SyncHandler.ApplyClientCommandAsync</c> uses to durably claim an irreversible action BEFORE
+///   it happens, independently of the round's own SyncKey/ledger commit. Coverage of the primitive's
+///   own contract — the handler-level crash-then-resend scenarios (both the successful-send case and
+///   the failed-send-then-retry case the two-phase claim/complete design exists to support) are proven
+///   red-first in <c>DraftSubmitIdempotencyTests</c>; there is no "unmodified" baseline for this
+///   primitive itself to reproduce against, so these are N/A for red-first.
 /// </summary>
 public sealed class SendDedupStoreTests : IDisposable
 {
@@ -37,15 +39,33 @@ public sealed class SendDedupStoreTests : IDisposable
 	}
 
 	[Fact]
-	public async Task TryClaimSendAsync_SecondClaimForTheSameAttempt_Fails()
+	public async Task TryClaimSendAsync_SecondClaimAfterCompletion_ReturnsAlreadySent()
 	{
 		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
 
-		bool first = await _service.TryClaimSendAsync(device, "5", 1, "add:c1", CancellationToken.None);
-		bool second = await _service.TryClaimSendAsync(device, "5", 1, "add:c1", CancellationToken.None);
+		SendClaimOutcome first = await _service.TryClaimSendAsync(device, "5", 1, "add:c1", CancellationToken.None);
+		Assert.Equal(SendClaimOutcome.PerformSend, first);
+		await _service.MarkSendCompletedAsync(device, "5", 1, "add:c1", CancellationToken.None);
 
-		Assert.True(first);
-		Assert.False(second); // the exact protection F2 needs: a resend under the same unadvanced key is a no-op
+		SendClaimOutcome second = await _service.TryClaimSendAsync(device, "5", 1, "add:c1", CancellationToken.None);
+		// The exact protection F2 needs: a resend of an attempt that ALREADY SUCCEEDED is a no-op.
+		Assert.Equal(SendClaimOutcome.AlreadySent, second);
+	}
+
+	[Fact]
+	public async Task TryClaimSendAsync_SecondClaimWithoutCompletion_StillReturnsPerformSend()
+	{
+		// The defect this repair closes: a claim by itself is not proof the guarded action ever
+		// happened — only MarkSendCompletedAsync durably records that. Without it (the action never
+		// finished — crashed, or failed with an ordinary transient error), a resend must retry, not
+		// silently report success.
+		Device device = await _service.GetOrCreateDeviceAsync("u@x2", "DEV1", "Phone", CancellationToken.None);
+
+		SendClaimOutcome first = await _service.TryClaimSendAsync(device, "5", 1, "add:c1", CancellationToken.None);
+		Assert.Equal(SendClaimOutcome.PerformSend, first);
+
+		SendClaimOutcome second = await _service.TryClaimSendAsync(device, "5", 1, "add:c1", CancellationToken.None);
+		Assert.Equal(SendClaimOutcome.PerformSend, second);
 	}
 
 	[Fact]
@@ -56,11 +76,11 @@ public sealed class SendDedupStoreTests : IDisposable
 		// the two are scoped to different generations.
 		Device device = await _service.GetOrCreateDeviceAsync("u@y", "DEV1", "Phone", CancellationToken.None);
 
-		bool atGenerationOne = await _service.TryClaimSendAsync(device, "5", 1, "change:5:42", CancellationToken.None);
-		bool atGenerationTwo = await _service.TryClaimSendAsync(device, "5", 2, "change:5:42", CancellationToken.None);
+		SendClaimOutcome atGenerationOne = await _service.TryClaimSendAsync(device, "5", 1, "change:5:42", CancellationToken.None);
+		SendClaimOutcome atGenerationTwo = await _service.TryClaimSendAsync(device, "5", 2, "change:5:42", CancellationToken.None);
 
-		Assert.True(atGenerationOne);
-		Assert.True(atGenerationTwo);
+		Assert.Equal(SendClaimOutcome.PerformSend, atGenerationOne);
+		Assert.Equal(SendClaimOutcome.PerformSend, atGenerationTwo);
 	}
 
 	[Fact]
@@ -77,8 +97,8 @@ public sealed class SendDedupStoreTests : IDisposable
 
 		// The round processing key 1 claims a send, then (in this test) succeeds and commits —
 		// unlike the crash scenario, where the round never reaches this commit.
-		bool claimed = await _service.TryClaimSendAsync(device, "5", key1, "add:c1", CancellationToken.None);
-		Assert.True(claimed);
+		SendClaimOutcome claimed = await _service.TryClaimSendAsync(device, "5", key1, "add:c1", CancellationToken.None);
+		Assert.Equal(SendClaimOutcome.PerformSend, claimed);
 
 		(validation, state) = await _service.ValidateSyncKeyAsync(device, "5", "1", CancellationToken.None);
 		Assert.Equal(SyncKeyValidation.Current, validation);
@@ -99,7 +119,8 @@ public sealed class SendDedupStoreTests : IDisposable
 	{
 		// A Replay commit does NOT advance SyncKey (the client is retrying the one-behind key), so
 		// a claim tagged with that SAME still-current key must survive — a second genuine replay of
-		// the identical resend must still find it.
+		// the identical resend must still find it (and, once the original attempt completed, must
+		// still report it as already sent).
 		Device device = await _service.GetOrCreateDeviceAsync("u@w", "DEV1", "Phone", CancellationToken.None);
 
 		await using (SqliteSyncDbContext seed = StateTestSupport.NewContext(_connection))
@@ -111,8 +132,9 @@ public sealed class SendDedupStoreTests : IDisposable
 			await seed.SaveChangesAsync(CancellationToken.None);
 		}
 
-		bool claimed = await _service.TryClaimSendAsync(device, "5", 2, "add:c1", CancellationToken.None);
-		Assert.True(claimed);
+		SendClaimOutcome claimed = await _service.TryClaimSendAsync(device, "5", 2, "add:c1", CancellationToken.None);
+		Assert.Equal(SendClaimOutcome.PerformSend, claimed);
+		await _service.MarkSendCompletedAsync(device, "5", 2, "add:c1", CancellationToken.None);
 
 		(SyncKeyValidation validation, CollectionState? state) =
 			await _service.ValidateSyncKeyAsync(device, "5", "1", CancellationToken.None);
@@ -121,8 +143,8 @@ public sealed class SendDedupStoreTests : IDisposable
 			state!, new Dictionary<string, string>(), 0, SyncKeyValidation.Replay, CancellationToken.None);
 		Assert.Equal(2, keyAfterReplay); // Replay does not advance the key
 
-		bool secondReplayClaimAttempt =
+		SendClaimOutcome secondReplayClaimAttempt =
 			await _service.TryClaimSendAsync(device, "5", 2, "add:c1", CancellationToken.None);
-		Assert.False(secondReplayClaimAttempt); // still claimed — the earlier send must not repeat
+		Assert.Equal(SendClaimOutcome.AlreadySent, secondReplayClaimAttempt); // still claimed AND completed — must not repeat
 	}
 }

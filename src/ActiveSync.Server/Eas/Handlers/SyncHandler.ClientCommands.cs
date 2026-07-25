@@ -93,15 +93,21 @@ public sealed partial class SyncHandler
 				{
 					// F2: the SMTP send is irreversible but the ledger entry above is only durable
 					// once THIS round's CommitCollectionStateAsync lands — which happens after every
-					// command in the collection is processed. A crash between the send and that
-					// commit leaves the SyncKey unadvanced, so the client's resend validates as
+					// command in the collection is processed. A crash between the send SUCCEEDING and
+					// that commit leaves the SyncKey unadvanced, so the client's resend validates as
 					// Current (a fresh, empty ledger) rather than Replay, and would submit the same
 					// draft again. Claim the send FIRST, on its own durable transaction, keyed to
-					// this round's still-unadvanced SyncKey; a resend that finds the claim already
-					// there skips straight to the same acknowledgement without re-sending.
+					// this round's still-unadvanced SyncKey; a resend that finds a COMPLETED claim
+					// skips straight to the same acknowledgement without re-sending. A claim that was
+					// never marked complete (SubmitDraftAsync threw last time — SMTP backend down, a
+					// network blip, an ordinary transient failure) is NOT proof the send happened, so
+					// this branch falls through and retries it — reporting success without ever
+					// sending would silently lose the user's mail, which is worse than the duplicate
+					// this claim exists to prevent.
+					string addClaimKey = $"add:{clientId}";
 					if (clientId.Length > 0 &&
-					    !await context.State.TryClaimSendAsync(
-						    context.Device, folder.ServerId, syncKeyForClaim, $"add:{clientId}", ct))
+					    await context.State.TryClaimSendAsync(
+						    context.Device, folder.ServerId, syncKeyForClaim, addClaimKey, ct) == SendClaimOutcome.AlreadySent)
 					{
 						ledger.RecordAdd(clientId, new AppliedClientAdd(null, null));
 						return new XElement(AS + "Add",
@@ -111,7 +117,16 @@ public sealed partial class SyncHandler
 
 					await SubmitDraftAsync(context, appData, null, null, ct);
 					if (clientId.Length > 0)
+					{
+						// Mark completion the instant the send is confirmed. Residual window: a crash
+						// between SubmitDraftAsync returning (the mail is definitely out) and this
+						// write landing (we durably say so) still resends — but that window is one
+						// in-process DB round trip, not "the rest of this round plus every remaining
+						// command plus the response write-out", which is what F2 originally closed.
+						await context.State.MarkSendCompletedAsync(context.Device, folder.ServerId, syncKeyForClaim, addClaimKey, ct);
 						ledger.RecordAdd(clientId, new AppliedClientAdd(null, null));
+					}
+
 					return new XElement(AS + "Add",
 						new XElement(AS + "ClientId", clientId),
 						new XElement(AS + "Status", "1"));
@@ -192,12 +207,16 @@ public sealed partial class SyncHandler
 				    store.EasClass.Equals(EasClass.Email, StringComparison.OrdinalIgnoreCase))
 				{
 					// F2: same crash window as the Add path above — claim the send durably, keyed to
-					// this round's still-unadvanced SyncKey, BEFORE submitting. A resend that finds
-					// the claim already there treats the draft as already gone (best-effort delete
-					// already happened or doesn't matter — the draft is either gone or will reappear
-					// via the next diff per F10) rather than re-submitting the mail.
-					if (!await context.State.TryClaimSendAsync(
-						    context.Device, folder.ServerId, syncKeyForClaim, $"change:{serverId}", ct))
+					// this round's still-unadvanced SyncKey, BEFORE submitting. A resend that finds a
+					// COMPLETED claim treats the draft as already gone (best-effort delete already
+					// happened or doesn't matter — the draft is either gone or will reappear via the
+					// next diff per F10) rather than re-submitting the mail. A claim that was never
+					// marked complete is NOT proof the send happened (SubmitDraftAsync may have thrown
+					// on a prior attempt — a routine transient failure), so this branch falls through
+					// and retries the submit instead of silently dropping the draft with no send.
+					string changeClaimKey = $"change:{serverId}";
+					if (await context.State.TryClaimSendAsync(
+						    context.Device, folder.ServerId, syncKeyForClaim, changeClaimKey, ct) == SendClaimOutcome.AlreadySent)
 					{
 						snapshot.Remove(itemKey);
 						ledger.RecordChange(serverId, new AppliedClientChange(itemKey, null));
@@ -205,6 +224,9 @@ public sealed partial class SyncHandler
 					}
 
 					await SubmitDraftAsync(context, appData, folder.BackendKey, itemKey, ct);
+					// Mark completion the instant the send is confirmed — see the Add path above for
+					// why this narrow (single DB write) residual window is acceptable.
+					await context.State.MarkSendCompletedAsync(context.Device, folder.ServerId, syncKeyForClaim, changeClaimKey, ct);
 					// The draft is already sent; deleting it from Drafts is best-effort cleanup. A
 					// failure here must not report failure for a sent message (the client would
 					// resend and duplicate it) — worst case the draft reappears via the next diff (F10).
@@ -265,14 +287,18 @@ public sealed partial class SyncHandler
 
 					// F2: the iTIP CANCEL mail below is irreversible but the ledger entry is only
 					// durable once THIS round's own commit lands (after every command in the
-					// collection is processed). A crash between the mail and that commit leaves the
-					// SyncKey unadvanced, so the resend validates as Current (empty ledger), not
-					// Replay, and would re-cancel (and re-mail) the same occurrence. Claim the whole
-					// cancel — backend write AND mail — durably first; a resend that finds the claim
-					// already there acknowledges success without repeating either.
-					if (!await context.State.TryClaimSendAsync(
-						    context.Device, folder.ServerId, syncKeyForClaim,
-						    $"occurrence-cancel:{occurrenceKey}", ct))
+					// collection is processed). A crash between the mail SUCCEEDING and that commit
+					// leaves the SyncKey unadvanced, so the resend validates as Current (empty
+					// ledger), not Replay, and would re-cancel (and re-mail) the same occurrence.
+					// Claim the whole cancel — backend write AND mail — durably first; a resend that
+					// finds a COMPLETED claim acknowledges success without repeating either. A claim
+					// that was never marked complete is NOT proof either step ran (the backend write
+					// or the iTIP send may have thrown on a prior attempt — a routine transient
+					// failure), so this falls through and retries the whole compound action rather
+					// than silently reporting the cancel as done when it may never have happened.
+					string occurrenceClaimKey = $"occurrence-cancel:{occurrenceKey}";
+					if (await context.State.TryClaimSendAsync(
+						    context.Device, folder.ServerId, syncKeyForClaim, occurrenceClaimKey, ct) == SendClaimOutcome.AlreadySent)
 						return null;
 
 					XElement occurrenceDelete = new(AS + "ApplicationData",
@@ -283,10 +309,14 @@ public sealed partial class SyncHandler
 									EasDateTime.ToCompact(occurrence)))));
 					string occurrenceRevision =
 						await store.UpdateItemAsync(folder.BackendKey, itemKey, occurrenceDelete, ct);
-					snapshot[itemKey] = occurrenceRevision;
-					ledger.RecordChange(occurrenceKey, new AppliedClientChange(itemKey, occurrenceRevision));
 					await invitations.AfterOccurrenceCancelAsync(
 						context, store, folder.BackendKey, itemKey, occurrence, ct);
+					// Mark completion only once BOTH the backend write and the iTIP mail have
+					// succeeded — see the Add path above for why this narrow residual window (a
+					// single DB write between the mail landing and this call) is acceptable.
+					await context.State.MarkSendCompletedAsync(context.Device, folder.ServerId, syncKeyForClaim, occurrenceClaimKey, ct);
+					snapshot[itemKey] = occurrenceRevision;
+					ledger.RecordChange(occurrenceKey, new AppliedClientChange(itemKey, occurrenceRevision));
 					return null;
 				}
 

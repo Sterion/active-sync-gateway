@@ -169,14 +169,26 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 	}
 
 	/// <summary>
-	///   F2: durably claims one irreversible send (16.x draft submit, occurrence-CANCEL iTIP) BEFORE
-	///   it happens. Returns <c>true</c> the first time (perform the send); <c>false</c> when this
-	///   exact attempt (device, collection, the client's CURRENT unadvanced SyncKey, key) was
-	///   already claimed — a crash between a prior claim and the round's own commit, so the send
-	///   must NOT be repeated on this resend.
+	///   F2: durably claims one attempt at an irreversible action (16.x draft submit, occurrence-
+	///   CANCEL iTIP) BEFORE it happens. Returns <see cref="SendClaimOutcome.PerformSend" /> when the
+	///   caller must (re)perform the action — this exact attempt (device, collection, the client's
+	///   CURRENT unadvanced SyncKey, key) was never claimed, or was claimed but never confirmed
+	///   complete (a prior try crashed or genuinely failed) — and <see cref="SendClaimOutcome.AlreadySent" />
+	///   only once <see cref="MarkSendCompletedAsync" /> has recorded that this exact attempt already
+	///   succeeded. The caller MUST call <see cref="MarkSendCompletedAsync" /> right after the action
+	///   returns successfully — a claim alone is not proof of success, only completion is.
 	/// </summary>
-	public Task<bool> TryClaimSendAsync(Device device, string collectionId, int clientSyncKey, string key, CancellationToken ct)
+	public Task<SendClaimOutcome> TryClaimSendAsync(Device device, string collectionId, int clientSyncKey, string key, CancellationToken ct)
 		=> _sendDedup.TryClaimAsync(device.Id, collectionId, clientSyncKey, key, ct);
+
+	/// <summary>
+	///   F2: durably records that the attempt claimed by <see cref="TryClaimSendAsync" /> actually
+	///   SUCCEEDED. Call this immediately after the guarded irreversible action returns — before any
+	///   further (best-effort) work — so the window between the action succeeding and this call
+	///   landing is as small as possible: a single durable write, not the rest of the round.
+	/// </summary>
+	public Task MarkSendCompletedAsync(Device device, string collectionId, int clientSyncKey, string key, CancellationToken ct)
+		=> _sendDedup.MarkCompletedAsync(device.Id, collectionId, clientSyncKey, key, ct);
 
 	public Task<CollectionState?> GetCollectionStateAsync(Device device, string collectionId, CancellationToken ct)
 		=> _collections.GetCollectionStateAsync(device, collectionId, ct);

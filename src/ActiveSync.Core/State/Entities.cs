@@ -167,6 +167,15 @@ public class SentCommandToken
 	public required string Key { get; set; }
 
 	public DateTime CreatedUtc { get; set; }
+
+	/// <summary>
+	///   <c>true</c> once the irreversible action this claim guards actually SUCCEEDED — set by
+	///   <see cref="SendDedupStore" /> right after the send/cancel returns, never at claim time. A
+	///   row with <c>Completed == false</c> means an attempt was claimed but never confirmed to have
+	///   finished (still running, crashed, or failed) and must be retried, not skipped — only a
+	///   <c>true</c> row is durable proof the action already happened.
+	/// </summary>
+	public bool Completed { get; set; }
 }
 
 /// <summary>Maps DAV item hrefs to short numeric ids used inside EAS item ServerIds.</summary>

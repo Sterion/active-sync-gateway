@@ -443,6 +443,9 @@ namespace ActiveSync.Core.Migrations.Npgsql
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<bool>("Completed")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("timestamp with time zone");
 
