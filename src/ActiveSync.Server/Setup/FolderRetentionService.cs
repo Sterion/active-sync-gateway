@@ -37,12 +37,15 @@ public sealed class FolderRetentionService(
 							reclaimed, cutoff);
 				}
 			}
-			catch (OperationCanceledException)
+			catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
 			{
-				break;
+				break; // host shutdown — the only cancellation that should stop the sweep
 			}
 			catch (Exception ex)
 			{
+				// E2: any other fault — including a non-shutdown OperationCanceledException such as an
+				// EF command timeout — must NOT stop the sweep, or retention freezes for the process
+				// lifetime with no signal. Keep the loop alive; retry on the next tick.
 				logger.LogDebug(ex, "Folder retention sweep failed; will retry");
 			}
 

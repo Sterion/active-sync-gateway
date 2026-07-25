@@ -249,7 +249,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **20. State layer performance & Oof concurrency** — ~~`A2`~~ ~~`A3`~~ ~~`A7`~~ **COMPLETE**
 > `A2` a batched DAV-id insert loses ids for this request's new hrefs when a concurrent unique-violation rolls back the whole batch → items drop from the render window. `A3` Oof read-modify-write has no concurrency token/upsert guard → lost update or 500. `A7` snapshot decompress uses a mismatched comparer. `State/*`.
 
-**21. Retention services & DB-log lifecycle** — `E2` `E4` `E13`
+**21. Retention services & DB-log lifecycle** — ~~`E2`~~ `E4` `E13`
 > `E2` the two retention services permanently stop on any `OperationCanceledException` (an EF timeout freezes retention for the process lifetime) — mirror `SettingsRefreshService`'s shutdown-only guard. `E4` the DB-log shutdown flush is uncancellable. `E13` the drain spins tight when logging is toggled off live. `Setup/*`.
 
 **22. Config & account resolution** — `B2` `B3` `B4` `B5` `B7` `B12`
@@ -373,7 +373,7 @@ Area S, the cross-cutting structural pass, is given in full below.)*
 
 ## Area E — Server: pipeline, hosting, startup, CLI (15)
 `E1` **High** `X-Forwarded-Proto` trusted from any peer to rewrite the scheme (OIDC/Autodiscover URLs) — `Setup/WebApplicationExtensions.cs:211`.
-`E2` **Med** Retention services permanently stop on any `OperationCanceledException` (EF timeout) — `Setup/LogRetentionService.cs:37`, `Setup/FolderRetentionService.cs:40`.
+`E2` **Med** Retention services permanently stop on any `OperationCanceledException` (EF timeout) — `Setup/LogRetentionService.cs:37`, `Setup/FolderRetentionService.cs:40`. FIXED (item 21): both sweeps' `catch (OperationCanceledException)` around the sweep body now guard `when (stoppingToken.IsCancellationRequested)`, mirroring `SettingsRefreshService`'s existing pattern — a non-shutdown OCE (an EF command timeout) now falls through to the retry-log `catch (Exception ex)` instead of breaking the loop. Proven red-first on `ExecuteTask.IsCompleted` (not on a second sweep attempt, since the inter-sweep delay is a real 6 hours): a `ThrowingFactory` throws a non-shutdown OCE from `CreateDbContext`; on unmodified code the loop breaks and `ExecuteTask` completes almost immediately, on fixed code it stays uncompleted (parked in the delay) — `LogRetentionServiceTests.NonShutdownCancellation_DoesNotStopTheSweepLoop`, `FolderRetentionServiceTests.NonShutdownCancellation_DoesNotStopTheSweepLoop`.
 `E3` **Med** `/cli` captured stdout can corrupt under a fan-out command (two writers, one buffer) — `Cli/LocalCliEndpoint.cs:316`.
 `E4` **Med** DB-log shutdown flush uncancellable, blocks up to 2 s with no save token — `Setup/DatabaseLogSink.cs:73,107`.
 `E5` **Med** `eas logs`/`config`/`tls` rebuild the DI container per `/cli` call instead of reusing the warm host — `Cli/LogsCommand.cs:58`, `Cli/ConfigCommands.cs:28`, `Cli/TlsCommand.cs:24`.
