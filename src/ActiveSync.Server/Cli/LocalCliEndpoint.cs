@@ -122,10 +122,19 @@ internal static class LocalCliEndpoint
 			if (!TryAuthorize(request, key, allowPlaintext, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
 				    replay, out string[] args, out string stdin))
 			{
-				AuditRefusal(logger, context.Connection.RemoteIpAddress,
-					key is null
-						? "no master key is configured and AllowPlaintext is not set"
-						: "no fresh, unused request sealed with the master key was presented");
+				// K7: with no master key, a credential-bearing verb (device password / user secret)
+				// is a distinct refusal from "not authorized at all" — TryAuthorize rejects it because
+				// there is nothing to seal its response with, not because the loopback+AllowPlaintext
+				// proof itself failed.
+				string reason = key switch
+				{
+					null when !allowPlaintext => "no master key is configured and AllowPlaintext is not set",
+					null =>
+						"the requested command's response carries a live credential and no master key " +
+						"is configured to seal it",
+					_ => "no fresh, unused request sealed with the master key was presented",
+				};
+				AuditRefusal(logger, context.Connection.RemoteIpAddress, reason);
 				return Results.NotFound();
 			}
 
@@ -142,12 +151,42 @@ internal static class LocalCliEndpoint
 	internal static bool IsLoopback(IPAddress? peer) => peer is not null && IPAddress.IsLoopback(peer);
 
 	/// <summary>
+	///   Verb paths whose successful response embeds a live credential in plaintext (matched against
+	///   the leading positional args, case-insensitively): <c>device password</c> prints an escrowed
+	///   recovery password; <c>user secret</c> confirms a backend password change. See
+	///   <see cref="IsCredentialBearingVerb" />.
+	/// </summary>
+	private static readonly string[][] CredentialBearingVerbs = [["device", "password"], ["user", "secret"]];
+
+	/// <summary>
+	///   True when <paramref name="args" /> invokes a verb whose response can carry a live
+	///   credential — see <see cref="CredentialBearingVerbs" />.
+	/// </summary>
+	internal static bool IsCredentialBearingVerb(string[] args) =>
+		CredentialBearingVerbs.Any(verb =>
+			args.Length >= verb.Length &&
+			verb.Select((token, index) => string.Equals(args[index], token, StringComparison.OrdinalIgnoreCase))
+				.All(match => match));
+
+	/// <summary>
 	///   Authenticates a request as a master-key holder. With a key configured, the caller MUST
 	///   supply a fresh <see cref="LocalCliEnvelope" /> sealed with it (a co-located sidecar without
 	///   the key can't) — the plaintext args/stdin are ignored, and <paramref name="allowPlaintext" />
 	///   cannot weaken that. Only when there is no key AND the operator explicitly set
 	///   <c>ActiveSync:Encryption:AllowPlaintext</c> (dev/test) is a plain body accepted behind the
 	///   loopback gate alone; a key that simply failed to load authenticates nobody.
+	///
+	///   <para>
+	///     K7: in that keyless AllowPlaintext mode there is nothing to seal a response with (see
+	///     <see cref="ProtectResponse" />), so a <see cref="IsCredentialBearingVerb">credential-bearing
+	///     verb</see> is refused outright rather than executed and returned in cleartext — the exact
+	///     gap a co-located, non-key-holding sidecar sharing loopback (the type doc's threat model)
+	///     could otherwise read. This is a request-level refusal (nothing runs server-side), which is
+	///     why it is folded into the "may this request proceed" decision here rather than surfaced as
+	///     a command result: it keeps the client's existing "404 ⇒ nothing ran ⇒ safe to fall back to
+	///     local execution" contract intact (<c>ActiveSync.Cli/Program.cs</c>), so the operator's
+	///     command still runs — locally, never over the wire.
+	///   </para>
 	/// </summary>
 	internal static bool TryAuthorize(
 		CliRequest? request, byte[]? key, bool allowPlaintext, long nowUnixMs, ReplayCache replay,
@@ -162,7 +201,15 @@ internal static class LocalCliEndpoint
 
 		if (key is null)
 		{
-			args = request?.Args ?? [];
+			string[] plainArgs = request?.Args ?? [];
+			if (IsCredentialBearingVerb(plainArgs))
+			{
+				args = [];
+				stdin = "";
+				return false;
+			}
+
+			args = plainArgs;
 			stdin = request?.Stdin ?? "";
 			return true;
 		}

@@ -562,6 +562,51 @@ public sealed class CliLocalEndpointTests : IDisposable
 			Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
 	}
 
+	/* ---- K7: credential-bearing verbs must not run keyless (their response can't be sealed) --- */
+
+	[Fact]
+	public void Authorize_RefusesCredentialBearingVerbs_InAllowPlaintextMode()
+	{
+		// K7: with no master key configured, ProtectResponse has nothing to seal a response with —
+		// so `device password` (prints an escrowed recovery password) and `user secret` (confirms a
+		// stored backend password) must not be allowed to run at all in AllowPlaintext mode, or the
+		// credential travels the /cli wire in the clear to any loopback peer, including a co-located
+		// sidecar that doesn't hold the key.
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		LocalCliEndpoint.ReplayCache Fresh() => new(LocalCliEndpoint.AuthWindowMs);
+
+		Assert.False(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(["device", "password", "alice", "DEV1"], null, null),
+			key: null, allowPlaintext: true, now, Fresh(), out _, out _));
+		Assert.False(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(["user", "secret", "alice", "Backends:MailStore:Password"], "pw", null),
+			key: null, allowPlaintext: true, now, Fresh(), out _, out _));
+
+		// Case-insensitive, and matched only as the LEADING verb path — not a coincidental later arg.
+		Assert.False(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(["DEVICE", "PASSWORD", "alice", "DEV1"], null, null),
+			key: null, allowPlaintext: true, now, Fresh(), out _, out _));
+		Assert.True(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(["user", "show", "device", "password"], null, null),
+			key: null, allowPlaintext: true, now, Fresh(), out string[] args, out _));
+		Assert.Equal(["user", "show", "device", "password"], args);
+
+		// Every other verb is unaffected.
+		Assert.True(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(["users"], null, null),
+			key: null, allowPlaintext: true, now, Fresh(), out _, out _));
+
+		// With a master key configured, the response IS sealed (see ProtectResponse), so these verbs
+		// run normally — only the keyless path is refused.
+		byte[] key = NewKey();
+		string sealedDevicePassword =
+			LocalCliEnvelope.Create(["device", "password", "alice", "DEV1"], null, now).Seal(key);
+		Assert.True(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(null, null, sealedDevicePassword),
+			key, allowPlaintext: false, now, Fresh(), out string[] sealedArgs, out _));
+		Assert.Equal(["device", "password", "alice", "DEV1"], sealedArgs);
+	}
+
 	[Fact]
 	public void Authorize_KeyConfigured_IgnoresAllowPlaintext()
 	{

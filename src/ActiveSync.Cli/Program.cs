@@ -88,9 +88,10 @@ try
 	}
 
 	// ONLY 404 proves the request never reached the CLI pipeline (endpoint disabled, non-loopback,
-	// or a rejected envelope) — nothing ran, so local execution is safe. Any other status (a 5xx
-	// especially) means the command may have started server-side and even completed its DB writes;
-	// re-running it here would risk a live double-execution (L36).
+	// a rejected envelope, or — K7 — a credential-bearing verb refused because there is no master
+	// key to seal its response with) — nothing ran, so local execution is safe. Any other status (a
+	// 5xx especially) means the command may have started server-side and even completed its DB
+	// writes; re-running it here would risk a live double-execution (L36).
 	if (response.StatusCode == HttpStatusCode.NotFound)
 		return RunLocal(arguments, stdin);
 
