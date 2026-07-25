@@ -149,6 +149,26 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	}
 
 	[Fact]
+	public async Task IdleSweep_DoesNotCountAFaultedSessionSlotAsActive()
+	{
+		// A9: EvictIdleSessionsCore derived `activeUsers` from raw _sessions.Keys, which includes
+		// a slot whose build FAULTED (e.g. a transient backend outage in CreateConnectionAsync) —
+		// IsValueCreated but not IsCompletedSuccessfully. A user whose only slot is faulted has no
+		// live session, so a provider's per-user resources (e.g. IDLE watchers) for that user must
+		// be trimmed on the sweep, not pinned by a phantom "active" entry.
+		FailingResourceOwnerProvider provider = new();
+		BackendSessionFactory factory = NewFactory(provider);
+
+		await Assert.ThrowsAsync<InvalidOperationException>(() =>
+			factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None));
+
+		InvokeEvictIdleSessions(factory);
+
+		Assert.NotNull(provider.LastActiveUsers);
+		Assert.DoesNotContain(Creds.UserName, provider.LastActiveUsers!);
+	}
+
+	[Fact]
 	public async Task DisposedFactory_UnsubscribesFromSettingsEvents()
 	{
 		// A28: the factory subscribed to BackendRolesProvider.Changed / AccountResolver.SnapshotChanged
@@ -222,7 +242,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 			.Invoke(factory, null);
 
 	private BackendSessionFactory NewFactory(
-		FakeMailProvider provider,
+		IBackendProvider provider,
 		int sessionIdleMinutes = 15,
 		ISyncDbContextFactory? dbFactory = null,
 		BackendRolesProvider? roles = null)
@@ -328,6 +348,33 @@ public sealed class BackendSessionFactoryTests : IDisposable
 #pragma warning restore VSTHRD003
 			return true;
 		}
+	}
+
+	/// <summary>
+	///   A MailStore provider whose connection build always FAULTS (a transient backend outage) —
+	///   and that also owns per-user resources, so a test can observe exactly which set the idle
+	///   sweep considers "active" (A9).
+	/// </summary>
+	private sealed class FailingResourceOwnerProvider : IBackendProvider, IPerUserResourceOwner
+	{
+		private static readonly IReadOnlySet<BackendRole> All = new HashSet<BackendRole>
+		{
+			BackendRole.MailStore, BackendRole.MailSubmit, BackendRole.Calendar,
+			BackendRole.Contacts, BackendRole.Tasks, BackendRole.Notes
+		};
+
+		public IReadOnlySet<string>? LastActiveUsers { get; private set; }
+
+		public string Name => "fake";
+		public IReadOnlySet<BackendRole> SupportedRoles => All;
+
+		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures) { }
+		public string DescribeRole(BackendRole role, ProviderSettings settings) => "fake";
+
+		public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct) =>
+			throw new InvalidOperationException("simulated transient backend outage");
+
+		public void TrimUserResources(IReadOnlySet<string> activeGatewayLogins) => LastActiveUsers = activeGatewayLogins;
 	}
 
 	private sealed class FakeResource : IAsyncDisposable

@@ -321,9 +321,13 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			if (pair.Value.ExpiresUtc <= nowUtc)
 				_authNegativeCache.TryRemove(pair);
 
-		// Providers with per-user caches (IDLE watchers) trim users without live sessions.
-		HashSet<string> activeUsers = _sessions.Keys
-			.Select(UserFromKey)
+		// Providers with per-user caches (IDLE watchers) trim users without live sessions. A9:
+		// only a BUILT slot is a live session — a still-building, never-realized, or faulted
+		// (A10) Lazy owns no connection, so counting its user here would pin that user's watchers
+		// even though nothing is actually holding a session for them.
+		HashSet<string> activeUsers = _sessions
+			.Where(pair => IsBuilt(pair.Value))
+			.Select(pair => UserFromKey(pair.Key))
 			.ToHashSet(StringComparer.Ordinal);
 		foreach (IBackendProvider provider in _registry.All)
 			if (provider is IPerUserResourceOwner owner)
