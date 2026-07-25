@@ -212,6 +212,27 @@ public class JsCalendarConverterTests
 		Assert.Equal("2026-07-20T09:00:00", back.GetProperty("start").GetString());
 	}
 
+	// H3: duration was computed by subtracting two floating (TZID-local) CalDateTime.Value
+	// wall-clock values, ignoring the zone — wrong whenever start and end straddle a DST
+	// transition. This spans the 2026-03-29 Europe/Copenhagen spring-forward (02:00 -> 03:00
+	// local, so that day is only 23 real hours): wall-clock 22:00 -> next day 04:00 naively
+	// looks like 6 hours, but only 5 real (UTC) hours elapse.
+	[Fact]
+	public void Duration_AcrossDstBoundary_IsComputedFromUtcInstants()
+	{
+		const string ics =
+			"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n" +
+			"BEGIN:VEVENT\r\nUID:dst-1\r\n" +
+			"DTSTART;TZID=Europe/Copenhagen:20260328T220000\r\n" +
+			"DTEND;TZID=Europe/Copenhagen:20260329T040000\r\n" +
+			"SUMMARY:Overnight\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+		Dictionary<string, object?> js = JsCalendarConverter.FromICalendar(ics, null);
+		JsonElement back = JsonSerializer.SerializeToElement(js);
+
+		Assert.Equal("PT5H", back.GetProperty("duration").GetString());
+	}
+
 	[Fact]
 	public void FromICalendar_DropsServerManagedMembers()
 	{

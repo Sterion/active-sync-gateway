@@ -173,7 +173,10 @@ public static class JsCalendarConverter
 			if (!allDay && start.TzId is { Length: > 0 } tz)
 				js["timeZone"] = tz;
 			if (evt.End is { } end)
-				js["duration"] = XmlConvert.ToString(end.Value - start.Value);
+				// H3: subtracting the floating wall-clock Values is wrong across a DST boundary —
+				// go through the UTC instants instead (all-day values carry no zone, so Value is
+				// already zone-free and stays exact).
+				js["duration"] = XmlConvert.ToString(allDay ? end.Value - start.Value : end.AsUtc - start.AsUtc);
 		}
 
 		js["status"] = evt.Status?.ToUpperInvariant() switch
