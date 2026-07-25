@@ -199,6 +199,74 @@ public sealed class CardDavStoreTests
 		Assert.False(string.IsNullOrEmpty(revision));
 	}
 
+	// H2 follow-up: the eager pre-PUT listing was turned into a lazy Func consulted only inside
+	// ResolveStoredHrefAsync, which runs AFTER the PUT — so whenever it IS invoked, it enumerates a
+	// collection that already contains the just-created resource. `before` is documented as the
+	// listing "from before the PUT" but can no longer be that. On a server that stores the resource
+	// under a canonical href different from the PUT target (Axigen-style rewrite), the UID-query hit
+	// is wrongly rejected (`!before().ContainsKey(hit.Href)` is now false because the post-PUT
+	// listing DOES contain it), and the listing-diff fallback's `appeared` set is always empty
+	// (both "before" and "after" are the same post-PUT snapshot) — so the method falls through to
+	// its warning and returns the WRONG href (the naive PUT target, not where the item actually is).
+	[Fact]
+	public async Task CreateItem_WhenServerCanonicalizesHref_AdoptsTheCanonicalHref()
+	{
+		const string canonicalHref = "/dav/ab/default/canonical-server-id.vcf";
+		string? putContent = null;
+		StubHandler stub = new(request =>
+		{
+			string method = request.Method.Method;
+			if (method == "PUT")
+			{
+				putContent = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+				HttpResponseMessage put = new(HttpStatusCode.Created);
+				put.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"put-etag\"");
+				return put;
+			}
+			if (method == "REPORT")
+			{
+				// UID query: the server reports the item under ITS OWN canonical href, never the
+				// naive PUT target.
+				return Xml($"""
+				<D:multistatus xmlns:D="DAV:">
+				  <D:response><D:href>{canonicalHref}</D:href>
+				    <D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop><D:getetag>"canon-etag"</D:getetag></D:prop></D:propstat>
+				  </D:response>
+				</D:multistatus>
+				""");
+			}
+			if (method == "GET")
+			{
+				// Content-verification GET: the server serves back the exact content it stored,
+				// under the canonical href.
+				return new HttpResponseMessage(HttpStatusCode.OK)
+				{
+					Content = new StringContent(putContent ?? string.Empty)
+				};
+			}
+			// PROPFIND: the listing only ever shows the canonical href — the naive PUT target was
+			// never actually used by the server.
+			return Xml($"""
+			<D:multistatus xmlns:D="DAV:">
+			  <D:response><D:href>{canonicalHref}</D:href>
+			    <D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop><D:getetag>"canon-etag"</D:getetag></D:prop></D:propstat>
+			  </D:response>
+			</D:multistatus>
+			""");
+		});
+		using WebDavClient dav = new(Base, new HttpClient(stub));
+		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
+		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+
+		XElement app = new("ApplicationData",
+			new XElement(EasNamespaces.Contacts + "FirstName", "Ada"));
+		(string itemKey, string revision) = await store.CreateItemAsync(
+			CardDavStore.KeyPrefix + "/dav/ab/default/", app, CancellationToken.None);
+
+		Assert.Equal(canonicalHref, itemKey);
+		Assert.Equal("canon-etag", revision.Trim('"'));
+	}
+
 	private static HttpResponseMessage Xml(string body)
 	{
 		return new HttpResponseMessage((HttpStatusCode)207)

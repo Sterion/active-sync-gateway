@@ -93,14 +93,6 @@ public abstract class DavStoreBase(
 		string folderBackendKey, XElement applicationData, CancellationToken ct)
 	{
 		string collection = FromBackendKey(folderBackendKey);
-		// Listing snapshot from before the PUT — the fallback way to spot where the server
-		// actually stored the new resource. Deferred (H2): a well-behaved server's UID query
-		// resolves the href directly, so this full collection enumeration is only fetched (and
-		// only once, memoized) when the fallback path in ResolveStoredHrefAsync actually needs it.
-		Task<IReadOnlyDictionary<string, string>>? beforeTask = null;
-		Func<Task<IReadOnlyDictionary<string, string>>> before = () =>
-			beforeTask ??= GetItemRevisionsAsync(folderBackendKey, ContentFilter.All, ct);
-
 		string uid = Guid.NewGuid().ToString();
 		string content = FromApplicationData(applicationData, uid, null);
 		string putHref = $"{collection.TrimEnd('/')}/{uid}{FileExtension}";
@@ -108,7 +100,7 @@ public abstract class DavStoreBase(
 			.ConfigureAwait(false);
 
 		(string href, string? listedETag) = await ResolveStoredHrefAsync(
-			folderBackendKey, collection, putHref, uid, before, ct).ConfigureAwait(false);
+			folderBackendKey, collection, putHref, uid, ct).ConfigureAwait(false);
 		// Prefer the etag as the LISTING reports it — that is what future diffs compare.
 		string etag = listedETag
 		              ?? (PathsEqual(href, putHref) ? putETag : null)
@@ -196,26 +188,36 @@ public abstract class DavStoreBase(
 	///   Determines the href the server actually stored a just-created resource under. Some
 	///   servers (Axigen) rewrite the PUT target to their own canonical href — tracked blindly,
 	///   the next diff would see an alien Add plus a Delete of the item the client just created,
-	///   duplicating it on the device. Tries a UID query first, then falls back to diffing the
-	///   collection listing from before the PUT; the listing is the same call the sync diff uses,
-	///   so an adopted key always matches future diffs. <paramref name="before" /> is lazy (H2):
-	///   on a well-behaved server the UID query alone resolves the href at the PUT target and this
-	///   full enumeration is never invoked.
+	///   duplicating it on the device. Tries a UID query first; a hit at a different href is
+	///   verified by fetching and checking its content (H2 follow-up — a full listing fetched
+	///   AFTER the PUT already contains the new resource under whatever href it landed at, so
+	///   presence in that listing can no longer distinguish "genuinely new" from "pre-existing";
+	///   there is no valid pre-PUT baseline left to diff against once that fetch is lazy, so
+	///   content is the only thing that still proves it's actually our item). Falls back to a
+	///   content scan of the post-PUT listing when the UID query is unsupported or unverified. A
+	///   well-behaved server (UID query resolves the exact PUT href) returns after one REPORT —
+	///   no listing enumeration, no content fetch.
 	/// </summary>
 	protected async Task<(string Href, string? ETag)> ResolveStoredHrefAsync(
-		string folderBackendKey, string collection, string putHref, string uid,
-		Func<Task<IReadOnlyDictionary<string, string>>> before, CancellationToken ct)
+		string folderBackendKey, string collection, string putHref, string uid, CancellationToken ct)
 	{
-		// Trust the UID query only when it points at the PUT target or at a genuinely new
-		// resource — weak servers ignore the filter and return pre-existing items.
+		// Trust the UID query only when it points at the PUT target, or when a fetch of its
+		// content confirms our uid — weak servers ignore the filter and echo back an unrelated
+		// (possibly pre-existing) item, so a href mismatch alone proves nothing.
 		(string Href, string? ETag)? byUid = await FindByUidAsync(collection, uid, ct).ConfigureAwait(false);
-		if (byUid is { } hit &&
-		    (PathsEqual(hit.Href, putHref) || !(await before().ConfigureAwait(false)).ContainsKey(hit.Href)))
+		if (byUid is { } hit)
 		{
-			if (!PathsEqual(hit.Href, putHref))
+			if (PathsEqual(hit.Href, putHref))
+				return (hit.Href, hit.ETag);
+
+			(bool verified, string? verifiedETag) = await TryVerifyByContentAsync(hit.Href, uid, ct)
+				.ConfigureAwait(false);
+			if (verified)
+			{
 				logger.LogDebug("{Protocol} stored {PutHref} under canonical href {CanonicalHref}",
 					ProtocolLabel, putHref, hit.Href);
-			return (hit.Href, hit.ETag);
+				return (hit.Href, verifiedETag ?? hit.ETag);
+			}
 		}
 
 		IReadOnlyDictionary<string, string> after =
@@ -224,21 +226,42 @@ public abstract class DavStoreBase(
 		if (exact is not null)
 			return (exact, after[exact]);
 
-		IReadOnlyDictionary<string, string> beforeMap = await before().ConfigureAwait(false);
-		List<string> appeared = after.Keys.Where(k => !beforeMap.ContainsKey(k)).ToList();
-		if (appeared.Count == 1)
+		// Neither the UID query nor the naive PUT href located it: the server both lacks (or
+		// ignored) UID-query support and rewrote the href. With no pre-PUT baseline available
+		// (H2), the only remaining way to identify our item is by content — scan the candidates
+		// the post-PUT listing already gave us.
+		foreach (string candidate in after.Keys)
 		{
-			logger.LogDebug(
-				"{Protocol} stored {PutHref} under canonical href {CanonicalHref} (found via listing diff)",
-				ProtocolLabel, putHref, appeared[0]);
-			return (appeared[0], after[appeared[0]]);
+			(bool verified, string? verifiedETag) = await TryVerifyByContentAsync(candidate, uid, ct)
+				.ConfigureAwait(false);
+			if (verified)
+			{
+				logger.LogDebug(
+					"{Protocol} stored {PutHref} under canonical href {CanonicalHref} (found via content scan)",
+					ProtocolLabel, putHref, candidate);
+				return (candidate, verifiedETag ?? after[candidate]);
+			}
 		}
 
 		logger.LogWarning(
 			"{Protocol}: created {ItemNoun} {PutHref} could not be located in the collection listing " +
-			"({AppearedCount} new entries); the next sync may briefly duplicate the item",
-			ProtocolLabel, ItemNoun, putHref, appeared.Count);
+			"({Count} candidates scanned); the next sync may briefly duplicate the item",
+			ProtocolLabel, ItemNoun, putHref, after.Count);
 		return (putHref, null);
+	}
+
+	/// <summary>
+	///   Fetches <paramref name="href" /> and reports whether its content's UID matches
+	///   <paramref name="uid" /> (with the fetched ETag, which may itself legitimately be null —
+	///   kept separate from the verified flag so "no ETag" is never mistaken for "not verified").
+	///   Not verified when the fetch 404s or the content belongs to a different item.
+	/// </summary>
+	private async Task<(bool Verified, string? ETag)> TryVerifyByContentAsync(
+		string href, string uid, CancellationToken ct)
+	{
+		(string Content, string? ETag)? fetched = await dav.GetAsync(href, ct).ConfigureAwait(false);
+		bool verified = fetched is { } f && string.Equals(ExtractUid(f.Content), uid, StringComparison.Ordinal);
+		return (verified, verified ? fetched!.Value.ETag : null);
 	}
 
 	/// <summary>Finds the canonical href (and etag) of the item with the given UID.</summary>
