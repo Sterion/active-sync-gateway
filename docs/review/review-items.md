@@ -255,7 +255,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **22. Config & account resolution** — ~~`B2`~~ ~~`B3`~~ ~~`B4`~~ ~~`B5`~~ ~~`B7`~~ ~~`B12`~~ **COMPLETE**
 > `B4` a stale account refresh can overwrite a newer role-aware snapshot (unlocked swap). `B2` negative `UsersRefreshSeconds` polls every request though the doc says it disables pickup. `B3` startup-impact validation can't catch a backend/user-validator brick. `B5`/`B7`/`B12` secret residency, legacy-Oof upgrade, level-alias drift. `Accounts`/`Settings`/`Administration`.
 
-**23. DAV & JMAP request correctness** [LIVE] — ~~`H2`~~ ~~`H3`~~ ~~`H4`~~ ~~`H6`~~ `H7` `H8` `H10` `H11`
+**23. DAV & JMAP request correctness** [LIVE] — ~~`H2`~~ ~~`H3`~~ ~~`H4`~~ ~~`H6`~~ ~~`H7`~~ `H8` `H10` `H11`
 > `H4` non-birth (wedding) anniversaries are destroyed on every contact edit. `H2` CalDAV create always does a wasted full enumeration (contradicts H13). `H3` all-day/timed duration is off across DST. `H6`/`H7`/`H8`/`H10`/`H11` SSE record buffering, wholesale mailbox-set replacement, recurrence `until` zone, an extra round-trip, malformed-address parsing. Verify JMAP on stalwart, CalDAV on a DAV stack.
 
 **24. Converter correctness** [LIVE] — `D2` `D3` `D4` `D5` `D13` `D15`
@@ -410,7 +410,7 @@ Area S, the cross-cutting structural pass, is given in full below.)*
 `H4` **Med** Non-birth (wedding) anniversaries destroyed on every contact edit — `Jmap/JsContactConverter.cs:42,285`. FIXED (item 23): `FromApplicationData` now seeds the rebuilt `anniversaries` map by carrying over every existing entry whose `kind` isn't `"birth"` (this bridge has no EAS-side field to rebuild a non-birth anniversary from — `contacts2:Anniversary` isn't read/written here), before writing/overwriting the `"b"` birth entry from the EAS `Birthday` field; the map is only omitted (letting `ClearedOnUpdate` null it) when it ends up empty. Proven red-first (`JsContactConverterTests.FromApplicationData_PreservesNonBirthAnniversaries_OnUpdate`): unmodified code threw `KeyNotFoundException` looking up the preserved wedding entry (the update produced only the fresh birth entry, dropping it entirely), fixed code keeps both.
 `H5` **Med** Contact/calendar revision hashes raw JSON whose member order is server-defined → full re-sync — `Jmap/JmapContactStore.cs:289`, `Jmap/JmapCalendarStore.cs:363`. FIXED: both `Revision` methods now hash a CANONICAL serialization (new `JmapRevision.Compute` — object members sorted by name, array order preserved, scalars verbatim, no insignificant whitespace) so a server re-ordering the same JSON no longer flips the revision. BEHAVIOUR NOTE: the revision string for a given item now differs from the pre-fix hash, so on upgrade every JMAP contact/calendar item's stored snapshot revision mismatches once → a one-time full re-sync of those collections (harmless, self-healing; acceptable per Standing context).
 `H6` **Low** SSE watcher signals per `data:` line without buffering a full record (ping mis-latch) — `Jmap/JmapEventSourceWatcher.cs:95`. FIXED (item 23): the reader loop now only decides at the record boundary (a blank line) — it tracks `sawData` and the record's final `currentEvent`, and signals there instead of the instant a `data:` line is seen. A ping whose `data:` line legally precedes its `event: ping` line no longer mis-latches. Proven red-first (`JmapEventSourceWatcherTests.PingRecord_WithDataLineBeforeEventLine_DoesNotSignal`, an SSE record with `data:` before `event: ping`): unmodified code signalled immediately (the wait completed within 500 ms), fixed code correctly never signals for it; a companion test (`StateChangeRecord_DoesSignal`) confirms a genuine `event: state` record still wakes the wait.
-`H7` **Low** Delete-to-trash/MoveItem replace `mailboxIds` wholesale, losing multi-mailbox membership — `Jmap/JmapMailStore.cs:322,344`.
+`H7` **Low** Delete-to-trash/MoveItem replace `mailboxIds` wholesale, losing multi-mailbox membership — `Jmap/JmapMailStore.cs:322,344`. FIXED (item 23): both `DeleteItemAsync`'s non-permanent path and `MoveItemAsync` now send a PatchObject (RFC 8620 §5.3) touching only the two affected keys — `mailboxIds/{source} = null`, `mailboxIds/{trash-or-dest} = true` — instead of replacing the whole map, so any other mailbox membership on the message survives. Scope note: the finding's own text also points at the identical shape in `JmapCalendarStore.MoveItemAsync` (`calendarIds`) and `JmapContactStore.MoveItemAsync` (`addressBookIds`), but its named FIX site is `JmapMailStore.cs` only — those two are filed as a new finding below rather than fixed inline. Proven red-first (`JmapMailStoreTests.DeleteItem_NonPermanent_PatchesMailboxIds_InsteadOfReplacing`, `MoveItem_PatchesMailboxIds_InsteadOfReplacing`, capturing the raw `Email/set` `update` argument): unmodified code sent a wholesale `"mailboxIds":{...}` key, fixed code sends only the two dotted-path patch keys.
 `H8` **Low** JSCalendar recurrence `until` written as naive local though parsed as UTC — `Jmap/JsCalendarConverter.cs:274`.
 `H9` **Low** JMAP blob/eventsource requests don't re-assert same-origin before attaching credentials — `Jmap/JmapClient.cs:246`.
 `H10` **Nit** `CategoriesOfAsync` issues an extra serial `Email/get` before the category patch — `Jmap/JmapMailStore.cs:264`.
@@ -463,3 +463,16 @@ behind a stricter capability than plain admin and restore body-settings probing,
 pre-save workflow the page is built around; or (b) keep `C2` as-is and change the SPA so Test is disabled
 (with an explanatory tooltip) until the role's settings are saved, and say so in `docs/webui.md`. Option (a)
 is the better product outcome; option (b) is the smaller change. **Not yet assigned to an item.**
+
+`H34` **Low** JMAP calendar/contact move replaces `calendarIds`/`addressBookIds` wholesale, same shape as `H7` —
+`src/ActiveSync.Backends.Jmap/JmapCalendarStore.cs:161-167` (`MoveItemAsync`, `["calendarIds"] = new
+Dictionary<string, object?> { [FromKey(destinationFolderBackendKey)] = true }`) and
+`src/ActiveSync.Backends.Jmap/JmapContactStore.cs:136-142` (`MoveItemAsync`, same shape with
+`addressBookIds`). `H7`'s own detail text names both sites as sharing the defect, but its assigned FIX
+target was `JmapMailStore.cs` only (item 23 fixed that one); these two were left as-is rather than fixed
+inline, since they are outside `H7`'s named site. An event/contact filed under more than one
+calendar/address book (JSCalendar/JSContact both permit it) loses every other membership on an EAS
+MoveItems. FIX: the identical `PatchObject` treatment `H7` applied — patch only
+`calendarIds/{source} = null` + `calendarIds/{dest} = true` (respectively `addressBookIds/...`) instead
+of replacing the map. Found by the worker implementing item 23 while fixing `H7`; not yet assigned to
+an item.

@@ -326,6 +326,9 @@ public sealed partial class JmapMailStore(
 			return;
 		}
 
+		// H7: patch only the two affected keys (RFC 8620 §5.3 PatchObject) instead of replacing
+		// "mailboxIds" wholesale — a message filed under more than one mailbox (e.g. a label
+		// alongside Inbox) must keep every OTHER membership across a single-folder EAS delete.
 		using JmapResponse response = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
 		{
 			["accountId"] = account,
@@ -333,7 +336,8 @@ public sealed partial class JmapMailStore(
 			{
 				[itemKey] = new Dictionary<string, object?>
 				{
-					["mailboxIds"] = new Dictionary<string, object?> { [trashId] = true }
+					[$"mailboxIds/{FromKey(folderBackendKey)}"] = null,
+					[$"mailboxIds/{trashId}"] = true
 				}
 			}
 		}, ct).ConfigureAwait(false);
@@ -344,7 +348,10 @@ public sealed partial class JmapMailStore(
 		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
+		string sourceId = FromKey(sourceFolderBackendKey);
 		string destId = FromKey(destinationFolderBackendKey);
+		// H7: same PatchObject shape as DeleteItemAsync above — drop only the source mailbox
+		// membership, not every mailbox the message happened to be filed under.
 		using JmapResponse response = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
 		{
 			["accountId"] = account,
@@ -352,7 +359,8 @@ public sealed partial class JmapMailStore(
 			{
 				[itemKey] = new Dictionary<string, object?>
 				{
-					["mailboxIds"] = new Dictionary<string, object?> { [destId] = true }
+					[$"mailboxIds/{sourceId}"] = null,
+					[$"mailboxIds/{destId}"] = true
 				}
 			}
 		}, ct).ConfigureAwait(false);

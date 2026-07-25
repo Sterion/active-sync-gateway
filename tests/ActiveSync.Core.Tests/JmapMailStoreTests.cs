@@ -137,6 +137,44 @@ public sealed class JmapMailStoreTests
 		Assert.Equal(1, stub.FullMailboxListings); // one Mailbox/get ids:null for both deletes
 	}
 
+	// H7: delete-to-trash replaced "mailboxIds" wholesale with just {trash: true}, so a message
+	// filed under more than one mailbox (e.g. a label plus Inbox) lost every other membership on
+	// a single-folder EAS delete. The update must PATCH only the two affected keys.
+	[Fact]
+	public async Task DeleteItem_NonPermanent_PatchesMailboxIds_InsteadOfReplacing()
+	{
+		PatchCapturingStub stub = new();
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+
+		await store.DeleteItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", permanent: false, CancellationToken.None);
+
+		Assert.NotNull(stub.CapturedUpdate);
+		JsonElement patch = stub.CapturedUpdate!.Value.GetProperty("E1");
+		Assert.False(patch.TryGetProperty("mailboxIds", out _)); // never a wholesale replace
+		Assert.True(patch.GetProperty("mailboxIds/INBOXID").ValueKind == JsonValueKind.Null);
+		Assert.True(patch.GetProperty("mailboxIds/TRASHID").GetBoolean());
+	}
+
+	// H7: MoveItemAsync has the identical shape — moving a multi-filed message must drop only the
+	// source mailbox, not every mailbox the message happened to be in.
+	[Fact]
+	public async Task MoveItem_PatchesMailboxIds_InsteadOfReplacing()
+	{
+		PatchCapturingStub stub = new();
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+
+		await store.MoveItemAsync(
+			JmapMailStore.ToKey("INBOXID"), "E1", JmapMailStore.ToKey("ARCHIVEID"), CancellationToken.None);
+
+		Assert.NotNull(stub.CapturedUpdate);
+		JsonElement patch = stub.CapturedUpdate!.Value.GetProperty("E1");
+		Assert.False(patch.TryGetProperty("mailboxIds", out _));
+		Assert.True(patch.GetProperty("mailboxIds/INBOXID").ValueKind == JsonValueKind.Null);
+		Assert.True(patch.GetProperty("mailboxIds/ARCHIVEID").GetBoolean());
+	}
+
 	private static HttpResponseMessage Json(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)
@@ -198,6 +236,47 @@ public sealed class JmapMailStoreTests
 		{
 			counter++;
 			return value;
+		}
+	}
+
+	/// <summary>
+	///   Answers the trash-lookup <c>Mailbox/get</c> and captures the <c>"update"</c> argument of
+	///   the next <c>Email/set</c> call (kept alive past the request's own <c>JsonDocument</c> via a
+	///   re-parsed copy) so a test can assert on its exact shape.
+	/// </summary>
+	private sealed class PatchCapturingStub : HttpMessageHandler
+	{
+		private JsonDocument? _capturedDoc;
+		public JsonElement? CapturedUpdate => _capturedDoc?.RootElement;
+
+		protected override async Task<HttpResponseMessage> SendAsync(
+			HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			string body = await request.Content!.ReadAsStringAsync(cancellationToken);
+			using JsonDocument doc = JsonDocument.Parse(body);
+			List<string> responses = new();
+			foreach (JsonElement call in doc.RootElement.GetProperty("methodCalls").EnumerateArray())
+			{
+				string name = call[0].GetString()!;
+				JsonElement args = call[1];
+				string id = call[2].GetString()!;
+				bool idsNull = args.TryGetProperty("ids", out JsonElement ids) && ids.ValueKind == JsonValueKind.Null;
+				string argsJson;
+				if (name == "Mailbox/get" && idsNull)
+					argsJson = "\"list\":[{\"id\":\"INBOXID\"},{\"id\":\"ARCHIVEID\"},{\"id\":\"TRASHID\",\"role\":\"trash\"}]";
+				else if (name == "Email/set")
+				{
+					_capturedDoc = JsonDocument.Parse(args.GetProperty("update").GetRawText());
+					argsJson = "\"updated\":{\"E1\":null}";
+				}
+				else
+					argsJson = "\"list\":[]";
+				responses.Add($"[\"{name}\",{{\"accountId\":\"c\",{argsJson}}},\"{id}\"]");
+			}
+
+			return Json($"{{\"methodResponses\":[{string.Join(",", responses)}],\"sessionState\":\"x\"}}");
 		}
 	}
 }
