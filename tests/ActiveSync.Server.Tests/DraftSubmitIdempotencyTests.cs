@@ -59,7 +59,8 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		XElement? result = await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, command,
 			new Dictionary<string, string>(StringComparer.Ordinal),
-			new BodyPreference(1, null, false), deletesAsMoves: true, ledger, CancellationToken.None);
+			new BodyPreference(1, null, false), deletesAsMoves: true, ledger, syncKeyForClaim: 1,
+			CancellationToken.None);
 
 		// A successful submission is reported as success, not the Status 6 the catch would emit.
 		Assert.Equal("1", result?.Element(AS + "Status")?.Value);
@@ -69,6 +70,99 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		Assert.True(_harness.Session.Mail.SaveToSentAttempted);
 		// …and the replay marker is recorded, so a client resend replays instead of re-sending.
 		Assert.True(ledger.AppliedAdds.ContainsKey("c1"));
+	}
+
+	// F2: a crash between the SMTP send and this collection's own CommitCollectionStateAsync
+	// leaves the SyncKey unadvanced, so a client resend validates as Current — a FRESH, EMPTY
+	// ledger, not a Replay of the one that recorded the first attempt (Replay only ever happens
+	// once the round has already committed and the key has already advanced once). Simulate the
+	// crash by driving ApplyClientCommandAsync twice for the identical Add/ClientId, each with its
+	// own independent empty ledger — exactly what two Sync requests under the same never-advanced
+	// SyncKey would each build.
+	[Fact]
+	public async Task DraftSubmit_ResentAfterACrashBeforeCommit_DoesNotSubmitTwice()
+	{
+		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:Drafts", "Drafts", null, EasFolderType.Drafts, EasClass.Email));
+		UserFolder drafts = folders.Single(f => f.BackendKey == "imap:Drafts");
+
+		SyncHandler handler = NewSyncHandler();
+		EasContext context = await _harness.NewContextAsync();
+
+		XElement CommandFor(string clientId) => new(AS + "Add",
+			new XElement(AS + "ClientId", clientId),
+			new XElement(AS + "ApplicationData",
+				new XElement(Email + "To", "dest@example.com"),
+				new XElement(Email + "Subject", "Hi"),
+				new XElement(ASB + "Body",
+					new XElement(ASB + "Type", "1"),
+					new XElement(ASB + "Data", "hello there")),
+				new XElement(E2 + "Send")));
+
+		// Attempt 1: the SMTP send goes out, then the process crashes before this collection's
+		// round commits — so nothing durable ever records that ClientId "c1" was already sent. Both
+		// attempts present the SAME (never-advanced) SyncKey, exactly as two real Sync requests
+		// under a round that never committed would.
+		await handler.ApplyClientCommandAsync(
+			context, drafts, _harness.Session.Store, CommandFor("c1"),
+			new Dictionary<string, string>(StringComparer.Ordinal),
+			new BodyPreference(1, null, false), deletesAsMoves: true, ClientCommandLedger.Empty(),
+			syncKeyForClaim: 1, CancellationToken.None);
+
+		// Attempt 2: the client, having never seen a response, resends the identical Add under the
+		// same (unadvanced) SyncKey — validated as Current, so the real collection loop would build
+		// a FRESH, empty ledger exactly like the first attempt's.
+		await handler.ApplyClientCommandAsync(
+			context, drafts, _harness.Session.Store, CommandFor("c1"),
+			new Dictionary<string, string>(StringComparer.Ordinal),
+			new BodyPreference(1, null, false), deletesAsMoves: true, ClientCommandLedger.Empty(),
+			syncKeyForClaim: 1, CancellationToken.None);
+
+		// The draft must have gone out over SMTP exactly once — not once per attempt.
+		Assert.Single(_harness.Session.Submit.Sent);
+	}
+
+	// F2 (coverage): the Change/email2:Send seam (SmartReply-style draft edit-and-send) guards the
+	// identical crash window with the identical mechanism (TryClaimSendAsync), keyed by ServerId
+	// instead of ClientId. Not run through a full red-first cycle separately — the guard is the
+	// same code path proven above for Add — but this exercises it end to end to confirm the Change
+	// branch's claim key (and its "already gone" resend outcome) actually wires up correctly.
+	[Fact]
+	public async Task DraftChangeSubmit_ResentAfterACrashBeforeCommit_DoesNotSubmitTwice()
+	{
+		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:Drafts", "Drafts", null, EasFolderType.Drafts, EasClass.Email));
+		UserFolder drafts = folders.Single(f => f.BackendKey == "imap:Drafts");
+
+		SyncHandler handler = NewSyncHandler();
+		EasContext context = await _harness.NewContextAsync();
+		string serverId = $"{drafts.ServerId}:99";
+		_harness.Session.Mail.RawMessage = System.Text.Encoding.UTF8.GetBytes(
+			"From: u@example.test\r\nTo: dest@example.com\r\nSubject: draft\r\n\r\ndraft body\r\n");
+
+		XElement CommandFor() => new(AS + "Change",
+			new XElement(AS + "ServerId", serverId),
+			new XElement(AS + "ApplicationData",
+				new XElement(Email + "To", "dest@example.com"),
+				new XElement(Email + "Subject", "Hi"),
+				new XElement(ASB + "Body",
+					new XElement(ASB + "Type", "1"),
+					new XElement(ASB + "Data", "hello there")),
+				new XElement(E2 + "Send")));
+
+		await handler.ApplyClientCommandAsync(
+			context, drafts, _harness.Session.Store, CommandFor(),
+			new Dictionary<string, string>(StringComparer.Ordinal),
+			new BodyPreference(1, null, false), deletesAsMoves: true, ClientCommandLedger.Empty(),
+			syncKeyForClaim: 1, CancellationToken.None);
+
+		await handler.ApplyClientCommandAsync(
+			context, drafts, _harness.Session.Store, CommandFor(),
+			new Dictionary<string, string>(StringComparer.Ordinal),
+			new BodyPreference(1, null, false), deletesAsMoves: true, ClientCommandLedger.Empty(),
+			syncKeyForClaim: 1, CancellationToken.None);
+
+		Assert.Single(_harness.Session.Submit.Sent);
 	}
 
 	private SyncHandler NewSyncHandler()

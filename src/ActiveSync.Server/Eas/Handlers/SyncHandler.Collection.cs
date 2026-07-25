@@ -134,8 +134,8 @@ public sealed partial class SyncHandler
 				try
 				{
 					XElement? handled = await ApplyClientCommandAsync(
-						context, folder, store, command, snapshot, bodyPreference, deletesAsMoves, ledger, ct,
-						conflictRevisions, collectionOptions.ServerWinsOnConflict);
+						context, folder, store, command, snapshot, bodyPreference, deletesAsMoves, ledger,
+						state.SyncKey, ct, conflictRevisions, collectionOptions.ServerWinsOnConflict);
 					if (handled is not null)
 						clientResponses.Add(handled);
 					snapshotDirty = true;

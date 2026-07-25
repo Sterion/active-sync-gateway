@@ -15,6 +15,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	public DbSet<UserFolder> UserFolders => Set<UserFolder>();
 	public DbSet<DeviceFolder> DeviceFolders => Set<DeviceFolder>();
 	public DbSet<CollectionState> CollectionStates => Set<CollectionState>();
+	public DbSet<SentCommandToken> SentCommandTokens => Set<SentCommandToken>();
 	public DbSet<DavItem> DavItems => Set<DavItem>();
 	public DbSet<LocalItem> LocalItems => Set<LocalItem>();
 	public DbSet<LoginBlock> LoginBlocks => Set<LoginBlock>();
@@ -57,6 +58,11 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 			e.HasIndex(c => new { c.DeviceKey, c.CollectionId }).IsUnique();
 			e.Property(c => c.ConcurrencyToken).IsConcurrencyToken();
 		});
+
+		// F2: one claim per (device, collection, attempt, key); the unique index is what makes a
+		// concurrent double-claim race safe (the loser's insert fails and re-reads the winner).
+		modelBuilder.Entity<SentCommandToken>(e =>
+			e.HasIndex(t => new { t.DeviceKey, t.CollectionId, t.SyncKeyAtClaim, t.Key }).IsUnique());
 
 		modelBuilder.Entity<DavItem>(e =>
 			e.HasIndex(i => new { i.UserFolderKey, i.Href }).IsUnique());

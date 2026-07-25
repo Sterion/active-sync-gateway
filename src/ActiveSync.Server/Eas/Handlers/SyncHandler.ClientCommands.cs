@@ -47,7 +47,7 @@ public sealed partial class SyncHandler
 	internal async Task<XElement?> ApplyClientCommandAsync(
 		EasContext context, UserFolder folder, IContentStore store, XElement command,
 		Dictionary<string, string> snapshot, BodyPreference bodyPreference, bool deletesAsMoves,
-		ClientCommandLedger ledger, CancellationToken ct,
+		ClientCommandLedger ledger, int syncKeyForClaim, CancellationToken ct,
 		IReadOnlyDictionary<string, string>? conflictRevisions = null, bool serverWinsOnConflict = true)
 	{
 		// Global ReadOnly mode and per-folder read-only shared-calendar grants share the
@@ -91,6 +91,24 @@ public sealed partial class SyncHandler
 				if (HasSendElement(command, appData) &&
 				    store.EasClass.Equals(EasClass.Email, StringComparison.OrdinalIgnoreCase))
 				{
+					// F2: the SMTP send is irreversible but the ledger entry above is only durable
+					// once THIS round's CommitCollectionStateAsync lands — which happens after every
+					// command in the collection is processed. A crash between the send and that
+					// commit leaves the SyncKey unadvanced, so the client's resend validates as
+					// Current (a fresh, empty ledger) rather than Replay, and would submit the same
+					// draft again. Claim the send FIRST, on its own durable transaction, keyed to
+					// this round's still-unadvanced SyncKey; a resend that finds the claim already
+					// there skips straight to the same acknowledgement without re-sending.
+					if (clientId.Length > 0 &&
+					    !await context.State.TryClaimSendAsync(
+						    context.Device, folder.ServerId, syncKeyForClaim, $"add:{clientId}", ct))
+					{
+						ledger.RecordAdd(clientId, new AppliedClientAdd(null, null));
+						return new XElement(AS + "Add",
+							new XElement(AS + "ClientId", clientId),
+							new XElement(AS + "Status", "1"));
+					}
+
 					await SubmitDraftAsync(context, appData, null, null, ct);
 					if (clientId.Length > 0)
 						ledger.RecordAdd(clientId, new AppliedClientAdd(null, null));
@@ -173,6 +191,19 @@ public sealed partial class SyncHandler
 				if (HasSendElement(command, appData) &&
 				    store.EasClass.Equals(EasClass.Email, StringComparison.OrdinalIgnoreCase))
 				{
+					// F2: same crash window as the Add path above — claim the send durably, keyed to
+					// this round's still-unadvanced SyncKey, BEFORE submitting. A resend that finds
+					// the claim already there treats the draft as already gone (best-effort delete
+					// already happened or doesn't matter — the draft is either gone or will reappear
+					// via the next diff per F10) rather than re-submitting the mail.
+					if (!await context.State.TryClaimSendAsync(
+						    context.Device, folder.ServerId, syncKeyForClaim, $"change:{serverId}", ct))
+					{
+						snapshot.Remove(itemKey);
+						ledger.RecordChange(serverId, new AppliedClientChange(itemKey, null));
+						return null;
+					}
+
 					await SubmitDraftAsync(context, appData, folder.BackendKey, itemKey, ct);
 					// The draft is already sent; deleting it from Drafts is best-effort cleanup. A
 					// failure here must not report failure for a sent message (the client would
@@ -231,6 +262,18 @@ public sealed partial class SyncHandler
 
 					if (!EasDateTime.TryParse(instanceId, out DateTime occurrence))
 						return ClientCommandStatus(command, "6"); // unparsable InstanceId
+
+					// F2: the iTIP CANCEL mail below is irreversible but the ledger entry is only
+					// durable once THIS round's own commit lands (after every command in the
+					// collection is processed). A crash between the mail and that commit leaves the
+					// SyncKey unadvanced, so the resend validates as Current (empty ledger), not
+					// Replay, and would re-cancel (and re-mail) the same occurrence. Claim the whole
+					// cancel — backend write AND mail — durably first; a resend that finds the claim
+					// already there acknowledges success without repeating either.
+					if (!await context.State.TryClaimSendAsync(
+						    context.Device, folder.ServerId, syncKeyForClaim,
+						    $"occurrence-cancel:{occurrenceKey}", ct))
+						return null;
 
 					XElement occurrenceDelete = new(AS + "ApplicationData",
 						new XElement(Cal + "Exceptions",

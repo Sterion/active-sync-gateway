@@ -82,6 +82,7 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 	private readonly FolderRegistry _folders = new(db);
 	private readonly CollectionStateStore _collections = new(db);
 	private readonly DavItemMap _davItems = new(db, dbContextFactory);
+	private readonly SendDedupStore _sendDedup = new(db, dbContextFactory);
 
 	// ---------- Device partnerships, login/session gates, policy & wipe ----------
 
@@ -141,13 +142,41 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 		PeekSyncKeyAsync(Device device, string collectionId, string clientSyncKey, CancellationToken ct)
 		=> _collections.PeekSyncKeyAsync(device, collectionId, clientSyncKey, ct);
 
-	public Task<int> CommitCollectionStateAsync(
+	public async Task<int> CommitCollectionStateAsync(
 		CollectionState state, Dictionary<string, string> newSnapshot, int filterType,
 		SyncKeyValidation validation, CancellationToken ct,
 		Dictionary<string, AppliedClientAdd>? appliedAdds = null,
 		Dictionary<string, AppliedClientChange>? appliedChanges = null)
-		=> _collections.CommitCollectionStateAsync(
-			state, newSnapshot, filterType, validation, ct, appliedAdds, appliedChanges);
+	{
+		int deviceKey = state.DeviceKey;
+		string collectionId = state.CollectionId;
+		int newKey = await _collections.CommitCollectionStateAsync(
+			state, newSnapshot, filterType, validation, ct, appliedAdds, appliedChanges).ConfigureAwait(false);
+		// F2: the round landed — every send-dedup claim older than the new generation is now
+		// either superseded (covered by the generation's own applied-command ledger and its N-1
+		// replay window) or abandoned, so it can never be matched again. Best-effort: a failure to
+		// prune only means a few rows linger, never a correctness problem.
+		try
+		{
+			await _sendDedup.PruneAsync(deviceKey, collectionId, newKey, ct).ConfigureAwait(false);
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			// Pruning is cleanup, not correctness — never let it fail an otherwise-successful commit.
+		}
+
+		return newKey;
+	}
+
+	/// <summary>
+	///   F2: durably claims one irreversible send (16.x draft submit, occurrence-CANCEL iTIP) BEFORE
+	///   it happens. Returns <c>true</c> the first time (perform the send); <c>false</c> when this
+	///   exact attempt (device, collection, the client's CURRENT unadvanced SyncKey, key) was
+	///   already claimed — a crash between a prior claim and the round's own commit, so the send
+	///   must NOT be repeated on this resend.
+	/// </summary>
+	public Task<bool> TryClaimSendAsync(Device device, string collectionId, int clientSyncKey, string key, CancellationToken ct)
+		=> _sendDedup.TryClaimAsync(device.Id, collectionId, clientSyncKey, key, ct);
 
 	public Task<CollectionState?> GetCollectionStateAsync(Device device, string collectionId, CancellationToken ct)
 		=> _collections.GetCollectionStateAsync(device, collectionId, ct);

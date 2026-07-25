@@ -144,6 +144,31 @@ public class CollectionState
 	public Guid ConcurrencyToken { get; set; }
 }
 
+/// <summary>
+///   F2: a durable claim that one irreversible send (16.x draft submit, occurrence-CANCEL iTIP)
+///   has already been carried out for one client command. Written with its OWN immediate
+///   SaveChangesAsync BEFORE the send runs (<see cref="SendDedupStore" />), independently of the
+///   round's SyncKey/ledger commit — so it survives a crash between the send and
+///   <c>CommitCollectionStateAsync</c>, the one window the applied-command ledger cannot cover
+///   (a crash there leaves the SyncKey unadvanced, so the client's resend validates as Current —
+///   a fresh round with an empty ledger — not Replay). <see cref="SyncKeyAtClaim" /> scopes the
+///   claim to the ATTEMPT, not the item: once a collection's commit lands, every claim carrying an
+///   older SyncKey is pruned, so a later, genuinely new edit that happens to reuse the same
+///   ServerId/ClientId is never mistaken for a crash-retry of a stale one.
+/// </summary>
+public class SentCommandToken
+{
+	public int Id { get; set; }
+	public int DeviceKey { get; set; }
+	public required string CollectionId { get; set; }
+	public int SyncKeyAtClaim { get; set; }
+
+	/// <summary>ClientId (Add); ServerId (Change); ServerId + '\n' + InstanceId (occurrence cancel).</summary>
+	public required string Key { get; set; }
+
+	public DateTime CreatedUtc { get; set; }
+}
+
 /// <summary>Maps DAV item hrefs to short numeric ids used inside EAS item ServerIds.</summary>
 public class DavItem
 {
