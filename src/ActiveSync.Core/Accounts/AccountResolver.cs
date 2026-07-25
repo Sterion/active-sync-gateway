@@ -570,6 +570,21 @@ public sealed class AccountResolver
 			failures.Add($"ActiveSync:Users:{login}: login must not contain ':' or control characters.");
 	}
 
+	/// <summary>
+	///   Unseals one <c>enc:v1:</c> backend secret at snapshot-build time. B5: the returned plaintext
+	///   is stored in the compiled <see cref="RoleTemplate" /> and stays resident in GC-managed memory
+	///   for the whole lifetime of the immutable <see cref="Snapshot" /> (bounded by
+	///   <see cref="AuthOptions.UsersRefreshSeconds" /> — the snapshot is replaced, and the old one
+	///   becomes collectible, on the next rebuild) rather than being re-derived per <see cref="Resolve" />
+	///   call. This is a deliberate, ACCEPTED residency, not an oversight: unsealing lazily at
+	///   `Resolve` time would need the master key loaded (and potentially PBKDF2-stretched from a
+	///   passphrase — K3) on every request that resolves an account with a sealed backend secret,
+	///   trading a memory-residency window (already gated behind reading process memory with the
+	///   master key available) for a real per-request cost, for a Low-severity finding. Unlike the
+	///   master key itself (zeroed after use, see the `finally` in <see cref="BuildSnapshot" />), the
+	///   values returned here are NOT zeroed — they are ordinary heap strings, and .NET has no way to
+	///   scrub a `string`'s backing memory deterministically anyway.
+	/// </summary>
 	private static string? ResolveSecret(
 		string? value, byte[]? encryptionKey, string context, List<string> failures)
 	{
