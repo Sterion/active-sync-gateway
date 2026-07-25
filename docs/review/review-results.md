@@ -1127,3 +1127,62 @@ returning a wrong answer — but it is a new worst case.
   other half of `H7`) and **`H35`** (an `IContentStore` previous-state parameter, which would also close
   `H10` properly). Both need an item.
 - No breaking changes; every fix changes a previously-wrong computed value to a correct one.
+
+---
+
+## Item 24 — Converter correctness [LIVE]
+**Findings:** `D2` `D3` `D4` `D5` `D13` `D15`
+**Commits:** `716dc08` (D2) · `8ec9b51` (D3) · `4ca12fb` (D4) · `5620d18` (D5) · `f9121bb` (D13) ·
+`7645078` (D15)
+**Verification:** integrity items=32 assigned=132 encoding=0 ✓ · cursor → item 25 ✓ · one commit per
+finding, strike with each ✓ · build 0 warnings ✓ · unit **1150 passed, 0 skipped** (+9) ✓ · live **141
+passed, 0 skipped** on a clean-volume Stalwart ✓
+**Diffs read against the detail entries.** Three findings here were *reinterpreted* by the worker, so I
+checked each against its FIX text specifically — **all three are within the finding's own sanctioned
+options**, which is not what I expected going in:
+- `D2` — the FIX text asks for two things: "confirm the engine scopes the stored snapshot to the same
+  filter" **and** "document the skew or widen by a day". The worker did both: confirmed the scoping is
+  already handled, then added `SearchFloor` = `sinceUtc.AddDays(-1).Date` so the IMAP-side filter is a
+  strict superset of the intended UTC window on any server timezone. Its comment also records a genuinely
+  sharp observation — the aged-out reconciliation only rescues items *seen before* and later falling out
+  of the window, so a message excluded from its very first appearance never gets that treatment. That is
+  why widening was the right half to take.
+- `D5` — the prescribed fix (emit the nominal date rather than the UTC instant for all-day, mirroring
+  `TasksConverter.Nominal()`) landed exactly as written, via a new `NominalUtc`. **But the worker could
+  not reproduce the finding's literal symptom**: with the pinned Ical.Net 5.2.3, `HasTime=false` values
+  are already special-cased, so no day-shift appears at process-local UTC+2 across bare `VALUE=DATE`,
+  explicit `TZID+VALUE=DATE`, and with/without `VTIMEZONE`. The main test is therefore **coverage, not
+  proof**, and is labelled as such. I accept the strike: the code genuinely did route a zoneless value
+  through `AsUtc`'s zone arithmetic (the expression the finding names), and the fix removes that
+  dependence on a library's internal handling rather than relying on it. **Read the strike as "the unsafe
+  expression is gone", not "a day-shift was observed and fixed."**
+- `D15` — the FIX text offers "page the flags fetch, **or** document why the revision map must be a
+  single fetch". The worker documented, arguing paging would require releasing the session gate mid-fetch
+  and could tear the revision map across mailbox states — which is a real conflict with the "revision map
+  is the whole truth" invariant, so the documented option is the better one here. **The O(collection)
+  per-round flags fetch and the gate-holding behaviour are unchanged**; only the rationale is now written
+  down. A large mailbox still pays that cost every Sync/Ping round.
+- `D3` — genuinely red-first (the finding's exact duplicate-and-drop reproduced). Worth noting the
+  process: the worker's first fix broke an existing test (`Update_PresentElementsWin_OverTheStoredValue`),
+  it diagnosed ownership per protocol step 9, reverted and re-fixed against the stored card's own
+  top-3-by-pref set. That is the protocol working as intended.
+- `D4` — `type != 4` exempts full-MIME bodies from the byte-cut. Exactly prescribed, red-first
+  (`Truncated` flipped 1→0).
+- `D13` — `Until` is now checked before `Occurrences`, so the bound that *narrows* the series wins.
+  Exactly the finding's reasoning, red-first.
+**Behaviour changes (four, all deliberate):**
+1. `D2` — the IMAP filter window is up to one day wider; near-boundary mail may surface one round earlier.
+2. `D4` — a type-4 body is **never** truncated, so a large MIME fetch with a small `TruncationSize` now
+   returns the whole message. Correct per spec, but a real payload-size change for constrained clients.
+3. `D5` — an all-day event with no DTEND now defaults to +1 nominal **day**, not +1 hour. This one was
+   found while probing and is **red-first proven** — a genuine adjacent bug in the same expression, and
+   arguably the most valuable thing in this commit.
+4. `D13` — when a client sends both `Occurrences` and `Until`, `Until` now wins (previously `Occurrences`).
+**Notes:**
+- **Two coverage-not-proof tests this item** (`D2`'s skew, `D5`'s main all-day claim), both because the
+  symptom needs a server/library behaviour the environment cannot produce deterministically. Both are
+  labelled in the test comment and the finding note, per protocol. Combined with `D15`'s documentation-only
+  closure, **half of this item changed no behaviour that any test observed** — the other half (D3, D4,
+  D13, D5's DTEND fallback) is solid red-first work.
+- No new findings filed; the D5 DTEND bug was fixed inline as directly adjacent to the code under edit,
+  which I agree with over filing it.
