@@ -806,3 +806,58 @@ than by reading 42 files:**
   have now landed across items 17–18 with no `ContractVersion` bump** (see item 17's note for why that is
   still the right call, and why a human should confirm it).
 - No new findings filed.
+
+---
+
+## Run summary — items 14–18 (Phase 3 complete)
+**Swept:** `git log e66e001..HEAD` = 9 fix commits + 5 results commits · **11 findings claimed across
+items 14–18, and the reconciliation is exact** — the set of IDs in commit subjects and the set struck on
+the queue lines are byte-identical (`S1 S2 S3 S4 S5 S6 S7 S8 S9 K11 K21`), "struck but never committed"
+empty, "committed but not struck" empty, no ID in two subjects ✓ · `git diff --stat e66e001..HEAD --
+src/` = 44 files, every directory traceable to an item — the widest spread (Backends.Local/Imap/Dav/Jmap,
+Server/Eas/Handlers) is entirely the `S7` namespace rename, confirmed by `git log -- <dir>` returning only
+`2dca177` ✓ · no file outside `src/`, `tests/`, `ActiveSync.slnx` and `docs/review/` was touched; AGENTS.md
+and the user-facing docs are untouched ✓
+**At HEAD:** integrity items=32 live=10 assigned=132 unique=132 dupes=0 encoding=0 ✓ · definition adequacy
+orphan-list empty, missing-list = Area S + `C10` + the two round-1 cross-references (`A22`, `K45`) as
+expected ✓ · build **0 warnings** ✓ · unit **1115 passed, 0 skipped** (Protocol 91 · Cli 16 · Core 668 ·
+WebUi 76 · Server 264), from 1093 at the start of the run ✓ · live **141 passed, 0 skipped** ✓
+**Carried forward:**
+- **Phase 3 is done and the cursor rests at item 19** — the start of Phase 4 (Correctness). A natural
+  handover seam: items 19+ are behavioural fixes, a different shape of work from this run's five
+  structural ones.
+- **⚠ Read this before trusting item 14–18's strikes: nine of eleven findings were proven
+  STRUCTURALLY, not behaviourally.** Only `S6`/`K21` (bidi in `WireLog.Payload`) had a real red-first
+  reproduction of a wrong output. The rest are moves, renames, splits and extractions — finding classes
+  with no defect to exhibit — so their "red" is a type that did not exist yet, a file that was not there,
+  or a source string that was still present. That is the honest shape for this work and each entry says
+  so, but it means **the confidence in this phase comes from three other things**, and a future reader
+  should weigh those instead: (1) the equivalence checks I ran per item (46/46 member sets and a
+  line-level body diff for `S4`; a non-namespace-line filter over the 42-file `S7` diff; a branch-by-branch
+  error-path comparison for `S2`/`K11`; a line-by-line comparison of the new sender against both deleted
+  copies for `S3`); (2) the pre-existing suites passing **unchanged** against the moved code; (3) five
+  full live runs. If any of this phase turns out to have broken something, the equivalence checks are
+  where to look first, not the red-first claims.
+- **⚠ Four of five workers skipped the live suite; I ran it every time, and every run was green.** No
+  regression escaped — but the *skip reasoning* was wrong at least once (item 15's worker called
+  `LocalContentProtector` unreachable from HTTP; it seals every local calendar/contact/note that an EAS
+  Sync round-trips). This is now the third consecutive run in which worker live-suite judgment was the
+  weak link. The protocol's independent full-suite run is carrying real weight and should not be relaxed.
+- **⚠ `ContractVersion` is still 1.0 after three published-surface changes.** `S5` and `S9` removed
+  `MergedFreeBusy` and `WireLog` from `ActiveSync.Contracts`; `S7` renamed the converter namespace in the
+  packed `Backends.Common`. Not bumping is defensible (Major is the loader's hard gate, `docs/plugins.md`
+  declares the contract not ABI-stable pre-2.0, and the version is welded to the assembly/NuGet version by
+  `ContractSurfaceTests`) — but it is now a **standing** decision affecting three changes, not a one-off,
+  and it is a release-level call. **A human should confirm it, or bump once before the next package
+  publish.**
+- **`S5` reversed a round-1 decision, deliberately and with the audit trail intact.** Round 1's `S4` moved
+  `MergedFreeBusy` into Contracts and its own comment handed a further move forward to "item 17"; round 2's
+  `S5` executed that. The round-1 guard test was replaced by the opposite-direction guard with a comment
+  naming both rounds. Anyone reading `round1/` alone will see a contradiction — this is where it is
+  resolved.
+- **`C10` is still filed and unassigned** (the admin Backends "Test connection" regression from `C2`,
+  High by this document's scale). Unchanged by this run; it still needs an item.
+- Unchanged from the last run summary: `K10` is half-closed (`Validate` still rejects pipe-containing
+  hrefs that `Parse` now handles), and `K4` contradicts README:526's documented 20-year self-signed
+  validity.
+- **Nothing has been pushed.** All 14 commits are local on `main`, per Standing context.
