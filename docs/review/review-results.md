@@ -281,3 +281,53 @@ All eight Phase-1 items landed and independently verified. Final unit suite **10
 coverage-labelled tests (D1 live-MSA-only, A4 coupling-of-A1, W2 LE-host-latent) — each justified and marked.
 Breaking changes (K1 re-key, B1/B8 case-fold + migration, H5 revision re-sync, C4 admin-bit, D6 category
 drop, E1/E10 header gating) are recorded per finding. Cursor rests at item 9 (Phase 2).
+
+---
+
+## Item 9 — Certificate store & TLS resolver
+**Findings:** `K4` `K5` `K6` `K17` `K18` `K19`
+**Commits:** `d4b9b54` (K4) · `d3d7c0b` (K5) · `13d2eeb` (K6) · `f3a9e14` (K17) · `f34598b` (K18) ·
+`eeab847` (K19) · `a85aeef` (queue-line strike — see deviation note)
+**Verification:** integrity items=32 live=10 assigned=unique=132 dupes=0 encoding=0 ✓ · cursor → item 10 ✓ ·
+one commit per finding, ID in subject ✓ · **both-provider migrations present** (Sqlite `20260725123448_` +
+Npgsql `20260725123503_AddServerCertificateConcurrencyToken`) ✓ · build clean (0 warnings) ✓ · unit suite
+**1067 passed, 0 skipped** (Protocol 85 · Core 658 · WebUi 73 · Server 251; +8 over item 8) ✓ · **live suite
+(independent, full, fresh clean-volume Stalwart): 141 passed, 0 skipped** ✓ (not a marked [LIVE] item, but
+K6 lands an EF migration — the unmarked-item rule applies) · **all six diffs read against their detail
+entries** — each touches the named site and implements the stated remedy ✓.
+**Notes:**
+- **First item run under the Sonnet-pinned worker model** and the new every-finding verification. The fixes
+  themselves are clean; the one problem was process, not code (below).
+- **PROCESS DEVIATION (worker self-disclosed, accepted this once):** the six fix commits did **not** each
+  carry their own `review-items.md` strike. All six code commits landed first, then one separate
+  bookkeeping commit (`a85aeef`) struck the whole queue line. Protocol step 3 requires the mark in the
+  *same* commit, and the reason is exactly the exposure this created: an interruption between `eeab847`
+  and `a85aeef` would have left six findings fixed with an unmoved cursor, and item 9 would have been
+  redone from scratch. End state is correct and the cursor did advance, so no check failed — but this is
+  the failure mode the rule exists to prevent, and it is the thing to watch on items 10–13.
+- **K4/K5/K6/K17/K19 proven red-first; K18 is coverage (justified).** A leaked native key handle has no
+  assertable symptom in a unit test, so the test guards `KeySizeOf` correctness across repeated calls
+  instead. Correctly labelled in both the test comment and the worker's report.
+- **K6 is NOT the `A22`/`A6` trap.** The worker reused the existing `catch (DbUpdateException)` rather than
+  adding a new catch, claiming `DbUpdateConcurrencyException` is covered "for free". I checked the filter
+  specifically because round 1's wipe-ack fix failed in exactly this way: that catch is **unfiltered**
+  (no `when (IsUniqueViolation)`), so the subtype genuinely is caught and the loser reloads and serves the
+  winner. Claim verified, not taken on trust.
+- **K6 scope superset (deliberate, coherent):** the detail says replace "only when the current blob still
+  fails to load under the same key"; as implemented the replace path also fires when the row is due for
+  renewal — which is K4's renewal landing in the same method. The two interlock correctly. "Log loudly on
+  replace" is satisfied by `TryLoad`'s existing warning, which names the fingerprint change.
+- **Breaking / behaviour changes (disclosed):** (1) **K4** — self-signed validity drops 20 years → 397 days
+  with auto-renewal 30 days out, so a deployment re-presents a **new fingerprint roughly annually** instead
+  of never; devices must re-trust on each renewal. This makes the self-signed path work on iOS at the cost
+  of periodic re-trust, and it contradicts README:526's "20-year validity" — **README/docs still need
+  updating** (not in item 9's file cluster; noted here rather than fixed inline, per protocol step 8).
+  (2) **K17** — a keyless or expired operator cert now throws at startup instead of failing opaquely at
+  handshake, which is what README:559 already promised. (3) **K6** — new `ConcurrencyToken` column on
+  `ServerCertificate`, no application-visible change beyond conflict detection.
+- **Judgment call (K19) — fall back rather than throw.** The detail offered either fallback or routing an
+  IP literal to `AddIpAddress`; the worker did both (K5 supplies the routing, K19 the fallback) and folded
+  them into one `TryAddHostName` helper. The `host` reassignment precedes `CN={host}`, so subject and SAN
+  stay consistent. `TryAddHostName` catches only `ArgumentException` — the exception the red-first test
+  actually produced; a different SAN-builder failure mode would still escape. Narrow, accepted.
+- No new findings filed.
