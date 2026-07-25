@@ -1054,3 +1054,76 @@ skipped** (+5) ✓ · live **141 passed, 0 skipped** on a clean-volume Stalwart 
   inside the lock, and the work is CPU-bound merging, so this is safe — but it is a slightly wider critical
   section than "swap under a lock" implies.
 - No new findings filed.
+
+---
+
+## Item 23 — DAV & JMAP request correctness [LIVE]  ⚠ REQUIRED AN ORCHESTRATOR-INITIATED REPAIR
+**Findings:** `H2` `H3` `H4` `H6` `H7` `H8` `H10`(N/A) `H11`
+**Commits:** `c7da14f` (H2, defective) · `ebf03f8` (**H2 repair**) · `6f78e64` (H3) · `4c844f4` (H4) ·
+`ca71f13` (H6) · `ffa02c6` (H7) · `d53eae3` (H8) · `c7e402c` (H11 + H10's N/A closure)
+**Verification:** integrity items=32 live=10 assigned=132 unique=132 dupes=0 encoding=0 ✓ (the two new
+findings are unassigned, so `assigned` correctly stays 132) · cursor → item 24 ✓ · build 0 warnings ✓ ·
+unit **1141 passed, 0 skipped** ✓ · live **141 passed, 0 skipped** on a clean-volume Stalwart ✓
+
+### ⚠ `H2` as first landed was a real regression, caught by reading the diff — not by any test
+`c7da14f` turned the pre-PUT collection listing into a lazy memoized `Func<Task<…>>`. It is never invoked
+before the PUT, so whenever it *was* invoked — from `ResolveStoredHrefAsync`, which runs after the PUT —
+it enumerated a collection **that already contained the just-created resource**, while still being named
+and documented as the "before the PUT" baseline. Both consumers broke:
+1. `!(await before()).ContainsKey(hit.Href)` — a server that stored the item under a canonical href now
+   has that href in the post-PUT listing, so the UID hit was **rejected** instead of adopted.
+2. `appeared = after.Keys.Where(k => !beforeMap.ContainsKey(k))` — both maps post-PUT, so `appeared` was
+   always **empty**, the `Count == 1` branch never fired, and the method fell through to its warning and
+   returned `putHref` — **the wrong href**.
+That is precisely the "next diff sees an alien Add plus a Delete → the device duplicates the item" failure
+that function's own comment describes, for the servers it names (Axigen, which is a CI backend). The
+worker's own test passed because it only exercises the fast path, where `PathsEqual(hit.Href, putHref)`
+short-circuits before `before()` is ever reached. **The unit suite, the live suite and the worker's
+red-first proof were all green on a broken fallback** — this is the case the every-finding diff read
+exists for, and the fourth time in this programme the orchestrator has caught something no worker did.
+**Repair** (`ebf03f8`, scoped subagent, verified like any item): the before/after diff is gone entirely,
+since a genuine pre-PUT snapshot cannot be reconstructed after the PUT. A UID hit at the exact PUT href
+is still trusted immediately (H2's optimisation intact — no enumeration, no content fetch on the happy
+path); a hit at a *different* href is now verified by fetching that resource and comparing its embedded
+UID to the freshly-generated one; the deep fallback content-scans the post-PUT listing. Content
+verification is strictly stronger than the old presence proxy — it proves the item is *ours* rather than
+inferring it from absence. Red-first: `CreateItem_WhenServerCanonicalizesHref_AdoptsTheCanonicalHref`
+fails on `c7e402c` returning the PUT-target href and passes after; the fast-path 0-PROPFIND test still
+passes.
+**Cost note carried forward:** on a doubly-broken server (no usable UID query **and** href rewriting)
+where our item genuinely isn't found, the fallback now issues one GET per listing entry before giving up,
+where it previously issued none. Bounded by collection size, create-only, and that path was already
+returning a wrong answer — but it is a new worst case.
+
+**Other diffs read against the detail entries:**
+- `H3` — `end.AsUtc - start.AsUtc` for timed events, floating `Value` subtraction kept for all-day (which
+  carries no zone). Exactly the described defect and fix.
+- `H4` — non-birth anniversaries are now carried over from the existing card and merged with the rebuilt
+  `birth` entry, instead of `anniversaries` being replaced wholesale. This is the item's most valuable
+  fix: a wedding anniversary was destroyed on **every** contact edit.
+- `H6` — the signal now fires at the SSE record boundary (blank line) with a `sawData` flag, so a `data:`
+  line preceding its `event: ping` line can no longer mis-latch. Correct reading of the SSE grammar.
+- `H7` — RFC 8620 PatchObject keys (`mailboxIds/{source} = null`, `mailboxIds/{dest} = true`) replace the
+  wholesale map assignment, exactly as prescribed.
+- `H8` — `until` is converted into the event's own zone per RFC 8984 §4.3.4, with a documented fallback to
+  the pre-fix UTC digits for floating or unresolvable zones.
+- `H11` — MimeKit's `MailboxAddress.TryParse` with the old heuristic kept only as a last resort.
+**Notes:**
+- **`H10` closed N/A, and the reasoning holds.** The prescribed fix was to fold the current-keywords
+  `Email/get` into the batched get→set→get. JMAP `resultReference` copies a literal value between batched
+  calls; it cannot carry a computed set-difference, and the categories patch needs the current keyword set
+  to decide what to null — so the get must complete and be read client-side before the set's arguments
+  exist. Two round trips are structural, not incidental. Filed `H35` for the real remedy.
+- **Protocol nit:** the queue line marks `~~H10~~ **N/A**` without the required one-line why inline (the
+  reasoning is in the finding text instead). Cosmetic; not worth a rewrite commit, noted so the next
+  reader knows where to look.
+- **`H10`'s N/A rode in `H11`'s commit** rather than its own — defensible (there is no source change to
+  isolate), but it is a deviation from one-commit-per-finding.
+- **`H7` was scoped to `JmapMailStore` only**, though its detail text also names the identical shape in
+  `JmapCalendarStore`/`JmapContactStore`. The worker filed `H34` for those rather than fixing them —
+  I'd have preferred them fixed here since the detail names the sites, but filing is defensible and
+  the finding is recorded, not lost.
+- **Two new findings filed and unassigned: `H34`** (calendarIds/addressBookIds wholesale replace — the
+  other half of `H7`) and **`H35`** (an `IContentStore` previous-state parameter, which would also close
+  `H10` properly). Both need an item.
+- No breaking changes; every fix changes a previously-wrong computed value to a correct one.
