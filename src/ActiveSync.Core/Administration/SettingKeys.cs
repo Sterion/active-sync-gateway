@@ -263,6 +263,19 @@ internal static class SettingKeys
 	///   (an OIDC ClientSecret before its Authority/ClientId) reports a failure about the OTHER,
 	///   still-unset keys; that is the operator's next step, not a reason to reject this one. The
 	///   remaining incompleteness is still caught at startup, which is where it becomes a real fault.
+	///
+	///   B3: this simulates <see cref="ActiveSyncOptionsValidator" /> ONLY — it does not (and, by
+	///   construction, cannot usefully) simulate <see cref="BackendConfigurationValidator" />, the
+	///   other startup gate, which needs the provider registry to validate the
+	///   <c>ActiveSync:Backends:*</c> role sections and <c>ActiveSync:Users</c>. Every catalogue key
+	///   in <see cref="All" /> lives outside both of those sections, so the "effective ⊕ candidate"
+	///   config this method builds is byte-identical there before and after the write: re-running
+	///   the registry-based validators here would compare a set of failures against itself and could
+	///   never surface anything. If a future catalogue key is ever added that reads into
+	///   <c>Backends</c> or <c>Users</c>, this method would need extending to cover it — until then,
+	///   a catalogue write can never brick startup only via the backend/user validators. (Writes to
+	///   the backend leaf keys themselves are validated separately, at the point they're not
+	///   catalogue keys, by <see cref="BackendKeyValidator" />.)
 	///   Returns a combined error message, or null when the value is acceptable.
 	/// </summary>
 	internal static string? ValidateStartupImpact(IConfiguration effective, string key, string? value)
