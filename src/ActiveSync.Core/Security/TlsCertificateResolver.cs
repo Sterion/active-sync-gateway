@@ -146,6 +146,7 @@ public sealed class TlsCertificateResolver(
 		string certPath = tls.CertificatePath!;
 		string? password = ResolvePassword(tls.CertificatePassword, masterKey);
 
+		X509Certificate2 certificate;
 		if (!string.IsNullOrWhiteSpace(tls.CertificateKeyPath))
 		{
 			// PEM certificate + private-key pair. Re-export through PKCS#12 so the private key is
@@ -154,11 +155,31 @@ public sealed class TlsCertificateResolver(
 			using X509Certificate2 pem = string.IsNullOrEmpty(password)
 				? X509Certificate2.CreateFromPemFile(certPath, tls.CertificateKeyPath)
 				: X509Certificate2.CreateFromEncryptedPemFile(certPath, password, tls.CertificateKeyPath);
-			return X509CertificateLoader.LoadPkcs12(pem.Export(X509ContentType.Pkcs12), null);
+			certificate = X509CertificateLoader.LoadPkcs12(pem.Export(X509ContentType.Pkcs12), null);
+		}
+		else
+		{
+			// PKCS#12 / PFX bundle (certificate + key in one file), optionally password-protected.
+			certificate = X509CertificateLoader.LoadPkcs12FromFile(certPath, password);
 		}
 
-		// PKCS#12 / PFX bundle (certificate + key in one file), optionally password-protected.
-		return X509CertificateLoader.LoadPkcs12FromFile(certPath, password);
+		// K17: a keyless or already-expired cert loaded "successfully" here and Kestrel then
+		// failed opaquely at handshake time — defeating README's documented "fails startup with a
+		// clear error". Fail fast at the point that actually knows what's wrong.
+		if (!certificate.HasPrivateKey)
+		{
+			certificate.Dispose();
+			throw new InvalidOperationException(
+				$"Certificate at '{certPath}' has no private key — Kestrel cannot serve TLS with it.");
+		}
+		if (certificate.NotAfter.ToUniversalTime() < DateTime.UtcNow)
+		{
+			DateTime notAfter = certificate.NotAfter.ToUniversalTime();
+			certificate.Dispose();
+			throw new InvalidOperationException(
+				$"Certificate at '{certPath}' expired on {notAfter:u}.");
+		}
+		return certificate;
 	}
 
 	private static string? ResolvePassword(string? configured, byte[]? masterKey)

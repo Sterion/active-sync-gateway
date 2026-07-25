@@ -94,6 +94,40 @@ public sealed class TlsCertificateResolverTests : IDisposable
 	}
 
 	[Fact]
+	public void LoadExternal_KeylessCertificate_ThrowsInsteadOfLoadingSilently()
+	{
+		// K17: a cert-only PFX (no private key) loaded "successfully" and Kestrel then failed
+		// opaquely at handshake time — defeating README's documented "fails startup with a clear
+		// error". LoadExternal must reject it itself.
+		using X509Certificate2 fullCert = MakeCert();
+		using X509Certificate2 certOnly = X509CertificateLoader.LoadCertificate(fullCert.Export(X509ContentType.Cert));
+		string path = Path.Combine(_dir, "keyless.pfx");
+		File.WriteAllBytes(path, certOnly.Export(X509ContentType.Pkcs12));
+
+		InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+			TlsCertificateResolver.LoadExternal(new TlsOptions { CertificatePath = path }, null));
+		Assert.Contains("private key", ex.Message, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public void LoadExternal_ExpiredCertificate_ThrowsInsteadOfLoadingSilently()
+	{
+		// K17: an already-expired operator cert loaded "successfully" too, so the failure only
+		// surfaced later (and opaquely) at the TLS handshake.
+		using RSA rsa = RSA.Create(2048);
+		CertificateRequest request = new(
+			"CN=expired.example.com", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+		DateTimeOffset now = DateTimeOffset.UtcNow;
+		using X509Certificate2 expired = request.CreateSelfSigned(now.AddDays(-30), now.AddDays(-1));
+		string path = Path.Combine(_dir, "expired.pfx");
+		File.WriteAllBytes(path, expired.Export(X509ContentType.Pkcs12));
+
+		InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+			TlsCertificateResolver.LoadExternal(new TlsOptions { CertificatePath = path }, null));
+		Assert.Contains("expired", ex.Message, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
 	public void LoadExternal_PfxWithPassword_Loads_AndRejectsWrongPassword()
 	{
 		using X509Certificate2 ok = TlsCertificateResolver.LoadExternal(
