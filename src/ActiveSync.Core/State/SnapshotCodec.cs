@@ -33,12 +33,18 @@ internal static class SnapshotCodec
 	public static Dictionary<string, string> Decompress(byte[]? compressed)
 	{
 		if (compressed is null || compressed.Length == 0)
-			return new Dictionary<string, string>();
+			return new Dictionary<string, string>(StringComparer.Ordinal);
 		using MemoryStream input = new(compressed);
 		using GZipStream gzip = new(input, CompressionMode.Decompress);
 		using MemoryStream output = new();
 		gzip.CopyTo(output);
-		return JsonSerializer.Deserialize<Dictionary<string, string>>(output.ToArray(), JsonOpts)
-			?? new Dictionary<string, string>();
+		// JsonSerializer.Deserialize builds the dictionary with the default (non-explicit) string
+		// comparer; re-wrap it with StringComparer.Ordinal so every snapshot map in the diff engine
+		// (FolderRegistry/DavItemMap already build theirs this way) uses the SAME comparer (A7).
+		Dictionary<string, string>? deserialized =
+			JsonSerializer.Deserialize<Dictionary<string, string>>(output.ToArray(), JsonOpts);
+		return deserialized is null
+			? new Dictionary<string, string>(StringComparer.Ordinal)
+			: new Dictionary<string, string>(deserialized, StringComparer.Ordinal);
 	}
 }

@@ -758,4 +758,20 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.Equal(1, rows[0].State);
 		Assert.Equal("back tomorrow", rows[0].Message);
 	}
+
+	[Fact]
+	public void Decompress_UsesOrdinalComparer_MatchingTheDiffEngine()
+	{
+		// A7: FolderRegistry/DavItemMap build their snapshot maps with StringComparer.Ordinal
+		// explicitly, and diff correctness (echo suppression/windowing) silently depends on every
+		// snapshot map using the SAME comparer. Decompress used the parameterless Dictionary ctor
+		// (EqualityComparer<string>.Default) instead of the explicit Ordinal comparer its siblings
+		// use — assert the actual comparer object, not just lookup behaviour (which happens to
+		// coincide for ordinary strings today).
+		byte[] compressed = SnapshotCodec.Compress(new Dictionary<string, string> { ["a"] = "1" });
+
+		Dictionary<string, string> result = SnapshotCodec.Decompress(compressed);
+
+		Assert.Same(StringComparer.Ordinal, result.Comparer);
+	}
 }
