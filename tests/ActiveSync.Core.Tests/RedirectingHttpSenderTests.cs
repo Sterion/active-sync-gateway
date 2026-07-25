@@ -1,8 +1,13 @@
-using ActiveSync.Backends.Dav;
+using ActiveSync.Backends.Common;
 
 namespace ActiveSync.Core.Tests;
 
-public class WebDavRedirectTests
+/// <summary>
+///   S3: <c>IsSafeRedirect</c> used to be duplicated near-verbatim in <c>WebDavClient</c> and
+///   <c>JmapClient</c> (relocated from the old <c>WebDavRedirectTests</c>). It now lives once, in
+///   the shared <see cref="RedirectingHttpSender" /> (<c>Backends.Common</c>) that both clients call.
+/// </summary>
+public class RedirectingHttpSenderTests
 {
 	[Theory]
 	// Same origin (scheme + host + port) → follow with the Authorization header.
@@ -21,6 +26,6 @@ public class WebDavRedirectTests
 	[InlineData("https://dav.example.com/", "https://dav.example.com:8443/cal/", false)]
 	public void IsSafeRedirect_ProtectsCredentials(string baseUri, string target, bool expected)
 	{
-		Assert.Equal(expected, WebDavClient.IsSafeRedirect(new Uri(baseUri), new Uri(target)));
+		Assert.Equal(expected, RedirectingHttpSender.IsSafeRedirect(new Uri(baseUri), new Uri(target)));
 	}
 }

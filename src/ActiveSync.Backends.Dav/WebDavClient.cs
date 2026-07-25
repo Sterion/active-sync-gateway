@@ -28,6 +28,7 @@ public sealed class WebDavClient : IDisposable
 	private readonly Uri _baseUri;
 	private readonly HttpClient _http;
 	private readonly ILogger? _wireLogger;
+	private readonly RedirectingHttpSender _redirectSender;
 
 	/// <summary>Per-response size ceiling; see <see cref="DefaultMaxResponseBytes" />.</summary>
 	internal long MaxResponseBytes { get; set; } = DefaultMaxResponseBytes;
@@ -56,6 +57,7 @@ public sealed class WebDavClient : IDisposable
 		_baseUri = baseUri;
 		_wireLogger = wireLogger;
 		_http = http;
+		_redirectSender = new RedirectingHttpSender(_http, _baseUri, _wireLogger);
 	}
 
 	public void Dispose()
@@ -216,86 +218,13 @@ public sealed class WebDavClient : IDisposable
 	private Task<HttpResponseMessage> SendAsync(Func<HttpRequestMessage> createRequest, CancellationToken ct)
 	{
 		return TransientRetry.SendHttpAsync(
-			() => SendFollowingRedirectsAsync(createRequest, ct), ct, idempotent: true,
+			() => _redirectSender.SendAsync(createRequest, ct), ct, idempotent: true,
 			onRetry: (reason, attempt) =>
 			{
 				Core.Observability.GatewayMetrics.RecordBackendRetry("dav");
 				_wireLogger?.LogDebug("DAV request transient failure ({Reason}); retry {Attempt}/{Max}",
 					reason, attempt, TransientRetry.DelaysMs.Length);
 			});
-	}
-
-	/// <summary>
-	///   Sends a request, following same-host redirects manually with the method, body and
-	///   Authorization header intact (auto-redirect would strip auth and downgrade methods).
-	///   The factory is invoked once per hop because HttpRequestMessage is single-use.
-	/// </summary>
-	private async Task<HttpResponseMessage> SendFollowingRedirectsAsync(
-		Func<HttpRequestMessage> createRequest, CancellationToken ct)
-	{
-		bool trace = _wireLogger?.IsEnabled(LogLevel.Trace) == true;
-		Uri? redirectTarget = null;
-		for (int hop = 0;; hop++)
-		{
-			HttpRequestMessage request = createRequest();
-			if (redirectTarget is not null)
-				request.RequestUri = redirectTarget;
-			Uri currentUri = request.RequestUri!; // the URI actually requested this hop
-			string method = request.Method.Method;
-			// Verbose wire logging — method, URI and body only, NEVER headers (the
-			// Authorization header must stay out of the logs by construction).
-			if (trace)
-				_wireLogger!.LogTrace("{Method} {Uri} request: {Payload}",
-					method, currentUri,
-					request.Content is null
-						? "(no body)"
-						: WireLog.Payload(await request.Content.ReadAsStringAsync(ct).ConfigureAwait(false)));
-			HttpResponseMessage response;
-			try
-			{
-				response = await _http.SendAsync(request, ct).ConfigureAwait(false);
-			}
-			finally
-			{
-				request.Dispose();
-			}
-
-			if ((int)response.StatusCode is not (301 or 302 or 307 or 308) || hop >= 5)
-			{
-				if (trace)
-				{
-					// Buffer so the caller's own read still works afterwards.
-					await response.Content.LoadIntoBufferAsync(ct).ConfigureAwait(false);
-					_wireLogger!.LogTrace("{StatusCode} {Status} for {Method} {Uri}: {Payload}",
-						(int)response.StatusCode, response.StatusCode, method, currentUri,
-						WireLog.Payload(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false)));
-				}
-
-				return response;
-			}
-			Uri? location = response.Headers.Location;
-			if (location is null)
-				return response;
-			// Resolve a relative Location against the CURRENT hop, not the original base.
-			Uri target = location.IsAbsoluteUri ? location : new Uri(currentUri, location);
-			if (!IsSafeRedirect(_baseUri, target))
-				return response;
-			response.Dispose();
-			redirectTarget = target;
-		}
-	}
-
-	/// <summary>
-	///   A redirect is followed (with the Basic Authorization header attached) only when it
-	///   stays on the same origin — identical scheme, host AND port. Any other target (a
-	///   different port, or an https→http downgrade) could hand the credentials to another
-	///   service or put them on the wire in cleartext, so the redirect is not followed.
-	/// </summary>
-	public static bool IsSafeRedirect(Uri baseUri, Uri target)
-	{
-		return string.Equals(target.Scheme, baseUri.Scheme, StringComparison.OrdinalIgnoreCase) &&
-		       string.Equals(target.Host, baseUri.Host, StringComparison.OrdinalIgnoreCase) &&
-		       target.Port == baseUri.Port;
 	}
 
 	public async Task<string?> GetPropertyAsync(string href, XName property, CancellationToken ct)

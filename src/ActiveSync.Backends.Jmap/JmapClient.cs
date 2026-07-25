@@ -134,6 +134,7 @@ public sealed class JmapClient : IDisposable
 	private readonly HttpClient _http;
 	private readonly ILogger? _wireLogger;
 	private readonly SemaphoreSlim _sessionGate = new(1, 1);
+	private readonly RedirectingHttpSender _redirectSender;
 	private JmapSessionResource? _session;
 
 	public JmapClient(
@@ -156,6 +157,7 @@ public sealed class JmapClient : IDisposable
 		_baseUri = baseUri;
 		_http = http;
 		_wireLogger = wireLogger;
+		_redirectSender = new RedirectingHttpSender(_http, _baseUri, _wireLogger);
 	}
 
 	private static HttpClient BuildHttpClient(
@@ -417,7 +419,7 @@ public sealed class JmapClient : IDisposable
 		Func<HttpRequestMessage> createRequest, CancellationToken ct, bool idempotent = true)
 	{
 		return TransientRetry.SendHttpAsync(
-			() => SendFollowingRedirectsAsync(createRequest, ct), ct, idempotent,
+			() => _redirectSender.SendAsync(createRequest, ct), ct, idempotent,
 			onRetry: (reason, attempt) =>
 			{
 				GatewayMetrics.RecordBackendRetry("jmap");
@@ -445,76 +447,6 @@ public sealed class JmapClient : IDisposable
 	}
 
 	/// <summary>
-	///   Sends a request, following same-origin redirects manually with the method, body and
-	///   Authorization header intact (auto-redirect would strip auth). Mirrors WebDavClient.
-	/// </summary>
-	private async Task<HttpResponseMessage> SendFollowingRedirectsAsync(
-		Func<HttpRequestMessage> createRequest, CancellationToken ct)
-	{
-		bool trace = _wireLogger?.IsEnabled(LogLevel.Trace) == true;
-		Uri? redirectTarget = null;
-		for (int hop = 0;; hop++)
-		{
-			HttpRequestMessage request = createRequest();
-			if (redirectTarget is not null)
-				request.RequestUri = redirectTarget;
-			Uri currentUri = request.RequestUri!;
-			string method = request.Method.Method;
-			// Verbose wire logging — method, URI and body only, NEVER headers (the
-			// Authorization header must stay out of the logs by construction).
-			if (trace)
-				_wireLogger!.LogTrace("{Method} {Uri} request: {Payload}",
-					method, currentUri,
-					request.Content is null
-						? "(no body)"
-						: WireLog.Payload(await request.Content.ReadAsStringAsync(ct).ConfigureAwait(false)));
-			HttpResponseMessage response;
-			try
-			{
-				response = await _http.SendAsync(request, ct).ConfigureAwait(false);
-			}
-			finally
-			{
-				request.Dispose();
-			}
-
-			if ((int)response.StatusCode is not (301 or 302 or 307 or 308) || hop >= 5)
-			{
-				if (trace)
-				{
-					await response.Content.LoadIntoBufferAsync(ct).ConfigureAwait(false);
-					_wireLogger!.LogTrace("{StatusCode} {Status} for {Method} {Uri}: {Payload}",
-						(int)response.StatusCode, response.StatusCode, method, currentUri,
-						WireLog.Payload(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false)));
-				}
-
-				return response;
-			}
-
-			Uri? location = response.Headers.Location;
-			if (location is null)
-				return response;
-			Uri target = location.IsAbsoluteUri ? location : new Uri(currentUri, location);
-			if (!IsSafeRedirect(_baseUri, target))
-				return response;
-			response.Dispose();
-			redirectTarget = target;
-		}
-	}
-
-	/// <summary>
-	///   A redirect is followed (carrying the Basic Authorization header) only when it stays on
-	///   the same origin — identical scheme, host and port. Any other target could hand the
-	///   credentials to another service or downgrade https→http, so it is not followed.
-	/// </summary>
-	private static bool IsSafeRedirect(Uri baseUri, Uri target)
-	{
-		return string.Equals(target.Scheme, baseUri.Scheme, StringComparison.OrdinalIgnoreCase) &&
-		       string.Equals(target.Host, baseUri.Host, StringComparison.OrdinalIgnoreCase) &&
-		       target.Port == baseUri.Port;
-	}
-
-	/// <summary>
 	///   H9: <see cref="Rebase" /> already forces every advertised URL (download/upload/eventSource)
 	///   onto this client's own origin at session-parse time, so this should never fire through the
 	///   public API today — but Basic auth is about to be attached at each of these three call
@@ -526,7 +458,7 @@ public sealed class JmapClient : IDisposable
 	internal Uri RequireSameOrigin(string url)
 	{
 		Uri target = new(url);
-		if (!IsSafeRedirect(_baseUri, target))
+		if (!RedirectingHttpSender.IsSafeRedirect(_baseUri, target))
 			throw new BackendException(
 				$"JMAP server advertised an off-origin URL '{target}'; refusing to attach credentials.");
 		return target;

@@ -232,7 +232,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **15. Unify AES-GCM framing** — ~~`S2`~~ ~~`K11`~~ **COMPLETE**
 > The `nonce‖ct‖tag` framing is hand-rolled twice (`SecretValue` in Crypto, `LocalContentProtector` in Core/Security). Extract one `SealedBlob` primitive into `ActiveSync.Crypto` taking `(prefix, aad, key)`; both callers use it, distinct prefixes/AAD preserved as arguments. **Do this before item 1 lands its K1/K2 crypto edits if scheduling allows — but K1/K2 can also go first; if so, re-home them here.** Core already references Crypto.
 
-**16. Consolidate the redirect follower** [LIVE] — `S3`
+**16. Consolidate the redirect follower** [LIVE] — ~~`S3`~~ **COMPLETE**
 > `SendFollowingRedirectsAsync` + `IsSafeRedirect` are verbatim twins in `WebDavClient` and `JmapClient` — the security-sensitive same-origin credential-forwarding logic in two places (the JMAP copy's comment even says "Mirrors WebDavClient"). Move into `Backends.Common` (a `RedirectingHttpSender`); relocate the `IsSafeRedirect` unit test with it. Verify both DAV and JMAP live.
 
 **17. Log-scrubbers, free/busy & WireLog placement** — `S6` `K21` `S5` `S9`
