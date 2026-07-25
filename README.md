@@ -394,8 +394,9 @@ no config edit, no redeploy. Three sources, per-login precedence:
    login; `eas user remove` falls back to the config entry.
 
 A running gateway notices database edits within `Auth:UsersRefreshSeconds` (default **1 s**;
-one primary-key point-read on the next request — `0` checks every request, negative
-disables live pickup). An edit also resets the auth verdict caches, so a rotated gateway
+one primary-key point-read on the next request — `0` checks every request; a negative or
+non-finite value is clamped to `0` rather than disabling live pickup, so it can never
+permanently lock refresh off). An edit also resets the auth verdict caches, so a rotated gateway
 password applies to the very next request. Database entries count as declared for
 `RequireDeclaredUsers`, and the startup banner lists every user with its origin
 (`[config]` / `[db]` / `[db, shadows config]`) and all overridden fields — passwords render

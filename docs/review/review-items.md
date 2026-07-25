@@ -252,7 +252,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **21. Retention services & DB-log lifecycle** — ~~`E2`~~ ~~`E4`~~ ~~`E13`~~ **COMPLETE**
 > `E2` the two retention services permanently stop on any `OperationCanceledException` (an EF timeout freezes retention for the process lifetime) — mirror `SettingsRefreshService`'s shutdown-only guard. `E4` the DB-log shutdown flush is uncancellable. `E13` the drain spins tight when logging is toggled off live. `Setup/*`.
 
-**22. Config & account resolution** — `B2` `B3` `B4` `B5` `B7` `B12`
+**22. Config & account resolution** — ~~`B2`~~ `B3` `B4` `B5` `B7` `B12`
 > `B4` a stale account refresh can overwrite a newer role-aware snapshot (unlocked swap). `B2` negative `UsersRefreshSeconds` polls every request though the doc says it disables pickup. `B3` startup-impact validation can't catch a backend/user-validator brick. `B5`/`B7`/`B12` secret residency, legacy-Oof upgrade, level-alias drift. `Accounts`/`Settings`/`Administration`.
 
 **23. DAV & JMAP request correctness** [LIVE] — `H2` `H3` `H4` `H6` `H7` `H8` `H10` `H11`
@@ -324,7 +324,7 @@ Area S, the cross-cutting structural pass, is given in full below.)*
 
 ## Area B — Core: Accounts / Administration / Settings / Options (12)
 `B1` **High** Case-only-duplicate account rows collapse last-write-wins, dropping a user's overrides — `Accounts/AccountStore.cs:43`. FIXED (item 5): `AccountStore` now STORES `UserName` case-folded (`NormalizeLogin` = `ToLowerInvariant`), so the raw unique index enforces case-folded uniqueness (the store can no longer create a case-variant pair); `LoadAllAsync` additionally WARNS instead of silently dropping if it ever meets an out-of-band pair. Data migration `NormalizeAccountUserNameCasing` (both providers) collapses any existing case-variant pair to the most-recently-updated survivor, then case-folds. BEHAVIOUR/BREAKING: stored/displayed `UserName` is now always lowercase; on upgrade existing mixed-case rows are folded and duplicates collapsed (one-time, deterministic).
-`B2` **Med** Negative `UsersRefreshSeconds` polls every request though docs say it disables pickup — `Settings/ChangeStampRefreshGate.cs:33`.
+`B2` **Med** Negative `UsersRefreshSeconds` polls every request though docs say it disables pickup — `Settings/ChangeStampRefreshGate.cs:33`. FIXED (item 22): documentation-only — the clamp-to-0 behaviour is the correct, already-shipped fix for B11 (round 1: a negative value used to permanently disable live refresh, including its own repair via an operator setting it back). Reverting to "negative disables" would reintroduce that lockout. `README.md`'s "Database-declared users" section and the `AuthOptions.UsersRefreshSeconds` XML doc (`ActiveSyncOptions.cs`) both said "negative disables" and now correctly say "clamped to 0, can never lock refresh off" — matching `docs/configuration.md`, which already had it right. N/A for red-first: no code behavior changed, this is a documentation-parity fix (same class as A5).
 `B3` **Med** Startup-impact validation can't catch a backend/user-validator brick — `Administration/SettingKeys.cs:271`.
 `B4` **Med** `EnsureFreshAsync`/`OnRolesChanged` race on `_snapshot`; a stale refresh overwrites a newer one — `Accounts/AccountResolver.cs:117,170`.
 `B5` **Low** `Users` config secrets unsealed and retained in the long-lived snapshot — `Accounts/AccountResolver.cs:446`.
