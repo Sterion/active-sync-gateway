@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using ActiveSync.Contracts;
@@ -164,7 +165,13 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 		request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
 			new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false));
 		SubjectAlternativeNameBuilder san = new();
-		san.AddDnsName(host);
+		// K5: an IP-addressed client (Docker/k8s NodePort, or a phone pointed at a bare IP) needs
+		// an IP SAN — a DNS name that happens to spell an IP address never satisfies an IP-based
+		// TLS name check.
+		if (IPAddress.TryParse(host, out IPAddress? hostIp))
+			san.AddIpAddress(hostIp);
+		else
+			san.AddDnsName(host);
 		if (!host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
 			san.AddDnsName("localhost");
 		request.CertificateExtensions.Add(san.Build());

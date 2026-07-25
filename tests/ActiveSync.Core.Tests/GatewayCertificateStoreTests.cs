@@ -83,6 +83,21 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 	}
 
 	[Fact]
+	public async Task GeneratedCertificate_IpHost_GetsAnIpSubjectAlternativeName()
+	{
+		// K5: SANs were DNS-only, so an IP-addressed client (the common Docker/k8s NodePort
+		// case, or a phone pointed at a bare IP) got RemoteCertificateNameMismatch even though
+		// the certificate was generated "for" that IP.
+		using LocalContentProtector protector = Protector();
+		using X509Certificate2 certificate = await Store(protector).GetOrCreateAsync(
+			"203.0.113.5", NullLogger.Instance, CancellationToken.None);
+
+		X509SubjectAlternativeNameExtension san =
+			certificate.Extensions.OfType<X509SubjectAlternativeNameExtension>().Single();
+		Assert.Contains("203.0.113.5", san.EnumerateIPAddresses().Select(ip => ip.ToString()));
+	}
+
+	[Fact]
 	public async Task StoredBlob_IsSealedWithTheEncryptionKey()
 	{
 		using LocalContentProtector protector = Protector();
