@@ -676,3 +676,43 @@ still `UndecryptableRow(null)`. No caller-visible behaviour moved.
   the queue line carries the strike. `K11` has no findings-list line at all: Area K is not indexed in
   `review-items.md` (only A–H, S, W are), so its detail entry is its only write-up.
 - No behaviour or breaking changes. No new findings filed.
+
+---
+
+## Item 16 — Consolidate the redirect follower [LIVE]
+**Findings:** `S3`
+**Commits:** `3e189b7` (S3)
+**Verification:** integrity items=32 live=10 assigned=132 unique=132 dupes=0 encoding=0 ✓ · cursor → item
+17 ✓ · strike shipped WITH the fix ✓ · build 0 warnings ✓ · unit **1111 passed, 0 skipped** (unchanged —
+the relocated test moved, it did not multiply) ✓ · live **141 passed, 0 skipped** on a clean-volume
+Stalwart restarted in parallel with the worker ✓
+**Diff read against the detail entry:** exactly the prescribed fix. I diffed the new
+`Backends.Common/RedirectingHttpSender.SendAsync` line-by-line against **both** deleted copies: the
+redirect walk is verbatim — same 5-hop cap, same 301/302/307/308 set, same relative-`Location` resolution
+against the *current* hop rather than the base, same `response.Dispose()` before following, same
+per-hop `createRequest()` (HttpRequestMessage is single-use), same `finally`-dispose of the request, same
+trace-guarded wire logging that logs method/URI/body and **never headers**, same
+`LoadIntoBufferAsync` before the terminal-response trace so the caller can still read the body.
+`IsSafeRedirect` is character-identical (scheme + host, both `OrdinalIgnoreCase`, + port). Both clients
+construct one sender alongside `_http`/`_baseUri`/`_wireLogger` and still wrap it in their own
+`TransientRetry.SendHttpAsync` with their own metric tag ("dav"/"jmap") and `idempotent` argument — the
+DAV call site keeps `idempotent: true`, the JMAP one keeps its per-call parameter. The `IsSafeRedirect`
+unit test moved with the code (`WebDavRedirectTests` → `RedirectingHttpSenderTests`), same 9 cases, as the
+finding asks. `JmapClient.RequireSameOrigin` (the `H9` guard from item 13) now calls the shared static —
+checked, because that is the one caller of `IsSafeRedirect` that is *not* a redirect and could have been
+silently dropped in a move.
+**Notes:**
+- **Red-first is compile-level again** (third structural item running): the test was repointed at
+  `RedirectingHttpSender.IsSafeRedirect` before that type existed and failed CS0103. Same honest shape as
+  `S8`/`S2` — a deduplication has no wrong output to reproduce. The *behavioural* assurance here is the
+  live suite, which exercises both the CalDAV/CardDAV and JMAP request paths through the new sender, and
+  the 9 relocated same-origin cases.
+- **One API surface shrank:** `WebDavClient.IsSafeRedirect` was `public static` and no longer exists.
+  `WebDavClient` lives in `ActiveSync.Backends.Dav`, which is **not** a published package (only Protocol,
+  Crypto, Contracts, Backends.Common and Core are packed), so this is not a plugin-contract break. The
+  replacement `RedirectingHttpSender` *is* public in `Backends.Common`, which is packed — a small,
+  deliberate addition to that surface, and arguably a useful one for a plugin HTTP backend that needs the
+  same credential-safe redirect walk.
+- The security-sensitive property this item exists to protect (credentials never forwarded off-origin)
+  now has exactly one implementation and one test. That was the whole point of `S3`.
+- No behaviour changes. No new findings filed.
