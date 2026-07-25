@@ -169,6 +169,53 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	}
 
 	[Fact]
+	public async Task GetSession_RecoversFromASingleFaultedBuild_WithoutWedgingTheSlot()
+	{
+		// A10: a faulted Lazy build (e.g. a transient backend outage during
+		// CreateConnectionAsync) was never swept from the cache, so every subsequent
+		// GetSessionAsync call for the same (user, device) re-awaited the SAME faulted Task and
+		// rethrew the SAME exception forever — wedged until restart. A single faulted attempt
+		// must drop the stale slot and rebuild once, so a transient outage self-heals within the
+		// SAME call instead of wedging the slot for every future request.
+		FlakyProvider provider = new();
+		BackendSessionFactory factory = NewFactory(provider);
+
+		IBackendSession session = await factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None);
+
+		Assert.NotNull(session);
+		Assert.Equal(2, provider.AttemptCount); // one faulted attempt, then one that succeeded
+		await session.DisposeAsync();
+	}
+
+	[Fact]
+	public async Task IdleSweep_RemovesAFaultedSessionSlot()
+	{
+		// A10: a faulted slot is never IsBuilt, so the idle-timeout eviction (which only ever
+		// checked IsBuilt) never qualified it — it sat in the cache forever. The sweep must
+		// remove a faulted slot on its own too, so a (user, device) that's never retried again
+		// doesn't leak.
+		FailingResourceOwnerProvider provider = new(); // CreateConnectionAsync always throws
+		BackendSessionFactory factory = NewFactory(provider);
+		string key = $"{Creds.UserName}\ndev-1";
+
+		await Assert.ThrowsAsync<InvalidOperationException>(() =>
+			factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None));
+		Assert.True(SessionsContainsKey(factory, key)); // the faulted slot is still cached
+
+		InvokeEvictIdleSessions(factory);
+
+		Assert.False(SessionsContainsKey(factory, key)); // the sweep removed it
+	}
+
+	private static bool SessionsContainsKey(BackendSessionFactory factory, string key)
+	{
+		object sessions = typeof(BackendSessionFactory)
+			.GetField("_sessions", BindingFlags.NonPublic | BindingFlags.Instance)!
+			.GetValue(factory)!;
+		return ((System.Collections.IDictionary)sessions).Contains(key);
+	}
+
+	[Fact]
 	public async Task DisposedFactory_UnsubscribesFromSettingsEvents()
 	{
 		// A28: the factory subscribed to BackendRolesProvider.Changed / AccountResolver.SnapshotChanged
@@ -375,6 +422,37 @@ public sealed class BackendSessionFactoryTests : IDisposable
 			throw new InvalidOperationException("simulated transient backend outage");
 
 		public void TrimUserResources(IReadOnlySet<string> activeGatewayLogins) => LastActiveUsers = activeGatewayLogins;
+	}
+
+	/// <summary>
+	///   A MailStore provider whose connection build FAULTS on the first attempt (a transient
+	///   backend outage) and succeeds on every attempt after (A10).
+	/// </summary>
+	private sealed class FlakyProvider : IBackendProvider
+	{
+		private static readonly IReadOnlySet<BackendRole> All = new HashSet<BackendRole>
+		{
+			BackendRole.MailStore, BackendRole.MailSubmit, BackendRole.Calendar,
+			BackendRole.Contacts, BackendRole.Tasks, BackendRole.Notes
+		};
+
+		private int _attempts;
+
+		public int AttemptCount => _attempts;
+
+		public string Name => "fake";
+		public IReadOnlySet<BackendRole> SupportedRoles => All;
+
+		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures) { }
+		public string DescribeRole(BackendRole role, ProviderSettings settings) => "fake";
+
+		public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
+		{
+			if (Interlocked.Increment(ref _attempts) == 1)
+				throw new InvalidOperationException("simulated transient backend outage");
+			return Task.FromResult<IBackendConnection>(
+				new BackendConnection([new FakeMailStore()], new FakeSubmit(), ownedResources: [new FakeResource()]));
+		}
 	}
 
 	private sealed class FakeResource : IAsyncDisposable

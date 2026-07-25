@@ -176,6 +176,11 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// config-static (restart to apply changes).
 		string key = $"{credentials.UserName}\n{deviceId}";
 
+		// A10: bounds the faulted-build retry below to exactly one extra attempt, so a backend
+		// that is genuinely down fails this call once (with its real exception) rather than
+		// retrying it synchronously without limit.
+		bool retriedFault = false;
+
 		// A2: rebuild loop. The cached session may need recycling (password rotation) or may have
 		// been evicted and torn down between our read of the cache and our lease acquisition; either
 		// way we drop the stale entry and go round again. The common path runs exactly once.
@@ -202,7 +207,24 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 				});
 
 			Lazy<Task<CompositeBackendSession>> lazy = _sessions.GetOrAdd(key, _ => NewLazy());
-			CompositeBackendSession session = await AwaitBuild(lazy).ConfigureAwait(false);
+			CompositeBackendSession session;
+			try
+			{
+				session = await AwaitBuild(lazy).ConfigureAwait(false);
+			}
+			catch (Exception) when (!retriedFault)
+			{
+				// A10: the build faulted (e.g. a transient backend outage) — an unswept faulted
+				// Lazy stays in the cache forever, and every later call for this same
+				// (user, device) would re-await the SAME faulted Task and rethrow the SAME
+				// exception, wedging it until restart. Drop the faulted slot (value-compared, so
+				// a concurrent caller that already replaced it is left untouched) and rebuild
+				// exactly once more, so a transient failure self-heals within this call; a second
+				// failure propagates normally rather than retrying an outage indefinitely.
+				retriedFault = true;
+				_sessions.TryRemove(new KeyValuePair<string, Lazy<Task<CompositeBackendSession>>>(key, lazy));
+				continue;
+			}
 
 			// Credentials changed (e.g. password rotation): recycle the cached session and rebuild.
 			if (session.Credentials.Password != credentials.Password)
@@ -310,6 +332,14 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 				_logger.LogDebug("Evicting idle backend session {Key}", key.Replace('\n', '/'));
 				_ = DisposeLazyAsync(removed);
 			}
+			else if (IsFaulted(lazy) &&
+			         _sessions.TryRemove(new KeyValuePair<string, Lazy<Task<CompositeBackendSession>>>(key, lazy)))
+			{
+				// A10: a faulted slot is never IsBuilt, so the branch above can never sweep it —
+				// GetSessionAsync already self-heals a build it hits again, but a (user, device)
+				// that's never retried would otherwise leak here until restart.
+				_logger.LogDebug("Sweeping faulted backend session build {Key}", key.Replace('\n', '/'));
+			}
 
 		// Expired auth-cache entries are dead weight; drop them so the caches stay
 		// bounded by the set of recently active usernames.
@@ -373,6 +403,12 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 
 	private static bool IsBuilt(Lazy<Task<CompositeBackendSession>> lazy) =>
 		lazy.IsValueCreated && lazy.Value.IsCompletedSuccessfully;
+
+	// A10: a build that threw (e.g. a transient backend outage during CreateConnectionAsync)
+	// leaves the Lazy permanently in this state — IsBuilt is (correctly) false for it forever,
+	// so it needs its own check to be found and swept.
+	private static bool IsFaulted(Lazy<Task<CompositeBackendSession>> lazy) =>
+		lazy.IsValueCreated && lazy.Value.IsFaulted;
 
 	private static CompositeBackendSession Built(Lazy<Task<CompositeBackendSession>> lazy) => lazy.Value.Result;
 #pragma warning restore VSTHRD002, VSTHRD003, VSTHRD011
