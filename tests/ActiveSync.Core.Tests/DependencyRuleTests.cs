@@ -163,6 +163,25 @@ public sealed class DependencyRuleTests
 		Assert.DoesNotContain("AesGcm aes = new", protectorSource);
 	}
 
+	// S4: JmapMailStore.cs (847 lines, 26 async methods) was the one un-split backend store — the IMAP
+	// equivalent already splits by concern (ImapMailBackend.Watch.cs), and JMAP itself already splits
+	// calendar/contacts/oof/submit into their own types, just not mail. A compiled-assembly check can't
+	// distinguish "one 847-line file" from "the same type spread across partial files" (the type and its
+	// members are identical either way), so read the source layout directly — the way S1's csproj check
+	// and S2's AesGcm-source check do for the same reason.
+	[Fact]
+	public void JmapMailStore_IsSplitIntoPartialFilesByConcern()
+	{
+		string dir = Path.Combine(FindRepoRoot(), "src", "ActiveSync.Backends.Jmap");
+
+		Assert.True(File.Exists(Path.Combine(dir, "JmapMailStore.Search.cs")),
+			"Expected JmapMailStore.Search.cs (the Email/query + Email/get search path) to exist as its own partial.");
+		Assert.True(File.Exists(Path.Combine(dir, "JmapMailStore.Watch.cs")),
+			"Expected JmapMailStore.Watch.cs (WaitForChangesAsync + folder-token polling) to exist as its own partial.");
+		Assert.True(File.Exists(Path.Combine(dir, "JmapMailStore.Attachments.cs")),
+			"Expected JmapMailStore.Attachments.cs (attachment fetch + file-reference codec) to exist as its own partial.");
+	}
+
 	private static string FindRepoRoot()
 	{
 		DirectoryInfo? dir = new(AppContext.BaseDirectory);

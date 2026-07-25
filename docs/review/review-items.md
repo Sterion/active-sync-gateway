@@ -238,7 +238,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **17. Log-scrubbers, free/busy & WireLog placement** — ~~`S6`~~ ~~`K21`~~ ~~`S5`~~ ~~`S9`~~ **COMPLETE**
 > `S6`/`K21` the two log-scrubbers (`WireLog.Payload`, `LogText.Clean`) duplicate the character-safety core and the bidi-override defense exists on only one path — route both through one classifier, extend bidi-stripping to payloads. `S5` `MergedFreeBusy` is host-only output — move to Core (and correct AGENTS.md) so Contracts carries only what a plugin builds. `S9` `WireLog` is incidental host utility in the published contract — move down to Protocol (BCL-only). **Breaking Contracts surface — acceptable.**
 
-**18. Namespace coherence & JmapMailStore split** — ~~`S7`~~ `S4`
+**18. Namespace coherence & JmapMailStore split** — ~~`S7`~~ ~~`S4`~~ **COMPLETE**
 > `S7` the converter namespace `ActiveSync.Backends.Converters` is a second root in the `Backends.Common` assembly — rename to `ActiveSync.Backends.Common.Converters` (mechanical, touches backend `using` sites). `S4` `JmapMailStore.cs` (847 lines) is the one un-split backend store — split into partials by concern (CRUD/listing, Search, Watch, Attachments) following the IMAP precedent. No API change.
 
 ## Phase 4 — Correctness

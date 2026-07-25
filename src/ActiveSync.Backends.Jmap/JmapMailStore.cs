@@ -16,7 +16,14 @@ namespace ActiveSync.Backends.Jmap;
 ///   converters by downloading the raw RFC822 blob (<c>Email.blobId</c>). The JMAP account id
 ///   is resolved lazily from the cached session, so construction stays I/O-free.
 /// </summary>
-public sealed class JmapMailStore(
+/// <remarks>
+///   Split by concern across four partials (S4), mirroring the IMAP precedent
+///   (<c>ImapMailBackend.Watch.cs</c>): this file holds folder/item CRUD + listing; free-text
+///   search is in <c>JmapMailStore.Search.cs</c>; the Ping/Sync change-wait engine is in
+///   <c>JmapMailStore.Watch.cs</c>; attachment fetch + the file-reference codec are in
+///   <c>JmapMailStore.Attachments.cs</c>. One type, no API change.
+/// </remarks>
+public sealed partial class JmapMailStore(
 	JmapClient client,
 	string? mailAddress,
 	int pollSeconds,
@@ -353,51 +360,6 @@ public sealed class JmapMailStore(
 		return itemKey; // JMAP Email ids are stable across mailbox moves
 	}
 
-	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
-		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
-	{
-		string account = await AccountAsync(ct).ConfigureAwait(false);
-		string[] ids = folderBackendKeys.Select(FromKey).ToArray();
-		Dictionary<string, string> baseline = await FolderTokensAsync(account, ids, ct).ConfigureAwait(false);
-		DateTime deadline = DateTime.UtcNow + timeout;
-		int delaySeconds = 1;
-		int ceiling = Math.Max(1, pollSeconds);
-		while (DateTime.UtcNow < deadline)
-		{
-			TimeSpan remaining = deadline - DateTime.UtcNow;
-			TimeSpan delay = TimeSpan.FromSeconds(Math.Min(delaySeconds, ceiling));
-			if (delay > remaining)
-				delay = remaining;
-			// The EventSource push, when available, wakes the wait as soon as the server
-			// signals a change; the poll (token diff below) stays the correctness backstop.
-			DateTime since = DateTime.UtcNow;
-			if (delay > TimeSpan.Zero)
-			{
-				if (waitForPush is not null)
-				{
-					using CancellationTokenSource race = CancellationTokenSource.CreateLinkedTokenSource(ct);
-					await Task.WhenAny(Task.Delay(delay, race.Token), waitForPush(since, race.Token)).ConfigureAwait(false);
-					await race.CancelAsync().ConfigureAwait(false);
-				}
-				else
-				{
-					await Task.Delay(delay, ct).ConfigureAwait(false);
-				}
-			}
-
-			delaySeconds = Math.Min(delaySeconds * 2, ceiling);
-
-			Dictionary<string, string> current = await FolderTokensAsync(account, ids, ct).ConfigureAwait(false);
-			List<string> changed = folderBackendKeys
-				.Where(key => baseline.GetValueOrDefault(FromKey(key)) != current.GetValueOrDefault(FromKey(key)))
-				.ToList();
-			if (changed.Count > 0)
-				return changed;
-		}
-
-		return [];
-	}
-
 	// ---------- IMailStoreOperations ----------
 
 	public async Task SaveToSentAsync(byte[] mime, CancellationToken ct)
@@ -431,32 +393,6 @@ public sealed class JmapMailStore(
 		return await GetRawByIdAsync(account, itemKey, ct).ConfigureAwait(false);
 	}
 
-	public async Task<BackendAttachment?> GetAttachmentAsync(string fileReference, CancellationToken ct)
-	{
-		string itemKey;
-		int index;
-		try
-		{
-			(_, itemKey, index) = ParseFileReference(fileReference);
-		}
-		catch (BackendException)
-		{
-			return null; // hand-crafted reference — same answer as a vanished attachment
-		}
-
-		string account = await AccountAsync(ct).ConfigureAwait(false);
-		byte[]? raw = await GetRawByIdAsync(account, itemKey, ct).ConfigureAwait(false);
-		if (raw is null)
-			return null;
-		using MemoryStream stream = new(raw);
-		MimeMessage message = await MimeMessage.LoadAsync(stream, ct).ConfigureAwait(false);
-		if (message.Attachments.Skip(index).FirstOrDefault() is not MimePart { Content: not null } part)
-			return null;
-		using MemoryStream output = new();
-		await part.Content.DecodeToAsync(output, ct).ConfigureAwait(false);
-		return new BackendAttachment(part.ContentType.MimeType, output.ToArray());
-	}
-
 	public async Task SetAnsweredAsync(string folderBackendKey, string itemKey, bool forwarded, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
@@ -470,43 +406,6 @@ public sealed class JmapMailStore(
 			}
 		}, ct).ConfigureAwait(false);
 		EnsureUpdated(response.Arguments("0"), itemKey, "Email");
-	}
-
-	public async Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
-		string? folderBackendKey, string freeText, DateTime? sinceUtc, int maxResults, CancellationToken ct)
-	{
-		string account = await AccountAsync(ct).ConfigureAwait(false);
-		Dictionary<string, object?> filter = new() { ["text"] = freeText };
-		if (folderBackendKey is not null)
-			filter["inMailbox"] = FromKey(folderBackendKey);
-		if (sinceUtc is { } since)
-			filter["after"] = JmapDate.ToUtc(since);
-
-		JmapCall query = new("Email/query", new Dictionary<string, object?>
-		{
-			["accountId"] = account,
-			["filter"] = filter,
-			["sort"] = new object[] { new Dictionary<string, object?> { ["property"] = "receivedAt", ["isAscending"] = false } },
-			["limit"] = maxResults
-		}, "0");
-		JmapCall get = new("Email/get", new Dictionary<string, object?>
-		{
-			["accountId"] = account,
-			["#ids"] = ResultRef("0", "Email/query", "/ids"),
-			["properties"] = new[] { "id", "mailboxIds" }
-		}, "1");
-
-		using JmapResponse response = await client.InvokeAsync(CapMail, [query, get], ct).ConfigureAwait(false);
-		List<(string, string)> hits = new();
-		foreach (JsonElement email in response.Arguments("1").GetProperty("list").EnumerateArray())
-		{
-			string id = email.GetProperty("id").GetString()!;
-			string folderKey = folderBackendKey ?? FirstMailbox(email);
-			if (folderKey.Length > 0)
-				hits.Add((folderKey, id));
-		}
-
-		return hits;
 	}
 
 	public async Task EmptyFolderAsync(string folderBackendKey, CancellationToken ct)
@@ -551,19 +450,6 @@ public sealed class JmapMailStore(
 		return backendKey.StartsWith(KeyPrefix, StringComparison.Ordinal)
 			? backendKey[KeyPrefix.Length..]
 			: throw new BackendException($"Not a JMAP mail folder key: {backendKey}");
-	}
-
-	public static string MakeFileReference(string folderBackendKey, string itemKey, int attachmentIndex)
-	{
-		return DelimitedKey.Encode(folderBackendKey, itemKey, attachmentIndex.ToString());
-	}
-
-	public static (string FolderBackendKey, string ItemKey, int AttachmentIndex) ParseFileReference(string fileReference)
-	{
-		string[]? parts = DelimitedKey.Decode(fileReference, 3);
-		if (parts is null || !int.TryParse(parts[2], out int index) || index < 0)
-			throw new BackendException("Malformed file reference.");
-		return (parts[0], parts[1], index);
 	}
 
 	private async Task<string> AccountAsync(CancellationToken ct)
@@ -680,54 +566,6 @@ public sealed class JmapMailStore(
 		{
 			_rolesGate.Release();
 		}
-	}
-
-	private async Task<Dictionary<string, string>> FolderTokensAsync(string account, string[] mailboxIds, CancellationToken ct)
-	{
-		if (mailboxIds.Length == 0)
-			return new Dictionary<string, string>();
-		// Mailbox counts (total:unread) alone miss a flag-only change (e.g. $flagged/$answered/a
-		// category, which move no counter) and an equal add+delete (the counts net out). The
-		// account-level Email state advances on ANY email create/update/destroy, so fold it into
-		// every folder's token to catch those (H19). Both are fetched in one request; Email/get with
-		// an empty id list returns just the current state. NOTE: the state is account-wide, so a
-		// change in one folder shifts every watched folder's token - Ping over-notifies rather than
-		// misses, which is the safe direction (the client resyncs and finds nothing new).
-		IReadOnlyList<JmapCall> calls =
-		[
-			new JmapCall("Mailbox/get", new Dictionary<string, object?>
-			{
-				["accountId"] = account,
-				["ids"] = mailboxIds,
-				["properties"] = new[] { "id", "totalEmails", "unreadEmails" }
-			}, "0"),
-			new JmapCall("Email/get", new Dictionary<string, object?>
-			{
-				["accountId"] = account,
-				["ids"] = Array.Empty<string>()
-			}, "1")
-		];
-		using JmapResponse response = await client.InvokeAsync(CapMail, calls, ct).ConfigureAwait(false);
-		JsonElement emailArgs = response.Arguments("1");
-		string emailState = emailArgs.TryGetProperty("state", out JsonElement es) ? es.GetString() ?? "" : "";
-		Dictionary<string, string> tokens = new(StringComparer.Ordinal);
-		foreach (JsonElement mailbox in response.Arguments("0").GetProperty("list").EnumerateArray())
-		{
-			string id = mailbox.GetProperty("id").GetString()!;
-			long total = mailbox.TryGetProperty("totalEmails", out JsonElement t) ? t.GetInt64() : 0;
-			long unread = mailbox.TryGetProperty("unreadEmails", out JsonElement u) ? u.GetInt64() : 0;
-			tokens[id] = $"{total}:{unread}:{emailState}";
-		}
-
-		return tokens;
-	}
-
-	private static string FirstMailbox(JsonElement email)
-	{
-		if (email.TryGetProperty("mailboxIds", out JsonElement ids) && ids.ValueKind == JsonValueKind.Object)
-			foreach (JsonProperty p in ids.EnumerateObject())
-				return ToKey(p.Name);
-		return "";
 	}
 
 	private static IReadOnlyList<string> KeywordsOf(JsonElement email)
