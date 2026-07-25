@@ -109,14 +109,18 @@ public sealed class MoveItemsHandler(
 					continue;
 				}
 
-				string newItemKey = await mover.MoveItemAsync(
+				(string newItemKey, string newRevision) = await mover.MoveItemAsync(
 					source.Value.Folder.BackendKey, itemKey, destination.Value.Folder.BackendKey, ct);
 				string dstMsgId = await folders.ComposeServerIdAsync(
 					destination.Value.Folder, destination.Value.Store, newItemKey, ct);
 
-				// Patch snapshots so the move is not echoed back on the next Sync.
+				// Patch snapshots so the move is not echoed back on the next Sync. F5: the
+				// destination side must record the item's REAL revision — a manufactured value
+				// (the old "moved" placeholder) can never match what the next revision listing
+				// reports, so the destination diff would see a spurious Change for an item the
+				// client already has.
 				QueueEdit(srcFldId, itemKey, true, null);
-				QueueEdit(dstFldId, newItemKey, false, "moved");
+				QueueEdit(dstFldId, newItemKey, false, newRevision);
 
 				logger.LogInformation("Moved {SrcMsgId} from \"{Source}\" to \"{Destination}\" for {User}",
 					srcMsgId, source.Value.Folder.DisplayName,

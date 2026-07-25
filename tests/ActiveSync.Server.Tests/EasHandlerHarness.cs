@@ -355,11 +355,16 @@ public sealed class EasHandlerHarness : IDisposable
 			return Task.CompletedTask;
 		}
 
-		public Task<string> MoveItemAsync(
+		/// <summary>
+		///   F5: mirrors a real backend's MoveItemAsync — the moved item keeps its key and reports
+		///   whatever <see cref="Revisions" /> holds for it (defaulting to "" when a test hasn't set
+		///   one), never a manufactured placeholder.
+		/// </summary>
+		public Task<(string ItemKey, string Revision)> MoveItemAsync(
 			string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
 		{
 			Moved.Add($"{sourceFolderBackendKey}/{itemKey}->{destinationFolderBackendKey}");
-			return Task.FromResult(itemKey);
+			return Task.FromResult((itemKey, Revisions.GetValueOrDefault(itemKey, "")));
 		}
 
 		public Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct)

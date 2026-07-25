@@ -344,7 +344,7 @@ public sealed partial class JmapMailStore(
 		EnsureUpdated(response.Arguments("0"), itemKey, "Email");
 	}
 
-	public async Task<string> MoveItemAsync(
+	public async Task<(string ItemKey, string Revision)> MoveItemAsync(
 		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
@@ -352,20 +352,35 @@ public sealed partial class JmapMailStore(
 		string destId = FromKey(destinationFolderBackendKey);
 		// H7: same PatchObject shape as DeleteItemAsync above — drop only the source mailbox
 		// membership, not every mailbox the message happened to be filed under.
-		using JmapResponse response = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
-		{
-			["accountId"] = account,
-			["update"] = new Dictionary<string, object?>
+		// F5: batch the move with a trailing keywords fetch (same H25 shape as UpdateItemAsync) so
+		// the caller gets the item's REAL post-move revision in one round trip instead of storing a
+		// placeholder that can never match the next listing's revision.
+		IReadOnlyList<JmapCall> calls =
+		[
+			new JmapCall("Email/set", new Dictionary<string, object?>
 			{
-				[itemKey] = new Dictionary<string, object?>
+				["accountId"] = account,
+				["update"] = new Dictionary<string, object?>
 				{
-					[$"mailboxIds/{sourceId}"] = null,
-					[$"mailboxIds/{destId}"] = true
+					[itemKey] = new Dictionary<string, object?>
+					{
+						[$"mailboxIds/{sourceId}"] = null,
+						[$"mailboxIds/{destId}"] = true
+					}
 				}
-			}
-		}, ct).ConfigureAwait(false);
+			}, "0"),
+			new JmapCall("Email/get", new Dictionary<string, object?>
+			{
+				["accountId"] = account,
+				["ids"] = new[] { itemKey },
+				["properties"] = new[] { "id", "keywords" }
+			}, "1")
+		];
+		using JmapResponse response = await client.InvokeAsync(CapMail, calls, ct).ConfigureAwait(false);
 		EnsureUpdated(response.Arguments("0"), itemKey, "Email");
-		return itemKey; // JMAP Email ids are stable across mailbox moves
+		JsonElement getList = response.Arguments("1").GetProperty("list");
+		string revision = getList.GetArrayLength() == 0 ? "000" : RevisionOf(KeywordsOf(getList[0]));
+		return (itemKey, revision); // JMAP Email ids are stable across mailbox moves
 	}
 
 	// ---------- IMailStoreOperations ----------

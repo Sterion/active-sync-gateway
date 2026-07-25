@@ -73,6 +73,55 @@ public sealed class MoveItemsSnapshotTests : IDisposable
 		Assert.DoesNotContain("10", Decompress(source.PreviousSnapshotCompressed).Keys);
 	}
 
+	// F5: the destination collection's snapshot must record the moved item's REAL post-move
+	// revision (what the backend actually reports for it there — the same value
+	// GetItemRevisionsAsync would return), not a manufactured placeholder. A placeholder can
+	// never equal what the next revision listing reports for that item, so the destination diff
+	// sees "known != current" and re-sends a needless Change for an item the client just received
+	// via the Add half of the move.
+	[Fact]
+	public async Task F5_Move_StoresTheBackendsRealDestinationRevision()
+	{
+		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email),
+			new BackendFolder("imap:Archive", "Archive", null, EasFolderType.UserMail, EasClass.Email));
+		UserFolder inbox = folders.Single(f => f.BackendKey == "imap:INBOX");
+		UserFolder archive = folders.Single(f => f.BackendKey == "imap:Archive");
+
+		// What the backend actually reports as this item's revision once it lands in Archive —
+		// e.g. the flags string a real IMAP MOVE preserves. Deliberately not "moved".
+		_harness.Session.Store.Revisions["10"] = "101";
+
+		Device device = await _harness.State.GetOrCreateDeviceAsync(
+			EasHandlerHarness.UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+
+		// Prime the destination collection with a live generation so the move's snapshot patch has
+		// somewhere to land.
+		(_, CollectionState? destState) = await _harness.State.ValidateSyncKeyAsync(
+			device, archive.ServerId, "0", CancellationToken.None);
+		await _harness.State.CommitCollectionStateAsync(
+			destState!, new Dictionary<string, string>(), 0, SyncKeyValidation.Initial, CancellationToken.None);
+
+		MoveItemsHandler handler = new(
+			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<MoveItemsHandler>.Instance);
+
+		XDocument request = new(new XElement(M + "MoveItems",
+			new XElement(M + "Move",
+				new XElement(M + "SrcMsgId", $"{inbox.ServerId}:10"),
+				new XElement(M + "SrcFldId", inbox.ServerId),
+				new XElement(M + "DstFldId", archive.ServerId))));
+
+		await _harness.RunAsync(handler, "MoveItems", request);
+
+		CollectionState? destination = await _harness.State.GetCollectionStateAsync(
+			device, archive.ServerId, CancellationToken.None);
+		Assert.NotNull(destination);
+		Dictionary<string, string> destSnapshot = Decompress(destination!.SnapshotCompressed);
+
+		Assert.Equal("101", destSnapshot["10"]);
+	}
+
 	private static Dictionary<string, string> Decompress(byte[]? compressed)
 	{
 		if (compressed is null || compressed.Length == 0)

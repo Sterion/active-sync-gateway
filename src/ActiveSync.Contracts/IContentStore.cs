@@ -104,8 +104,14 @@ public interface IContentStore
 /// </summary>
 public interface IItemMoveOperations
 {
-	/// <summary>Moves an item to another folder of the same class; returns the new item key.</summary>
-	Task<string> MoveItemAsync(
+	/// <summary>
+	///   Moves an item to another folder of the same class; returns the new item key AND the
+	///   item's revision at the destination (the same token <see cref="IContentStore.GetItemRevisionsAsync" />
+	///   would report for it there). F5: the caller persists this into the destination collection's
+	///   snapshot so the next diff does not see a manufactured value that can never match the
+	///   backend's real revision and re-send the item as a spurious Change.
+	/// </summary>
+	Task<(string ItemKey, string Revision)> MoveItemAsync(
 		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct);
 }
 

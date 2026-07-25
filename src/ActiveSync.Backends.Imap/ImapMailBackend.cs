@@ -342,7 +342,7 @@ public sealed partial class ImapMailBackend(
 		return folder.ExpungeAsync([uid], ct);
 	}
 
-	public Task<string> MoveItemAsync(
+	public Task<(string ItemKey, string Revision)> MoveItemAsync(
 		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
 	{
 		return session.RunAsync(async client =>
@@ -364,7 +364,16 @@ public sealed partial class ImapMailBackend(
 				validity = destination.UidValidity;
 			}
 
-			return $"{validity}:{newUid.Value.Id}";
+			// F5: fetch the moved message's flags at the destination so the caller can store the
+			// item's REAL revision, not a placeholder that can never match the next listing.
+			IList<IMessageSummary> summaries = await destination
+				.FetchAsync([newUid.Value], MessageSummaryItems.UniqueId | MessageSummaryItems.Flags, ct)
+				.ConfigureAwait(false);
+			string revision = summaries.Count > 0
+				? RevisionOf(summaries[0].Flags ?? MessageFlags.None, summaries[0].Keywords)
+				: RevisionOf(MessageFlags.None);
+
+			return ($"{validity}:{newUid.Value.Id}", revision);
 		}, ct);
 	}
 

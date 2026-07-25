@@ -149,7 +149,7 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		EnsureNotIn(response.Arguments("0"), "notDestroyed", itemKey);
 	}
 
-	public async Task<string> MoveItemAsync(
+	public async Task<(string ItemKey, string Revision)> MoveItemAsync(
 		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
@@ -165,7 +165,10 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 			}
 		}, ct).ConfigureAwait(false);
 		EnsureNotIn(response.Arguments("0"), "notUpdated", itemKey);
-		return itemKey;
+		// F5: report the item's REAL revision at the destination, not a placeholder the caller
+		// would otherwise have to invent (see UpdateItemAsync above for the identical shape).
+		JsonElement? full = await GetEventAsync(itemKey, ct).ConfigureAwait(false);
+		return (itemKey, full is { } f ? Revision(f) : "0");
 	}
 
 	// K58: JMAP calendar folder mutation over ActiveSync is not supported, so this store does not

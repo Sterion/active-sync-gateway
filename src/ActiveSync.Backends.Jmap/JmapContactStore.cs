@@ -124,7 +124,7 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		EnsureNotIn(response.Arguments("0"), "notDestroyed", itemKey);
 	}
 
-	public async Task<string> MoveItemAsync(
+	public async Task<(string ItemKey, string Revision)> MoveItemAsync(
 		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
@@ -140,7 +140,10 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 			}
 		}, ct).ConfigureAwait(false);
 		EnsureNotIn(response.Arguments("0"), "notUpdated", itemKey);
-		return itemKey;
+		// F5: report the item's REAL revision at the destination, not a placeholder the caller
+		// would otherwise have to invent (see UpdateItemAsync above for the identical shape).
+		JsonElement? full = await GetCardAsync(itemKey, ct).ConfigureAwait(false);
+		return (itemKey, full is { } f ? Revision(f) : "0");
 	}
 
 	// K58: JMAP address-book folder mutation over ActiveSync is not supported, so this store does
