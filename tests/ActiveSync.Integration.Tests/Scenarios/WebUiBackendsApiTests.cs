@@ -276,30 +276,41 @@ public sealed class WebUiBackendsApiTests(GatewayFixture gateway) : IAsyncLifeti
 		})).Content.ReadFromJsonAsync<JsonElement>();
 		Assert.False(unsupported.GetProperty("supported").GetBoolean());
 
-		// A listening socket answers; the port nobody is on does not.
+		// INVERTED BY C2. /test used to probe whatever Host/Port the request body carried, which
+		// made the boolean `reachable` answer an SSRF-style oracle for arbitrary operator-supplied
+		// hosts. It now probes only the role's currently-STORED settings — a request-body Settings
+		// override is never fed to the probe. So a listener has to be PERSISTED via the settings
+		// PUT before the probe can see it, and a bogus body override must NOT redirect the probe
+		// away from the stored (working) host.
 		using TcpListener listener = new(System.Net.IPAddress.Loopback, 0);
 		listener.Start();
 		int openPort = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
 
-		JsonElement reachable = await (await SendAsync("POST", "/admin/api/backends/MailStore/test", new
+		HttpResponseMessage stored = await SendAsync("PUT", "/admin/api/backends/MailStore", new
 		{
-			provider = "imap",
 			settings = new Dictionary<string, string?>
 			{
 				["Host"] = "127.0.0.1", ["Port"] = openPort.ToString(), ["Security"] = "None", ["UseSsl"] = "false"
 			}
+		});
+		Assert.Equal(HttpStatusCode.OK, stored.StatusCode);
+
+		// A body Settings override pointing at a closed port must be ignored: the probe still
+		// reports reachable because it only ever looks at what was just stored.
+		JsonElement reachable = await (await SendAsync("POST", "/admin/api/backends/MailStore/test", new
+		{
+			provider = "imap",
+			settings = new Dictionary<string, string?> { ["Host"] = "127.0.0.1", ["Port"] = "1" }
 		})).Content.ReadFromJsonAsync<JsonElement>();
 		Assert.True(reachable.GetProperty("supported").GetBoolean());
 		Assert.True(reachable.GetProperty("reachable").GetBoolean());
 		listener.Stop();
 
+		// Once the stored host stops answering, the probe reports it — this time with no body
+		// Settings at all, proving the stored configuration alone drives the result.
 		JsonElement dead = await (await SendAsync("POST", "/admin/api/backends/MailStore/test", new
 		{
-			provider = "imap",
-			settings = new Dictionary<string, string?>
-			{
-				["Host"] = "127.0.0.1", ["Port"] = openPort.ToString(), ["Security"] = "None", ["UseSsl"] = "false"
-			}
+			provider = "imap"
 		})).Content.ReadFromJsonAsync<JsonElement>();
 		Assert.False(dead.GetProperty("reachable").GetBoolean());
 	}
