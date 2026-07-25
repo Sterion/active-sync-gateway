@@ -63,7 +63,7 @@ public sealed class ManageSieveClient : IAsyncDisposable
 
 			SslStream ssl = new(_stream, false,
 				ServerCertificateValidator.CreateCallback(
-					_options.AllowInvalidCertificates, _options.CaCertificatePath));
+					_options.AllowInvalidCertificates, _options.CaCertificatePath, _options.CheckRevocation));
 			await ssl.AuthenticateAsClientAsync(
 				new SslClientAuthenticationOptions { TargetHost = _options.Host },
 				ct).ConfigureAwait(false);

@@ -20,6 +20,10 @@ public static class BackendSchemaFields
 		yield return new BackendConfigField("CaCertificatePath", "CA certificate path",
 			BackendFieldType.String,
 			Help: "PEM file of extra trusted CAs (private PKI). Ignored when invalid certificates are allowed.");
+		yield return new BackendConfigField("CheckRevocation", "Check certificate revocation",
+			BackendFieldType.Bool, Default: "false",
+			Help: "Check CRL/OCSP revocation status against CaCertificatePath's trust store. Off by default — " +
+			      "only enable this when that private CA actually publishes revocation information.");
 	}
 
 	/// <summary>Host/port/TLS of <see cref="MailConnectionOptions" />, with the provider's own default port.</summary>

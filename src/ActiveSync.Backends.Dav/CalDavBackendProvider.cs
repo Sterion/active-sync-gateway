@@ -110,7 +110,8 @@ public sealed class CalDavBackendProvider(
 	{
 		DavServerOptions options = settings.Bind<DavServerOptions>();
 		return DavReadiness.ProbeAsync(
-			options.BaseUrl, options.AllowInvalidCertificates, options.CaCertificatePath, ct);
+			options.BaseUrl, options.AllowInvalidCertificates, options.CaCertificatePath,
+			options.CheckRevocation, ct);
 	}
 
 	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
@@ -123,7 +124,8 @@ public sealed class CalDavBackendProvider(
 		ResolvedRole clientRole = SelectClientRole(context.Roles);
 		DavServerOptions clientOptions = clientRole.Settings.Bind<DavServerOptions>();
 		WebDavClient client = new(new Uri(clientOptions.BaseUrl), clientRole.Credentials,
-			clientOptions.AllowInvalidCertificates, clientOptions.CaCertificatePath, _wireLogger);
+			clientOptions.AllowInvalidCertificates, clientOptions.CaCertificatePath, _wireLogger,
+			clientOptions.CheckRevocation);
 		string partStatIdentity = context.MailAddress ?? context.GatewayCredentials.UserName;
 		int pollSeconds = hostOptions.CurrentValue.Eas.DavPollSeconds;
 

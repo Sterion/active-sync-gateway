@@ -24,7 +24,8 @@ internal static class ImapConnectionFactory
 			: new ImapClient();
 		try
 		{
-			MailTransportSecurity.Apply(client, options.AllowInvalidCertificates, options.CaCertificatePath);
+			MailTransportSecurity.Apply(
+				client, options.AllowInvalidCertificates, options.CaCertificatePath, options.CheckRevocation);
 			await client.ConnectAsync(options.Host, options.Port, MailTransportSecurity.ForImap(options), ct)
 				.ConfigureAwait(false);
 			await client.AuthenticateAsync(credentials.UserName, credentials.Password, ct).ConfigureAwait(false);

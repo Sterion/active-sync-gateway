@@ -17,6 +17,16 @@ public abstract class NetworkBackendOptions
 	///   (private PKI). Ignored when <see cref="AllowInvalidCertificates" /> is true.
 	/// </summary>
 	public string? CaCertificatePath { get; set; }
+
+	/// <summary>
+	///   Check CRL/OCSP revocation status of a backend certificate validated against
+	///   <see cref="CaCertificatePath" />'s custom trust store (K13). Off by default — most
+	///   private CAs behind a <see cref="CaCertificatePath" /> (lab/self-signed setups) publish no
+	///   CRL/OCSP, so turning this on against one fails every connection closed, not open. Ignored
+	///   when <see cref="AllowInvalidCertificates" /> is true or <see cref="CaCertificatePath" />
+	///   is unset (there is no custom chain to build).
+	/// </summary>
+	public bool CheckRevocation { get; set; }
 }
 
 /// <summary>

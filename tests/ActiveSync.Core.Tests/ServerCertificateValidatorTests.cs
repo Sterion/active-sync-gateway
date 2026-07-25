@@ -113,6 +113,29 @@ public class ServerCertificateValidatorTests : IDisposable
 		Assert.Null(ServerCertificateValidator.CreateCallback(false, null));
 	}
 
+	// K13 (coverage — checkRevocation is a new knob this fix introduces; unmodified code has no
+	// such parameter to exercise, so there is no black-box red state to observe without first
+	// changing the signature). RevocationMode was hardcoded to NoCheck unconditionally, so a
+	// revoked backend certificate on a real private PKI was silently accepted with no opt-out.
+	// This proves the knob is actually wired into the chain build, not merely accepted and
+	// ignored: the test CA/leaf carry no CRL/OCSP endpoint (as most lab/private CAs don't), so
+	// enabling revocation checking makes the chain's revocation status unknowable — and .NET's
+	// chain engine fails the build closed on that, without any live CRL/OCSP server involved.
+	[Fact]
+	public void CustomCa_WithRevocationCheckEnabled_RejectsChainWithNoRevocationInfo()
+	{
+		Assert.False(ServerCertificateValidator.Validate(
+			_leaf, SslPolicyErrors.RemoteCertificateChainErrors, false, CustomCas(), checkRevocation: true));
+	}
+
+	// The default (omitted / false) must keep today's behaviour unchanged for the exact same chain.
+	[Fact]
+	public void CustomCa_WithRevocationCheckOmitted_StillAcceptsLeafSignedByIt()
+	{
+		Assert.True(ServerCertificateValidator.Validate(
+			_leaf, SslPolicyErrors.RemoteCertificateChainErrors, false, CustomCas()));
+	}
+
 	[Fact]
 	public void SettingsValidation_RejectsMissingCaFile()
 	{

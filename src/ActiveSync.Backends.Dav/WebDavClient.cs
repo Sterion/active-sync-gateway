@@ -37,13 +37,15 @@ public sealed class WebDavClient : IDisposable
 		BackendCredentials credentials,
 		bool allowInvalidCertificates = false,
 		string? caCertificatePath = null,
-		ILogger? wireLogger = null)
+		ILogger? wireLogger = null,
+		bool checkRevocation = false)
 		// Redirects are followed manually in SendAsync: HttpClient's auto-redirect strips the
 		// Authorization header and downgrades non-GET methods on 301/302, which turns a
 		// well-known discovery redirect (Stalwart: 307 → /dav/cal) into an unauthenticated HTML
 		// page. BackendHttpClientFactory builds the handler (no auto-redirect) and Basic auth.
 		: this(baseUri,
-			BackendHttpClientFactory.CreateClient(credentials, allowInvalidCertificates, caCertificatePath),
+			BackendHttpClientFactory.CreateClient(
+				credentials, allowInvalidCertificates, caCertificatePath, checkRevocation: checkRevocation),
 			wireLogger)
 	{
 	}

@@ -20,7 +20,7 @@ public static class ServerCertificateValidator
 	///   keeps the platform's default validation untouched.
 	/// </summary>
 	public static RemoteCertificateValidationCallback? CreateCallback(
-		bool allowInvalidCertificates, string? caCertificatePath)
+		bool allowInvalidCertificates, string? caCertificatePath, bool checkRevocation = false)
 	{
 		if (allowInvalidCertificates)
 			return (_, _, _, _) => true;
@@ -29,7 +29,7 @@ public static class ServerCertificateValidator
 
 		X509Certificate2Collection cas = LoadCaCertificates(caCertificatePath);
 		return (_, certificate, _, errors) =>
-			Validate(certificate as X509Certificate2, errors, false, cas);
+			Validate(certificate as X509Certificate2, errors, false, cas, checkRevocation);
 	}
 
 	/// <summary>Core decision, exposed for tests.</summary>
@@ -37,7 +37,8 @@ public static class ServerCertificateValidator
 		X509Certificate2? certificate,
 		SslPolicyErrors errors,
 		bool allowInvalid,
-		X509Certificate2Collection? customCas)
+		X509Certificate2Collection? customCas,
+		bool checkRevocation = false)
 	{
 		if (allowInvalid)
 			return true;
@@ -53,7 +54,12 @@ public static class ServerCertificateValidator
 		using X509Chain chain = new();
 		chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
 		chain.ChainPolicy.CustomTrustStore.AddRange(customCas);
-		chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+		// K13: NoCheck by default — most private CAs behind a custom-CA path publish no CRL/OCSP,
+		// so unconditionally checking would fail every connection closed. CheckRevocation is the
+		// operator's explicit opt-in for a private PKI that DOES publish revocation, so a revoked
+		// backend certificate is no longer silently accepted just because it chains to a trusted CA.
+		chain.ChainPolicy.RevocationMode =
+			checkRevocation ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
 		return chain.Build(certificate);
 	}
 

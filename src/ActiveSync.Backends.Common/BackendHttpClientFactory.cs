@@ -31,14 +31,15 @@ public static class BackendHttpClientFactory
 	// Probe handlers are keyed by their TLS shape and reused across calls so a periodic
 	// readiness probe does not build and discard a handler (and its connection pool) every
 	// time (H26). The HttpClient wrapping them is cheap and created disposable per call.
-	private static readonly ConcurrentDictionary<(bool AllowInvalid, string? CaPath), SocketsHttpHandler>
-		ProbeHandlers = new();
+	private static readonly ConcurrentDictionary<(bool AllowInvalid, string? CaPath, bool CheckRevocation),
+		SocketsHttpHandler> ProbeHandlers = new();
 
 	/// <summary>
 	///   A connection-owning handler for a long-lived backend client: manual redirects, the
 	///   operator's TLS trust, and a 10-minute pooled connection lifetime. The caller disposes it.
 	/// </summary>
-	public static SocketsHttpHandler CreateHandler(bool allowInvalidCertificates, string? caCertificatePath)
+	public static SocketsHttpHandler CreateHandler(
+		bool allowInvalidCertificates, string? caCertificatePath, bool checkRevocation = false)
 	{
 		SocketsHttpHandler handler = new()
 		{
@@ -46,7 +47,7 @@ public static class BackendHttpClientFactory
 			PooledConnectionLifetime = TimeSpan.FromMinutes(10)
 		};
 		RemoteCertificateValidationCallback? certCallback = ServerCertificateValidator.CreateCallback(
-			allowInvalidCertificates, caCertificatePath);
+			allowInvalidCertificates, caCertificatePath, checkRevocation);
 		if (certCallback is not null)
 			handler.SslOptions.RemoteCertificateValidationCallback = certCallback;
 		return handler;
@@ -59,9 +60,9 @@ public static class BackendHttpClientFactory
 	/// </summary>
 	public static HttpClient CreateClient(
 		BackendCredentials credentials, bool allowInvalidCertificates, string? caCertificatePath,
-		TimeSpan? timeout = null)
+		TimeSpan? timeout = null, bool checkRevocation = false)
 	{
-		HttpClient http = new(CreateHandler(allowInvalidCertificates, caCertificatePath))
+		HttpClient http = new(CreateHandler(allowInvalidCertificates, caCertificatePath, checkRevocation))
 		{
 			Timeout = timeout ?? TimeSpan.FromSeconds(100),
 			MaxResponseContentBufferSize = MaxBackendResponseBytes
@@ -76,10 +77,10 @@ public static class BackendHttpClientFactory
 	///   handler each call (H26); the returned client does not dispose it.
 	/// </summary>
 	public static HttpClient CreateProbeClient(
-		bool allowInvalidCertificates, string? caCertificatePath, TimeSpan timeout)
+		bool allowInvalidCertificates, string? caCertificatePath, TimeSpan timeout, bool checkRevocation = false)
 	{
 		SocketsHttpHandler handler = ProbeHandlers.GetOrAdd(
-			(allowInvalidCertificates, caCertificatePath),
+			(allowInvalidCertificates, caCertificatePath, checkRevocation),
 			key =>
 			{
 				SocketsHttpHandler h = new()
@@ -88,7 +89,7 @@ public static class BackendHttpClientFactory
 					PooledConnectionLifetime = TimeSpan.FromMinutes(1)
 				};
 				RemoteCertificateValidationCallback? cb = ServerCertificateValidator.CreateCallback(
-					key.AllowInvalid, key.CaPath);
+					key.AllowInvalid, key.CaPath, key.CheckRevocation);
 				if (cb is not null)
 					h.SslOptions.RemoteCertificateValidationCallback = cb;
 				return h;

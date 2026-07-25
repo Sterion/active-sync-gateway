@@ -78,7 +78,8 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 		JmapOptions options = primary.Settings.Bind<JmapOptions>();
 		JmapClient client = new(
 			new Uri(options.BaseUrl), primary.Credentials,
-			options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger);
+			options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger,
+			checkRevocation: options.CheckRevocation);
 
 		// Mail Ping/Sync waits accelerate off a shared per-user EventSource watcher (poll is the
 		// backstop). The watcher self-disables if the server advertises no eventSourceUrl.
@@ -118,7 +119,8 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 		JmapOptions options = role.Settings.Bind<JmapOptions>();
 		using JmapClient client = new(
 			new Uri(options.BaseUrl), role.Credentials,
-			options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger);
+			options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger,
+			checkRevocation: options.CheckRevocation);
 		try
 		{
 			await client.GetSessionAsync(ct).ConfigureAwait(false);
@@ -144,7 +146,8 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 		// H26: reuse a pooled handler per TLS shape instead of building and discarding one (with
 		// its connection pool) on every readiness sweep.
 		using HttpClient http = BackendHttpClientFactory.CreateProbeClient(
-			options.AllowInvalidCertificates, options.CaCertificatePath, TimeSpan.FromSeconds(5));
+			options.AllowInvalidCertificates, options.CaCertificatePath, TimeSpan.FromSeconds(5),
+			options.CheckRevocation);
 		// H31: the response is needed only for disposal (any HTTP answer = reachable), so it is a
 		// throwaway rather than a read local.
 		using HttpResponseMessage _ = await http.GetAsync(
@@ -183,7 +186,7 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 			JmapClient watcherClient = new(
 				new Uri(options.BaseUrl), credentials,
 				options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger,
-				httpTimeout: Timeout.InfiniteTimeSpan);
+				httpTimeout: Timeout.InfiniteTimeSpan, checkRevocation: options.CheckRevocation);
 			return new JmapEventSourceWatcher(watcherClient, credentials, _logger);
 		}
 

@@ -52,7 +52,8 @@ public sealed class CardDavBackendProvider(
 	{
 		DavServerOptions options = settings.Bind<DavServerOptions>();
 		return DavReadiness.ProbeAsync(
-			options.BaseUrl, options.AllowInvalidCertificates, options.CaCertificatePath, ct);
+			options.BaseUrl, options.AllowInvalidCertificates, options.CaCertificatePath,
+			options.CheckRevocation, ct);
 	}
 
 	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
@@ -60,7 +61,7 @@ public sealed class CardDavBackendProvider(
 		ResolvedRole role = context.Roles.Single(r => r.Role == BackendRole.Contacts);
 		DavServerOptions options = role.Settings.Bind<DavServerOptions>();
 		WebDavClient client = new(new Uri(options.BaseUrl), role.Credentials,
-			options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger);
+			options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger, options.CheckRevocation);
 		CardDavStore store = new(client, options, role.Credentials, _logger,
 			hostOptions.CurrentValue.Eas.DavPollSeconds);
 		return Task.FromResult<IBackendConnection>(new BackendConnection([store], ownedResources: [client]));

@@ -39,10 +39,12 @@ public static class MailTransportSecurity
 		};
 	}
 
-	public static void Apply(IMailService client, bool allowInvalidCertificates, string? caCertificatePath)
+	public static void Apply(
+		IMailService client, bool allowInvalidCertificates, string? caCertificatePath,
+		bool checkRevocation = false)
 	{
 		RemoteCertificateValidationCallback? callback =
-			ServerCertificateValidator.CreateCallback(allowInvalidCertificates, caCertificatePath);
+			ServerCertificateValidator.CreateCallback(allowInvalidCertificates, caCertificatePath, checkRevocation);
 		if (callback is not null)
 			client.ServerCertificateValidationCallback = callback;
 	}

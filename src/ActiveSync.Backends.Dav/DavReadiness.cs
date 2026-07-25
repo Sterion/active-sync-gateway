@@ -6,7 +6,8 @@ namespace ActiveSync.Backends.Dav;
 internal static class DavReadiness
 {
 	public static async Task<bool> ProbeAsync(
-		string baseUrl, bool allowInvalidCertificates, string? caCertificatePath, CancellationToken ct)
+		string baseUrl, bool allowInvalidCertificates, string? caCertificatePath, bool checkRevocation,
+		CancellationToken ct)
 	{
 		// A section without its own BaseUrl (the Tasks overlay on the Calendar section)
 		// has no endpoint of its own to probe — the paired role covers it.
@@ -18,7 +19,7 @@ internal static class DavReadiness
 		// CaCertificatePath) must still fail, exactly as a real request would. The pooled probe
 		// handler (H26) is reused per TLS shape rather than built and discarded each call.
 		using HttpClient http = BackendHttpClientFactory.CreateProbeClient(
-			allowInvalidCertificates, caCertificatePath, TimeSpan.FromSeconds(5));
+			allowInvalidCertificates, caCertificatePath, TimeSpan.FromSeconds(5), checkRevocation);
 		using HttpRequestMessage request = new(HttpMethod.Options, baseUrl);
 		// H31: the response is needed only for disposal — any HTTP status means the server
 		// answered — so it is a throwaway, not a read local.

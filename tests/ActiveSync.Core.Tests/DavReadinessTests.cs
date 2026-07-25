@@ -27,7 +27,9 @@ public sealed class DavReadinessTests
 		using CancellationTokenSource cts = new(TimeSpan.FromSeconds(10));
 
 		await Assert.ThrowsAnyAsync<Exception>(() =>
-			DavReadiness.ProbeAsync(server.Url, allowInvalidCertificates: false, caCertificatePath: null, cts.Token));
+			DavReadiness.ProbeAsync(
+				server.Url, allowInvalidCertificates: false, caCertificatePath: null, checkRevocation: false,
+				cts.Token));
 	}
 
 	// The same endpoint, with allowInvalidCertificates:true, is the lab opt-in — the probe accepts
@@ -39,7 +41,8 @@ public sealed class DavReadinessTests
 		using CancellationTokenSource cts = new(TimeSpan.FromSeconds(10));
 
 		bool ready = await DavReadiness.ProbeAsync(
-			server.Url, allowInvalidCertificates: true, caCertificatePath: null, cts.Token);
+			server.Url, allowInvalidCertificates: true, caCertificatePath: null, checkRevocation: false,
+			cts.Token);
 
 		Assert.True(ready);
 	}

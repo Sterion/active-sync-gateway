@@ -39,7 +39,8 @@ public sealed class SmtpSubmitBackend(
 			: new SmtpClient();
 		// Tighter than MailKit's 120 s default so a hung connect/auth fails fast enough to retry.
 		smtp.Timeout = 30_000;
-		MailTransportSecurity.Apply(smtp, options.AllowInvalidCertificates, options.CaCertificatePath);
+		MailTransportSecurity.Apply(
+			smtp, options.AllowInvalidCertificates, options.CaCertificatePath, options.CheckRevocation);
 
 		// Connect + authenticate are side-effect-free (nothing is submitted yet), so the whole setup
 		// is retried on a transient blip. The DATA phase below runs EXACTLY ONCE — replaying a

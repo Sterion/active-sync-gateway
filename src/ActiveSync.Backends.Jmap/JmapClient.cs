@@ -142,8 +142,11 @@ public sealed class JmapClient : IDisposable
 		bool allowInvalidCertificates = false,
 		string? caCertificatePath = null,
 		ILogger? wireLogger = null,
-		TimeSpan? httpTimeout = null)
-		: this(baseUri, BuildHttpClient(credentials, allowInvalidCertificates, caCertificatePath, httpTimeout), wireLogger)
+		TimeSpan? httpTimeout = null,
+		bool checkRevocation = false)
+		: this(baseUri,
+			BuildHttpClient(credentials, allowInvalidCertificates, caCertificatePath, httpTimeout, checkRevocation),
+			wireLogger)
 	{
 	}
 
@@ -157,7 +160,7 @@ public sealed class JmapClient : IDisposable
 
 	private static HttpClient BuildHttpClient(
 		BackendCredentials credentials, bool allowInvalidCertificates, string? caCertificatePath,
-		TimeSpan? httpTimeout)
+		TimeSpan? httpTimeout, bool checkRevocation = false)
 	{
 		// Redirects are followed manually (same-origin only) so the Authorization header is never
 		// handed to another origin — the .well-known/jmap discovery hop redirects to the real
@@ -166,7 +169,7 @@ public sealed class JmapClient : IDisposable
 		// cap is 100 s; the EventSource watcher passes an infinite timeout so its long-lived SSE
 		// stream is not aborted mid-flight (H17).
 		return BackendHttpClientFactory.CreateClient(
-			credentials, allowInvalidCertificates, caCertificatePath, httpTimeout);
+			credentials, allowInvalidCertificates, caCertificatePath, httpTimeout, checkRevocation);
 	}
 
 	public void Dispose()

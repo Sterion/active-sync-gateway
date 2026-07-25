@@ -50,6 +50,7 @@ The `imap` settings are below; for `jmap` see [the JMAP subsection](#backends-pr
 | `Security` | `null` | Explicit transport security: `None` \| `SslOnConnect` \| `StartTls` \| `StartTlsWhenAvailable` \| `Auto`. When unset, derived from `UseSsl`/`Port`. `None` also skips opportunistic STARTTLS (needed for plaintext test servers advertising STARTTLS with self-signed certs). |
 | `AllowInvalidCertificates` | `false` | Accept any TLS certificate (lab use; wins over `CaCertificatePath`). |
 | `CaCertificatePath` | `null` | PEM file with CA certificates trusted in addition to the system store (private PKI). Validated at startup. |
+| `CheckRevocation` | `false` | Check CRL/OCSP revocation status against `CaCertificatePath`'s trust store. Off by default — most private CAs behind a self-signed/lab setup publish no revocation info, so enabling this against one fails every connection closed. |
 | `PathSeparator` | `null` | IMAP folder path separator override; autodetected when unset. |
 
 ## `Backends:MailSubmit` (required, provider `smtp` or `jmap`)
@@ -65,6 +66,7 @@ The `smtp` settings are below; for `jmap` see [the JMAP subsection](#backends-pr
 | `Security` | `null` | Same values/semantics as MailStore's `Security`. |
 | `AllowInvalidCertificates` | `false` | As above. |
 | `CaCertificatePath` | `null` | As above. |
+| `CheckRevocation` | `false` | As above. |
 | `ForceFrom` | `false` | Rewrite the `From` header of outgoing mail to the authenticated user before submission (display name is kept; only applies when the login is a mail address). Off by default because most SMTP servers already enforce sender alignment for authenticated submissions — enable it when yours does not. |
 
 <a id="backends-provider-jmap"></a>
@@ -82,6 +84,7 @@ option set is the same in every role section:
 | `BaseUrl` | — | Absolute http(s) base URL of the JMAP server (e.g. `https://mail.example.com`). **Required.** The session resource is discovered at `{BaseUrl}/.well-known/jmap`; the server's advertised api/download/upload URLs are re-anchored onto this authority (scheme/host/port), so a reverse proxy or container-network address still works. |
 | `AllowInvalidCertificates` | `false` | Accept any TLS certificate (lab use; wins over `CaCertificatePath`). |
 | `CaCertificatePath` | `null` | PEM file with CA certificates trusted in addition to the system store (private PKI). Validated at startup. |
+| `CheckRevocation` | `false` | Check CRL/OCSP revocation status against `CaCertificatePath`'s trust store. Off by default — most private CAs behind a self-signed/lab setup publish no revocation info, so enabling this against one fails every connection closed. |
 
 ```jsonc
 "MailStore":  { "Provider": "jmap", "BaseUrl": "https://mail.example.com" },
@@ -116,6 +119,7 @@ below are the `caldav`/`carddav` ones.
 | `SendInvitations` | `"Auto"` | *(caldav only)* iMIP invitation mails when the user organizes a meeting: `Auto` (send unless the server advertises `calendar-auto-schedule` or a schedule outbox — a scheduling server invites on its own, and double invites are worse than none), `On` (always) or `Off` (never). The local calendar store always sends (nothing else can). Per-user overridable. |
 | `AllowInvalidCertificates` | `false` | As above. |
 | `CaCertificatePath` | `null` | As above. |
+| `CheckRevocation` | `false` | As above. |
 
 ## `Backends:Oof` (optional, provider `sieve` or `jmap`) — out-of-office
 
@@ -142,6 +146,7 @@ Credentials default to the user's effective MailStore login; a per-user
 | `UseTls` | `true` | Require STARTTLS before authenticating (ManageSieve has no implicit-TLS port). `false` = plaintext, test stacks only. |
 | `AllowInvalidCertificates` | `false` | As above. |
 | `CaCertificatePath` | `null` | As above. |
+| `CheckRevocation` | `false` | As above. |
 
 ## `Database` (bootstrap — file/env only)
 
