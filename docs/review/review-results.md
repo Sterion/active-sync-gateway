@@ -962,3 +962,42 @@ skipped** (+5) ✓ · live **141 passed, 0 skipped** on a clean-volume Stalwart 
   `SnapshotCodec` allocation (serialize straight into the GZip stream); whoever works it should fold this
   copy into that pass rather than leaving two allocation fixes in tension.
 - No behaviour changes visible to a client. No new findings filed.
+
+---
+
+## Item 21 — Retention services & DB-log lifecycle
+**Findings:** `E2` `E4` `E13`
+**Commits:** `8c0edfb` (E2) · `913dfe2` (E4) · `d567fcd` (E13)
+**Verification:** integrity items=32 live=10 assigned=132 unique=132 dupes=0 encoding=0 ✓ · cursor → item
+22 ✓ · one commit per finding, strike with each ✓ · build 0 warnings ✓ · unit **1127 passed, 0 skipped**
+(+4; Server 264→268) ✓ · live **141 passed, 0 skipped** on a clean-volume Stalwart ✓
+**Diffs read against the detail entries:**
+- `E2` — exactly the prescribed mirror of `SettingsRefreshService`: `catch (OperationCanceledException)
+  when (stoppingToken.IsCancellationRequested)` in **both** retention services, so a non-shutdown OCE (an
+  EF command timeout) now falls through to the retry-log catch instead of breaking the loop for the
+  process lifetime. The red-first is well-chosen — it asserts on `ExecuteTask.IsCompleted` rather than
+  waiting for a second sweep, since the real inter-sweep delay is 6 hours.
+- `E4` — a `_shutdownCts` is now cancelled in `Dispose` and threaded into both `WaitToReadAsync` and
+  `SaveChangesAsync`, so a hung write is actually interrupted rather than merely abandoned while
+  `Dispose` stops waiting. Cancellation is re-thrown past the per-batch handler so it reads as a clean
+  exit, not a logged batch failure.
+- `E13` — a 200 ms cancellable pause on the disabled-live discard path. It still drains a full batch per
+  pause, so the backlog clears rather than stalling, and the channel's existing bounded/DropOldest policy
+  caps what can accumulate.
+**Notes:**
+- **`E4` forced a genuine second fix that rides in the same commit: `Dispose` is now idempotent.** Serilog's
+  `Logger.Dispose()` disposes an owned `IDisposable` sink, and callers hold the sink themselves to
+  `Activate` it before the logger exists — so `Dispose()` runs twice in normal operation, and
+  `Cancel()`-after-`Dispose()` on the new CTS throws `ObjectDisposedException`. The `Interlocked.Exchange`
+  guard is therefore load-bearing for `E4`, not tidying: without it this fix would have introduced a
+  shutdown crash. Worth knowing, because it means `E4` touched disposal semantics that predate it.
+- **A test-only accessor was added to production code**: `internal int BufferedCount => _channel.Reader.Count`
+  on `DatabaseLogSink`, used by `E13`'s test to observe the backlog. Small and `internal`, but it is
+  production surface existing for a test; flagged rather than hidden.
+- **`E13`'s 200 ms is a chosen constant, not a derived one.** It bounds the discard to ~1 batch (500
+  entries) per pause. Nothing depends on the exact value; a future tuner should know it was picked for
+  "obviously not a spin", not measured.
+- All three proven red-first with real reproductions (a non-shutdown OCE, a genuinely hung
+  `SaveChangesAsync`, and a 6000-entry backlog draining in ~27 ms unfixed vs ~2.4 s fixed). No
+  coverage-only tests this item.
+- No new findings filed.
