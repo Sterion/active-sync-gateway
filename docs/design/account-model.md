@@ -20,9 +20,36 @@ two is wrong and that is a human decision.
 Gated on a clean-slate **schema reinit** the project owner has confirmed and planned:
 
 - The repository is squashed / reinitialised.
-- **All EF migrations are deleted**; the schema is regenerated from scratch.
 - **Every existing deployment breaks.** In-place upgrade is not supported. This is accepted,
   deliberate, and the reason this design is affordable.
+
+### Database: no upgrade path, but migrations still exist
+
+Read this precisely, because the two halves are easy to conflate:
+
+| ✅ Required | ❌ Never write |
+|---|---|
+| A **fresh `Initial` migration per provider**, generated from the final model | Any migration **from an existing schema version** |
+| It must apply cleanly to a **blank database** — that is the only case that has to work | `AddColumn`/`RenameColumn`/`DropColumn` sequences that walk an old shape to the new one |
+| Both providers in lockstep (`Migrations/Sqlite` **and** `Migrations/Npgsql`) | Data movement: backfills, `migrationBuilder.Sql(...)`, provenance inference, "treat unflagged rows as X" |
+| | A `LegacyAccountJson`-style converter for old persisted shapes |
+
+**Delete the entire existing migration chain** — both `src/ActiveSync.Core/Migrations/Sqlite/` and
+`src/ActiveSync.Core/Migrations/Npgsql/` (~43 files each, accumulated across rounds 1–2) plus their
+model snapshots — and replace it with one `Initial` per provider. There is no data anywhere that
+needs carrying forward, so **no upgrade script needs to be written for any part of this refactor.**
+
+**Migrations do not disappear, and must not.** Production applies them at startup
+(`WebApplicationExtensions.cs:50`, `MigrateAsync`) and the integration suite boots the real host, so
+a missing or non-applying migration means the live suite cannot create a schema and every
+integration test fails. The contract for the whole refactor is simply: **blank DB → `Initial` →
+working schema.**
+
+**While the refactor is in progress, regenerate rather than chain.** `AGENTS.md` § *State store* says
+to add a migration for both contexts whenever an entity changes. That rule is **suspended for this
+work only**: as the model evolves across items 2–4, delete and re-generate the single `Initial` pair
+rather than stacking incremental migrations on top of a shape nobody will ever deploy. Normal
+per-change migration discipline resumes for any change made **after** the reinit ships.
 
 | Licensed | NOT licensed |
 |---|---|
@@ -31,8 +58,8 @@ Gated on a clean-slate **schema reinit** the project owner has confirmed and pla
 | Deleting `LegacyAccountJson` and its upgrade path | Changing the plugin contract without a `ContractVersion` bump |
 | Dropping back-compat shims and data migrations | Re-introducing whole-entry replacement (below) |
 
-**There is no data to migrate.** Do not write migration code, provenance heuristics, or
-"treat unflagged rows as X" fallbacks.
+**There is no data to migrate** — see "Database: no upgrade path" above for what that does and does
+not license.
 
 ---
 
@@ -284,7 +311,9 @@ large diff, zero semantic change — do it first so later diffs read cleanly.
 **2. `AccountId` + provisioning.** Add the identity column; FK all eight entities to it; move
 notifier keys, cache keys and the `LocalContentProtector` AAD onto it; keep the login as a unique
 case-folded attribute; land `AutoProvisionAccounts`' semantics and delete `RequireDeclaredUsers`.
-Regenerate the schema (no migration). **Acceptance tests, non-negotiable:** (a) rename a login and
+**Delete the existing migration chain for both providers and generate a fresh `Initial` pair from the
+new model** — no upgrade path from the old schema, and none needed (Standing context). **Acceptance
+tests, non-negotiable:** (a) rename a login and
 assert sync state survives and an encrypted `LocalItem` written before the rename still decrypts
 after it; (b) past the auth boundary an `AccountId` is always present — an undeclared login either
 gets an account or is refused; (c) the id column is non-reusing on both providers. Update `AGENTS.md`
@@ -338,6 +367,13 @@ Violating any of these is a stop-and-report.
   passing one. Items 2, 3 and 4 change the schema, auth and the request pipeline, so the live suite is
   mandatory for them; item 2 especially, since re-keying every entity is exactly the class of change
   whose blast radius no unit suite can see.
+- **The migration contract is a test, not an assumption:** a **blank** database plus the regenerated
+  `Initial` must yield a working schema on **both** providers. SQLite is covered by the live suite
+  (which boots the real host, and so runs `MigrateAsync` for real); **Postgres only runs in CI** with
+  `AS_TEST_PG` set, so a Npgsql-only mistake is invisible locally — do not treat a green local run as
+  proof both providers are sound.
+- Unit suites build the schema model-driven rather than through migrations, so **a model change can
+  pass every unit test while the migration is broken or absent**. Only the live suite catches that.
 
 ---
 
