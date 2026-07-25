@@ -164,14 +164,45 @@ Four things that are easy to get wrong:
    auth verdict caches and any watcher keyed on the login must be dropped on rename, exactly as
    `SnapshotChanged` already does for account edits.
 
-**Consequence to decide, not to discover: every syncing login now needs an account row.** Today an
-undeclared pass-through login can sync with `AutoProvisionUsers=false` and no `AccountEntry` at all —
-its `Device`/`UserFolder`/`CollectionState` rows just carry the login string. With `AccountId` FKs
-there is nothing for those rows to point at, so an account row must exist for anyone who syncs.
-`AutoProvisionUsers` therefore changes meaning: from *"persist an account row"* to *"surface this
-account as declared in `eas accounts` / the admin UI"*. That is arguably a simplification — the row
-exists either way, the flag only controls visibility — but it is a real semantic change to a
-documented option and must be stated in `docs/configuration.md`.
+### `AutoProvisionAccounts` — an account ALWAYS exists past auth (decided)
+
+Every syncing login now needs an account row: with `AccountId` FKs there is nothing for a
+`Device`/`UserFolder`/`CollectionState` row to point at otherwise. Today an undeclared pass-through
+login can sync with `AutoProvisionUsers=false` and no `AccountEntry` at all, its state rows simply
+carrying the login string. That third state disappears.
+
+**The rule, decided:**
+
+- **`AutoProvisionAccounts = true` (default)** — a login that authenticates and has no account gets
+  one created immediately, with a fresh `AccountId`. No exceptions, no deferral.
+- **`AutoProvisionAccounts = false`** — an undeclared login is **refused**, before any backend probe.
+
+**The option is renamed `AutoProvisionUsers` → `AutoProvisionAccounts`** as part of item 1's
+vocabulary pass.
+
+**Why this matters far more than a rename: it makes `AccountId` total.** Past the auth boundary,
+every request, handler, store, notifier and cache can assume an account exists and its id is known.
+There is no "account may not exist yet" state to branch on, no nullable account threaded through the
+call graph, no ordering hazard where sync state is written before the row that owns it. **Do not
+re-introduce a lazy/deferred provisioning path** — the totality is the property being bought, and one
+deferred case costs it everywhere.
+
+State it as a testable boundary condition: *after authentication succeeds, `ResolvedAccount.AccountId`
+is non-null for every caller* — and if provisioning cannot happen, authentication fails instead.
+
+**Consequence — this collapses into `RequireDeclaredUsers`, and one of the two should go.**
+`RequireDeclaredUsers = true` already means "refuse a login with no declared entry, before touching a
+backend". `AutoProvisionAccounts = false` now means the same thing. Keeping both invites a
+contradictory pair (`RequireDeclaredUsers=false` + `AutoProvisionAccounts=false` — refuse, or allow
+and don't persist? The latter is no longer expressible). **Recommendation: delete
+`RequireDeclaredUsers` and let `AutoProvisionAccounts` be the single switch**, since the reinit makes
+removing a config key free. If both are kept, they must be validated as mutually consistent at
+startup rather than silently resolved.
+
+One thing to preserve from `RequireDeclaredUsers`: the refusal happens **before** the backend probe,
+so undeclared logins never reach the mail server — that is a brute-force shield, not just a policy.
+`AutoProvisionAccounts = false` must refuse at the same point, not after a successful probe (which is
+where `PassThroughProvisioner` runs today).
 
 **Logs are the one place to keep the login, not the id.** A log line saying *"account
 7f3a…-…"* is useless to an operator. Log the **login as it was at the time** (that is the audit
@@ -291,7 +322,9 @@ Follow `docs/review/fix-review.md`'s working protocol (red-first tests, commit p
 build 0 warnings, live suite for anything touching auth or the request pipeline).
 
 **1. Terminology + rename, no behaviour change.** `ActiveSync:Users` → `ActiveSync:Accounts`,
-`eas user` → `eas account`, "user" → "account" for the persistent record throughout code and docs.
+`ActiveSync:AutoProvisionUsers` → `ActiveSync:AutoProvisionAccounts` (rename only here — its
+semantic change lands with item 2), `eas user` → `eas account`, "user" → "account" for the
+persistent record throughout code and docs.
 Mechanical, large diff, zero semantic change. Do it first so every later diff reads cleanly. Update
 `docs/configuration.md`, `docs/cli.md`, `docs/webui.md`, `README.md`, `AGENTS.md`.
 
@@ -300,10 +333,13 @@ else assumes, so it goes before the layer split. Add the surrogate key; FK all e
 (`Device`, `UserFolder`, `LocalItem`, `LoginBlock`, `WebSessionRevocation`, `SharedCalendarGrant`,
 `AccountEntry`, `OofSetting`); move `LocalChangeNotifier` keys, session/watcher cache keys and the
 `LocalContentProtector` AAD onto it; keep the login as a unique case-folded attribute. Regenerate the
-schema (no migration — reinit). **Prove the property that justifies the whole change with a test:
-rename a login and assert that sync state survives and an encrypted `LocalItem` written before the
-rename still decrypts after it.** That single test is the acceptance criterion for this item. Update
-`AGENTS.md` and `README.md` in the same work (Invariant 1).
+schema (no migration — reinit). Land `AutoProvisionAccounts`' new semantics here too (always create
+on first successful auth; off = refuse before the backend probe), and decide `RequireDeclaredUsers`'
+fate. **Prove the two properties that justify the whole change with tests: (a) rename a login and
+assert sync state survives and an encrypted `LocalItem` written before the rename still decrypts
+after it; (b) past the auth boundary an `AccountId` is always present — an undeclared login either
+gets an account or is refused, never proceeds without one.** Those are the acceptance criteria for
+this item. Update `AGENTS.md` and `README.md` in the same work (Invariants 1 and 5).
 
 **3. Split the shape.** Introduce `AccountLayer`; move `Backends` into `Administered`. Leave
 `SelfService` present but always empty and unwritten. Regenerate the schema (no migration — reinit).
@@ -351,14 +387,16 @@ Violating any of these is a stop-and-report, not a judgement call. All are from 
    breaks auth for everyone.
 4. **Live pickup (~1 s)** via the `AccountsStamp` point-read and atomic snapshot swap survives, and
    `SnapshotChanged` still clears the auth caches.
-5. **`RequireDeclaredUsers`** (allowlist) semantics are preserved exactly: an undeclared login is
-   refused *before* auth, so no account row is created for it. An auto-provisioned account is an
-   empty **Administered** layer plus the marker.
-   **`AutoProvisionUsers` is the one documented option whose meaning this design changes** — see
-   Identity, "every syncing login now needs an account row". It stops controlling *whether a row is
-   persisted* (one always is, or sync state has nothing to reference) and starts controlling
-   *whether the account is surfaced as declared*. This is a deliberate, human-approved change, not
-   drift; it must land in `docs/configuration.md` and `AGENTS.md` in the same work.
+5. **An `AccountId` always exists past the auth boundary** (see `AutoProvisionAccounts`). Either the
+   login authenticated and an account exists — pre-declared or provisioned on the spot — or
+   authentication failed. No caller past that point handles a missing account, and no code path may
+   defer provisioning to make one appear later. An auto-provisioned account is an empty
+   **Administered** layer plus the marker.
+   **`AutoProvisionUsers` → `AutoProvisionAccounts` is a deliberate, owner-approved rename AND
+   semantic change**, not drift: off now means *refuse the undeclared login* rather than *allow it
+   but persist nothing*, because "persist nothing" is no longer expressible. It must land in
+   `docs/configuration.md`, `docs/cli.md` and `AGENTS.md` in the same work, along with the decision
+   on whether `RequireDeclaredUsers` survives at all.
 6. **Secrets never leave the server** — the existing leak-guard test (no `pbkdf2$` / `enc:v1:` in any
    response) must pass against **both** layers.
 7. **MailStore + MailSubmit stay mandatory**; content roles still fall back to `local`.
@@ -397,7 +435,11 @@ Decide before item 1; each changes real work:
 3. **Should `Settings` be layered too, or stay admin-only-with-`SelfServiceEditable`?** This design
    layers only credentials and leaves the existing `SelfServiceEditable` gate on settings. Layering
    settings as well would be more uniform but is a bigger change.
-4. **Does the config section stay a full account source, or become administered-defaults only?** The
+4. **Delete `RequireDeclaredUsers`, or keep it alongside `AutoProvisionAccounts`?** They now mean the
+   same thing (see `AutoProvisionAccounts`), and keeping both allows a combination that is no longer
+   expressible. (Recommendation: **delete it**; the reinit makes removing a config key free. If kept,
+   validate the pair for consistency at startup rather than silently resolving a contradiction.)
+5. **Does the config section stay a full account source, or become administered-defaults only?** The
    current "a DB row REPLACES the whole config entry" rule (`AccountResolver.cs:320-341`) is a wart
    the reinit could remove — e.g. config populates Administered, DB overrides per field, no
    whole-entry replacement.
