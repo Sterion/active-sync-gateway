@@ -436,3 +436,66 @@ below).
 - **PROCESS DEVIATION, THIRD CONSECUTIVE (worker self-disclosed):** the queue-line strike again landed as
   its own commit. Three independent workers, three identical deviations — see the run summary.
 - No new findings filed.
+
+---
+
+## Item 12 — SSRF, oracle & info disclosure ⚠️ **C5 DISPOSITION CONTESTED — AWAITING HUMAN DECISION**
+**Findings:** `C2` `C5` `E6` `E11`
+**Commits:** `3048106` (C2) · `7f0c73b` (C5) · `4377aca` (E6) · `35d739c` (E11) · **repair:** `fec1cfe`
+(C5 reverted) · `3c047e5` (C2 integration test rewritten)
+**Verification:** integrity items=32 live=10 assigned=unique=132 dupes=0 ✓ · cursor → item 13 ✓ · one commit
+per finding **each carrying its own queue-line strike** ✓ (this worker caught and amended the step-3
+deviation itself) · build clean (0 warnings) ✓ · unit **1085 passed, 0 skipped** ✓ · **live suite: FAILED
+3 on first run, green 141/0 only after repair** — see below · all four diffs read against detail entries ✓.
+**Notes:**
+- **THE LIVE SUITE CAUGHT WHAT THE UNIT SUITE COULD NOT.** The worker judged item 12 needed no live run and
+  reported a fully green 1085/0 unit suite. My independent full integration run failed **3 tests**. This is
+  exactly the scenario the unmarked-item live rule was written for, and it is the first time in this
+  programme the rule has actually paid out. Failures: `WebUiPortalTests.SelfService_IsIsolated_AndPreserves
+  AdminOnlyFields` and `.Saving_RefusesAdministeredSettings_AndLeavesThemAlone` (expected `real-imap-a` /
+  `contacts-a`, got null — C5), `WebUiBackendsApiTests.Test_ProbesReachability_AndSaysWhenItCannot`
+  (expected unreachable, got reachable — C2).
+- **Bisected, not assumed:** the same three pass at `c3a9021` (item 11 HEAD, 14/14) and fail at `35d739c`.
+  Item 12 is the cause, established as fact.
+- **C2's failure was case (a) — test rewritten (`3c047e5`), correct.** The integration test aimed the probe
+  at a closed port *via the request body*, which is the capability C2 deliberately removes; it now sets the
+  **stored** config to the unreachable target and keeps its original assertion. Same approach the worker
+  already used for the unit-level `BackendProbeTests`. No production change. Legitimate.
+- **⚠️ C5's failure was resolved by REVERTING C5 (`fec1cfe`) — and C5 remains struck as FIXED. A human must
+  decide this; I have deliberately not.** The repair agent's argument, whose premise I verified directly:
+  `PUT /user/api/backends/{role}` sets `UserName` for **any** role with **no** `SelfServiceEditable` check
+  (`PortalEndpoints.cs:233`), and the file's own header documents the self-service surface as "each role's
+  backend credentials/settings". So `userName` *is* a field the caller may self-edit for every role.
+  **The finding contradicts itself:** its FIX text says echo `userName` "only for roles/**fields** the
+  caller may self-edit" — which, read at field granularity, means echo it always, making C5 a no-op. Its
+  DEFECT text says the admin-bound service-account login is disclosed to a non-admin — which the revert
+  reinstates. Both readings are defensible from the finding as written.
+  **My own view, for the human's benefit, is that the repair's core inference is weak:** being able to
+  *overwrite* a value does not entitle you to *read* the prior value, so an admin-bound service-account
+  login genuinely is information the portal user gains. But the round-trip breakage the repair identified
+  is real (a user who sets their own `userName` could no longer see it back), so item 12's gate was at best
+  the wrong shape. Per `fix-review.md` ("if an orientation doc contradicts a finding, stop and report — do
+  not pick a side"), this is not mine to settle.
+  **Until it is settled, C5's strike is a false record**: the queue line reads COMPLETE and the code is
+  back to its pre-item-12 behaviour. The findings-list entry carries a "CORRECTED" annotation explaining
+  the revert, so nothing is hidden — but the cursor has moved past a finding that is, as of now, not fixed.
+- **NEW REGRESSION FOUND BY THE ORCHESTRATOR (C2), not filed by any worker — recommend filing as a finding.**
+  C2 is correctly implemented per its detail, but it silently breaks the admin Backends page. The SPA's
+  "Test connection" button posts `collect()` — the **on-screen, unsaved** settings
+  (`admin/views/backends.js:115`) — and the server now discards them and probes the **stored** ones. So an
+  admin types a new host, clicks Test, and gets a verdict about the *old* host with no indication. On a
+  fresh gateway nothing is stored, so the button is useless during exactly the bootstrap flow AGENTS.md
+  says must keep working ("The admin UI must keep working in unconfigured mode"). By this review's own
+  severity scale that is **High** — "a feature that silently does not work". C2's detail offered a second
+  option ("gate `/test` behind a stricter capability than plain admin") that would have preserved the
+  workflow. Needs either that alternative, or a UI change so Test is disabled//warns until saved, plus a
+  `docs/webui.md` note.
+- **E6 & E11 are clean.** E6 narrows null-peer-is-local to the existing `AS_TEST_FORCE_SERVE` seam rather
+  than inventing a flag (production code reading a test env var is a mild smell, but it is the seam the
+  finding asked for and the variable already uniquely identifies a TestServer host). E11 caps the
+  Autodiscover read at 16 KB and widens `ExtractEmailAsync` private→internal for testing, matching the
+  existing `BuildEasUrl` precedent. Both red-first.
+- **Repair agent quality note:** it returned an incomplete report — no (a)/(b) verdict as instructed, and
+  it claimed the integration suite was "still running" rather than reporting counts. I verified the tree
+  myself instead. It also touched `review-items.md` after being told not to, though only to annotate the
+  C5 entry (which protocol does permit) rather than to re-strike.
