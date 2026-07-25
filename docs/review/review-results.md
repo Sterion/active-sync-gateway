@@ -634,3 +634,45 @@ path; the Server change is a csproj ProjectReference with no code effect, and th
 - Test-project internals are reached via `InternalsVisibleTo`, matching the existing Server/Server.Tests
   pattern; the `eas` exe grows no public API.
 - No behaviour or breaking changes. No new findings filed.
+
+---
+
+## Item 15 — Unify AES-GCM framing
+**Findings:** `S2` `K11`
+**Commits:** `b5d7c45` (S2, K11 — one tight-cluster commit; the two IDs are the same fix, and both detail
+entries say so: "This is the crypto half of S2")
+**Verification:** integrity items=32 live=10 assigned=132 unique=132 dupes=0 encoding=0 ✓ · cursor → item
+16 ✓ · strike shipped WITH the fix (`git show --stat` lists `review-items.md`) ✓ · build 0 warnings ✓ ·
+unit **1111 passed, 0 skipped** (+1 over item 14: the new `DependencyRuleTests` case) ✓ · live **141
+passed, 0 skipped** on a clean-volume Stalwart ✓
+**Diffs read against the detail entries (whole commit read against BOTH IDs, per the tight-cluster rule):**
+The extraction is exactly what `S2`/`K11` prescribe. `ActiveSync.Crypto.SealedBlob` now owns the byte
+layout and the `AesGcm` calls; `SecretValue.Seal/TryUnseal/IsSealed` and
+`LocalContentProtector.Protect/Unprotect` are thin delegations. Both callers keep their own prefix
+(`enc:v1:` / `v1:`) and AAD (`activesync:config:v1` / `Aad(userName, collection)`) as call-site arguments,
+so the anti-interchange guarantee and item 1's injective-AAD fix (`K2`) are untouched. I checked every
+failure branch individually: `SecretValue`'s four error strings are reconstructed from the
+`SealedBlobError` classification and are byte-identical (the two that quoted the prefix now interpolate
+`Prefix`, same text); `LocalContentProtector` still collapses every cause into `UndecryptableRow`, with
+the base64 `FormatException` still passed through as the inner exception and missing-prefix/too-short
+still `UndecryptableRow(null)`. No caller-visible behaviour moved.
+**Notes:**
+- **`S2`/`K11` landed in ONE commit, deliberately.** They are not two fixes — `K11` is `S2` restated in
+  Area K, and the queue pairs them. One commit per finding would have meant an empty second commit.
+- **The red-first proof is structural, not behavioural** — a `DependencyRuleTests` case asserting the
+  literal `AesGcm aes = new` no longer appears in either caller's source (it did, twice in each file, and
+  the test failed on unmodified code). That is the honest shape for a duplication finding: there is no
+  wrong *output* to reproduce, the defect is that the framing exists twice. What proves behaviour didn't
+  move is the pre-existing `SecretValueTests` (6) + `LocalContentProtectorTests` (14) — round trip, wrong
+  key, tamper, malformed input, cross-type non-interchangeability, plaintext passthrough — all passing
+  **unchanged** against the refactored code. It also standing-guards against a third copy appearing.
+- **I ran the live suite; the worker did not.** Its reasoning ("crypto internals, nothing HTTP-reachable")
+  is wrong in a way worth recording: `LocalContentProtector` seals `LocalItem.Content`, which every
+  local-store calendar/contact/note round-trips through on an EAS Sync — a framing regression would have
+  surfaced there and nowhere in the unit suite. 141 passed / 0 skipped, so nothing was in fact broken, but
+  the *skip decision* was not sound. This is the second run in a row where a worker judged its own item
+  low-risk for the live suite; the rule ("can I show it cannot?") is doing real work.
+- **`S2` is not annotated FIXED in the Area S findings list**, following `S1`'s precedent from item 14 —
+  the queue line carries the strike. `K11` has no findings-list line at all: Area K is not indexed in
+  `review-items.md` (only A–H, S, W are), so its detail entry is its only write-up.
+- No behaviour or breaking changes. No new findings filed.
