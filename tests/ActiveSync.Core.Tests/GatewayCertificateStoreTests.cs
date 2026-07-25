@@ -230,6 +230,21 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 		Assert.True(pub.VerifyData(data, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
 	}
 
+	[Fact]
+	public async Task GeneratedCertificate_UnusableHost_FallsBackInsteadOfThrowing()
+	{
+		// K19: Generate could throw at first serve on an odd PublicUrl host with no fallback —
+		// an unhandled-exception startup death instead of degrading to FallbackHost. This host is
+		// not a valid IDN name, so SubjectAlternativeNameBuilder.AddDnsName throws ArgumentException.
+		using LocalContentProtector protector = Protector();
+		string unusableHost = "exa\u0000mple.com";
+
+		using X509Certificate2 certificate = await Store(protector).GetOrCreateAsync(
+			unusableHost, NullLogger.Instance, CancellationToken.None);
+
+		Assert.Equal($"CN={GatewayCertificateStore.FallbackHost}", certificate.Subject);
+	}
+
 	[Theory]
 	[InlineData(null, "activesync-gateway")]
 	[InlineData("not a url", "activesync-gateway")]

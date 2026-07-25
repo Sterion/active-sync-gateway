@@ -88,7 +88,7 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 			// replace it.
 		}
 
-		(X509Certificate2 certificate, string pfxProtected) = Generate(host);
+		(X509Certificate2 certificate, string pfxProtected) = Generate(host, logger);
 		if (row is null)
 		{
 			// DbSet.Add is synchronous and local (no I/O) — AddAsync exists only to support
@@ -158,8 +158,48 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 		}
 	}
 
-	private (X509Certificate2 Certificate, string PfxProtected) Generate(string host)
+	/// <summary>
+	///   Builds the SAN for <paramref name="host" /> (K5: IP literal vs DNS name). Returns false
+	///   without mutating <paramref name="san" /> further when the host isn't usable in either
+	///   form (K19) — e.g. not a valid IDN name — so the caller can fall back instead of the
+	///   whole certificate generation throwing.
+	/// </summary>
+	private static bool TryAddHostName(SubjectAlternativeNameBuilder san, string host)
 	{
+		try
+		{
+			// K5: an IP-addressed client (Docker/k8s NodePort, or a phone pointed at a bare IP)
+			// needs an IP SAN — a DNS name that happens to spell an IP address never satisfies an
+			// IP-based TLS name check.
+			if (IPAddress.TryParse(host, out IPAddress? hostIp))
+				san.AddIpAddress(hostIp);
+			else
+				san.AddDnsName(host);
+			return true;
+		}
+		catch (ArgumentException)
+		{
+			return false;
+		}
+	}
+
+	private (X509Certificate2 Certificate, string PfxProtected) Generate(string host, ILogger logger)
+	{
+		SubjectAlternativeNameBuilder san = new();
+		if (!TryAddHostName(san, host))
+		{
+			// K19: an odd PublicUrl host (or any string Generate is handed) can be rejected by
+			// the SAN builder — that used to throw and take HTTPS startup down with it, with no
+			// fallback. FallbackHost is always a valid DNS name, so this cannot recurse.
+			logger.LogWarning(
+				"'{Host}' is not usable in a TLS certificate — falling back to '{FallbackHost}'",
+				host, FallbackHost);
+			host = FallbackHost;
+			TryAddHostName(san, host);
+		}
+		if (!host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+			san.AddDnsName("localhost");
+
 		using RSA key = RSA.Create(2048);
 		CertificateRequest request = new(
 			$"CN={host}", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -169,16 +209,6 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 		// serverAuth — the only purpose this certificate has.
 		request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
 			new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false));
-		SubjectAlternativeNameBuilder san = new();
-		// K5: an IP-addressed client (Docker/k8s NodePort, or a phone pointed at a bare IP) needs
-		// an IP SAN — a DNS name that happens to spell an IP address never satisfies an IP-based
-		// TLS name check.
-		if (IPAddress.TryParse(host, out IPAddress? hostIp))
-			san.AddIpAddress(hostIp);
-		else
-			san.AddDnsName(host);
-		if (!host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
-			san.AddDnsName("localhost");
 		request.CertificateExtensions.Add(san.Build());
 
 		// Backdated an hour so a device with mild clock skew accepts it immediately. Validity is
