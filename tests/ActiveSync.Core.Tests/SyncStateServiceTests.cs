@@ -528,6 +528,31 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task CompleteAccountWipe_ConcurrentDeviceConflict_DoesNotThrow()
+	{
+		// CompleteAccountWipeAsync's catch filter only covered a LoginBlock unique violation
+		// (A22). Device is concurrency-token-stamped, so a concurrent write to the SAME device
+		// row (e.g. a touch from GetOrCreateDeviceAsync, or a pipelined FolderSync bump) racing
+		// the wipe ack raises an unhandled DbUpdateConcurrencyException — a 500 on a
+		// security-critical wipe acknowledgement instead of the ack completing (A6).
+		FaultInjectingInterceptor faults = new();
+		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
+		SyncStateService service = new(db);
+		Device device = await service.GetOrCreateDeviceAsync("u@a6", "DEV1", "Phone", CancellationToken.None);
+		device.PendingAccountWipe = true;
+		await db.SaveChangesAsync(CancellationToken.None);
+
+		// Simulate a concurrent writer advancing this device row's ConcurrencyToken between our
+		// read and our save.
+		faults.ThrowOnNextSave(new DbUpdateConcurrencyException("concurrent device write"));
+		await service.CompleteAccountWipeAsync(device, CancellationToken.None); // must not throw
+
+		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
+		Device saved = await verify.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.UserName == "u@a6");
+		Assert.False(saved.PendingAccountWipe);
+	}
+
+	[Fact]
 	public async Task GetOrCreateDevice_NonUniqueFailure_PropagatesOriginalError()
 	{
 		// The insert-race catch assumed every DbUpdateException was "someone inserted first" and

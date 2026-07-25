@@ -146,33 +146,52 @@ internal sealed class DeviceStore(SyncDbContext db)
 	/// </summary>
 	public async Task CompleteAccountWipeAsync(Device device, CancellationToken ct)
 	{
-		device.PendingAccountWipe = false;
-		bool alreadyBlocked = await db.LoginBlocks
-			.AnyAsync(b => b.UserName == device.UserName && b.DeviceId == device.DeviceId, ct)
-			.ConfigureAwait(false);
-		LoginBlock? added = null;
-		if (!alreadyBlocked)
+		// A6: bounded retry — either failure below means this attempt's save never landed, so
+		// each pass re-derives its own state from a fresh read rather than assuming the first
+		// attempt's decisions still hold.
+		const int maxAttempts = 4;
+		for (int attempt = 1; ; attempt++)
 		{
-			added = new LoginBlock
+			device.PendingAccountWipe = false;
+			bool alreadyBlocked = await db.LoginBlocks
+				.AnyAsync(b => b.UserName == device.UserName && b.DeviceId == device.DeviceId, ct)
+				.ConfigureAwait(false);
+			LoginBlock? added = null;
+			if (!alreadyBlocked)
 			{
-				UserName = device.UserName,
-				DeviceId = device.DeviceId,
-				CreatedUtc = DateTime.UtcNow
-			};
-			await db.LoginBlocks.AddAsync(added, ct).ConfigureAwait(false);
-		}
+				added = new LoginBlock
+				{
+					UserName = device.UserName,
+					DeviceId = device.DeviceId,
+					CreatedUtc = DateTime.UtcNow
+				};
+				await db.LoginBlocks.AddAsync(added, ct).ConfigureAwait(false);
+			}
 
-		try
-		{
-			await db.SaveChangesAsync(ct).ConfigureAwait(false);
-		}
-		catch (DbUpdateException ex) when (added is not null && DbExceptions.IsUniqueViolation(ex))
-		{
-			// A concurrent wipe ack already inserted the (user, device) block between our
-			// AnyAsync check and this insert — the block we want exists, so this is success, not
-			// a 500. Drop our duplicate insert and persist the wipe-completion flag alone (A22).
-			db.Entry(added).State = EntityState.Detached;
-			await db.SaveChangesAsync(ct).ConfigureAwait(false);
+			try
+			{
+				await db.SaveChangesAsync(ct).ConfigureAwait(false);
+				return;
+			}
+			catch (DbUpdateException ex) when (added is not null && DbExceptions.IsUniqueViolation(ex))
+			{
+				// A concurrent wipe ack already inserted the (user, device) block between our
+				// AnyAsync check and this insert — the block we want exists, so this is success, not
+				// a 500. Drop our duplicate insert; the next pass's AnyAsync sees the winner and
+				// skips the insert, persisting only the wipe-completion flag (A22).
+				db.Entry(added).State = EntityState.Detached;
+			}
+			catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
+			{
+				// A concurrent write to the SAME device row (e.g. a touch from
+				// GetOrCreateDeviceAsync, or a pipelined FolderSync bumping FolderSyncKey)
+				// advanced its ConcurrencyToken between our read and this save. Reload the row
+				// and re-apply the wipe-completion flag on the next pass rather than surfacing a
+				// 500 on this security-critical ack (A6).
+				if (added is not null)
+					db.Entry(added).State = EntityState.Detached;
+				await db.Entry(device).ReloadAsync(ct).ConfigureAwait(false);
+			}
 		}
 	}
 }
