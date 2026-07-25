@@ -765,3 +765,44 @@ relocation guards, −1 obsolete round-1 guard). Net +2 = 1113. Nothing was sile
   file cluster. The precedent (round 1's `S4` moved a type across the same boundary without bumping)
   points the same way. **Carried forward: the Contracts surface has now shrunk twice unversioned.**
 - No new findings filed.
+
+---
+
+## Item 18 — Namespace coherence & JmapMailStore split
+**Findings:** `S7` `S4`
+**Commits:** `2dca177` (S7) · `c57dcc0` (S4)
+**Verification:** integrity items=32 live=10 assigned=132 unique=132 dupes=0 encoding=0 ✓ · cursor → item
+19 ✓ · strike shipped WITH each fix ✓ · build 0 warnings ✓ · unit **1115 passed, 0 skipped** (+2 = the two
+new guard tests) ✓ · live **141 passed, 0 skipped** on a clean-volume Stalwart ✓
+**Diffs read against the detail entries — both are mechanical, so I verified them mechanically rather
+than by reading 42 files:**
+- `S7` — filtered the whole 42-file diff down to lines that are *not* a `namespace`/`using`/comment
+  change. Four things came back, all correct: the one fully-qualified call site
+  (`ActiveSync.Backends.Converters.DraftMessageBuilder.Build` → `...Common.Converters...`), the new
+  `ConverterTypes_UseTheCommonAssemblyRootNamespace` guard, and the tightening of the existing
+  `BackendsCommon_TypesUseCoherentNamespaces` (its second OR-branch for the old root became dead — the
+  test is now *stricter*, requiring one root, which is exactly what `S7` is for). Also swept the whole
+  repo for the old namespace: outside `docs/review/**` it survives only inside the guard test that
+  asserts its absence. Nothing under `docs/` needed updating — no doc named the converter namespace.
+- `S4` — checked the split is pure code motion, not a rewrite. Extracted the member declarations from the
+  pre-split 847-line file and from the concatenation of the four partials: **46 before, 46 after,
+  identical set.** Then diffed the two bodies line-by-line: the *only* line present before and absent
+  after is `public sealed class JmapMailStore(` (now `partial`), and the only additions are the three new
+  files' `namespace`/class/brace boilerplate, their repeated `using`s, and new header comments. Every
+  code line is byte-identical. Concerns split as prescribed and as the IMAP precedent does:
+  `.cs` = CRUD + listing (685 lines), `.Search.cs` = `SearchAsync`/`FirstMailbox`, `.Watch.cs` =
+  `WaitForChangesAsync`/`FolderTokensAsync`, `.Attachments.cs` = `GetAttachmentAsync` + the
+  FileReference codec.
+**Notes:**
+- **Neither finding can change behaviour, and the checks above are what establish that** — a member-set
+  and line-level equivalence proof, not "the tests passed". For a code-motion item that distinction
+  matters: a subtly dropped method would still compile if nothing called it, and would still pass.
+- **`S4`'s red-first is a file-existence assertion, `S7`'s is a reflection assertion.** Both are the
+  honest shape for their finding class (fourth and fifth structural item in a row — see items 14–17), and
+  both were confirmed red on unmodified code. Neither is behavioural proof, and neither pretends to be.
+- **`S7` is the breaking change Standing context anticipated.** Nothing outside this repo consumes
+  `ActiveSync.Backends.Converters`; `Backends.Common` is packed, so an out-of-repo plugin using the
+  converters must update its `using`. Note this compounds with item 17: **three published-surface changes
+  have now landed across items 17–18 with no `ContractVersion` bump** (see item 17's note for why that is
+  still the right call, and why a human should confirm it).
+- No new findings filed.
