@@ -313,8 +313,16 @@ internal static class LocalCliEndpoint
 			Console.SetIn(new StringReader(stdin));
 			// A command may fan out to its own tasks (which DO inherit the flow), so the buffers are
 			// written through synchronized wrappers; their contents are read back after the run.
-			outRouter.Capture(TextWriter.Synchronized(outWriter));
-			errorRouter.Capture(TextWriter.Synchronized(errorWriter));
+			// E3: the injected IAnsiConsole below writes through this SAME wrapper INSTANCE, not an
+			// independent one over the same StringWriter — TextWriter.Synchronized locks on the
+			// wrapper object itself, so two separate wrappers over one StringWriter would each
+			// serialize their own writes while still racing each other on the shared buffer. Sharing
+			// one instance is what actually closes the race between raw Console.Write calls (routed
+			// here) and AnsiConsole output during a command that fans out concurrent work.
+			TextWriter syncedOut = TextWriter.Synchronized(outWriter);
+			TextWriter syncedError = TextWriter.Synchronized(errorWriter);
+			outRouter.Capture(syncedOut);
+			errorRouter.Capture(syncedError);
 			// Render with ANSI colour only when the CALLER's terminal wants it (a TTY, NO_COLOR
 			// unset) — the client detects that and sends the hint, so piped/redirected output stays
 			// plain. Pin the profile width to the caller's terminal (or a wide default) so tables
@@ -324,7 +332,7 @@ internal static class LocalCliEndpoint
 				Ansi = color ? AnsiSupport.Yes : AnsiSupport.No,
 				ColorSystem = color ? ColorSystemSupport.Standard : ColorSystemSupport.NoColors,
 				Interactive = InteractionSupport.No,
-				Out = new AnsiConsoleOutput(outWriter),
+				Out = new AnsiConsoleOutput(syncedOut),
 			});
 			captured.Profile.Width = width > 0 ? width : 200;
 			captured.Profile.Height = 100;

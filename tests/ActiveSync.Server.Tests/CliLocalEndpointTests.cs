@@ -160,6 +160,99 @@ public sealed class CliLocalEndpointTests : IDisposable
 		Assert.Contains("ActiveSync:", response.Stdout);
 	}
 
+	// E3 — COVERAGE, NOT PROOF. RunCapturedAsync's writer wiring is a private local, and no command
+	// in the current tree fans out concurrent writes through both the Console-routing path and
+	// AnsiConsole, so the actual race can't be triggered end-to-end through ExecuteAsync. These two
+	// tests reproduce the IDENTICAL wiring pattern standalone: one proves the "before" shape (a
+	// TextWriter.Synchronized wrapper on one path, the raw StringWriter directly on the other —
+	// Synchronized locks on ITSELF, not on the StringWriter, so the two paths still race on the
+	// shared buffer underneath) reliably corrupts output under concurrent load; the other proves the
+	// fix (both paths sharing ONE synchronized instance, exactly what RunCapturedAsync now does)
+	// does not.
+	[Fact]
+	public void UnfixedPattern_TwoIndependentWrappersOverOneStringWriter_CorruptsUnderConcurrentWrites()
+	{
+		const int threads = 8;
+		const int itersPerThread = 4000;
+		const string chunk = "0123456789";
+		long expectedLength = (long)threads * itersPerThread * chunk.Length;
+
+		bool corrupted = false;
+		for (int attempt = 0; attempt < 10 && !corrupted; attempt++)
+		{
+			StringWriter outWriter = new();
+			TextWriter synced = TextWriter.Synchronized(outWriter); // mirrors the router path
+			TextWriter raw = outWriter;                              // mirrors AnsiConsoleOutput(outWriter), unfixed
+
+			Exception? caught = null;
+			Thread[] pool = new Thread[threads];
+			for (int t = 0; t < threads; t++)
+			{
+				TextWriter w = t % 2 == 0 ? synced : raw;
+				pool[t] = new Thread(() =>
+				{
+					try
+					{
+						for (int i = 0; i < itersPerThread; i++)
+							w.Write(chunk);
+					}
+					catch (Exception ex)
+					{
+						caught = ex;
+					}
+				});
+			}
+
+			foreach (Thread th in pool) th.Start();
+			foreach (Thread th in pool) th.Join();
+
+			corrupted = caught is not null || outWriter.ToString().Length != expectedLength;
+		}
+
+		Assert.True(corrupted,
+			"expected the unfixed dual-writer pattern (independent Synchronized wrapper + raw " +
+			"StringWriter) to corrupt the shared buffer at least once in 10 concurrent attempts");
+	}
+
+	[Fact]
+	public void FixedPattern_OneSharedSynchronizedWriter_NeverCorrupts_UnderTheSameConcurrentLoad()
+	{
+		const int threads = 8;
+		const int itersPerThread = 4000;
+		const string chunk = "0123456789";
+		long expectedLength = (long)threads * itersPerThread * chunk.Length;
+
+		for (int attempt = 0; attempt < 10; attempt++)
+		{
+			StringWriter outWriter = new();
+			TextWriter sharedSynced = TextWriter.Synchronized(outWriter); // ONE instance, both paths
+
+			Exception? caught = null;
+			Thread[] pool = new Thread[threads];
+			for (int t = 0; t < threads; t++)
+			{
+				pool[t] = new Thread(() =>
+				{
+					try
+					{
+						for (int i = 0; i < itersPerThread; i++)
+							sharedSynced.Write(chunk);
+					}
+					catch (Exception ex)
+					{
+						caught = ex;
+					}
+				});
+			}
+
+			foreach (Thread th in pool) th.Start();
+			foreach (Thread th in pool) th.Join();
+
+			Assert.Null(caught);
+			Assert.Equal(expectedLength, outWriter.ToString().Length);
+		}
+	}
+
 	[Fact]
 	public void ColorRendering_ForcesAnsiEscapes_ToTheCapturedBuffer()
 	{
