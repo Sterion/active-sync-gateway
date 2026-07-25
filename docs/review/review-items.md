@@ -218,7 +218,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 > re-apply the item-12 gate. See `review-results.md` § Item 12 for the full history.
 > `C2` the backend `/test` probe is an SSRF reachability oracle for arbitrary operator-supplied hosts. `C5` portal leaks the admin-set backend username to a non-admin. `E6` `/readyz` treats a null peer as local and discloses topology. `E11` uncapped Autodiscover body buffer.
 
-**13. Shared-collection, redirect & backend TLS** [LIVE] — ~~`K10`~~ ~~`K13`~~ `H9`
+**13. Shared-collection, redirect & backend TLS** [LIVE] — ~~`K10`~~ ~~`K13`~~ ~~`H9`~~ **COMPLETE**
 > `K10` `SharedCollection.Parse` truncates an href containing `|` → wrong collection shared. `K13` custom-CA path disables revocation unconditionally. `H9` JMAP blob/eventsource requests don't re-assert same-origin before attaching credentials. DAV/JMAP touch → verify against a live backend.
 
 ## Phase 3 — Boundaries (structural)

@@ -247,7 +247,7 @@ public sealed class JmapClient : IDisposable
 			.Replace("{name}", "blob")
 			.Replace("{type}", Uri.EscapeDataString("application/octet-stream"));
 		using HttpResponseMessage response = await SendAsync(
-			() => new HttpRequestMessage(HttpMethod.Get, new Uri(url)), ct).ConfigureAwait(false);
+			() => new HttpRequestMessage(HttpMethod.Get, RequireSameOrigin(url)), ct).ConfigureAwait(false);
 		await EnsureSuccessAsync(response, "GET", "download", ct).ConfigureAwait(false);
 		return await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
 	}
@@ -265,7 +265,7 @@ public sealed class JmapClient : IDisposable
 			.Replace("{types}", "*")
 			.Replace("{closeafter}", "no")
 			.Replace("{ping}", pingSeconds.ToString());
-		HttpRequestMessage request = new(HttpMethod.Get, new Uri(url));
+		HttpRequestMessage request = new(HttpMethod.Get, RequireSameOrigin(url));
 		request.Headers.Accept.ParseAdd("text/event-stream");
 		HttpResponseMessage response = await _http
 			.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
@@ -291,7 +291,7 @@ public sealed class JmapClient : IDisposable
 		{
 			ByteArrayContent payload = new(content);
 			payload.Headers.ContentType = new MediaTypeHeaderValue(contentType);
-			return new HttpRequestMessage(HttpMethod.Post, new Uri(url)) { Content = payload };
+			return new HttpRequestMessage(HttpMethod.Post, RequireSameOrigin(url)) { Content = payload };
 		}, ct).ConfigureAwait(false);
 		await EnsureSuccessAsync(response, "POST", "upload", ct).ConfigureAwait(false);
 		string body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
@@ -512,6 +512,24 @@ public sealed class JmapClient : IDisposable
 		return string.Equals(target.Scheme, baseUri.Scheme, StringComparison.OrdinalIgnoreCase) &&
 		       string.Equals(target.Host, baseUri.Host, StringComparison.OrdinalIgnoreCase) &&
 		       target.Port == baseUri.Port;
+	}
+
+	/// <summary>
+	///   H9: <see cref="Rebase" /> already forces every advertised URL (download/upload/eventSource)
+	///   onto this client's own origin at session-parse time, so this should never fire through the
+	///   public API today — but Basic auth is about to be attached at each of these three call
+	///   sites, so the same-origin invariant is re-asserted at the point of use rather than trusted
+	///   to have survived unchanged from session parsing. Defense against a future
+	///   <see cref="Rebase" /> regression or a template that smuggles an absolute URL, not a
+	///   reachable defect today — reuses the same same-origin rule the redirect guard applies.
+	/// </summary>
+	internal Uri RequireSameOrigin(string url)
+	{
+		Uri target = new(url);
+		if (!IsSafeRedirect(_baseUri, target))
+			throw new BackendException(
+				$"JMAP server advertised an off-origin URL '{target}'; refusing to attach credentials.");
+		return target;
 	}
 
 	private static async Task EnsureSuccessAsync(

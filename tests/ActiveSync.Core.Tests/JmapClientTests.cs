@@ -256,6 +256,33 @@ public class JmapClientTests
 		Assert.True(tracker.Disposed, "the failed EventSource response must be disposed, not leaked");
 	}
 
+	// H9 (coverage — Rebase already forces every advertised URL onto this client's own origin at
+	// session-parse time, so an off-origin download/upload/eventSource URL cannot currently be
+	// produced through the public API; there is no black-box red state to observe against
+	// unmodified code without first defeating Rebase. This proves the guard RequireSameOrigin
+	// wires up its send-seam callers are supposed to use, as a defense against a future Rebase
+	// regression rather than a reachable defect today.)
+	[Fact]
+	public void RequireSameOrigin_OffOriginUrl_Throws()
+	{
+		using JmapClient client = new(Base, new HttpClient(new StubHandler((_, _) => Json(SessionJson))));
+
+		BackendException ex = Assert.Throws<BackendException>(
+			() => client.RequireSameOrigin("http://evil.example.com/jmap/download/x"));
+
+		Assert.Contains("evil.example.com", ex.Message);
+	}
+
+	[Fact]
+	public void RequireSameOrigin_SameOriginUrl_ReturnsIt()
+	{
+		using JmapClient client = new(Base, new HttpClient(new StubHandler((_, _) => Json(SessionJson))));
+
+		Uri result = client.RequireSameOrigin("http://localhost:5232/jmap/download/x");
+
+		Assert.Equal("http://localhost:5232/jmap/download/x", result.ToString());
+	}
+
 	private static HttpResponseMessage Json(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)
