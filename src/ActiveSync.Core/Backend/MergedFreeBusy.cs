@@ -1,4 +1,6 @@
-namespace ActiveSync.Contracts;
+using ActiveSync.Contracts;
+
+namespace ActiveSync.Core.Backend;
 
 /// <summary>
 ///   Builds the MS-ASCMD MergedFreeBusy digit string (2.2.3.107): one digit per 30-minute

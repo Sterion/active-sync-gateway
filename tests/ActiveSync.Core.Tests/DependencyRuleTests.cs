@@ -45,8 +45,24 @@ public sealed class DependencyRuleTests
 		Assert.DoesNotContain("ActiveSync.Core", referenced);
 	}
 
-	// S4: MergedFreeBusy_MovedFromCoreToContracts (round-1 guard) is replaced in the S5 block below —
-	// item 17 (round 2) moves MergedFreeBusy back to Core; see MergedFreeBusy_MovedFromContractsToCore.
+	// S5 (round 2, reversing round-1 S4): MergedFreeBusy is host-only output — ResolveRecipientsHandler
+	// calls MergedFreeBusy.Build, but a plugin only ever implements IFreeBusySource and returns
+	// BusyPeriod; it never calls Build itself. Contracts is the published plugin-contract package and
+	// must carry only what a plugin builds against (the same rule that already keeps IBackendSession /
+	// BackendSessionFactory out of Contracts, per HostOnlySessionTypes_AreNotOnTheContractsSurface
+	// above) — round 1's S4 moved it to Contracts on a different rationale (no EF/Core dependency) that
+	// didn't account for the plugin-surface rule; this corrects it. BusyPeriod itself (the capability
+	// model IFreeBusySource returns) stays in Contracts — Core already depends on Contracts, so it can
+	// see BusyPeriod fine.
+	[Fact]
+	public void MergedFreeBusy_MovedFromContractsToCore()
+	{
+		System.Reflection.Assembly contracts = typeof(BusyPeriod).Assembly;
+		System.Reflection.Assembly core = typeof(Core.Backend.BackendProviderRegistry).Assembly;
+
+		Assert.Null(contracts.GetType("ActiveSync.Contracts.MergedFreeBusy"));
+		Assert.NotNull(core.GetType("ActiveSync.Core.Backend.MergedFreeBusy"));
+	}
 
 	// S4: CollectionDiff is the differential-sync windowing algorithm — pure protocol logic depending
 	// on nothing but BCL types and its own records. It belongs in ActiveSync.Protocol, where it is also
