@@ -95,6 +95,60 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	}
 
 	[Fact]
+	public async Task AuthCache_RejectsAVerdictStampedWithAnOlderSnapshotVersion()
+	{
+		// A8: SnapshotChanged clears the auth caches, but a verdict already IN FLIGHT against the
+		// OLD snapshot can still write back to the (now-empty) cache AFTER the clear — a stale
+		// positive verdict re-populates the cache (TOCTOU: the edit that should have invalidated
+		// it already ran). It must be stamped with the snapshot version it was computed under and
+		// rejected on a later read once the version has moved on, so the second attempt re-probes
+		// instead of trusting the stale entry.
+		ControllableVerifierProvider provider = new();
+		IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection(
+			new Dictionary<string, string?>
+			{
+				["ActiveSync:Backends:MailStore:Provider"] = "fake",
+				["ActiveSync:Backends:MailSubmit:Provider"] = "fake",
+			}).Build();
+		BackendRolesProvider rolesProvider = new(config);
+		BackendProviderRegistry registry = new([provider], NullLogger<BackendProviderRegistry>.Instance);
+		AccountStore store = new(_dbFactory);
+		ActiveSyncOptions options = new()
+		{
+			Encryption = new EncryptionOptions { AllowPlaintext = true },
+			Auth = new AuthOptions { UsersRefreshSeconds = 0 }, // "0 = check on every request"
+			Eas = new EasOptions()
+		};
+		IOptionsMonitor<ActiveSyncOptions> monitor = TestOptionsMonitor.Of(options);
+		AccountResolver resolver = new(monitor, rolesProvider, registry, store);
+		BackendSessionFactory factory = new(monitor, resolver, rolesProvider, _dbFactory, registry,
+			NullLogger<BackendSessionFactory>.Instance);
+
+		provider.Gate = new TaskCompletionSource();
+		BackendCredentials creds = new("racer@x", "pw");
+		Task<bool> authTask = factory.AuthenticateAsync(creds, CancellationToken.None);
+
+		// Wait until the probe actually started (captured its snapshot version) before racing a
+		// rebuild underneath it.
+		Assert.True(await provider.Entered.WaitAsync(TimeSpan.FromSeconds(2)));
+
+		// A concurrent `eas user` edit lands and the resolver rebuilds — bumps the snapshot
+		// version and clears the (still-empty) auth caches.
+		await store.UpsertAsync("someone-else", new AccountOptions(), CancellationToken.None);
+		await resolver.EnsureFreshAsync(true, CancellationToken.None);
+
+		// Let the in-flight probe finish; its verdict now writes back into the cache AFTER the
+		// rebuild — tagged with the OLD version if the fix is in place.
+		provider.Gate.SetResult();
+		Assert.True(await authTask);
+
+		// A fresh authentication attempt reads the CURRENT snapshot version. If the stale cached
+		// verdict were trusted, this second probe would never run.
+		Assert.True(await factory.AuthenticateAsync(creds, CancellationToken.None));
+		Assert.Equal(2, provider.VerifyCallCount);
+	}
+
+	[Fact]
 	public async Task DisposedFactory_UnsubscribesFromSettingsEvents()
 	{
 		// A28: the factory subscribed to BackendRolesProvider.Changed / AccountResolver.SnapshotChanged
@@ -236,6 +290,43 @@ public sealed class BackendSessionFactoryTests : IDisposable
 			LastResource = new FakeResource();
 			return Task.FromResult<IBackendConnection>(
 				new BackendConnection([new FakeMailStore()], new FakeSubmit(), ownedResources: [LastResource]));
+		}
+	}
+
+	/// <summary>
+	///   A MailStore provider whose credential probe pauses on <see cref="Gate" /> until released,
+	///   so a test can control exactly when a concurrent verdict is "in flight" relative to a
+	///   snapshot rebuild (A8).
+	/// </summary>
+	private sealed class ControllableVerifierProvider : IBackendProvider, ICredentialVerifier
+	{
+		private static readonly IReadOnlySet<BackendRole> All = new HashSet<BackendRole> { BackendRole.MailStore };
+
+		public int VerifyCallCount { get; private set; }
+		public TaskCompletionSource? Gate { get; set; }
+		public SemaphoreSlim Entered { get; } = new(0);
+
+		public string Name => "fake";
+		public IReadOnlySet<BackendRole> SupportedRoles => All;
+
+		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures) { }
+		public string DescribeRole(BackendRole role, ProviderSettings settings) => "fake";
+
+		public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct) =>
+			throw new NotSupportedException();
+
+		public async Task<bool> VerifyCredentialsAsync(ResolvedRole role, CancellationToken ct)
+		{
+			VerifyCallCount++;
+			Entered.Release();
+			if (Gate is not null)
+				// VSTHRD003: awaiting the test's TaskCompletionSource on purpose — it is the
+				// synchronization gate the test uses to pause this "in-flight probe" until it has
+				// deliberately raced a snapshot rebuild underneath it.
+#pragma warning disable VSTHRD003
+				await Gate.Task.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
+			return true;
 		}
 	}
 

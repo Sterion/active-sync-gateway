@@ -42,6 +42,14 @@ public sealed class AccountResolver
 	private readonly SemaphoreSlim _refreshGate = new(1, 1);
 	private readonly Settings.ChangeStampRefreshGate _gate = new();
 	private volatile Snapshot _snapshot;
+	// A8: monotonic — bumped every time _snapshot is swapped (both rebuild paths below), NEVER on
+	// the constructor's initial build. BackendSessionFactory stamps each cached auth verdict with
+	// the version live when it was computed and rejects a hit whose stamp doesn't match the
+	// CURRENT version, closing the TOCTOU where SnapshotChanged clears the caches but an
+	// in-flight verdict (computed against the old snapshot) writes back afterward — that stale
+	// write is still tagged with the old version, so the next read treats it as a miss instead of
+	// trusting it.
+	private long _snapshotVersion = 1;
 	// _lastStamp is a Guid? (cannot be `volatile`) but is only ever touched inside _refreshGate,
 	// whose SemaphoreSlim Wait/Release are full memory barriers. _lastDbUsers is the one field read
 	// OUTSIDE that gate — OnRolesChanged runs on the config-reload thread — so it must be volatile to
@@ -75,6 +83,13 @@ public sealed class AccountResolver
 
 	/// <summary>The global role assignments (for banners, readiness probes and the CLI).</summary>
 	public BackendRolesConfig Roles => _rolesProvider.Current;
+
+	/// <summary>
+	///   Monotonic snapshot generation, bumped on every rebuild (A8). Callers that cache a
+	///   verdict computed against the current snapshot should stamp it with this value and
+	///   distrust a cached hit whose stamp no longer matches.
+	/// </summary>
+	public long SnapshotVersion => Interlocked.Read(ref _snapshotVersion);
 
 	/// <summary>The merged, effective user view (database entries replacing config ones).</summary>
 	public IReadOnlyDictionary<string, MergedAccount> MergedUsers => _snapshot.Users;
@@ -116,6 +131,7 @@ public sealed class AccountResolver
 				_lastDbUsers = dbUsers;
 				_snapshot = BuildSnapshot(_options.CurrentValue, _rolesProvider.Current, _registry, dbUsers, _logger);
 				_lastStamp = stamp;
+				Interlocked.Increment(ref _snapshotVersion);
 				_logger?.LogInformation(
 					"Accounts snapshot rebuilt: {Count} declared user(s) ({Db} from database)",
 					_snapshot.Users.Count, _snapshot.Users.Count(u => u.Value.FromDatabase));
@@ -168,6 +184,7 @@ public sealed class AccountResolver
 		}
 
 		_snapshot = rebuilt;
+		Interlocked.Increment(ref _snapshotVersion);
 		SnapshotChanged?.Invoke();
 	}
 

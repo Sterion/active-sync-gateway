@@ -23,8 +23,11 @@ namespace ActiveSync.Core.Backend;
 /// </summary>
 public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDisposable
 {
-	private readonly ConcurrentDictionary<string, (string PasswordHash, DateTime ExpiresUtc)> _authCache = new();
-	private readonly ConcurrentDictionary<string, (string PasswordHash, DateTime ExpiresUtc)> _authNegativeCache = new();
+	// A8: each entry carries the AccountResolver snapshot version it was computed under, so a
+	// verdict written back after a rebuild already cleared these caches (the TOCTOU) is tagged
+	// stale and ignored on read rather than trusted.
+	private readonly ConcurrentDictionary<string, (string PasswordHash, DateTime ExpiresUtc, long SnapshotVersion)> _authCache = new();
+	private readonly ConcurrentDictionary<string, (string PasswordHash, DateTime ExpiresUtc, long SnapshotVersion)> _authNegativeCache = new();
 	private readonly ISyncDbContextFactory _dbFactory;
 	private readonly Timer _evictionTimer;
 	private readonly ILogger<BackendSessionFactory> _logger;
@@ -93,14 +96,20 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		await _resolver.EnsureFreshAsync(false, ct).ConfigureAwait(false);
 		string cacheKey = credentials.UserName;
 		string passwordHash = Hash(credentials.Password);
+		// A8: the version live right now — a hit stamped with an older version was computed
+		// against an account snapshot that has since been rebuilt (and its caches cleared), so it
+		// must not be trusted even if it landed in the dictionary after the clear.
+		long snapshotVersion = _resolver.SnapshotVersion;
 		if (_options.CurrentValue.Auth.SuccessCacheMinutes > 0 &&
-		    _authCache.TryGetValue(cacheKey, out (string PasswordHash, DateTime ExpiresUtc) cached) &&
+		    _authCache.TryGetValue(cacheKey, out (string PasswordHash, DateTime ExpiresUtc, long SnapshotVersion) cached) &&
+		    cached.SnapshotVersion == snapshotVersion &&
 		    cached.PasswordHash == passwordHash && cached.ExpiresUtc > DateTime.UtcNow)
 			return true;
 		// Repeats of a known-bad password are refused without a backend round-trip, so the
 		// gateway cannot be used to hammer the mail backend with login attempts.
 		if (_options.CurrentValue.Auth.NegativeCacheSeconds > 0 &&
-		    _authNegativeCache.TryGetValue(cacheKey, out (string PasswordHash, DateTime ExpiresUtc) negative) &&
+		    _authNegativeCache.TryGetValue(cacheKey, out (string PasswordHash, DateTime ExpiresUtc, long SnapshotVersion) negative) &&
+		    negative.SnapshotVersion == snapshotVersion &&
 		    negative.PasswordHash == passwordHash && negative.ExpiresUtc > DateTime.UtcNow)
 			return false;
 
@@ -110,7 +119,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// a false verdict feeds the per-IP throttle via the normal 401 path.
 		if (_resolver.VerifyLocally(credentials.UserName, credentials.Password) is { } verified)
 		{
-			CacheVerdict(cacheKey, passwordHash, verified);
+			CacheVerdict(cacheKey, passwordHash, verified, snapshotVersion);
 			return verified;
 		}
 
@@ -128,7 +137,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		}
 
 		bool ok = await verifier.VerifyCredentialsAsync(mailRole, ct).ConfigureAwait(false);
-		CacheVerdict(cacheKey, passwordHash, ok);
+		CacheVerdict(cacheKey, passwordHash, ok, snapshotVersion);
 		return ok;
 	}
 
@@ -238,12 +247,13 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			.ToList();
 	}
 
-	private void CacheVerdict(string cacheKey, string passwordHash, bool verified)
+	private void CacheVerdict(string cacheKey, string passwordHash, bool verified, long snapshotVersion)
 	{
 		if (verified)
 		{
 			if (_options.CurrentValue.Auth.SuccessCacheMinutes > 0)
-				_authCache[cacheKey] = (passwordHash, DateTime.UtcNow.AddMinutes(_options.CurrentValue.Auth.SuccessCacheMinutes));
+				_authCache[cacheKey] = (passwordHash,
+					DateTime.UtcNow.AddMinutes(_options.CurrentValue.Auth.SuccessCacheMinutes), snapshotVersion);
 			_authNegativeCache.TryRemove(cacheKey, out _);
 		}
 		else
@@ -251,7 +261,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			_authCache.TryRemove(cacheKey, out _);
 			if (_options.CurrentValue.Auth.NegativeCacheSeconds > 0)
 				_authNegativeCache[cacheKey] =
-					(passwordHash, DateTime.UtcNow.AddSeconds(_options.CurrentValue.Auth.NegativeCacheSeconds));
+					(passwordHash, DateTime.UtcNow.AddSeconds(_options.CurrentValue.Auth.NegativeCacheSeconds), snapshotVersion);
 		}
 	}
 
@@ -304,10 +314,10 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// Expired auth-cache entries are dead weight; drop them so the caches stay
 		// bounded by the set of recently active usernames.
 		DateTime nowUtc = DateTime.UtcNow;
-		foreach (KeyValuePair<string, (string PasswordHash, DateTime ExpiresUtc)> pair in _authCache)
+		foreach (KeyValuePair<string, (string PasswordHash, DateTime ExpiresUtc, long SnapshotVersion)> pair in _authCache)
 			if (pair.Value.ExpiresUtc <= nowUtc)
 				_authCache.TryRemove(pair); // pair-overload: no-op if refreshed meanwhile
-		foreach (KeyValuePair<string, (string PasswordHash, DateTime ExpiresUtc)> pair in _authNegativeCache)
+		foreach (KeyValuePair<string, (string PasswordHash, DateTime ExpiresUtc, long SnapshotVersion)> pair in _authNegativeCache)
 			if (pair.Value.ExpiresUtc <= nowUtc)
 				_authNegativeCache.TryRemove(pair);
 
