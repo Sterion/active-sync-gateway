@@ -372,9 +372,18 @@ establish the fact, spawn a scoped repair subagent, or stop and report. It is th
 the most accumulated context and the least room to think; its whole value is being an independent
 check. One that authors code is both author and reviewer.
 
-**Cap it at ~8 items and start a fresh one.** Subagents get clean contexts; the orchestrator does
-not. One reached 1.5M tokens over four hours and its judgment visibly degraded before any hard limit.
-Handover is free — the cursor is the state.
+**Hand off at a natural boundary, not at a token count.** Subagents get clean contexts; the
+orchestrator does not. Beware the obvious-looking metric: a run's *displayed* orchestrator cost
+includes every subagent's implementation rolled up into it, so the orchestrator looks far more
+expensive than it is — reading that number as its own context is what produced the original "cap it
+at ~8 items" rule. Its real accumulation is coordination overhead: reports, verification dumps, test
+summaries. That is small, and in practice the ceiling has not been the binding constraint.
+
+What actually degrades is **judgment**, gradually, and a degrading orchestrator gets sloppy at
+exactly the thing it exists for — terse checks, skipped integrity numbers, "looks good" instead of
+the counts. So watch for that signal rather than a budget, and prefer to stop at a phase boundary or
+before a run-alone structural item. Handover is free — the cursor is the state — so when in doubt,
+hand off.
 
 **Keep worker briefs short.** Name the item and anything not in the document (a resumed item, a
 stash). Do *not* paste finding text into the prompt: the orchestrator's summaries degrade as its
@@ -402,7 +411,12 @@ For calibration, on ~42k lines:
 - **Implementation:** far cheaper per finding than expected, because the review already did the
   expensive thinking. Workers execute a spec rather than explore. Most elapsed time is waiting on
   builds, test suites and containers — wall clock, not tokens.
-- **The expensive participant is the orchestrator**, the only one that accumulates. Cap it.
+- **The orchestrator looks like the expensive participant and is not.** Its displayed cost includes
+  the subagents' work rolled up into it; its own accumulation is just coordination overhead — reports,
+  verification dumps, test summaries — and that has not been a binding constraint in practice. Do not
+  budget the run around it, and do not trim verification to protect it. It is the one participant
+  whose *judgment* degrades with accumulated context, so hand off on that signal (see Orchestrated
+  mode), not on a token figure.
 - **Cost is not uniform across the queue.** Well-specified fixes are cheap. The items that are
   genuinely expensive are the structural ones — assembly moves, decomposing an 826-line class,
   breaking API changes, and any item where the review deliberately left a design decision open.
