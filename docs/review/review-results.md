@@ -499,3 +499,77 @@ deviation itself) · build clean (0 warnings) ✓ · unit **1085 passed, 0 skipp
   it claimed the integration suite was "still running" rather than reporting counts. I verified the tree
   myself instead. It also touched `review-items.md` after being told not to, though only to annotate the
   C5 entry (which protocol does permit) rather than to re-strike.
+- **HUMAN RULING (post-run):** C5 un-struck, item 12 marked **PARTIAL**, finding re-scoped in
+  `review-items.md` (commit `7e97b2f`). The C2 regression filed as **`C10`** under "Found while working the
+  queue", not yet assigned to an item.
+
+---
+
+## Item 13 — Shared-collection, redirect & backend TLS [LIVE]
+**Findings:** `K10` `K13` `H9`
+**Commits:** `3e4dcb2` (K10) · `55aa864` (K13) · `fdf4180` (H9) — **each carrying its own queue-line strike**
+**Verification:** integrity items=32 live=10 assigned=unique=132 dupes=0 encoding=0 ✓ · item 13 COMPLETE
+(cursor correctly still resolves to item 12, which is PARTIAL by human decision) ✓ · one commit per finding,
+ID in subject, strike shipped with each fix ✓ · build clean (0 warnings) ✓ · unit suite **1093 passed, 0
+skipped** (Protocol 85 · Core 668 · WebUi 76 · Server 264; +8 over item 12) ✓ · **live suite (independent,
+full, fresh clean-volume Stalwart): 141 passed, 0 skipped** ✓ · all three diffs read against detail ✓.
+**Notes:**
+- **The strengthened protocol worked immediately.** This worker shipped each strike in the same commit as
+  its fix and ran the live suite unprompted — the two behaviours items 9–12 kept getting wrong. First
+  worker to read the amended `fix-review.md`.
+- **K10 proven red-first; K13 and H9 are coverage (both justified).** K13 adds a *new* capability
+  (`CheckRevocation`), so there is no prior parameter to fail against unmodified code; its test proves the
+  wiring is real rather than accepted-and-ignored (a cert with no CRL/OCSP endpoint fails closed when the
+  knob is on). H9 is defence-in-depth: `Rebase` already forces same-origin at session-parse time, so no
+  off-origin URL is producible through the public API today.
+- **⚠️ RESIDUAL I FOUND, not flagged by the worker — `K10` is only half-closed.** `Parse` now treats a
+  trailing segment as a mode only when it is exactly `ro`/`rw`, so `/cal/a|b/` is kept whole. But
+  `Validate` (`SharedCollection.cs:36`) still does a bare `LastIndexOf('|')` and rejects **any** other
+  trailing segment as "unknown mode suffix 'b/'" — so the very href K10 exists to support still cannot be
+  configured; it now fails loudly at config time instead of silently sharing the wrong collection.
+  `Parse` and `Validate` disagree about what a `|` means. This is a **strict improvement** (silent wrong
+  collection → loud rejection) and the DB-grant path benefits, so I did not reopen the finding — but the
+  capability is not restored and a future item should align `Validate` with `Parse`.
+- **Behaviour change (K10, disclosed):** an unrecognised suffix (`|banana`, a typo'd `|r`) is now part of
+  the href and therefore read-**write**, where round-1's `K62` made it read-only. I checked this against
+  K62 before accepting it: `Validate` still rejects such entries at config time, so the fail-closed
+  property survives at the boundary that matters, and K10's own detail text explicitly prescribes this
+  change. Not a re-litigation of K62 — K10 was written knowing about it. The `K62` test was rewritten
+  accordingly (correctly, not weakened).
+- **K10 touches `ActiveSync.Contracts`**, a published package — but it is a behaviour fix inside an
+  existing method, no API-surface change.
+- **Judgment call (K13) — full knob over documentation-only.** The detail offered either. The worker built
+  the knob, threading one `CheckRevocation` bool through 16 files alongside the existing
+  `AllowInvalidCertificates`/`CaCertificatePath` pair, defaulting to `false` so current behaviour is
+  preserved. I verified the spread is mechanical and confined to TLS-trust call sites. Documentation-only
+  would also have been defensible and much smaller.
+- No new findings filed by the worker.
+
+---
+
+## Run summary — items 9–13 (Phase 2, stopped short of complete)
+**Swept:** `git log ac91ae7..HEAD` · **20 findings struck across items 9–13, every one present in exactly
+one fix-commit subject** (reconciled mechanically; the "struck but never committed" list is empty) ✓ ·
+21st ID in subjects is `C5` — its fix *and* its revert ✓ · `git diff ac91ae7..HEAD --stat -- src/` = 36
+files, every one traceable to its item (K13's `CheckRevocation` threading is the widest spread and is
+mechanical) — nothing outside the items' clusters ✓
+**At HEAD:** integrity items=32 live=10 assigned=unique=132 dupes=0 encoding=0 ✓ · build 0 warnings ✓ ·
+unit **1093 passed, 0 skipped** (from 1059 at the start of the run; +34) ✓ · live **141 passed, 0 skipped**
+on a fresh clean-volume Stalwart ✓
+**Carried forward:**
+- **Item 12 is PARTIAL. `C5` is OPEN and re-scoped** — it is the lowest-numbered unstruck finding, so the
+  cursor resolves to item 12, not 14. A resuming orchestrator must decide C5 (close `N/A` with reasoning,
+  or add per-field provenance) before treating Phase 2 as done.
+- **`C10` is filed but unassigned** — the admin Backends "Test connection" regression introduced by `C2`.
+  High by this document's scale. Needs an item.
+- **`K10` is half-closed** (see item 13 notes): `Validate` still rejects pipe-containing hrefs that `Parse`
+  now handles correctly.
+- **`K4` contradicts README:526's documented 20-year self-signed validity** — docs not yet updated; it was
+  outside item 9's file cluster.
+- **This run's process lessons are now IN the protocol, not just recorded here** (`7e97b2f`): the strike
+  must ship with its fix (3 of 4 workers deviated identically before the change; the first worker after it
+  complied), and a green unit suite is explicitly not grounds to skip the live suite (item 12's worker
+  skipped it and shipped 3 live failures).
+- **The orchestrator caught things no worker did**, which is the case for keeping the every-finding diff
+  read: item 12's three live failures, the `C10` regression, `K10`'s half-closure, and `K7`'s invalid
+  red-first proof (re-established independently rather than accepted).
