@@ -33,13 +33,16 @@ internal static class PortalEndpoints
 
 	internal static void Map(RouteGroupBuilder api)
 	{
-		api.MapGet("me", async (ClaimsPrincipal principal, AccountResolver resolver, CancellationToken ct) =>
+		api.MapGet("me", async (
+			ClaimsPrincipal principal, AccountResolver resolver, BackendRolesProvider rolesProvider,
+			BackendProviderRegistry registry, CancellationToken ct) =>
 		{
 			string? login = principal.Identity?.Name;
 			await resolver.EnsureFreshAsync(false, ct);
 			if (login is null || !resolver.MergedUsers.TryGetValue(login, out MergedAccount? account))
 				return Results.NotFound();
 			AccountOptions o = account.Options;
+			BackendRolesConfig roles = rolesProvider.Current;
 			return Results.Ok(new
 			{
 				login,
@@ -52,7 +55,14 @@ internal static class PortalEndpoints
 					{
 						enabled = b.Value.Enabled,
 						provider = b.Value.Provider,
-						userName = b.Value.UserName,
+						// C5: the admin-set backend login (often a shared/service-account name) is
+						// credential-adjacent topology disclosure to a caller who has no self-service
+						// surface for the role at all — only echo it for a role/provider that opts AT
+						// LEAST ONE field into self-service, the same SelfServiceEditable gate that
+						// already governs the settings dictionary below.
+						userName = HasSelfServiceSurface(registry, roles, b.Key, b.Value.Provider)
+							? b.Value.UserName
+							: null,
 						passwordSet = !string.IsNullOrEmpty(b.Value.Password),
 						settings = EndpointHelpers.MaskSecretSettings(b.Value.Settings)
 					},
@@ -262,6 +272,26 @@ internal static class PortalEndpoints
 			await resolver.EnsureFreshAsync(true, ct);
 			return Results.Ok(new { login, role = role.ToString() });
 		});
+	}
+
+	/// <summary>
+	///   C5: whether <paramref name="roleName" /> has ANY self-service surface at all — the
+	///   account's own provider override wins, exactly as <c>backends/meta</c> resolves it, else
+	///   falling back to the global role assignment. Used to decide whether <c>me</c> may echo the
+	///   role's backend <c>userName</c>: a role the provider keeps fully administered (zero
+	///   <see cref="BackendConfigField.SelfServiceEditable" /> fields) should not disclose who an
+	///   admin bound it to. An unparsable role name never had that surface either.
+	/// </summary>
+	private static bool HasSelfServiceSurface(
+		BackendProviderRegistry registry, BackendRolesConfig roles, string roleName, string? ownProvider)
+	{
+		if (!EndpointHelpers.TryParseRole(roleName, out BackendRole role, out _))
+			return false;
+		string? effectiveProvider = ownProvider
+			?? (roles.Assignments.TryGetValue(role, out RoleAssignment? assignment)
+				? assignment.ProviderName
+				: null);
+		return SelfServiceFields(registry, effectiveProvider, role).Count > 0;
 	}
 
 	/// <summary>
