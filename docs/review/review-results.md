@@ -916,3 +916,49 @@ skipped** (+5) ✓ · live **141 passed, 0 skipped** on a clean-volume Stalwart 
 - Worker implemented `A6` before `A5`, off the item's listed order. Findings are independent here, so no
   consequence.
 - No new findings filed.
+
+---
+
+## Item 20 — State layer performance & Oof concurrency
+**Findings:** `A2` `A3` `A7`
+**Commits:** `28acd66` (A2) · `9e030ad` (A3) · `c90a724` (A7)
+**Verification:** integrity items=32 live=10 assigned=132 unique=132 dupes=0 encoding=0 ✓ · cursor → item
+21 ✓ · one commit per finding, strike with each ✓ · build 0 warnings ✓ · unit **1123 passed, 0 skipped**
+(+3) ✓ · live **141 passed, 0 skipped** on a clean-volume Stalwart ✓
+**Diffs read against the detail entries:**
+- `A2` — the real defect is that `SaveChangesAsync` is atomic, so one href's violation rolls back the
+  whole batch and the single re-read only recovers ids *the racer* created; an href new to this request
+  vanished from the returned map. Now a bounded 5-attempt loop re-stages whatever is still missing after
+  each re-read, and the final attempt's exception propagates instead of being swallowed. Correct, and it
+  keeps `A9`'s "only a unique violation takes this path" narrowing.
+- `A3` — the prescribed catch-`IsUniqueViolation`-and-re-read-as-update idiom, mirroring
+  `DeviceStore.GetOrCreateDeviceAsync`. Field application was factored into `ApplyOofFields` so the
+  recovery path re-applies exactly what the first attempt did.
+- `A7` — both the empty-blob and deserialized paths now build with `StringComparer.Ordinal` explicitly.
+**Notes:**
+- **⚠ `A3`'s red-first was re-established INDEPENDENTLY by me, because the worker's own sequencing went
+  through the banned shape.** The worker wrote a fault-injection test first and saw it red, then found the
+  injected (fake) exception made the fix's recovery path fail for an artificial reason — a real
+  instance of the protocol's "reverting/simulating often doesn't cleanly reproduce" warning. It redesigned
+  the test around a genuine committed competing row, but validated red by reverting the already-written
+  fix, which is exactly the sequence the protocol bans. Rather than accept or reject the claim, I bisected:
+  `git checkout 9e030ad^ -- src/ActiveSync.Core/State/SyncStateService.cs` (source only, test untouched)
+  and ran the test — it failed with an unhandled
+  `DbUpdateException / SQLite Error 19: UNIQUE constraint failed: OofSettings.UserName`, the finding's
+  exact symptom. **The proof stands.** It also survives the "is the test shaped by the fix?" question: it
+  asserts only the symptom (does not throw · exactly one surviving row · this call's fields applied) and
+  references nothing the fix introduced (`ApplyOofFields` is private).
+- **`A3` fixes the INSERT race only — the lost-update case remains.** Two concurrent *updates* to an
+  existing Oof row still have no conflict detection, because `OofSetting` still carries no concurrency
+  token. The finding offered both remedies and the worker chose the non-migration one, which I agree with
+  at this severity, but the finding's title says "no concurrency token / insert-race guard" and only the
+  second half is now closed. Recorded so the strike is not read as more than it is.
+- **`A7` is defensive, not a behaviour fix, and the worker was straight about it**: .NET's default string
+  equality comparer is already ordinal, so no lookup behaviour changes today. The red-first asserts the
+  comparer *object* (`Assert.Same(StringComparer.Ordinal, result.Comparer)`), which is a genuine proof of
+  the structural defect rather than a coverage label.
+- **⚠ Carry to item 28:** `A7`'s fix re-wraps the deserialized dictionary, so `Decompress` now allocates
+  one extra `Dictionary` per call — on the per-sync-round hot path. Item 28's `A14` is specifically about
+  `SnapshotCodec` allocation (serialize straight into the GZip stream); whoever works it should fold this
+  copy into that pass rather than leaving two allocation fixes in tension.
+- No behaviour changes visible to a client. No new findings filed.
