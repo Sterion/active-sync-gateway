@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
+using ActiveSync.Contracts;
 using ActiveSync.Protocol.Wbxml;
 
 namespace ActiveSync.Core.Tests;
@@ -66,6 +67,68 @@ public class CalendarConverterTests
 		Assert.Contains("ACTION:DISPLAY", updated);
 		Assert.Contains("-PT30M", updated);
 		Assert.DoesNotContain("-PT15M", updated); // the old display alarm was replaced, not kept
+	}
+
+	/// <summary>
+	///   D5: DTSTART/DTEND;VALUE=DATE carry no time and no zone — the "date" IS the whole value,
+	///   so reading it must never go through zone-conversion arithmetic. COVERAGE, not red-first
+	///   proof: on the pinned Ical.Net 5.2.3, CalDateTime.AsUtc already special-cases
+	///   HasTime=false internally and returns the correct unshifted midnight for every all-day
+	///   encoding tried (bare VALUE=DATE, with/without an explicit TZID, with/without a
+	///   surrounding VTIMEZONE, regardless of the process's local timezone) — this test passes
+	///   on unmodified code too. The fix makes the nominal-date handling explicit (matching
+	///   TasksConverter's established Nominal() pattern) instead of relying on that internal
+	///   special-case remaining stable across a library upgrade, which is exactly the kind of
+	///   silent, version-dependent breakage the finding warns about.
+	/// </summary>
+	[Fact]
+	public void AllDayEvent_KeepsTheNominalDate_RegardlessOfLocalOrEventZone()
+	{
+		const string ics = """
+		                    BEGIN:VCALENDAR
+		                    VERSION:2.0
+		                    BEGIN:VEVENT
+		                    UID:allday-1
+		                    DTSTART;VALUE=DATE:20260401
+		                    DTEND;VALUE=DATE:20260403
+		                    SUMMARY:All day
+		                    END:VEVENT
+		                    END:VCALENDAR
+		                    """;
+
+		List<XElement>? data = CalendarConverter.ToApplicationData(ics, BodyPreference.PlainText);
+
+		Assert.NotNull(data);
+		string? allDay = data!.FirstOrDefault(e => e.Name == Cal + "AllDayEvent")?.Value;
+		string? start = data.FirstOrDefault(e => e.Name == Cal + "StartTime")?.Value;
+		string? end = data.FirstOrDefault(e => e.Name == Cal + "EndTime")?.Value;
+
+		Assert.Equal("1", allDay);
+		Assert.Equal("20260401T000000Z", start);
+		Assert.Equal("20260403T000000Z", end); // a genuine multi-day DTEND, not the +1h timed fallback
+	}
+
+	[Fact]
+	public void AllDayEvent_MissingDtEnd_DefaultsToOneNominalDay_NotOneHour()
+	{
+		// D5 (adjacent): the DTEND-absent fallback used start + 1 HOUR unconditionally, which is
+		// nonsensical for an all-day event (a timed default makes sense only for timed events).
+		const string ics = """
+		                    BEGIN:VCALENDAR
+		                    VERSION:2.0
+		                    BEGIN:VEVENT
+		                    UID:allday-3
+		                    DTSTART;VALUE=DATE:20260401
+		                    SUMMARY:All day, no DTEND
+		                    END:VEVENT
+		                    END:VCALENDAR
+		                    """;
+
+		List<XElement>? data = CalendarConverter.ToApplicationData(ics, BodyPreference.PlainText);
+
+		Assert.NotNull(data);
+		string? end = data!.FirstOrDefault(e => e.Name == Cal + "EndTime")?.Value;
+		Assert.Equal("20260402T000000Z", end);
 	}
 
 	[Fact]

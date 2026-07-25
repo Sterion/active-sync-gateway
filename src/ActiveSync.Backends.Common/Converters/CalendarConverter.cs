@@ -44,12 +44,19 @@ public static class CalendarConverter
 		bool allDay = master.IsAllDay;
 		data.Add(new XElement(Cal + "AllDayEvent", allDay ? "1" : "0"));
 
-		DateTime? start = ToUtc(master.Start);
-		DateTime? end = ToUtc(master.End) ?? start?.AddHours(1);
+		// D5: an all-day DTSTART/DTEND;VALUE=DATE carries no time and no zone — the date IS the
+		// whole value. Routing it through AsUtc (correct for every timed value) applies
+		// zone-conversion arithmetic to something zoneless; NominalUtc keeps the emitted date
+		// bytes equal to the wire value instead of depending on a library's internal handling of
+		// a zoneless value, matching TasksConverter's established Nominal() pattern. A missing
+		// DTEND likewise defaults to one nominal DAY for an all-day event, not one hour.
+		DateTime? start = allDay ? NominalUtc(master.Start) : ToUtc(master.Start);
 		if (start is null)
 			return null;
+		DateTime defaultEnd = allDay ? start.Value.AddDays(1) : start.Value.AddHours(1);
+		DateTime end = (allDay ? NominalUtc(master.End) : ToUtc(master.End)) ?? defaultEnd;
 		data.Add(new XElement(Cal + "StartTime", EasDateTime.ToCompact(start.Value)));
-		data.Add(new XElement(Cal + "EndTime", EasDateTime.ToCompact(end ?? start.Value.AddHours(1))));
+		data.Add(new XElement(Cal + "EndTime", EasDateTime.ToCompact(end)));
 		data.Add(new XElement(Cal + "DtStamp",
 			EasDateTime.ToCompact(ToUtc(master.DtStamp) ?? DateTime.UtcNow)));
 
@@ -739,5 +746,16 @@ public static class CalendarConverter
 	private static DateTime? ToUtc(CalDateTime? value)
 	{
 		return value?.AsUtc;
+	}
+
+	/// <summary>
+	///   D5: the wall-clock value of an all-day (date-only) CalDateTime, marked as UTC only so
+	///   EasDateTime.ToCompact passes it through unconverted — the all-day counterpart to
+	///   TasksConverter.Nominal(). Never routes a zoneless date through AsUtc's zone-conversion
+	///   arithmetic.
+	/// </summary>
+	private static DateTime? NominalUtc(CalDateTime? value)
+	{
+		return value is null ? null : DateTime.SpecifyKind(value.Value.Date, DateTimeKind.Utc);
 	}
 }
