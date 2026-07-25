@@ -331,3 +331,49 @@ entries** — each touches the named site and implements the stated remedy ✓.
   stay consistent. `TryAddHostName` catches only `ArgumentException` — the exception the red-first test
   actually produced; a different SAN-builder failure mode would still escape. Narrow, accepted.
 - No new findings filed.
+
+---
+
+## Item 10 — Password & throttle robustness
+**Findings:** `K3` `K8` `K9` `K15`
+**Commits:** `e53b00f` (K3 + K15 — tight cluster, same `TryParse` validation block) · `501c069` (K9 + K8 —
+tight cluster, same `Prune`/`RecordFailure` lines) · `2d865cc` (queue-line strike — see deviation note)
+**Verification:** integrity items=32 live=10 assigned=unique=132 dupes=0 encoding=0 ✓ · cursor → item 11 ✓ ·
+all four IDs in commit subjects ✓ · build clean (0 warnings) ✓ · unit suite **1071 passed, 0 skipped**
+(Protocol 85 · Core 660 · WebUi 73 · Server 253; +4 over item 9 — exactly the tests added) ✓ · **live suite
+(independent, full, fresh clean-volume Stalwart): 141 passed, 0 skipped** ✓ (not marked [LIVE], but this
+changes authentication — the unmarked-item rule applies) · **all four diffs read against their detail
+entries** ✓.
+**Notes:**
+- **Tight-cluster commits accepted.** K3+K15 are two guards in the same `TryParse` validation block;
+  K9+K8 rewrite the same `Prune` lines (K9 injects the clock, K8 makes the stamp atomic). Splitting either
+  would have committed an artificial intermediate state. Protocol step 2 permits a tight cluster; all IDs
+  are in the subjects.
+- **K3, K15, K9 proven red-first; K8 is coverage (justified).** A torn 8-byte `DateTime` read needs a
+  32-bit process to trigger deterministically and this suite runs 64-bit, so the original symptom cannot be
+  exhibited; the replacement test drives the fixed `Interlocked` cadence under real concurrency (32 threads
+  × 500 keys). Correctly labelled in the test comment, the commit body and the worker's report.
+- **K9's red is compile-level, and I accept it as red-first.** The new test calls a two-argument
+  `AuthThrottle` constructor that does not exist on unmodified code (`CS1729`). For a *testability*
+  finding whose symptom is literally "the rate limiter cannot be constructed with a controllable clock",
+  a compile failure is the symptom. Weaker than a behavioural red, so recorded explicitly rather than
+  glossed — after the fix the same test asserts window expiry off the injected clock.
+- **Worth recording: the worker caught its own slow test.** K3's first reproducer called
+  `Hash(iterations: 2_000_000_000)` and genuinely ran PBKDF2 at that count — it went red, but took 3m49s.
+  Rewritten to hand-assemble the stored string from a cheap default-iteration hash, red now runs in 30ms.
+  The finding is still proven (parse rejects the count without executing it), and the suite is not
+  poisoned with a four-minute test.
+- **Breaking (internal only):** `AuthThrottle`'s constructor now requires a `TimeProvider`. DI-only type,
+  no plugin surface, no persisted state; `TimeProvider.System` registered in `ProgramServer` and in the
+  WebUi test host. I checked every construction site — the two in tests are updated, production goes
+  through the DI singleton, none left unwired.
+- **Behaviour change (disclosed):** `TryParse` now rejects `iterations > 10_000_000` and salt/hash below
+  16/32 bytes. `Hash()` never produced such a value, so only an externally-supplied or lower-privilege-
+  written `pbkdf2$` row is affected — which is precisely K3/K15's threat model.
+- **Judgment call (K15) — `>=` rather than exact equality.** Permits a *stronger* externally-supplied
+  value and rejects only weaker ones, per the detail's "enforce the generator's own sizes" wording.
+  Reasonable either way; exact equality would also have been defensible.
+- **PROCESS DEVIATION REPEATED (worker self-disclosed):** the queue-line strike again landed as its own
+  commit (`2d865cc`) rather than with each finding — identical to item 9. Two independent workers making
+  the same deviation is a signal about the instruction, not about either worker; see the run summary.
+- No new findings filed.
