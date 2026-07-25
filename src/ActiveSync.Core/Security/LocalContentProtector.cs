@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Crypto;
 
 namespace ActiveSync.Core.Security;
 
@@ -18,8 +19,6 @@ public sealed class LocalContentProtector : IDisposable
 {
 	public const string FormatPrefix = "v1:";
 
-	private const int NonceSize = 12;
-	private const int TagSize = 16;
 	private const int KeySize = 32;
 
 	private readonly byte[]? _key;
@@ -52,16 +51,7 @@ public sealed class LocalContentProtector : IDisposable
 		if (_key is null)
 			return plaintext;
 
-		byte[] plaintextBytes = Encoding.UTF8.GetBytes(plaintext);
-		byte[] payload = new byte[NonceSize + plaintextBytes.Length + TagSize];
-		Span<byte> nonce = payload.AsSpan(0, NonceSize);
-		Span<byte> ciphertext = payload.AsSpan(NonceSize, plaintextBytes.Length);
-		Span<byte> tag = payload.AsSpan(NonceSize + plaintextBytes.Length, TagSize);
-
-		RandomNumberGenerator.Fill(nonce);
-		using AesGcm aes = new(_key, TagSize);
-		aes.Encrypt(nonce, plaintextBytes, ciphertext, tag, Aad(userName, collection));
-		return FormatPrefix + Convert.ToBase64String(payload);
+		return SealedBlob.Seal(FormatPrefix, Aad(userName, collection), _key, plaintext);
 	}
 
 	/// <summary>
@@ -76,38 +66,17 @@ public sealed class LocalContentProtector : IDisposable
 	{
 		if (_key is null)
 			return stored;
-		if (!stored.StartsWith(FormatPrefix, StringComparison.Ordinal))
-			throw UndecryptableRow(null);
 
-		byte[] payload;
-		try
+		if (SealedBlob.TryUnseal(FormatPrefix, Aad(userName, collection), _key, stored,
+			    out string? plaintext, out SealedBlobError error, out Exception? inner))
+			return plaintext!;
+
+		throw error switch
 		{
-			payload = Convert.FromBase64String(stored[FormatPrefix.Length..]);
-		}
-		catch (FormatException ex)
-		{
-			throw UndecryptableRow(ex);
-		}
-
-		if (payload.Length < NonceSize + TagSize)
-			throw UndecryptableRow(null);
-
-		ReadOnlySpan<byte> nonce = payload.AsSpan(0, NonceSize);
-		ReadOnlySpan<byte> ciphertext = payload.AsSpan(NonceSize, payload.Length - NonceSize - TagSize);
-		ReadOnlySpan<byte> tag = payload.AsSpan(payload.Length - TagSize, TagSize);
-		byte[] plaintextBytes = new byte[ciphertext.Length];
-
-		try
-		{
-			using AesGcm aes = new(_key, TagSize);
-			aes.Decrypt(nonce, ciphertext, tag, plaintextBytes, Aad(userName, collection));
-		}
-		catch (CryptographicException ex)
-		{
-			throw UndecryptableRow(ex);
-		}
-
-		return Encoding.UTF8.GetString(plaintextBytes);
+			SealedBlobError.InvalidBase64 => UndecryptableRow(inner),
+			SealedBlobError.AuthenticationFailed => UndecryptableRow(inner),
+			_ => UndecryptableRow(null),
+		};
 	}
 
 	public void Dispose()

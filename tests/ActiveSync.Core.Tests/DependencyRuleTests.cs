@@ -111,6 +111,27 @@ public sealed class DependencyRuleTests
 		Assert.Contains("ActiveSync.Core.csproj", csproj);
 	}
 
+	// S2 / K11: SecretValue (Crypto) and LocalContentProtector (Core/Security) each hand-roll the
+	// identical AES-256-GCM nonce‖ct‖tag framing independently — same NonceSize/TagSize,
+	// RandomNumberGenerator.Fill + `using AesGcm aes = new(key, TagSize)` + base64+prefix
+	// seal/unseal, differing only in prefix and AAD. A framing fix (constant-time handling, a v2
+	// format, a nonce-reuse audit) would have to land in both assemblies or silently diverge. Both
+	// callers must delegate to one shared primitive rather than constructing AesGcm themselves —
+	// read the source directly, the way S1's csproj check does, since a compiled-assembly check
+	// can't distinguish "shares an AesGcm call" from "shares an AesGcm framing implementation".
+	[Fact]
+	public void SecretValueAndLocalContentProtector_DoNotConstructAesGcmThemselves()
+	{
+		string repoRoot = FindRepoRoot();
+		string secretValueSource = File.ReadAllText(
+			Path.Combine(repoRoot, "src", "ActiveSync.Crypto", "SecretValue.cs"));
+		string protectorSource = File.ReadAllText(
+			Path.Combine(repoRoot, "src", "ActiveSync.Core", "Security", "LocalContentProtector.cs"));
+
+		Assert.DoesNotContain("AesGcm aes = new", secretValueSource);
+		Assert.DoesNotContain("AesGcm aes = new", protectorSource);
+	}
+
 	private static string FindRepoRoot()
 	{
 		DirectoryInfo? dir = new(AppContext.BaseDirectory);

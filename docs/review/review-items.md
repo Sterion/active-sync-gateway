@@ -229,7 +229,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **14. Explicit Core reference & CLI testability** — ~~`S1`~~ ~~`S8`~~ **COMPLETE**
 > `S1` Server depends on Core pervasively but references it only transitively (an accident of the backend/WebUi references) — add the explicit ProjectReference. `S8` the slim `eas` client (holds the master key, gates admin commands) has no test project and no namespace — extract the forwarding logic from top-level `Program.cs` into a testable class and add `ActiveSync.Cli.Tests`.
 
-**15. Unify AES-GCM framing** — `S2` `K11`
+**15. Unify AES-GCM framing** — ~~`S2`~~ ~~`K11`~~ **COMPLETE**
 > The `nonce‖ct‖tag` framing is hand-rolled twice (`SecretValue` in Crypto, `LocalContentProtector` in Core/Security). Extract one `SealedBlob` primitive into `ActiveSync.Crypto` taking `(prefix, aad, key)`; both callers use it, distinct prefixes/AAD preserved as arguments. **Do this before item 1 lands its K1/K2 crypto edits if scheduling allows — but K1/K2 can also go first; if so, re-home them here.** Core already references Crypto.
 
 **16. Consolidate the redirect follower** [LIVE] — `S3`
