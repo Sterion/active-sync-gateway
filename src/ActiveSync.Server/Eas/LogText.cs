@@ -1,9 +1,14 @@
+using ActiveSync.Protocol;
+
 namespace ActiveSync.Server.Eas;
 
 /// <summary>
 ///   Sanitizes client-supplied strings (usernames, device ids, commands, mail headers)
-///   before they are embedded in log output: control characters would let a hostile client
-///   forge log lines or smuggle terminal escape sequences into the console.
+///   before they are embedded in log output: unsafe characters would let a hostile client
+///   forge log lines, smuggle terminal escape sequences, or visually reorder a log line.
+///   Single-field values never carry line structure, so every control character (including
+///   CR/LF/TAB) is neutralized — unlike <see cref="WireLog.Payload" />'s multi-line dumps,
+///   see <see cref="WireLog.IsUnsafe" /> (S6/K21: the one shared classifier).
 /// </summary>
 public static class LogText
 {
@@ -18,7 +23,7 @@ public static class LogText
 		int bad = -1;
 		for (int i = 0; i < span.Length; i++)
 		{
-			if (IsUnsafe(span[i]))
+			if (WireLog.IsUnsafe(span[i], allowLineStructure: false))
 			{
 				bad = i;
 				break;
@@ -29,19 +34,7 @@ public static class LogText
 		return string.Create(text.Length, text, static (dest, source) =>
 		{
 			for (int i = 0; i < source.Length; i++)
-				dest[i] = IsUnsafe(source[i]) ? '?' : source[i];
+				dest[i] = WireLog.IsUnsafe(source[i], allowLineStructure: false) ? '?' : source[i];
 		});
-	}
-
-	/// <summary>
-	///   A character that must not reach a log line verbatim: control characters (escape
-	///   sequences, newline injection) and the Unicode bidirectional overrides/isolates
-	///   (U+202A-202E, U+2066-2069). The latter are format characters — NOT
-	///   <see cref="char.IsControl(char)" /> — so a hostile username could visually reorder
-	///   the rest of a log line without them.
-	/// </summary>
-	private static bool IsUnsafe(char c)
-	{
-		return char.IsControl(c) || c is (>= '‪' and <= '‮') or (>= '⁦' and <= '⁩');
 	}
 }

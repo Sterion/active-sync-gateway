@@ -235,7 +235,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **16. Consolidate the redirect follower** [LIVE] — ~~`S3`~~ **COMPLETE**
 > `SendFollowingRedirectsAsync` + `IsSafeRedirect` are verbatim twins in `WebDavClient` and `JmapClient` — the security-sensitive same-origin credential-forwarding logic in two places (the JMAP copy's comment even says "Mirrors WebDavClient"). Move into `Backends.Common` (a `RedirectingHttpSender`); relocate the `IsSafeRedirect` unit test with it. Verify both DAV and JMAP live.
 
-**17. Log-scrubbers, free/busy & WireLog placement** — `S6` `K21` ~~`S5`~~ ~~`S9`~~
+**17. Log-scrubbers, free/busy & WireLog placement** — ~~`S6`~~ ~~`K21`~~ ~~`S5`~~ ~~`S9`~~ **COMPLETE**
 > `S6`/`K21` the two log-scrubbers (`WireLog.Payload`, `LogText.Clean`) duplicate the character-safety core and the bidi-override defense exists on only one path — route both through one classifier, extend bidi-stripping to payloads. `S5` `MergedFreeBusy` is host-only output — move to Core (and correct AGENTS.md) so Contracts carries only what a plugin builds. `S9` `WireLog` is incidental host utility in the published contract — move down to Protocol (BCL-only). **Breaking Contracts surface — acceptable.**
 
 **18. Namespace coherence & JmapMailStore split** — `S7` `S4`

@@ -47,4 +47,21 @@ public sealed class WireLogTests
 		const string text = "<Sync>\n\t<Status>1</Status>\n</Sync>";
 		Assert.Same(text, WireLog.Payload(text));
 	}
+
+	// S6/K21: bidi-override characters (U+202A-202E, U+2066-2069) reorder a wire-log dump's visible
+	// content, the same smuggling risk LogTextTests.BidiOverrideCharacters_AreNeutralized covers for
+	// LogText.Clean — but that defense existed on only the Clean path, not here. A hostile SendMail
+	// Subject/body or DAV property containing a bidi override would ride straight through Payload
+	// (they are Unicode format chars, NOT char.IsControl, so the control-only scan let them through)
+	// into the Trace log line.
+	[Fact]
+	public void Payload_BidiOverrideCharacters_AreNeutralized()
+	{
+		// Right-to-Left Override (U+202E) and Pop Directional Isolate (U+2069):
+		Assert.DoesNotContain('‮', WireLog.Payload("Subject: admin‮evil"));
+		Assert.DoesNotContain('⁩', WireLog.Payload("a⁩b"));
+		Assert.DoesNotContain('‪', WireLog.Payload("a‪b"));
+		Assert.DoesNotContain('⁦', WireLog.Payload("a⁦b"));
+		Assert.Equal("admin?evil", WireLog.Payload("admin‮evil"));
+	}
 }
