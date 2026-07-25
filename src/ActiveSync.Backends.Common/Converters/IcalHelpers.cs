@@ -2,7 +2,7 @@ using ActiveSync.Contracts;
 using Ical.Net;
 using Ical.Net.Serialization;
 
-namespace ActiveSync.Backends.Converters;
+namespace ActiveSync.Backends.Common.Converters;
 
 /// <summary>Ical.Net load/serialize boilerplate shared by the calendar, task and note converters.</summary>
 internal static class IcalHelpers

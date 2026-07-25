@@ -11,7 +11,7 @@ using Ical.Net.DataTypes;
 // as CalendarConverter).
 #pragma warning disable CS0618
 
-namespace ActiveSync.Backends.Converters;
+namespace ActiveSync.Backends.Common.Converters;
 
 /// <summary>
 ///   iCalendar VTODO ↔ EAS Tasks-class ApplicationData (MS-ASTASK). Recurrence maps both

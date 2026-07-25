@@ -91,20 +91,34 @@ public sealed class DependencyRuleTests
 		Assert.NotNull(protocol.GetType("ActiveSync.Protocol.WireLog"));
 	}
 
-	// S8: ActiveSync.Backends.Common is a published, plugin-facing package. Its types must sit under a
-	// coherent namespace set — the assembly-named ActiveSync.Backends.Common (its helpers) or the
-	// purpose-named ActiveSync.Backends.Converters (the EAS converters). ServerCertificateValidator was
-	// the odd one out in the bare ActiveSync.Backends root — a namespace that conceptually belongs to
-	// the sibling backend assemblies (Imap/Dav/…), forcing consumers to guess a third using for one
-	// assembly. This guards against any type drifting back out of the two sanctioned namespaces.
+	// S7: the converter namespace (ActiveSync.Backends.Converters) was a second, unrelated root inside
+	// the ActiveSync.Backends.Common assembly, alongside the assembly-named ActiveSync.Backends.Common
+	// root everything else in the assembly uses — one assembly, two namespace roots, neither matching
+	// the assembly name. Renaming it to ActiveSync.Backends.Common.Converters (folder-aligned, a child
+	// of the assembly's own root) fixes that; this proves the old root is gone and the new one exists.
+	[Fact]
+	public void ConverterTypes_UseTheCommonAssemblyRootNamespace()
+	{
+		System.Reflection.Assembly common = typeof(MailKitWireLogger).Assembly;
+
+		Assert.Null(common.GetType("ActiveSync.Backends.Converters.ContactConverter"));
+		Assert.NotNull(common.GetType("ActiveSync.Backends.Common.Converters.ContactConverter"));
+	}
+
+	// S8 (round 1), narrowed by S7 (round 2): ActiveSync.Backends.Common is a published, plugin-facing
+	// package. Its types must sit under the one assembly-named root, ActiveSync.Backends.Common —
+	// S7 folded the former second root (ActiveSync.Backends.Converters) into it as a child namespace,
+	// so a single StartsWith now covers both the helpers and the converters. ServerCertificateValidator
+	// was the odd one out in the bare ActiveSync.Backends root — a namespace that conceptually belongs
+	// to the sibling backend assemblies (Imap/Dav/…), forcing consumers to guess a third using for one
+	// assembly. This guards against any type drifting back out of the one sanctioned root.
 	[Fact]
 	public void BackendsCommon_TypesUseCoherentNamespaces()
 	{
 		string[] offenders = typeof(MailKitWireLogger).Assembly
 			.GetExportedTypes()
 			.Where(static t => t.Namespace is null ||
-				!(t.Namespace.StartsWith("ActiveSync.Backends.Common", StringComparison.Ordinal) ||
-					t.Namespace.StartsWith("ActiveSync.Backends.Converters", StringComparison.Ordinal)))
+				!t.Namespace.StartsWith("ActiveSync.Backends.Common", StringComparison.Ordinal))
 			.Select(static t => t.FullName!)
 			.OrderBy(static n => n, StringComparer.Ordinal)
 			.ToArray();

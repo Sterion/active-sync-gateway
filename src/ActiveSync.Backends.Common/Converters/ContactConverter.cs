@@ -9,7 +9,7 @@ using FolkerKinzel.VCards.Extensions;
 using FolkerKinzel.VCards.Models;
 using FolkerKinzel.VCards.Models.Properties;
 
-namespace ActiveSync.Backends.Converters;
+namespace ActiveSync.Backends.Common.Converters;
 
 /// <summary>vCard ↔ EAS Contacts-class ApplicationData (MS-ASCNTC).</summary>
 public static class ContactConverter

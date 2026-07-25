@@ -9,7 +9,7 @@ using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using MimeKit;
 
-namespace ActiveSync.Backends.Converters;
+namespace ActiveSync.Backends.Common.Converters;
 
 /// <summary>Converts MIME messages to EAS Email-class ApplicationData (MS-ASEMAIL / MS-ASAIRS).</summary>
 public static class MailConverter

@@ -6,7 +6,7 @@ using Ical.Net;
 using Ical.Net.CalendarComponents;
 using Ical.Net.DataTypes;
 
-namespace ActiveSync.Backends.Converters;
+namespace ActiveSync.Backends.Common.Converters;
 
 /// <summary>iCalendar VJOURNAL ↔ EAS Notes-class ApplicationData (MS-ASNOTES).</summary>
 public static class NotesConverter

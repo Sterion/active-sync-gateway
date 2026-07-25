@@ -1,4 +1,4 @@
-namespace ActiveSync.Backends.Converters;
+namespace ActiveSync.Backends.Common.Converters;
 
 /// <summary>
 ///   Dav:CalendarAttachments mode → per-attachment byte cap. Attachments are stored inline

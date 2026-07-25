@@ -3,7 +3,7 @@ using Ical.Net.CalendarComponents;
 using Ical.Net.DataTypes;
 using MimeKit;
 
-namespace ActiveSync.Backends.Converters;
+namespace ActiveSync.Backends.Common.Converters;
 
 /// <summary>
 ///   iMIP (RFC 6047) mail assembly: METHOD:REQUEST wraps the stored event verbatim (minus

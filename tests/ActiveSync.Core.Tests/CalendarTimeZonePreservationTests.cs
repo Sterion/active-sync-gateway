@@ -1,5 +1,5 @@
 using System.Xml.Linq;
-using ActiveSync.Backends.Converters;
+using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Protocol.Wbxml;
 
 namespace ActiveSync.Core.Tests;

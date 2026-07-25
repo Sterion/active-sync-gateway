@@ -13,7 +13,7 @@ using Ical.Net.Serialization;
 // Ical.Net matches what the protocol can carry.
 #pragma warning disable CS0618
 
-namespace ActiveSync.Backends.Converters;
+namespace ActiveSync.Backends.Common.Converters;
 
 /// <summary>iCalendar VEVENT ↔ EAS Calendar-class ApplicationData (MS-ASCAL).</summary>
 public static class CalendarConverter

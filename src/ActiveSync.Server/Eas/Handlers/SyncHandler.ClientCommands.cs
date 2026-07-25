@@ -317,7 +317,7 @@ public sealed partial class SyncHandler
 		}
 
 		MimeKit.MimeMessage message =
-			ActiveSync.Backends.Converters.DraftMessageBuilder.Build(appData, original, context.Session.MailAddress);
+			ActiveSync.Backends.Common.Converters.DraftMessageBuilder.Build(appData, original, context.Session.MailAddress);
 		using MemoryStream buffer = new();
 		await message.WriteToAsync(buffer, ct);
 		byte[] mime = buffer.ToArray();
