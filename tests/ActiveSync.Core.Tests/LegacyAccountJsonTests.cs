@@ -120,4 +120,18 @@ public sealed class LegacyAccountJsonTests
 		Assert.Equal("sieve", oof.Provider); // enabled:true was the per-user opt-in
 		Assert.Equal("sieve.x", oof.Settings!["host"]);
 	}
+
+	[Fact]
+	public void SieveOptIn_WithNoHost_DoesNotProduceAnUnauthenticableOofOverride()
+	{
+		// B7: sieve.enabled:true with no Host used to unconditionally set Provider="sieve" — an
+		// override the sieve provider's ValidateConfiguration then rejects (Host is required), and
+		// (per B3) an invalid DATABASE row fails the WHOLE account closed, not just Oof. A legacy
+		// user who relied on the old "defaults to the IMAP host" convenience came back from the
+		// upgrade unable to log in at all. The upgrade must not opt a user into an Oof override it
+		// cannot authenticate. (A userName key is included so the section converts to a non-null
+		// override at all — enabled:true alone, with nothing else, already converts to nothing.)
+		AccountOptions converted = Convert("""{"sieve":{"enabled":true,"userName":"sieve-user"}}""");
+		Assert.False(converted.Backends?.ContainsKey("Oof") ?? false);
+	}
 }

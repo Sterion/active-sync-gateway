@@ -105,10 +105,38 @@ public static class LegacyAccountJson
 				// enabled:true was the per-user opt-in; the new equivalent is naming the
 				// provider (which then requires an explicit Host — the "defaults to the
 				// IMAP host" convenience is gone).
-				if (TryGetCaseInsensitive(sieve, "enabled", out JsonElement sieveEnabled) &&
-				    sieveEnabled.ValueKind == JsonValueKind.True)
-					oof.Provider = "sieve";
-				converted.Backends["Oof"] = oof;
+				bool wasEnabled = TryGetCaseInsensitive(sieve, "enabled", out JsonElement sieveEnabled) &&
+				                  sieveEnabled.ValueKind == JsonValueKind.True;
+				if (wasEnabled)
+				{
+					// B7: setting Provider="sieve" unconditionally produced an override the sieve
+					// provider's ValidateConfiguration then rejects when no Host survived the
+					// conversion (Host is required) — and, per B3, an invalid DATABASE row now fails
+					// the WHOLE account closed, not just Oof. A legacy user who relied on the old
+					// "defaults to the IMAP host" convenience would come back from the upgrade unable
+					// to log in at all. Only opt in when a Host is present; otherwise leave Oof
+					// unconfigured for this user (the rest of the account keeps working) and log an
+					// actionable hint rather than silently producing an un-authenticable account.
+					bool hasHost = oof.Settings?.Keys.Any(
+						k => k.Equals("Host", StringComparison.OrdinalIgnoreCase)) == true;
+					if (hasHost)
+					{
+						oof.Provider = "sieve";
+						converted.Backends["Oof"] = oof;
+					}
+					else
+					{
+						logger?.LogWarning(
+							"Legacy account row had sieve.enabled=true with no Host; the upgraded role " +
+							"model requires one explicitly, so Oof was left unconfigured for this user " +
+							"instead of producing an un-authenticable account. Set " +
+							"Backends:Oof:Settings:Host (or a per-user Backends:Oof override) to restore it.");
+					}
+				}
+				else
+				{
+					converted.Backends["Oof"] = oof;
+				}
 			}
 
 			if (converted.Backends.Count == 0)
