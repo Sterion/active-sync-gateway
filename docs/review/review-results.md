@@ -502,6 +502,24 @@ deviation itself) · build clean (0 warnings) ✓ · unit **1085 passed, 0 skipp
 - **HUMAN RULING (post-run):** C5 un-struck, item 12 marked **PARTIAL**, finding re-scoped in
   `review-items.md` (commit `7e97b2f`). The C2 regression filed as **`C10`** under "Found while working the
   queue", not yet assigned to an item.
+- **C5 FINAL DISPOSITION — closed `N/A`, no code change, item 12 now COMPLETE.** After the re-scope I read
+  the account model to cost the "proper" fix and reversed my own earlier position; the human ruled N/A on
+  that basis. The reasoning, recorded in full on the finding itself:
+  1. **The caller can already overwrite this field unconditionally**, and if they do, *their own sync
+     breaks until an admin repairs it*. Echoing the value is what stops a user destroying a credential
+     they can already destroy blind — withholding it makes the portal more dangerous, not less. This, not
+     the repair agent's weaker "can overwrite ⇒ may read" inference, is what settles it.
+  2. **The model has no per-field provenance.** `BackendRoleOverride` is both config-bound
+     (`ActiveSync:Users`) and JSON-serialized into `AccountEntry`, so a `UserNameSetBySelf` flag would be
+     settable-but-meaningless in appsettings and would need a clear-on-every-admin-write invariant that
+     drifts silently the first time a write path forgets. A provenance flag that fails open is worse than
+     no flag, because it reads as closed.
+  3. **Legacy rows have no good default** — fail-closed hides every pre-upgrade self-set username from its
+     owner; fail-open keeps disclosing admin-set ones.
+  4. **Severity is Low** and the password half of the pair is already masked (`passwordSet` bool).
+  **Process note:** I wrote this closure as orchestrator, which means no independent party verified it.
+  There is no code to verify — the change is documentation only, `git status` confirms no `src/` or
+  `tests/` file was touched — but the *judgement* is unreviewed, and that is worth knowing.
 
 ---
 
@@ -557,9 +575,9 @@ mechanical) — nothing outside the items' clusters ✓
 unit **1093 passed, 0 skipped** (from 1059 at the start of the run; +34) ✓ · live **141 passed, 0 skipped**
 on a fresh clean-volume Stalwart ✓
 **Carried forward:**
-- **Item 12 is PARTIAL. `C5` is OPEN and re-scoped** — it is the lowest-numbered unstruck finding, so the
-  cursor resolves to item 12, not 14. A resuming orchestrator must decide C5 (close `N/A` with reasoning,
-  or add per-field provenance) before treating Phase 2 as done.
+- **~~Item 12 is PARTIAL. `C5` is OPEN~~ — RESOLVED. `C5` closed `N/A` by human decision (see the item 12
+  entry above); item 12 is COMPLETE and the cursor now advances to item 14.** Phase 2 is done: items 9–13
+  all landed, 20 findings fixed and 1 closed N/A.
 - **`C10` is filed but unassigned** — the admin Backends "Test connection" regression introduced by `C2`.
   High by this document's scale. Needs an item.
 - **`K10` is half-closed** (see item 13 notes): `Validate` still rejects pipe-containing hrefs that `Parse`
