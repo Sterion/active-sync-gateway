@@ -151,6 +151,29 @@ public sealed class TlsCertificateResolverTests : IDisposable
 	}
 
 	[Fact]
+	public async Task Describe_External_CalledRepeatedly_KeepsReturningCorrectKeySize()
+	{
+		// K18 COVERAGE (not proof): Describe's KeySize read via GetRSAPublicKey()/
+		// GetECDsaPublicKey()/GetDSAPublicKey() leaked the returned AsymmetricAlgorithm's native
+		// handle (none were disposed) — reachable from the admin TLS panel / `eas tls`, both of
+		// which can poll it repeatedly. A leaked native handle has no directly observable symptom
+		// in a unit test (it shows up as accumulated OS handles under sustained polling, not a
+		// value a single call can assert on); this guards that reading KeySize through a
+		// dispose-after-use pattern still returns the correct value across repeated calls.
+		ActiveSyncOptions options = new() { Encryption = new EncryptionOptions { AllowPlaintext = true } };
+		options.Tls.CertificatePath = _pemCert;
+		options.Tls.CertificateKeyPath = _pemKey;
+		TlsCertificateResolver resolver = Resolver(options, out _);
+
+		for (int i = 0; i < 25; i++)
+		{
+			TlsCertificateInfo info = await resolver.DescribeAsync(NullLogger.Instance, CancellationToken.None);
+			Assert.Equal("RSA", info.KeyAlgorithm);
+			Assert.Equal(2048, info.KeySize);
+		}
+	}
+
+	[Fact]
 	public async Task Describe_External_ReturnsDetails_NoError()
 	{
 		ActiveSyncOptions options = new()

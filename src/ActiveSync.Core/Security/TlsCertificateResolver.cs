@@ -217,9 +217,12 @@ public sealed class TlsCertificateResolver(
 			}
 		}
 
-		int? keySize = cert.GetRSAPublicKey()?.KeySize
-		               ?? cert.GetECDsaPublicKey()?.KeySize
-		               ?? cert.GetDSAPublicKey()?.KeySize;
+		// K18: Get{RSA,ECDsa,DSA}PublicKey() each return a fresh AsymmetricAlgorithm backed by a
+		// native key handle — reading KeySize without disposing it leaks that handle on every
+		// call (DescribeAsync is reachable from the admin TLS panel / `eas tls`, both pollable).
+		int? keySize = KeySizeOf(cert.GetRSAPublicKey())
+		               ?? KeySizeOf(cert.GetECDsaPublicKey())
+		               ?? KeySizeOf(cert.GetDSAPublicKey());
 
 		return new TlsCertificateInfo(
 			tls.Enabled, tls.Port, source, path,
@@ -228,5 +231,16 @@ public sealed class TlsCertificateResolver(
 			GatewayCertificateStore.Fingerprint(cert),
 			new Oid(cert.GetKeyAlgorithm()).FriendlyName ?? cert.GetKeyAlgorithm(),
 			keySize, null);
+	}
+
+	/// <summary>
+	///   Reads <c>KeySize</c> off a public-key handle and disposes it (K18) — the
+	///   <c>Get{RSA,ECDsa,DSA}PublicKey()</c> family each allocate a fresh <see cref="AsymmetricAlgorithm" />
+	///   backed by a native key handle that the caller owns.
+	/// </summary>
+	private static int? KeySizeOf(AsymmetricAlgorithm? key)
+	{
+		using (key)
+			return key?.KeySize;
 	}
 }
