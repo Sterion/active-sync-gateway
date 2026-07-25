@@ -62,7 +62,7 @@ LABEL org.opencontainers.image.title="ActiveSync Gateway" \
       org.opencontainers.image.url="https://github.com/Sterion/active-sync-gateway" \
       org.opencontainers.image.documentation="https://github.com/Sterion/active-sync-gateway#readme" \
       org.opencontainers.image.authors="Ruben Andersen" \
-      org.opencontainers.image.vendor="Sterion" \
+      org.opencontainers.image.vendor="Ruben Andersen" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}"
 

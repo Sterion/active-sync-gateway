@@ -268,7 +268,7 @@ jobs:
             org.opencontainers.image.description=Exchange ActiveSync 16.1 gateway to IMAP/SMTP, JMAP, CalDAV/CardDAV and ManageSieve backends.
             org.opencontainers.image.licenses=PolyForm-Noncommercial-1.0.0
             org.opencontainers.image.authors=Ruben Andersen
-            org.opencontainers.image.vendor=Sterion
+            org.opencontainers.image.vendor=Ruben Andersen
 
       - name: Login to ghcr.io
         uses: docker/login-action@v4

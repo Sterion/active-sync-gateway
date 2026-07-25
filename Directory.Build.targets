@@ -12,8 +12,11 @@
 	     no repository metadata at all. The SourceLink ItemGroup can stay in .props because ITEMS
 	     are evaluated after every property, so its identical condition resolves correctly. -->
 	<PropertyGroup Condition="'$(IsPackable)' == 'true'">
-		<Authors>Sterion</Authors>
-		<Company>Sterion</Company>
+		<!-- Authors/Company are the legal identity, not the GitHub handle: "Sterion" is a
+		     personal alias and not an entity, so it stays only in the repository URLs below.
+		     Keep these in step with <Copyright> in Directory.Build.props. -->
+		<Authors>Ruben Andersen</Authors>
+		<Company>Ruben Andersen</Company>
 		<Product>ActiveSync Gateway</Product>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 		<PackageProjectUrl>https://github.com/Sterion/active-sync-gateway</PackageProjectUrl>
