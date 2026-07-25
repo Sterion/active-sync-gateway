@@ -109,6 +109,42 @@ public class JsContactConverterTests
 		Assert.StartsWith("1815-12-10", birthday);
 	}
 
+	// H4: "anniversaries" is a Managed top-level member (rewritten from the payload on every
+	// edit), but the writer only ever produces the "birth" entry from EAS Birthday — any other
+	// kind already on the card (e.g. a wedding anniversary; EAS carries it as
+	// contacts2:Anniversary, which this bridge does not read/write) was silently dropped on
+	// every edit instead of being carried over.
+	[Fact]
+	public void FromApplicationData_PreservesNonBirthAnniversaries_OnUpdate()
+	{
+		const string existingCardJson = """
+		{
+		  "@type": "Card", "version": "1.0", "kind": "individual",
+		  "anniversaries": {
+		    "b": { "@type": "Anniversary", "kind": "birth",
+		           "date": { "@type": "Timestamp", "utc": "1815-12-10T00:00:00Z" } },
+		    "w": { "@type": "Anniversary", "kind": "wedding",
+		           "date": { "@type": "Timestamp", "utc": "1840-06-01T00:00:00Z" } }
+		  }
+		}
+		""";
+		JsonElement existingCard = JsonDocument.Parse(existingCardJson).RootElement;
+
+		// An edit to an unrelated field; the client resends the unchanged Birthday too (managed
+		// fields are full-replace), so only "anniversaries" itself is at risk of being clobbered.
+		XElement app = new("ApplicationData",
+			new XElement(C + "FirstName", "Ada"),
+			new XElement(C + "LastName", "Lovelace"),
+			new XElement(C + "Birthday", "1815-12-10T00:00:00.000Z"));
+
+		Dictionary<string, object?> card = JsContactConverter.FromApplicationData(app, existingCard);
+		JsonElement rebuilt = JsonSerializer.SerializeToElement(card);
+
+		JsonElement anniversaries = rebuilt.GetProperty("anniversaries");
+		Assert.Equal("wedding", anniversaries.GetProperty("w").GetProperty("kind").GetString());
+		Assert.Equal("birth", anniversaries.GetProperty("b").GetProperty("kind").GetString());
+	}
+
 	[Fact]
 	public void RoundTrip_EasToJsContactToEas_PreservesFields()
 	{

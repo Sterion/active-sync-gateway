@@ -252,20 +252,33 @@ public static class JsContactConverter
 				["n"] = new Dictionary<string, object?> { ["name"] = nick }
 			};
 
+		// Anniversaries: only "birth" is rewritten from the EAS Birthday field below. Any other
+		// kind (e.g. a wedding anniversary — EAS carries it as contacts2:Anniversary, which this
+		// bridge does not read/write) has no EAS-side representation to rebuild it from, so it is
+		// carried over from the existing card rather than dropped — "anniversaries" is Managed,
+		// so without this it is nulled/overwritten on every edit (H4).
+		Dictionary<string, object?> anniversaries = new();
+		if (existing is { ValueKind: JsonValueKind.Object } priorCard &&
+		    priorCard.TryGetProperty("anniversaries", out JsonElement priorAnniversaries) &&
+		    priorAnniversaries.ValueKind == JsonValueKind.Object)
+			foreach (JsonProperty entry in priorAnniversaries.EnumerateObject())
+				if (Str(entry.Value, "kind") != "birth")
+					anniversaries[entry.Name] = JsonSerializer.Deserialize<object>(entry.Value.GetRawText());
+
 		if (V("Birthday") is { } birthday && EasDateTime.TryParse(birthday, out DateTime bday))
-			card["anniversaries"] = new Dictionary<string, object?>
+			anniversaries["b"] = new Dictionary<string, object?>
 			{
-				["b"] = new Dictionary<string, object?>
+				["@type"] = "Anniversary",
+				["kind"] = "birth",
+				["date"] = new Dictionary<string, object?>
 				{
-					["@type"] = "Anniversary",
-					["kind"] = "birth",
-					["date"] = new Dictionary<string, object?>
-					{
-						["@type"] = "Timestamp",
-						["utc"] = JmapDate.ToUtc(bday)
-					}
+					["@type"] = "Timestamp",
+					["utc"] = JmapDate.ToUtc(bday)
 				}
 			};
+
+		if (anniversaries.Count > 0)
+			card["anniversaries"] = anniversaries;
 
 		string? body = applicationData.Element(AirSyncBase + "Body")?.Element(AirSyncBase + "Data")?.Value;
 		if (!string.IsNullOrEmpty(body))
