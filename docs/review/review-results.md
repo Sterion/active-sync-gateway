@@ -1001,3 +1001,56 @@ skipped** (+5) ✓ · live **141 passed, 0 skipped** on a clean-volume Stalwart 
   `SaveChangesAsync`, and a 6000-entry backlog draining in ~27 ms unfixed vs ~2.4 s fixed). No
   coverage-only tests this item.
 - No new findings filed.
+
+---
+
+## Item 22 — Config & account resolution
+**Findings:** `B2` `B3` `B4` `B5` `B7` `B12`
+**Commits:** `ad0683d` (B2) · `4a7e031` (B3) · `d98146e` (B4) · `561dc28` (B5) · `b490afc` (B7) ·
+`8613820` (B12)
+**Verification:** integrity items=32 live=10 assigned=132 unique=132 dupes=0 encoding=0 ✓ · cursor → item
+23 ✓ · one commit per finding, strike with each ✓ · build 0 warnings ✓ · unit **1131 passed, 0 skipped**
+(+4) ✓ · live **141 passed, 0 skipped** on a clean-volume Stalwart ✓
+**Diffs read against the detail entries:**
+- `B4` — the substantive fix, and better than the minimum. Both writers (`EnsureFreshAsync` on the request
+  path, `OnRolesChanged` on the config-reload thread) now **build as well as swap** under one
+  `_snapshotSwapLock`, so the second writer computes against the first's applied state instead of racing
+  with stale roles baked in. Locking only the assignment would have left the finding's actual defect —
+  a build started against superseded inputs finishing last — intact.
+- `B7` — the legacy `sieve.enabled` upgrade now opts a user into the Oof override **only** when a Host
+  survived conversion, and logs an actionable hint otherwise. Correct direction: an invalid DB row fails
+  the whole account closed, so the old behaviour could leave a legacy user unable to log in at all after
+  an upgrade, not merely without Oof.
+- `B12` — one `NormalizeLevelName` shared by `LogQueryService`, `ActiveSyncOptionsValidator` and the write
+  path, exactly as prescribed.
+**Notes:**
+- **⚠ THREE of six findings were closed documentation-only (`B2`, `B3`, `B5`). I checked each against its
+  detail text: all three explicitly offer "document it" as one of two sanctioned remedies**, so this is
+  within the findings' own terms, not a worker taking the cheap way out. Still, half this item changed no
+  behaviour, and a reader should know what each strike does and does not mean:
+  - **`B2` — the docs were wrong, not the code, and that is the unusual part.** The clamp of a negative
+    `UsersRefreshSeconds` to 0 is deliberate: round 1's `B11` introduced it because "negative disables
+    live pickup" is self-locking — an operator who set it negative could never repair it live, since the
+    repair itself needs pickup. Honouring negative-as-disable would have reintroduced that. README:394 and
+    the `AuthOptions` XML doc now match `docs/configuration.md`, which was already correct. **Behaviour is
+    unchanged: a negative value still polls every request.**
+  - **`B3` — the validation gap is real and still open; only its documentation changed.** A catalogue write
+    that bricks startup *via* the backend/user validators is still not caught at write time. The worker's
+    argument for not wiring it up is that every catalogue key lives outside the `Backends`/`Users` sections
+    those validators read, so the check would compare a failure set to itself — dead code at the cost of a
+    full role+user validation pass per write. I find that sound **today**; it stops being sound the moment
+    a catalogue key lands inside those sections, and the XML doc now states that trigger.
+  - **`B5` — secrets still sit unsealed in the long-lived snapshot.** Documented as an accepted trade-off
+    rather than moved to lazy per-request unsealing (which would put a PBKDF2 derivation on a hot path).
+    The memory-residency surface the finding describes is unchanged.
+- **`A5` (item 19) plus `B2`/`B3`/`B5` means four documentation-only closures across two items.** Each is
+  individually justified by its own finding text. Flagging the pattern because it is invisible at the
+  queue line — those four strikes look identical to the fifteen behavioural ones next to them.
+- **Worker process note, self-disclosed:** `B4` and `B5` initially landed in one commit (both touch
+  `AccountResolver.cs`); the worker caught it and used `git reset --soft HEAD~2` to re-split before moving
+  on. Nothing was pushed and the final history is one commit per finding — I verified each of the six
+  touches only its own hunk.
+- **`B4` holds a lock across `BuildSnapshot`**, which can call provider `ValidateConfiguration`. No `await`
+  inside the lock, and the work is CPU-bound merging, so this is safe — but it is a slightly wider critical
+  section than "swap under a lock" implies.
+- No new findings filed.
