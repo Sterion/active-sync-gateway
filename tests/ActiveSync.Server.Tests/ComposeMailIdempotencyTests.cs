@@ -1,5 +1,8 @@
 using System.Text;
 using System.Xml.Linq;
+using ActiveSync.Contracts;
+using ActiveSync.Core.State;
+using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using ActiveSync.Server.Eas.Handlers;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -13,6 +16,9 @@ namespace ActiveSync.Server.Tests;
 ///       degraded message (a forward with nothing forwarded).</item>
 ///     <item>F30 — a failure AFTER a successful submit (filing to Sent, flagging the source) must
 ///       not be reported as a send failure, or the client resends and duplicates the mail.</item>
+///     <item>F4 — SmartReply/SmartForward must resolve the referenced source item ONCE per send:
+///       <c>BuildOutgoingAsync</c> resolves it to build the quote/attachment, and
+///       <c>MarkSourceAsync</c> must reuse that resolution to flag it, not resolve it again.</item>
 ///   </list>
 /// </summary>
 public sealed class ComposeMailIdempotencyTests : IDisposable
@@ -24,6 +30,13 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 	public void Dispose()
 	{
 		_harness.Dispose();
+	}
+
+	private async Task<UserFolder> InboxAsync()
+	{
+		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+		return registry.Single();
 	}
 
 	[Fact]
@@ -71,6 +84,57 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		// The mail went out exactly once, and the file-to-Sent failure was reached and swallowed.
 		Assert.Single(_harness.Session.Submit.Sent);
 		Assert.True(_harness.Session.Mail.SaveToSentAttempted);
+	}
+
+	// F4 — BuildOutgoingAsync resolves the source item (to quote/attach it); MarkSourceAsync then
+	// flags that same item (answered/forwarded). It must reuse the first resolution rather than
+	// resolving the ServerId a second time.
+	[Fact]
+	public async Task SmartForward_ResolvesSourceExactlyOnce()
+	{
+		UserFolder inbox = await InboxAsync();
+		_harness.Session.Mail.RawMessage = Encoding.UTF8.GetBytes(
+			"From: sender@example.test\r\nTo: u@example.test\r\nSubject: original\r\n\r\noriginal body\r\n");
+
+		XDocument request = new(new XElement(CM + "SmartForward",
+			new XElement(CM + "Source",
+				new XElement(CM + "FolderId", inbox.ServerId),
+				new XElement(CM + "ItemId", $"{inbox.ServerId}:42")),
+			OpaqueMime("From: u@example.test\r\nTo: dest@example.com\r\nSubject: fwd\r\n\r\nsee below\r\n")));
+
+		SmartForwardHandler handler = new(
+			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<SmartForwardHandler>.Instance);
+
+		int before = _harness.FolderResolutionQueries;
+		await _harness.RunAsync(handler, "SmartForward", request);
+
+		// BuildOutgoingAsync resolves the source to fetch+attach the original; MarkSourceAsync then
+		// flags it "forwarded" — that must reuse the SAME resolution, not look it up again (F4).
+		Assert.Equal(1, _harness.FolderResolutionQueries - before);
+	}
+
+	[Fact]
+	public async Task SmartReply_ResolvesSourceExactlyOnce()
+	{
+		UserFolder inbox = await InboxAsync();
+		_harness.Session.Mail.RawMessage = Encoding.UTF8.GetBytes(
+			"From: sender@example.test\r\nTo: u@example.test\r\nSubject: original\r\n\r\noriginal body\r\n");
+
+		XDocument request = new(new XElement(CM + "SmartReply",
+			new XElement(CM + "Source",
+				new XElement(CM + "FolderId", inbox.ServerId),
+				new XElement(CM + "ItemId", $"{inbox.ServerId}:42")),
+			OpaqueMime("From: u@example.test\r\nTo: sender@example.test\r\nSubject: re: original\r\n\r\nmy reply\r\n")));
+
+		SmartReplyHandler handler = new(
+			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<SmartReplyHandler>.Instance);
+
+		int before = _harness.FolderResolutionQueries;
+		await _harness.RunAsync(handler, "SmartReply", request);
+
+		Assert.Equal(1, _harness.FolderResolutionQueries - before);
 	}
 
 	private static XElement OpaqueMime(string mime)

@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Xml.Linq;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
@@ -10,6 +11,7 @@ using ActiveSync.Server.Eas;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Server.Tests;
@@ -24,18 +26,28 @@ public sealed class EasHandlerHarness : IDisposable
 {
 	private readonly SqliteConnection _connection;
 	private readonly SqliteSyncDbContext _db;
+	private readonly TableQueryCounter _folderQueryCounter = new("UserFolders");
 
 	public EasHandlerHarness()
 	{
 		_connection = new SqliteConnection("Data Source=:memory:");
 		_connection.Open();
 		DbContextOptions<SqliteSyncDbContext> dbOptions = new DbContextOptionsBuilder<SqliteSyncDbContext>()
-			.UseSqlite(_connection).Options;
+			.UseSqlite(_connection)
+			.AddInterceptors(_folderQueryCounter)
+			.Options;
 		_db = new SqliteSyncDbContext(dbOptions);
 		_db.Database.EnsureCreated();
 		State = new SyncStateService(_db);
 		Folders = new FolderService(State, NullLogger<FolderService>.Instance);
 	}
+
+	/// <summary>
+	///   Number of SELECTs issued against <c>UserFolders</c> since the harness was created — a proxy
+	///   for how many times <see cref="FolderService.ResolveCollectionAsync" /> actually hit the DB
+	///   (F4: a handler that resolves the same source twice shows up as two queries, not one).
+	/// </summary>
+	public int FolderResolutionQueries => _folderQueryCounter.Count;
 
 	public const string UserName = "u@example.test";
 
@@ -500,6 +512,31 @@ public sealed class EasHandlerHarness : IDisposable
 		{
 			Emptied.Add(folderBackendKey);
 			return Task.CompletedTask;
+		}
+	}
+
+	/// <summary>Counts SELECTs issued against one table, so a test can assert a DB lookup ran exactly once.</summary>
+	private sealed class TableQueryCounter(string tableName) : DbCommandInterceptor
+	{
+		private int _count;
+
+		public int Count => _count;
+
+		public override InterceptionResult<DbDataReader> ReaderExecuting(
+			DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result)
+		{
+			if (command.CommandText.Contains(tableName, StringComparison.Ordinal))
+				Interlocked.Increment(ref _count);
+			return base.ReaderExecuting(command, eventData, result);
+		}
+
+		public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+			DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+			CancellationToken cancellationToken = default)
+		{
+			if (command.CommandText.Contains(tableName, StringComparison.Ordinal))
+				Interlocked.Increment(ref _count);
+			return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
 		}
 	}
 }

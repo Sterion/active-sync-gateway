@@ -225,18 +225,30 @@ public abstract class ComposeMailHandlerBase(
 			new XElement(CM + Command, new XElement(CM + "Status", status))));
 	}
 
+	// F4: BuildOutgoingAsync resolves the referenced source to build the quote/attachment, then
+	// MarkSourceAsync resolves the SAME source again to flag it (answered/forwarded) — a second
+	// DB round trip (and, for a DAV store, a second backend lookup) per send for no reason: the
+	// source never changes within one HandleAsync call. Cache the outcome (including a "not
+	// found" miss) so the second call is free.
+	private bool _sourceResolveAttempted;
+	private (string FolderBackendKey, string ItemKey)? _resolvedSource;
+
 	protected async Task<(string FolderBackendKey, string ItemKey)?> ResolveSourceAsync(
 		EasContext context, ComposeRequest request, CancellationToken ct)
 	{
+		if (_sourceResolveAttempted)
+			return _resolvedSource;
+		_sourceResolveAttempted = true;
+
 		if (request.SourceFolderId is null || request.SourceItemId is null)
-			return null;
+			return _resolvedSource = null;
 		(UserFolder Folder, IContentStore Store)? resolved = await Folders.ResolveCollectionAsync(
 			context.Session, context.Device.UserName, request.SourceFolderId, ct);
 		if (resolved is null)
-			return null;
+			return _resolvedSource = null;
 		string? itemKey = await Folders.ResolveItemKeyAsync(
 			resolved.Value.Folder, resolved.Value.Store, request.SourceItemId, ct);
-		return itemKey is null ? null : (resolved.Value.Folder.BackendKey, itemKey);
+		return _resolvedSource = itemKey is null ? null : (resolved.Value.Folder.BackendKey, itemKey);
 	}
 
 	protected sealed record ComposeRequest(
