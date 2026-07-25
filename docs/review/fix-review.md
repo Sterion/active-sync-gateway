@@ -334,6 +334,25 @@ Use `~~`X1`~~ **N/A** — <one line why>` for a finding that no longer applies. 
 Annotating the findings-list entry as well is welcome — that is the right home for a breaking-change
 note or a caveat about what a test proves. It is a supplement, never a substitute.
 
+**The strike ships WITH the fix. One bookkeeping commit at the end is a protocol violation, even
+though it ends up looking identical.** This is the most-repeated deviation in this programme — three
+of four workers in one run did it, each disclosing it honestly afterwards, which means the
+instruction (not the worker) is what keeps failing. So, concretely:
+
+> ❌ `fix(a)` → `fix(b)` → `fix(c)` → `docs: mark item N complete (a, b, c)`
+> ✅ `fix(a)` **+ strike a** → `fix(b)` **+ strike b** → `fix(c)` **+ strike c**
+
+`git show <your commit> --stat` must list **both** the source file and `review-items.md`, every time.
+If it doesn't, `git commit --amend` the strike in **before** starting the next finding — that costs
+nothing, and it is the only cheap moment to fix it.
+
+Why it matters even though the end state is the same: the strike is not paperwork, it is the
+**cursor**. Between your last fix commit and a trailing bookkeeping commit, the tree holds N finished
+findings that the document says are not done — so an interruption there (context exhaustion, a failed
+build, a stopped run, a crash) sends the next session to redo the entire item on top of work that
+already landed. The window is usually minutes and the loss is an entire item, which is a bad trade
+for a commit you have to make anyway.
+
 **4. If you moved or renamed code other findings reference, fix their anchors.** You are the only one
 who will know where it went.
 
@@ -424,6 +443,19 @@ to start it.
 > **Read the passed/skipped counts, not the exit code.** Compare against the baseline in
 > `review-items.md`. If passed is 0, or skipped is large, fix the environment and re-run. Do **not**
 > strike a finding through on a skipped suite.
+
+**A green unit suite is not evidence that you do not need the live suite.** It is the single most
+tempting wrong inference on this queue, and it has already cost a run: an item touching WebUi
+endpoints reported 1085 unit tests green, concluded no live run was needed, and had broken **three**
+integration tests — a portal response shape and a probe's semantics, neither of which any unit test
+covers. The unit suites do not exercise the assembled HTTP surface, so they cannot speak to it.
+
+So the decision is not "do I think this needs a live run?" but **"can I show it cannot?"** If your
+item touches any endpoint, handler, DTO shape, migration, auth path, or anything reachable over HTTP,
+run it. When you skip it, the report must say *why* in one specific sentence ("no file in this item is
+reachable from a request path"), not "not marked [LIVE]". A worker's judgement that its own item is
+low-risk is exactly the judgement the orchestrator's independent full-suite run exists to check —
+and when the two disagree, it has so far been the worker.
 
 **The marked list is a floor, not the whole rule.** Also run the live suite for any item that lands a
 schema migration, changes authentication or session policy, or alters the request pipeline — marked
