@@ -692,4 +692,34 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.Equal("/ab/x.vcf", href);
 		Assert.Null(await _service.ResolveDavHrefAsync(folder, "99999", CancellationToken.None));
 	}
+
+	[Fact]
+	public async Task GetOrAddDavItemIds_ConcurrentUniqueViolation_DoesNotDropThisRequestsNewHrefs()
+	{
+		// A2: SaveChangesAsync is atomic — one href's unique violation rolls back the WHOLE staged
+		// batch. The recovery re-reads the map, but a href new to THIS request (not created by any
+		// racer) is genuinely absent from that re-read, so it silently drops out of the returned map
+		// and that item gets no ServerId this Sync round. Simulating the violation with no real
+		// second writer isolates exactly this case: nothing was ever actually persisted, so a
+		// correct implementation must retry and re-stage rather than return whatever the one re-read
+		// found.
+		FaultInjectingInterceptor faults = new();
+		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
+		SyncStateService service = new(db);
+		List<UserFolder> registry = await service.RefreshFolderRegistryAsync("u@a2",
+			[new BackendFolder("carddav:/ab/", "Contacts", null, 9, "Contacts")], CancellationToken.None);
+		UserFolder folder = registry[0];
+
+		string[] hrefs = ["/ab/one.vcf", "/ab/two.vcf", "/ab/three.vcf"];
+		faults.ThrowOnNextSave(new DbUpdateException("dup",
+			new SqliteException("UNIQUE constraint failed", 19, 2067)));
+
+		IReadOnlyDictionary<string, string> map =
+			await service.GetOrAddDavItemIdsAsync(folder, hrefs, CancellationToken.None);
+
+		// Every href this request asked for must come back with a ServerId — none may have been
+		// silently dropped by the one-shot recovery re-read.
+		foreach (string href in hrefs)
+			Assert.True(map.ContainsKey(href), $"{href} missing from the returned map");
+	}
 }

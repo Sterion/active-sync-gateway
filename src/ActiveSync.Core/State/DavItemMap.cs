@@ -73,41 +73,58 @@ internal sealed class DavItemMap(SyncDbContext db, ISyncDbContextFactory? factor
 		return await GetOrAddBatchAsync(own, folder.Id, hrefs, ct).ConfigureAwait(false);
 	}
 
+	/// <summary>
+	///   Bounded so a persistently contended folder fails loudly rather than retrying forever;
+	///   in practice a batch converges in one or two passes (A2).
+	/// </summary>
+	private const int MaxBatchAttempts = 5;
+
 	private static async Task<Dictionary<string, string>> GetOrAddBatchAsync(
 		SyncDbContext ctx, int folderId, IReadOnlyCollection<string> hrefs, CancellationToken ct)
 	{
 		List<string> wanted = hrefs.Distinct(StringComparer.Ordinal).ToList();
 		Dictionary<string, string> map = await ReadHrefIdsAsync(ctx, folderId, wanted, ct).ConfigureAwait(false);
 
-		List<DavItem> added = new();
-		foreach (string href in wanted)
-			if (!map.ContainsKey(href))
-			{
-				DavItem item = new() { UserFolderKey = folderId, Href = href };
-				// DbSet.Add false positive for VSTHRD103 — see GetOrCreateDeviceAsync.
+		// SaveChangesAsync is atomic: one href's unique violation rolls back the WHOLE staged
+		// batch. A single re-read after that only recovers ids the racer itself created — any
+		// href new to THIS request, and not created by the racer, is genuinely absent from that
+		// re-read and would otherwise silently drop out of the returned map (A2). Re-stage
+		// whatever is still missing after each re-read and retry, bounded.
+		for (int attempt = 1; attempt <= MaxBatchAttempts; attempt++)
+		{
+			List<DavItem> added = new();
+			foreach (string href in wanted)
+				if (!map.ContainsKey(href))
+				{
+					DavItem item = new() { UserFolderKey = folderId, Href = href };
+					// DbSet.Add false positive for VSTHRD103 — see GetOrCreateDeviceAsync.
 #pragma warning disable VSTHRD103
-				ctx.DavItems.Add(item);
+					ctx.DavItems.Add(item);
 #pragma warning restore VSTHRD103
-				added.Add(item);
+					added.Add(item);
+				}
+
+			if (added.Count == 0)
+				return map;
+
+			try
+			{
+				await ctx.SaveChangesAsync(ct).ConfigureAwait(false);
+				foreach (DavItem item in added)
+					map[item.Href] = item.Id.ToString();
+				return map;
 			}
-
-		if (added.Count == 0)
-			return map;
-
-		try
-		{
-			await ctx.SaveChangesAsync(ct).ConfigureAwait(false);
-			foreach (DavItem item in added)
-				map[item.Href] = item.Id.ToString();
-		}
-		catch (DbUpdateException ex) when (DbExceptions.IsUniqueViolation(ex))
-		{
-			// A concurrent request mapped one or more of the same hrefs first — detach our staged
-			// inserts and re-read the winners in one query. Only a unique violation takes this
-			// path; any other failure keeps its diagnostic (A9), same as the single-item form.
-			foreach (DavItem item in added)
-				ctx.Entry(item).State = EntityState.Detached;
-			map = await ReadHrefIdsAsync(ctx, folderId, wanted, ct).ConfigureAwait(false);
+			catch (DbUpdateException ex) when (DbExceptions.IsUniqueViolation(ex) && attempt < MaxBatchAttempts)
+			{
+				// A concurrent request mapped one or more of the same hrefs first — detach our
+				// staged inserts and re-read the winners in one query, then loop to re-stage
+				// anything still missing. Only a unique violation takes this path; any other
+				// failure keeps its diagnostic (A9), same as the single-item form. Exhausting the
+				// bound lets the last attempt's exception propagate instead of being swallowed.
+				foreach (DavItem item in added)
+					ctx.Entry(item).State = EntityState.Detached;
+				map = await ReadHrefIdsAsync(ctx, folderId, wanted, ct).ConfigureAwait(false);
+			}
 		}
 
 		return map;
