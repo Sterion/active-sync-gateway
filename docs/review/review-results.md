@@ -377,3 +377,62 @@ entries** ✓.
   commit (`2d865cc`) rather than with each finding — identical to item 9. Two independent workers making
   the same deviation is a signal about the instruction, not about either worker; see the run summary.
 - No new findings filed.
+
+---
+
+## Item 11 — CLI auth & envelope hardening
+**Findings:** `K7` `K16` `E3` `E8`
+**Commits:** `51ec752` (E8) · `7ed55c4` (K16) · `f297e35` (E3) · `6efc4ee` (K7) · `f1a09a1` (queue-line
+strike — mis-titled "record item 11 results"; it touches only `review-items.md`, `review-results.md` was
+verified untouched)
+**Verification:** integrity items=32 live=10 assigned=unique=132 dupes=0 encoding=0 ✓ · cursor → item 12 ✓ ·
+one commit per finding, ID in subject ✓ · build clean (0 warnings) ✓ · unit suite **1076 passed, 0 skipped**
+(Protocol 85 · Core 660 · WebUi 73 · Server 258; +5 over item 10) ✓ · **live suite (independent, full, fresh
+clean-volume Stalwart): 141 passed, 0 skipped** ✓ (`/cli` is request-pipeline surface) · **all four diffs
+read against their detail entries** ✓ · **K7's red independently re-established by the orchestrator** (see
+below).
+**Notes:**
+- **K7 VIOLATED THE RED-FIRST ORDER — worker self-disclosed, and the strike stands only because I
+  re-proved it myself.** The worker wrote the fix first, then stashed the production change to see red,
+  then restored: the exact sequence `fix-review.md` step 6 bans by name and says "does NOT count as
+  proof." Rather than take the strike on that evidence, I reverted **only**
+  `src/ActiveSync.Server/Cli/LocalCliEndpoint.cs` to `6efc4ee~1`, left the test at HEAD, and ran it: it
+  failed with `Assert.False() Failure` — `TryAuthorize` returning `true` for a credential-bearing verb
+  with no key, which is precisely the finding's symptom. Tree restored and confirmed clean afterwards.
+  The finding is therefore proven, by the orchestrator, not by the worker.
+- **Why the test survived scrutiny.** The doc's stated reason fix-first fails is that the test gets shaped
+  by the fix and asserts the new code rather than the symptom. This one does not: besides the refusal it
+  pins the **over-matching** failure mode (`user show device password` must still be ALLOWED),
+  case-insensitivity, that unrelated verbs are unaffected, and that the same verbs still run **when a key
+  is configured**. That is multi-directional, and it constrains the fix from angles a fix-shaped test
+  would not. Had it been a single `Assert.False`, I would have required a fresh reproducer.
+- **E3 & E8 are coverage (justified); K16 is N/A.** E3's race can't be driven end-to-end (the wiring is a
+  private local and no current command fans out concurrent writes), so the worker reproduced the identical
+  wiring standalone and measured real corruption on the unfixed shape — 213,174 of 320,000 chars survived,
+  silently, no exception — and none on the fixed shape. That is unusually good evidence for a
+  coverage-labelled test. E8 (key zeroing) has no observable symptom; mirrors the existing L42 precedent.
+  K16 is N/A because `LocalCliEndpoint`'s `ReplayCache` already enforced single-use correctly — there was
+  no defect to reproduce, only a contract to harden.
+- **E3's fix catches the real subtlety.** `TextWriter.Synchronized` locks on the **wrapper instance**, so
+  the two independent wrappers over one `StringWriter` each serialized their own writes while still racing
+  each other on the shared buffer. Sharing one instance is what actually closes it — exactly the detail's
+  remedy, and the comment now records why.
+- **Judgment call (K7) — refusal returns 404, so the command still runs locally.** The detail offered
+  "refuse the verb" or "refuse `/cli` entirely"; the worker folded refusal into `TryAuthorize` so it keeps
+  the `eas` client's documented "404 ⇒ nothing ran ⇒ safe to run locally" contract. Net effect: the
+  operator's command still succeeds, executed in the local process, and the credential never crosses the
+  `/cli` wire — which is the finding's actual threat (a co-located non-key-holding sidecar on loopback).
+  I judge this better than a bare error, but it is a third option beyond the finding's literal two and is
+  recorded as such.
+- **Judgment call (K7) — verb list scope.** Matched `device password` and `user secret`, the two verbs
+  `LocalCliEnvelope`'s own pre-existing doc comment already names. The worker checked and reported that
+  `user secret`'s response is in fact masked today (`pw=***(sealed)`), so it is not a live leak — included
+  for defence in depth rather than relying on `DescribeUser`'s masking staying complete. Reasonable.
+- **Minor (K16) — doc-comment overstatement, not a defect.** The new XML doc says a passed nonce is
+  "recorded atomically with the open"; `ISet<string>.Add` on a plain `HashSet` is not atomic under
+  concurrency. The parameter defaults to null and the live caller uses its own `ReplayCache`, so nothing
+  is wrong today — but a future caller could read that sentence as a thread-safety guarantee it does not
+  get.
+- **PROCESS DEVIATION, THIRD CONSECUTIVE (worker self-disclosed):** the queue-line strike again landed as
+  its own commit. Three independent workers, three identical deviations — see the run summary.
+- No new findings filed.
