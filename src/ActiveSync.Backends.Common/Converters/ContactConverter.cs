@@ -259,17 +259,29 @@ public static class ContactConverter
 		"BDAY", "NOTE", "CATEGORIES", "PHOTO"
 	};
 
+	/// <summary>
+	///   D3: "surplus" (not one of Email1-3) must be decided the same way Email1-3 itself was
+	///   picked — <c>vcard.EMails.OrderByPref()</c>, via <see cref="Ghost" />/
+	///   <see cref="ToApplicationData(string,int)" /> — not by raw FILE position, which is not
+	///   guaranteed to match pref order (a PREF param on a later line promotes it to the front).
+	///   Matching against what ended up WRITTEN (the merged/possibly client-overridden Email1-3
+	///   values) is wrong too: a client that replaces Email1Address leaves the stored card's old
+	///   top-pref address matching nothing, so it would wrongly reappear as "surplus". The
+	///   correct exclusion set is the stored card's OWN top-3-by-pref addresses, independent of
+	///   what the client did with those slots afterward.
+	/// </summary>
 	private static void AppendPreserved(StringBuilder sb, string existingVcard)
 	{
-		int emailCount = 0;
+		HashSet<string> top3 = TopEmailAddresses(existingVcard, 3);
 		foreach (string line in UnfoldLines(existingVcard))
 		{
 			string name = PropertyNameOf(line);
 			if (name.Equals("EMAIL", StringComparison.OrdinalIgnoreCase))
 			{
-				// EAS carries only Email1-3 (rewritten above); surplus addresses survive as-is.
-				emailCount++;
-				if (emailCount > 3)
+				string address = EmailAddressOf(line);
+				// A blank/unparsable address can't be confirmed as one of the top 3 — preserve
+				// it rather than risk silently dropping data.
+				if (address.Length == 0 || !top3.Contains(address))
 					AppendFolded(sb, line);
 				continue;
 			}
@@ -277,6 +289,28 @@ public static class ContactConverter
 			if (!ManagedProperties.Contains(name))
 				AppendFolded(sb, line);
 		}
+	}
+
+	private static HashSet<string> TopEmailAddresses(string vcf, int count)
+	{
+		HashSet<string> addresses = new(StringComparer.OrdinalIgnoreCase);
+		if (Vcf.Parse(vcf).FirstOrDefault() is not { } vcard)
+			return addresses;
+		foreach (var email in vcard.EMails.OrderByPref())
+		{
+			if (addresses.Count >= count)
+				break;
+			if (email?.Value is { } address)
+				addresses.Add(address);
+		}
+
+		return addresses;
+	}
+
+	private static string EmailAddressOf(string line)
+	{
+		int colon = line.IndexOf(':');
+		return colon >= 0 ? line[(colon + 1)..].Trim() : "";
 	}
 
 	private static IEnumerable<string> UnfoldLines(string vcf)

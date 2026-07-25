@@ -206,6 +206,39 @@ public class ContactConverterTests
 	}
 
 	[Fact]
+	public void Update_PreservedEmail_DoesNotDuplicateAnEmittedOne_WhenPrefReordersTheTop3()
+	{
+		// D3: Email1-3 are picked from vcard.EMails.OrderByPref() (used by ToApplicationData,
+		// which Ghost() calls to backfill an omitted Email1-3 from the stored card). The old
+		// AppendPreserved instead walked the RAW FILE order and re-emitted every EMAIL past the
+		// 3rd *file position* — correct only when file order already matches pref order. Here an
+		// explicit PREF=1 on the 4th line in the file promotes it to Email1, so pref order is
+		// [d, a, b, c] while file order is [a, b, c, d]: the file-position-3 address (c) is
+		// wrongly treated as "already written" (and dropped), while the file-position-4 address
+		// (d) — which WAS already written as Email1 — is wrongly re-preserved as a duplicate.
+		const string vcard =
+			"BEGIN:VCARD\r\n" +
+			"VERSION:3.0\r\n" +
+			"UID:c-20\r\n" +
+			"N:Person;Pref;;;\r\n" +
+			"FN:Pref Person\r\n" +
+			"EMAIL;TYPE=INTERNET:a@example.com\r\n" +
+			"EMAIL;TYPE=INTERNET:b@example.com\r\n" +
+			"EMAIL;TYPE=INTERNET:c@example.com\r\n" +
+			"EMAIL;TYPE=INTERNET;PREF=1:d@example.com\r\n" +
+			"END:VCARD\r\n";
+
+		// The client touches an unrelated field only, so Email1-3 are entirely ghosted from the
+		// stored card's own pref-ordered view.
+		string updated = ContactConverter.FromApplicationData(AppData(
+			new XElement(Contacts + "FirstName", "Pref")), "c-20", vcard);
+
+		int dCount = updated.Split("d@example.com").Length - 1;
+		Assert.Equal(1, dCount); // d must appear exactly once, not duplicated as a "surplus" line
+		Assert.Contains("c@example.com", updated); // c must survive as the genuine surplus address
+	}
+
+	[Fact]
 	public void Update_UnfoldsContinuationLines_BeforeClassifying()
 	{
 		// A folded NOTE (managed) must be dropped as one logical line, and a folded X-
