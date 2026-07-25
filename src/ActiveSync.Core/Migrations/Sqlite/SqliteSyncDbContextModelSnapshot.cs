@@ -409,6 +409,10 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.Property<int>("Id")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("TEXT");
 

@@ -91,8 +91,13 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 
 		// Single well-known row (Id=1) — same explicit-key idiom as AccountsStamp, and the
 		// primary-key conflict is what serializes concurrent first-boot generation races.
+		// ConcurrencyToken (K6) additionally serializes the *replace an unreadable/expiring row*
+		// race, which the primary-key conflict alone doesn't cover (that path is an UPDATE).
 		modelBuilder.Entity<ServerCertificate>(e =>
-			e.Property(c => c.Id).ValueGeneratedNever());
+		{
+			e.Property(c => c.Id).ValueGeneratedNever();
+			e.Property(c => c.ConcurrencyToken).IsConcurrencyToken();
+		});
 
 		modelBuilder.Entity<OofSetting>(e =>
 			e.HasIndex(o => o.UserName).IsUnique());
@@ -127,7 +132,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	{
 		foreach (EntityEntry entry in ChangeTracker.Entries())
 			if (entry.State is EntityState.Added or EntityState.Modified &&
-			    entry.Entity is CollectionState or LocalItem or Device)
+			    entry.Entity is CollectionState or LocalItem or Device or ServerCertificate)
 				entry.CurrentValues["ConcurrencyToken"] = Guid.NewGuid();
 	}
 }

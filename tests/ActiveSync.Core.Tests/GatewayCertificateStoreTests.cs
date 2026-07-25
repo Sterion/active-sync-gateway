@@ -131,6 +131,39 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 	}
 
 	[Fact]
+	public async Task ConcurrentReplace_OfAnUnreadableRow_IsDetectedAsAConflict()
+	{
+		// K6: GetOrCreateAsync's "unreadable row -> replace" path had no concurrency guard, so
+		// two replicas racing to replace the same unreadable row could both silently succeed —
+		// each overwriting the other with no exception raised, flip-flopping the served
+		// fingerprint on restart (indistinguishable from an active MITM to a device). This
+		// reproduces the race at the row/DbContext level: two contexts read the same starting
+		// row, the first replaces it, and the second's write — still based on the stale read —
+		// must now be rejected as a conflict rather than silently applied.
+		await using (SyncDbContext seed = _factory.CreateDbContext())
+		{
+#pragma warning disable VSTHRD103
+			seed.ServerCertificates.Add(new ServerCertificate
+			{
+				Id = 1, PfxProtected = "garbage-unreadable-blob", CreatedUtc = DateTime.UtcNow,
+			});
+#pragma warning restore VSTHRD103
+			await seed.SaveChangesAsync();
+		}
+
+		await using SyncDbContext replicaA = _factory.CreateDbContext();
+		await using SyncDbContext replicaB = _factory.CreateDbContext();
+		ServerCertificate rowA = await replicaA.ServerCertificates.FirstAsync(c => c.Id == 1);
+		ServerCertificate rowB = await replicaB.ServerCertificates.FirstAsync(c => c.Id == 1);
+
+		rowA.PfxProtected = "replica-a-replacement";
+		await replicaA.SaveChangesAsync(); // first replica wins the race.
+
+		rowB.PfxProtected = "replica-b-replacement";
+		await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => replicaB.SaveChangesAsync());
+	}
+
+	[Fact]
 	public async Task GeneratedCertificate_ValidityIsCappedForAppleCompatibility()
 	{
 		// K4: iOS/macOS refuse server certs valid for more than 398 days (Apple's ≤825/≤398-day

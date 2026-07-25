@@ -302,6 +302,15 @@ public class ServerCertificate
 	public int Id { get; set; }
 	public required string PfxProtected { get; set; }
 	public DateTime CreatedUtc { get; set; }
+
+	/// <summary>
+	///   EF concurrency token (K6): two replicas racing to replace an unreadable row must not
+	///   both silently succeed — the loser gets a <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException" />
+	///   (already handled in <see cref="Security.GatewayCertificateStore.GetOrCreateAsync" />
+	///   the same way the first-boot insert race is) instead of flip-flopping the served
+	///   fingerprint. Same stamping idiom as <c>Device</c>/<c>CollectionState</c>/<c>LocalItem</c>.
+	/// </summary>
+	public Guid ConcurrencyToken { get; set; }
 }
 
 /// <summary>

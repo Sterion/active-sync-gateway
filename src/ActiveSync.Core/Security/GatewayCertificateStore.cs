@@ -110,7 +110,12 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 		}
 		catch (DbUpdateException)
 		{
-			// Another replica won the first-boot insert race — serve the winner's certificate.
+			// Another replica won the race — either the first-boot INSERT (unique PK conflict)
+			// or, since ServerCertificate.ConcurrencyToken is a concurrency token (K6), the
+			// UPDATE that replaces an unreadable/expiring row (DbUpdateConcurrencyException, a
+			// DbUpdateException subtype: the WHERE clause's stale token no longer matches, so a
+			// losing replica's replace can no longer silently overwrite the winner's). Either
+			// way: serve the winner's certificate instead of flip-flopping the served fingerprint.
 			certificate.Dispose();
 			await using SyncDbContext retry = contextFactory.CreateDbContext();
 			ServerCertificate winner = await retry.ServerCertificates.AsNoTracking()
