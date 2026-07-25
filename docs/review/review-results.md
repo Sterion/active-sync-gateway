@@ -716,3 +716,52 @@ silently dropped in a move.
 - The security-sensitive property this item exists to protect (credentials never forwarded off-origin)
   now has exactly one implementation and one test. That was the whole point of `S3`.
 - No behaviour changes. No new findings filed.
+
+---
+
+## Item 17 — Log-scrubbers, free/busy & WireLog placement
+**Findings:** `S6` `K21` `S5` `S9`
+**Commits:** `c90259d` (S9) · `e7f61d2` (S5) · `82704e8` (S6, K21 — one commit; `K21` is `S6` restated in
+Area K, same pairing as `S2`/`K11` in item 15)
+**Verification:** integrity items=32 live=10 assigned=132 unique=132 dupes=0 encoding=0 ✓ · cursor → item
+18 ✓ · strike shipped WITH each fix (all three commits list `review-items.md`) ✓ · build 0 warnings ✓ ·
+unit **1113 passed, 0 skipped** ✓ · live **141 passed, 0 skipped** on a clean-volume Stalwart ✓
+**Test-count reconciliation** (checked rather than eyeballed, because two suites moved): Protocol 85→91
+(+5 `WireLogTests` relocated from Core.Tests, +1 new bidi test); Core 670→666 (−5 relocated, +2 new
+relocation guards, −1 obsolete round-1 guard). Net +2 = 1113. Nothing was silently dropped.
+**Diffs read against the detail entries:**
+- `S9` — `WireLog` moved Contracts → Protocol verbatim; `using` fixed at the three call sites
+  (`MailKitWireLogger`, `RedirectingHttpSender`, `AutodiscoverEndpoint`), test moved to
+  `ActiveSync.Protocol.Tests`. `TransientRetry` correctly left in Contracts, as the finding instructs.
+- `S5` — `MergedFreeBusy` moved Contracts → `ActiveSync.Core.Backend`; `BusyPeriod` (what a plugin
+  actually returns from `IFreeBusySource`) correctly stays in Contracts. The 11 existing
+  `MergedFreeBusyTests` pass unchanged, which is what makes "pure relocation" checkable.
+- `S6`/`K21` — exactly the prescribed fix: one classifier `WireLog.IsUnsafe(char, allowLineStructure)`
+  covering control chars **and** the bidi overrides/isolates (U+202A–202E, U+2066–2069); `Payload` calls
+  it with `allowLineStructure: true` (CR/LF/TAB survive, so multi-line XML/MIME stays readable),
+  `LogText.Clean` with `false` (a single-field value must not carry line structure) and its private
+  duplicate is deleted. Both entry points are kept, as the finding requires. `Payload`'s
+  truncate-before-scan LOH optimisation and its allocation-free fast path are preserved.
+**Notes:**
+- **`S6`/`K21` is a real behaviour change, not a refactor:** Trace-tier wire dumps (IMAP/SMTP wire logs,
+  DAV/JMAP bodies, EAS request/response XML, Autodiscover) now neutralize bidi-override characters to
+  `'?'`. Log text only — never an HTTP response or DTO. Proven **red-first**: U+202E rode straight
+  through `Payload` on unmodified code, which is precisely the finding's stated symptom.
+- **`S5` reverses a round-1 decision, and that is correct here.** Round 1's `S4` moved `MergedFreeBusy`
+  Core → Contracts on a "no EF/Core dependency, belongs lowest" rationale; round 2's `S5` moves it back on
+  the plugin-surface rule (Contracts carries only what a plugin *builds against* — the rule that already
+  keeps `IBackendSession` out). This is not a blind re-litigation: round 1's own fix comment said a
+  further relocation "would be a breaking plugin-contract change owned by item 17", so it was handed
+  forward deliberately. The worker replaced the round-1 guard test with the opposite-direction guard and
+  left an inline comment naming both rounds, so the audit trail survives. No AGENTS.md edit was needed —
+  it already documented `MergedFreeBusy.Build` as Core, i.e. the *docs* were right and the code was wrong.
+- **⚠ `ContractVersion` was NOT bumped, and I agree with that — but a human should confirm it.** Both
+  `S5` and `S9` remove public types from the published `ActiveSync.Contracts` surface, and
+  `ContractVersion.cs`'s own doc says to bump `Major` on a breaking surface change. Against bumping:
+  `Major` is the plugin loader's hard gate, `docs/plugins.md` says the contract is "NOT ABI-stable before
+  2.0", so moving 1→2 would falsely announce that stability arrived; and
+  `ContractSurfaceTests.ContractVersion_MatchesTheAssemblyVersion` ties the constant to the assembly
+  version, so a bump drags the NuGet package major with it — a release decision, well outside item 17's
+  file cluster. The precedent (round 1's `S4` moved a type across the same boundary without bumping)
+  points the same way. **Carried forward: the Contracts surface has now shrunk twice unversioned.**
+- No new findings filed.
