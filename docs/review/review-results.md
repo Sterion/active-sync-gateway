@@ -1257,3 +1257,61 @@ capability fails to compile. All four in-repo implementers were updated. `Contra
   point in `F2`'s coverage and worth a test if that harness helper ever appears.
 - `DraftChangeSubmit_...` is coverage (same guard, same code path as the proven Add case);
   `SendDedupStoreTests` is N/A for red-first (brand-new type, no prior behaviour).
+
+---
+
+## Run summary — items 19–25 (Phase 4, stopped short of complete at the human's request)
+**Swept:** `git log 73f54d8..HEAD` = 34 fix commits + 7 results commits · **35 findings struck across
+items 19–25 and the reconciliation is exact**: 34 IDs appear in commit subjects and all 34 are struck;
+the one extra strike is `H10`, closed **N/A** and therefore correctly having no fix commit. No ID appears
+in two subjects; "committed but not struck" is empty ✓ · `git diff --stat 73f54d8..HEAD -- src/` = 45
+files, every directory traceable to an item ✓ · one file outside `src/`+`tests/`+`docs/review/`:
+**README.md**, which is `B2`'s own prescribed remedy ("correct README + the XML doc + SettingKeys") —
+in scope, not creep ✓
+**At HEAD:** integrity items=32 live=10 assigned=132 unique=132 dupes=0 encoding=0 ✓ · build **0
+warnings** ✓ · unit **1164 passed, 0 skipped** (from 1115 at the start of the run, +49) ✓ · live **141
+passed, 0 skipped** ✓
+**Where the cursor rests:** **item 26**. Items 26 and 27 are the remainder of Phase 4; the human stopped
+the run after item 25.
+
+**Carried forward:**
+- **⚠⚠ TWO items in this run landed a fix that was WORSE than the defect, and both were caught by reading
+  the diff — not by any test.** This is the single most important thing to carry forward.
+  - **`H2` (item 23)** made the pre-PUT listing lazy, but the closure only ever runs *after* the PUT, so
+    the "before" baseline already contained the new item. On a server that canonicalises hrefs (Axigen —
+    a CI backend, named in that function's own comment) the created item was tracked under the wrong
+    href: the device-duplication failure the function exists to prevent. Repaired in `ebf03f8`.
+  - **`F2` (item 25)** claimed a send durably *before* the irreversible action with no release path and
+    no record of whether the action succeeded, so an ordinary transient SMTP failure meant the client's
+    resend was answered **Status 1 (success) with nothing sent** — silent loss of the user's outgoing
+    mail. Repaired in `7ee97c6`.
+  In both cases the unit suite, the live suite, and the worker's own red-first proof were **all green**,
+  because each test exercised the path the fix optimised rather than the path it broke. Sampling would
+  have missed both. **Do not relax the every-finding diff read.**
+- **⚠ `ContractVersion` is still 1.0, and `F5` has now made this urgent.** Items 17–18 moved types out of
+  `ActiveSync.Contracts` and renamed a namespace in the packed `Backends.Common`; `F5` has now changed
+  the **signature of a method plugins implement** (`IItemMoveOperations.MoveItemAsync` →
+  `Task<(string ItemKey, string Revision)>`). Any out-of-repo plugin with an item-move capability no
+  longer compiles. Four published-surface breaks, none versioned. **This needs a human decision before
+  the next package publish** — see item 17's note for the arguments on both sides.
+- **`F2` added a new table (`SentCommandTokens`) and FOUR migrations** (two per provider: `AddSentCommandToken`
+  and `AddSentCommandTokenCompleted`). First schema change of round 2. It carries a knowingly-left
+  residual window — a crash between a successful send and the completion write still duplicates — which
+  is documented in the commit and fails in the safe direction.
+- **Six findings across this run changed no behaviour** — `A5`, `B2`, `B3`, `B5`, `D15` (documentation
+  only) and `D2`/`D5`'s coverage-labelled tests. Each is individually permitted by its own finding text
+  (every one of them offers "document it" or the symptom is not reproducible on pinned dependencies), and
+  each is recorded in its item entry. But they look identical to the twenty-eight behavioural strikes at
+  the queue line, so: `B3`'s validation gap, `B5`'s secret residency, `D15`'s O(collection) per-round
+  flags fetch and `A5`'s auth-cache staleness window are all **still present in the code**.
+- **Worker live-suite judgment remained the weak link.** Workers declined a live run on items 19, 20, 21
+  and 22; the orchestrator ran one every time. Item 25's live suite caught a bug `F5`'s own fix
+  introduced (`25de5e8`), which is the clearest justification yet for the rule.
+- **Three new findings are filed and unassigned**: `C10` (from the previous run), plus **`H34`** (the
+  calendar/contact half of `H7`) and **`H35`** (an `IContentStore` previous-state parameter, which would
+  also close `H10` properly). All three need an item.
+- **One item-25 coverage gap is disclosed rather than hidden**: the occurrence-CANCEL path shares `F2`'s
+  guard but has no handler-level test.
+- Unchanged from earlier runs: `K10` is half-closed; `K4` contradicts README:526's documented 20-year
+  self-signed validity.
+- **Nothing has been pushed since the items 14–18 run.** All 41 commits in this range are local on `main`.
