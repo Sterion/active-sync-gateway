@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ruben Andersen
+// SPDX-License-Identifier: MIT
+
 namespace ActiveSync.Protocol;
 
 /// <summary>EAS content classes.</summary>

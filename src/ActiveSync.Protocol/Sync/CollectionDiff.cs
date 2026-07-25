@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ruben Andersen
+// SPDX-License-Identifier: MIT
+
 namespace ActiveSync.Protocol.Sync;
 
 public sealed record ItemChange(string ServerId, string Revision);

@@ -191,6 +191,40 @@ tests/ActiveSync.Integration.Tests/  real-backend E2E tests (see "Integration te
 Keep the dependency direction strict: `Protocol ← Contracts ← Core ← Backends ← Server`. Converters
 live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
 
+## Licensing (read before moving code between assemblies)
+
+The repository is licensed in **two parts**, and the boundary is the same one `IsPackable`
+draws:
+
+- **`ActiveSync.Contracts` + `ActiveSync.Protocol` → MIT** (`LICENSE-MIT`). These are the two
+  published NuGet packages, permissive on purpose so third-party plugins — including
+  commercial ones — can build against them.
+- **Everything else → PolyForm Noncommercial 1.0.0** (`LICENSE`). Source-available, not open
+  source: any noncommercial use is permitted, commercial use is not (`COMMERCIAL.md`).
+
+**The invariant that matters: anything moved INTO Contracts or Protocol becomes permanently
+permissive.** A published package version can never be un-published — the MIT grant on it is
+irrevocable. So a refactor that relocates gateway logic down into those two assemblies is a
+licensing decision, not just a structural one. Keep them to contract interfaces and protocol
+primitives; converters, the sync engine and anything with commercial value stay above the line.
+(Core, Crypto and Backends.Common were packed up to 1.1.2 and are now host-only — see the
+provider-engine notes.)
+
+Two mechanical consequences:
+
+- `<Copyright>` lives **ungated** in `Directory.Build.props` (every shipped assembly needs it),
+  while `PackageLicenseExpression` and the rest of the package identity stay gated on
+  `IsPackable` in `Directory.Build.targets`. Don't merge the two — they have different scopes.
+- `THIRD-PARTY-NOTICES.md` must be regenerated when `Directory.Packages.props` changes: MIT and
+  Apache-2.0 both require notices to travel with the binaries, and it ships in the image at
+  `/licenses/` and in the release zips. The file documents how it was produced.
+
+Trademark: refer to the protocol descriptively ("implements the Exchange ActiveSync protocol"),
+never brand the product as EAS or imply Microsoft endorsement. The spec's copyright grant does
+**not** include a patent licence, and Microsoft runs a paid EAS licensing programme covering
+servers — relevant only if this is ever commercialised, but don't write anything claiming a
+licence is held.
+
 ## Coding conventions
 
 - **Async end-to-end is a hard rule.** Every I/O path is `async`/`await` with a

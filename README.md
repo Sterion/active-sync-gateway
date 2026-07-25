@@ -765,3 +765,33 @@ drop into `/app/plugins` and register themselves — no fork required. A plugin 
 one small **`ActiveSync.Contracts`** package (published to NuGet per release; it pulls in
 `ActiveSync.Protocol` and nothing else). See
 **[docs/plugins.md](docs/plugins.md)**.
+
+## Licence
+
+This project is **source-available, not open source**. It is licensed in two parts:
+
+| Part | Licence | Why |
+|------|---------|-----|
+| `src/ActiveSync.Contracts/` + `src/ActiveSync.Protocol/` — the plugin contract, published to NuGet | **[MIT](LICENSE-MIT)** | so backend plugins, including commercial and closed-source ones, can be built against it freely |
+| Everything else — the gateway itself | **[PolyForm Noncommercial 1.0.0](LICENSE)** | free for any noncommercial purpose; commercial use is not permitted |
+
+The PolyForm licence permits personal use, hobby projects, study and research, and use by
+charities, educational institutions, public research bodies, public safety and health
+organisations, environmental organisations and government institutions. It does not permit
+commercial use — see **[COMMERCIAL.md](COMMERCIAL.md)**.
+
+Third-party components redistributed in the Docker image and the release archives are listed
+with their own licences and copyright notices in
+**[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)**.
+
+Contributions are welcome under the terms in **[CONTRIBUTING.md](CONTRIBUTING.md)** — note the
+licence grant, which is what keeps commercial licensing possible.
+
+**Exchange ActiveSync is a Microsoft protocol.** This is an independent implementation written
+from Microsoft's published Open Specifications, which grant copyright permission to implement
+but expressly grant no patent licence; Microsoft operates a separate [EAS licensing
+programme](https://www.microsoft.com/en-us/legal/intellectualproperty/tech-licensing/programs)
+covering devices, software and servers. No claim is made that this project holds or is covered
+by any Microsoft patent licence. "Exchange ActiveSync", "Exchange" and "Microsoft" are
+trademarks of Microsoft Corporation, used here only descriptively to identify the protocol
+implemented. This project is not affiliated with, endorsed by, or certified by Microsoft.

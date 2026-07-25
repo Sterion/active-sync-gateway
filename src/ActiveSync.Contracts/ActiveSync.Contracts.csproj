@@ -5,8 +5,10 @@
 	  plugin builds against (IBackendProvider, IContentStore, IGatewayPlugin, BackendRole,
 	  ProviderSettings, BackendConfigField, ...). Deliberately tiny — it references only
 	  ActiveSync.Protocol (EAS constants) and the Microsoft.Extensions config/DI abstractions,
-	  NOT Crypto, EF Core or Core's host graph. A plugin references THIS one package (plus
-	  ActiveSync.Backends.Common only if it wants the MIME/iCal/vCard converters).
+	  NOT Crypto, EF Core or Core's host graph. A plugin references THIS one package alone —
+	  Core, Crypto and Backends.Common are host-only and are no longer published.
+	  Licensed MIT (see LICENSE-MIT) so third-party plugins, including commercial ones, can
+	  build against it freely; the rest of the repository is PolyForm Noncommercial.
 	-->
 	<PropertyGroup>
 		<RootNamespace>ActiveSync.Contracts</RootNamespace>

@@ -6,6 +6,12 @@
 		<LangVersion>latest</LangVersion>
 		<GenerateDocumentationFile>false</GenerateDocumentationFile>
 		<AnalysisLevel>latest</AnalysisLevel>
+		<!-- Copyright is deliberately UNGATED, unlike the package metadata in
+		     Directory.Build.targets: every assembly shipped in the Docker image and the release
+		     zips must carry an AssemblyCopyright attribute, not just the two packable projects.
+		     The repository is licensed in two parts (MIT for the plugin contract, PolyForm
+		     Noncommercial for the gateway) — see LICENSE. -->
+		<Copyright>Copyright (c) 2026 Ruben Andersen</Copyright>
 	</PropertyGroup>
 
 	<!-- NuGet: nothing packs unless a project opts in with <IsPackable>true</IsPackable>.

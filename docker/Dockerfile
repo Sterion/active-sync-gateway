@@ -14,6 +14,9 @@ COPY nuget.config Directory.Build.props Directory.Packages.props ActiveSync.slnx
 COPY src/ src/
 COPY tests/ tests/
 RUN dotnet restore ActiveSync.slnx -r "$(cat /rid)"
+# Licence + third-party attribution. Copied AFTER restore so editing them does not invalidate
+# the restore layer; the CI zip step reads them from /src to bundle them into the release zips.
+COPY LICENSE LICENSE-MIT THIRD-PARTY-NOTICES.md ./
 # Version stamp for tagged releases: CI passes the git tag (v1.0.3 -> 1.0.3) so the
 # startup banner reports the real version. Empty (local/branch builds) keeps the default.
 ARG VERSION=
@@ -43,6 +46,26 @@ RUN dotnet test ActiveSync.slnx -c Release --nologo --filter "Category!=Integrat
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
+
+# OCI image metadata. ARGs do not cross stages, so VERSION is re-declared here; CI passes both
+# it and the commit SHA. `licenses` is an SPDX expression and describes THIS image — the
+# gateway, which is PolyForm Noncommercial. The MIT-licensed plugin-contract packages
+# (ActiveSync.Contracts/.Protocol) ship separately on NuGet and are not what this label covers.
+# If a strict SPDX validator ever rejects the identifier, the fallback form is
+# LicenseRef-PolyForm-Noncommercial-1.0.0.
+ARG VERSION=
+ARG REVISION=
+LABEL org.opencontainers.image.title="ActiveSync Gateway" \
+      org.opencontainers.image.description="Exchange ActiveSync 16.1 gateway to IMAP/SMTP, JMAP, CalDAV/CardDAV and ManageSieve backends." \
+      org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0" \
+      org.opencontainers.image.source="https://github.com/Sterion/active-sync-gateway" \
+      org.opencontainers.image.url="https://github.com/Sterion/active-sync-gateway" \
+      org.opencontainers.image.documentation="https://github.com/Sterion/active-sync-gateway#readme" \
+      org.opencontainers.image.authors="Ruben Andersen" \
+      org.opencontainers.image.vendor="Sterion" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"
+
 # Npgsql probes for Kerberos/GSSAPI on its first Postgres connection; without this
 # library the native loader prints "Cannot load library libgssapi_krb5.so.2" to stderr.
 RUN apt-get update \
@@ -51,6 +74,12 @@ RUN apt-get update \
 # Copying the marker forces BuildKit to execute the test stage on every image build.
 COPY --from=test /tests-passed /tmp/tests-passed
 COPY --from=build /app .
+
+# The licence and third-party attribution ship inside the image: MIT and Apache-2.0 both
+# require the notices to travel with the binaries. /licenses is the conventional path
+# (it is where Red Hat / OpenShift container certification looks). Kept below the apt-get
+# layer so editing a licence file does not invalidate the package install.
+COPY LICENSE LICENSE-MIT THIRD-PARTY-NOTICES.md /licenses/
 
 # Operator convenience: `eas <verb>` from any exec session — e.g.
 #   echo -n 'imap-password' | kubectl exec -i <pod> -- eas protect

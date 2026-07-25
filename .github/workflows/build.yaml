@@ -254,11 +254,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The labels this emits are applied AFTER the Dockerfile's own LABEL lines and win, so the
+      # licensing ones are pinned here explicitly: metadata-action otherwise derives
+      # `licenses` from GitHub's own license detection, which does not recognise PolyForm and
+      # would overwrite the Dockerfile's correct value with an empty one.
       - name: Docker Tags and Labels
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
+          labels: |
+            org.opencontainers.image.title=ActiveSync Gateway
+            org.opencontainers.image.description=Exchange ActiveSync 16.1 gateway to IMAP/SMTP, JMAP, CalDAV/CardDAV and ManageSieve backends.
+            org.opencontainers.image.licenses=PolyForm-Noncommercial-1.0.0
+            org.opencontainers.image.authors=Ruben Andersen
+            org.opencontainers.image.vendor=Sterion
 
       - name: Login to ghcr.io
         uses: docker/login-action@v4
@@ -349,7 +359,12 @@ jobs:
                   "Bare $3 prints the effective-configuration banner; \"help\" lists commands." \
                   "Configure via appsettings.json next to the binaries, or environment variables." \
                   "Docs:     ${{ github.server_url }}/${{ github.repository }}" \
+                  "" \
+                  "Licence:  PolyForm Noncommercial 1.0.0 - free for noncommercial use only." \
+                  "          See LICENSE, LICENSE-MIT and THIRD-PARTY-NOTICES.md in this archive." \
                   > "/out/$1/README.txt"
+                # MIT and Apache-2.0 both require their notices to travel with the binaries.
+                cp LICENSE LICENSE-MIT THIRD-PARTY-NOTICES.md "/out/$1/"
               }
               publish linux-x64 Linux ./ActiveSync.Server
               publish linux-arm64 Linux-arm64 ./ActiveSync.Server
@@ -399,6 +414,7 @@ jobs:
           cache-from: type=gha
           build-args: |
             VERSION=${{ needs.test.outputs.version }}
+            REVISION=${{ github.sha }}
 
       # Version tags only, strictly after the image push: attach the download zips to the
       # GitHub release. An existing release (from release.yaml or by hand) is reused;

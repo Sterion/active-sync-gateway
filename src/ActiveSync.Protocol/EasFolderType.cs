@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ruben Andersen
+// SPDX-License-Identifier: MIT
+
 namespace ActiveSync.Protocol;
 
 /// <summary>EAS folder types (MS-ASCMD FolderSync Type element).</summary>

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ruben Andersen
+// SPDX-License-Identifier: MIT
+
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 

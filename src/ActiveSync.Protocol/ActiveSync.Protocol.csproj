@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-	<!-- Published so out-of-repo plugins compile against the EAS/WBXML contract. -->
+	<!-- Published so out-of-repo plugins compile against the EAS/WBXML contract. Licensed MIT
+	     (see LICENSE-MIT) — one of only two projects that are; the rest of the repository is
+	     PolyForm Noncommercial. Anything moved INTO this assembly becomes permanently
+	     permissive, so keep it to protocol primitives. -->
 	<PropertyGroup>
 		<IsPackable>true</IsPackable>
 		<PackageId>ActiveSync.Protocol</PackageId>

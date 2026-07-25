@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ruben Andersen
+// SPDX-License-Identifier: MIT
+
 using System.Net;
 
 namespace ActiveSync.Contracts;
