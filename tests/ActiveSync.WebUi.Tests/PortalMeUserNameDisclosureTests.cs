@@ -6,15 +6,19 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C5 (round 2) — <c>GET /user/api/me</c> echoed the admin-set backend <c>userName</c> verbatim
-///   for EVERY role, including one the provider keeps fully administered: carddav's Contacts role
-///   describes only BaseUrl/HomeSetPath plus the shared network knobs, none of them
-///   <c>SelfServiceEditable</c> (unlike caldav's Calendar role, which opts CalendarAttachments /
-///   SendInvitations / SharedCollections in). A shared/service-account login an admin bound to
-///   Contacts is therefore disclosed to a non-admin portal caller who has no self-service surface
-///   for that role at all — credential-adjacent topology, not the credential itself, but exactly
-///   the class of leak <c>EndpointHelpers.MaskSecretSettings</c> already guards for the settings
-///   dictionary next to it.
+///   C5 (round 2), re-evaluated as an item-12 follow-up. The original C5 fix withheld
+///   <c>GET /user/api/me</c>'s <c>userName</c> for a role whose PROVIDER opts no field into
+///   <c>SelfServiceEditable</c> (the SETTINGS surface — connection knobs like Host/BaseUrl). But
+///   that gate governs the settings dictionary only; backend CREDENTIALS (userName/password) are a
+///   separate, unconditional self-service surface per this handler's own header comment and
+///   docs/webui.md — <c>PUT /user/api/backends/{role}</c> lets a caller set <c>userName</c> for ANY
+///   role with no <c>SelfServiceEditable</c> check at all (only the <c>settings</c> dictionary is
+///   gated there). Withholding the read for a value the write side never restricted broke the
+///   round trip: a caller who set their own <c>Contacts</c> userName could no longer read it back
+///   (see <c>WebUiPortalTests.Saving_RefusesAdministeredSettings_AndLeavesThemAlone</c> /
+///   <c>SelfService_IsIsolated_AndPreservesAdminOnlyFields</c> in the integration suite, which
+///   caught this live). <c>userName</c> is now echoed unconditionally again, like every other field
+///   on the DTO — consistent with the PUT side that was never gated in the first place.
 /// </summary>
 public sealed class PortalMeUserNameDisclosureTests
 {
@@ -25,13 +29,15 @@ public sealed class PortalMeUserNameDisclosureTests
 	};
 
 	[Fact]
-	public async Task Me_DoesNotEchoUserName_ForARoleWithNoSelfServiceFields()
+	public async Task Me_EchoesUserName_ForARoleWithNoSelfServiceSettingsFields()
 	{
 		await using WebUiHost host = await WebUiHost.StartAsync(
 			WebUiHost.Users(("bob", new AccountOptions { MailAddress = "bob@example.com" })), ContactsRole);
 
-		// The admin bound a shared service-account login to Contacts — bob never set this himself
-		// and (carddav offering no SelfServiceEditable field for the role) never could.
+		// carddav's Contacts role opts no field into the SETTINGS self-service surface, but bob can
+		// still PUT his own Contacts userName unconditionally (the credential surface is separate
+		// and always available) — so GET must echo back whatever is currently stored, admin-set or
+		// self-set, exactly as the PUT handler lets him overwrite it either way.
 		AccountStore store = new(host.Factory);
 		await store.UpsertAsync("bob", new AccountOptions
 		{
@@ -45,19 +51,15 @@ public sealed class PortalMeUserNameDisclosureTests
 		using HttpClient client = await host.SignInAsync("bob", admin: false);
 		HttpResponseMessage response = await client.GetAsync("/user/api/me");
 
-		string raw = await response.Content.ReadAsStringAsync();
-		Assert.DoesNotContain("svc-shared-contacts", raw, StringComparison.Ordinal);
-
 		JsonElement contacts = (await host.ReadJsonAsync(response)).GetProperty("backends").GetProperty("Contacts");
-		Assert.Equal(JsonValueKind.Null, contacts.GetProperty("userName").ValueKind);
+		Assert.Equal("svc-shared-contacts@internal.example.com", contacts.GetProperty("userName").GetString());
 	}
 
 	[Fact]
 	public async Task Me_StillEchoesUserName_ForARoleWithSelfServiceFields()
 	{
-		// The gate must not blank EVERY role's userName — only ones the caller has no self-service
-		// surface for at all. Calendar (caldav) opts several fields in, so it stays visible: it is
-		// exactly the kind of credential the portal exists to let a user see and change.
+		// A role whose provider DOES opt settings fields in behaves the same way — userName is
+		// visible regardless, since the settings-surface gate never applied to credentials at all.
 		Dictionary<string, string?> settings = new()
 		{
 			["ActiveSync:Backends:Calendar:Provider"] = "caldav",
