@@ -861,3 +861,58 @@ WebUi 76 · Server 264), from 1093 at the start of the run ✓ · live **141 pas
   hrefs that `Parse` now handles), and `K4` contradicts README:526's documented 20-year self-signed
   validity.
 - **Nothing has been pushed.** All 14 commits are local on `main`, per Standing context.
+
+---
+
+## Item 19 — Backend session lifetime & auth cache
+**Findings:** `A5` `A6` `A8` `A9` `A10`
+**Commits:** `9595623` (A6) · `cc2f282` (A5) · `177e961` (A8) · `4cec6d7` (A9) · `cc259ef` (A10)
+**Verification:** integrity items=32 live=10 assigned=132 unique=132 dupes=0 encoding=0 ✓ · cursor → item
+20 ✓ · one commit per finding, strike shipped with each ✓ · build 0 warnings ✓ · unit **1120 passed, 0
+skipped** (+5) ✓ · live **141 passed, 0 skipped** on a clean-volume Stalwart ✓
+**Diffs read against the detail entries:**
+- `A6` — the prescribed reload+re-apply. `CompleteAccountWipeAsync` is now a bounded 4-attempt loop that
+  **re-derives its state from a fresh read each pass** rather than reusing the first attempt's decisions,
+  reloads the `Device` row on `DbUpdateConcurrencyException`, and detaches the pending `LoginBlock` on
+  both failure paths. Round 1's `A22` unique-violation handling is preserved, not replaced — I checked
+  that specifically, since the `claimed-fixed-but-not.md` pointer warns this is where the last fix stopped
+  short.
+- `A8` — exactly the prescribed version-stamping, and correct in the detail that matters: the snapshot
+  version is captured **before** `VerifyLocally`/the `ICredentialVerifier` probe and carried into
+  `CacheVerdict`, so a verdict computed against the pre-rebuild snapshot is written with the *old* stamp
+  and read as a miss. Capturing it after the probe would have looked identical and fixed nothing.
+  Both the positive and negative caches are stamped.
+- `A9` — `activeUsers` now filters on `IsBuilt`, exactly as prescribed.
+- `A10` — both halves of the prescribed fix landed: `GetSessionAsync` catches the faulted build,
+  value-compared `TryRemove`s the slot and rebuilds once (bounded by a `retriedFault` flag), and the idle
+  sweep gained an `IsFaulted` branch so a slot nobody retries is still reclaimed.
+- `A5` — see the note below.
+**Notes:**
+- **`A5` was closed with a documentation-only remedy, and that is legitimate here** — its detail text
+  offers three alternatives ("document the window in the option help, offer a 'no positive cache' mode, or
+  bound `SuccessCacheMinutes` more tightly"), and the no-positive-cache mode already exists and is already
+  tested (`SuccessCacheMinutes = 0`; the read is guarded by `> 0`, verified). So the only real gap was the
+  operator-facing help text in `SettingKeys`, which now states plainly that a password revoked on the mail
+  backend keeps working against the gateway for up to the cache window. Proof is **N/A**, correctly — there
+  is no behaviour change to reproduce. **The underlying staleness window is unchanged and still real**: a
+  backend-side password revocation is not honoured for up to `SuccessCacheMinutes` (default 5). That is
+  now documented rather than fixed, which is what the finding permits, but a reader should not take the
+  strike as meaning the window is gone.
+- **`A10` changes observable behaviour**: a transient backend outage during session build now self-heals
+  inside the *same* `GetSessionAsync` call (one extra attempt) instead of failing that request. A caller
+  that previously saw request N fail and N+1 succeed now sees N succeed. The worker's reading of "rebuild
+  once" — self-heal transparently rather than fail-and-let-the-next-caller-retry — matches the method's
+  existing rebuild-loop idiom for password rotation and lease eviction, and I agree with it.
+- **Minor, accepted:** `A10`'s catch is `catch (Exception) when (!retriedFault)`, so a *cancelled* build
+  also costs one retry before propagating. Harmless (the retry observes the same cancelled token
+  immediately) and dropping a cancelled build from the cache is right anyway, but it is broader than the
+  finding strictly needed.
+- **`A8` grew two internal shapes**: `AccountResolver.SnapshotVersion` is new public API on a Core type
+  (host-only, not the plugin contract), and the auth-cache tuples gained a field. No published surface.
+- **I ran the live suite; the worker did not** — it argued the item "touches no auth/session policy",
+  which is difficult to sustain for a change to the auth verdict cache and the session build path. Green,
+  so nothing was broken. That is now **five of six workers** across this and the previous run declining a
+  live run the orchestrator then ran anyway.
+- Worker implemented `A6` before `A5`, off the item's listed order. Findings are independent here, so no
+  consequence.
+- No new findings filed.
