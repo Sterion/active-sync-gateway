@@ -155,7 +155,15 @@ internal static class BackendsEndpoints
 				return roleError!;
 
 			Dictionary<string, string?> db = new(await store.LoadAllAsync(ct), StringComparer.OrdinalIgnoreCase);
-			Dictionary<string, string?> merged = Merge(parsed, request, db, config, out string? providerName);
+			// C2: probe only the role's currently-STORED settings (config file + DB overrides).
+			// A request-body Settings override is never fed to the probe — otherwise the boolean
+			// `reachable` answer is an SSRF-style oracle: any admin caller could aim it at an
+			// arbitrary internal Host:Port and learn open-vs-closed for a target the role was
+			// never actually configured to reach. The provider CHOICE still travels from the
+			// request — it only selects among the fixed, already-registered provider set, not a
+			// network address, so switching it before saving is still testable.
+			Dictionary<string, string?> merged = Merge(
+				parsed, new RoleWriteRequest(request.Provider, null), db, config, out string? providerName);
 			if (providerName is null)
 				return Results.Ok(new { supported = false, reachable = false, detail = "No provider selected." });
 
