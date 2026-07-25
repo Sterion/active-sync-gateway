@@ -80,7 +80,11 @@ public sealed class JmapEventSourceWatcher : IAsyncDisposable
 				backoffSeconds = 1;
 				await using Stream stream = await response.Content.ReadAsStreamAsync(_cts.Token).ConfigureAwait(false);
 				using StreamReader reader = new(stream);
+				// H6: dispatch once at the record boundary (a blank line — SSE fields have no fixed
+				// order within a record, so a ping's "data:" line can legally arrive before its
+				// "event: ping" line, and signalling as soon as "data:" is seen mis-latches on that).
 				string currentEvent = "";
+				bool sawData = false;
 				while (!_cts.IsCancellationRequested)
 				{
 					string? line = await reader.ReadLineAsync(_cts.Token).ConfigureAwait(false);
@@ -88,14 +92,17 @@ public sealed class JmapEventSourceWatcher : IAsyncDisposable
 						break; // stream closed — reconnect
 					if (line.Length == 0)
 					{
+						if (sawData && currentEvent != "ping")
+							Signal(); // a state change (anything that is not the keep-alive ping)
 						currentEvent = "";
+						sawData = false;
 						continue;
 					}
 
 					if (line.StartsWith("event:", StringComparison.Ordinal))
 						currentEvent = line[6..].Trim();
-					else if (line.StartsWith("data:", StringComparison.Ordinal) && currentEvent != "ping")
-						Signal(); // a state change (anything that is not the keep-alive ping)
+					else if (line.StartsWith("data:", StringComparison.Ordinal))
+						sawData = true;
 				}
 			}
 			catch (OperationCanceledException)
