@@ -78,6 +78,19 @@ public class ActiveSyncOptionsValidatorTests
 	}
 
 	[Fact]
+	public void DbMinimumLevel_AcceptsTheSameAliasesAsEasLogs()
+	{
+		// B12: `eas logs -l critical` (LogQueryService.LevelsAtOrAbove) already accepted the "critical"
+		// alias for Fatal, but this validator only matched the four exact enum names — so a value the
+		// CLI understood fine bricked startup (and, via SettingKeys' identical exact-match check, a
+		// live `eas config set`/web write of the same value too). Both now share
+		// LogQueryService.NormalizeLevelName.
+		ActiveSyncOptions options = Valid();
+		options.Log.DbMinimumLevel = "critical";
+		Assert.True(Validator.Validate(null, options).Succeeded);
+	}
+
+	[Fact]
 	public void InvalidHeartbeatBounds_Fail()
 	{
 		ActiveSyncOptions options = Valid();

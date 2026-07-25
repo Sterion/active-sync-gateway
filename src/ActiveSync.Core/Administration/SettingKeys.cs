@@ -314,6 +314,16 @@ internal static class SettingKeys
 			case ValueType.Bool:
 				return bool.TryParse(value, out _) ? null : $"'{value}' is not a boolean (true/false).";
 			case ValueType.Enum:
+				// B12: DbMinimumLevel shares LogQueryService's alias table (info/warn/critical) rather
+				// than the exact-match-only check every other enum key uses — `eas logs -l critical`
+				// already accepted the alias, so a write of the same value must not be rejected here
+				// (ActiveSyncOptionsValidator's DbMinimumLevel check accepts the same aliases now, so
+				// storing the raw alias text can never brick the next startup either).
+				if (key.Key.Equals("ActiveSync:Log:DbMinimumLevel", StringComparison.OrdinalIgnoreCase))
+					return LogQueryService.NormalizeLevelName(value) is null
+						? $"'{value}' is not a recognized log level (Information/Warning/Error/Fatal, " +
+						  "or an alias like Info/Warn/Critical)."
+						: null;
 				return key.EnumValues!.Contains(value, StringComparer.OrdinalIgnoreCase)
 					? null
 					: $"'{value}' is not one of: {string.Join(", ", key.EnumValues!)}.";

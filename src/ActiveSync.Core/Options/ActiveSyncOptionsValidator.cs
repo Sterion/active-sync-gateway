@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Security;
 using ActiveSync.Crypto;
 using Microsoft.Extensions.Options;
@@ -71,9 +72,12 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 			failures.Add($"ActiveSync:Log:Mode '{options.Log.Mode}' is unknown (use Simple, Standard or Extended).");
 		if (options.Log.Format.ToLowerInvariant() is not ("text" or "json"))
 			failures.Add($"ActiveSync:Log:Format '{options.Log.Format}' is unknown (use Text or Json).");
-		if (options.Log.DbMinimumLevel.ToLowerInvariant() is not ("information" or "warning" or "error" or "fatal"))
+		// B12: shares LogQueryService's alias table (info/warn/critical) rather than matching only
+		// the four exact names — `eas logs -l critical` already accepted the alias; a config file
+		// carrying the same value must not brick startup here just because this check didn't know it.
+		if (LogQueryService.NormalizeLevelName(options.Log.DbMinimumLevel) is null)
 			failures.Add($"ActiveSync:Log:DbMinimumLevel '{options.Log.DbMinimumLevel}' is unknown " +
-			             "(use Information, Warning, Error or Fatal).");
+			             "(use Information, Warning, Error or Fatal, or an alias like Info/Warn/Critical).");
 		if (options.Log.RetentionDays is < 0 or > 3650)
 			failures.Add("ActiveSync:Log:RetentionDays must be between 0 (disabled) and 3650.");
 

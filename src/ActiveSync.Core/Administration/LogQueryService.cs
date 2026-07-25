@@ -27,22 +27,38 @@ public sealed class LogQueryService(ISyncDbContextFactory contextFactory)
 	public sealed record LogCounts(int ErrorsAndFatal, int Warnings);
 
 	/// <summary>
+	///   Canonicalizes a level name or alias (info/warn/critical, any casing) to one of
+	///   <see cref="LevelOrder" />, or null when unrecognized. B12: shared with
+	///   <see cref="ActiveSyncOptionsValidator" /> and <see cref="SettingKeys" /> so `eas logs -l
+	///   critical` and a write of <c>ActiveSync:Log:DbMinimumLevel</c> (CLI or web) agree on what a
+	///   "level name" is — they used to disagree (the CLI/read side tolerated aliases, the write/
+	///   startup side accepted only the four exact names), so a value the CLI understood fine could
+	///   be rejected at write time or brick startup coming from a config file.
+	/// </summary>
+	public static string? NormalizeLevelName(string? level)
+	{
+		if (string.IsNullOrWhiteSpace(level))
+			return null;
+		return level.Trim().ToLowerInvariant() switch
+		{
+			"information" or "info" => "Information",
+			"warning" or "warn" => "Warning",
+			"error" => "Error",
+			"fatal" or "critical" => "Fatal",
+			_ => null
+		};
+	}
+
+	/// <summary>
 	///   The set of level names at or above <paramref name="level" />, or an empty array when the
 	///   name is unrecognized. Accepts the CLI's aliases (info/warn/critical) as well as the exact
 	///   names the web filter offers, so both callers resolve a level the same way.
 	/// </summary>
 	public static string[] LevelsAtOrAbove(string? level)
 	{
-		if (string.IsNullOrWhiteSpace(level))
+		string? normalized = NormalizeLevelName(level);
+		if (normalized is null)
 			return [];
-		string normalized = level.Trim().ToLowerInvariant() switch
-		{
-			"information" or "info" => "Information",
-			"warning" or "warn" => "Warning",
-			"error" => "Error",
-			"fatal" or "critical" => "Fatal",
-			_ => ""
-		};
 		int floor = Array.IndexOf(LevelOrder, normalized);
 		return floor < 0 ? [] : LevelOrder[floor..];
 	}

@@ -252,7 +252,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **21. Retention services & DB-log lifecycle** — ~~`E2`~~ ~~`E4`~~ ~~`E13`~~ **COMPLETE**
 > `E2` the two retention services permanently stop on any `OperationCanceledException` (an EF timeout freezes retention for the process lifetime) — mirror `SettingsRefreshService`'s shutdown-only guard. `E4` the DB-log shutdown flush is uncancellable. `E13` the drain spins tight when logging is toggled off live. `Setup/*`.
 
-**22. Config & account resolution** — ~~`B2`~~ ~~`B3`~~ ~~`B4`~~ ~~`B5`~~ ~~`B7`~~ `B12`
+**22. Config & account resolution** — ~~`B2`~~ ~~`B3`~~ ~~`B4`~~ ~~`B5`~~ ~~`B7`~~ ~~`B12`~~ **COMPLETE**
 > `B4` a stale account refresh can overwrite a newer role-aware snapshot (unlocked swap). `B2` negative `UsersRefreshSeconds` polls every request though the doc says it disables pickup. `B3` startup-impact validation can't catch a backend/user-validator brick. `B5`/`B7`/`B12` secret residency, legacy-Oof upgrade, level-alias drift. `Accounts`/`Settings`/`Administration`.
 
 **23. DAV & JMAP request correctness** [LIVE] — `H2` `H3` `H4` `H6` `H7` `H8` `H10` `H11`
@@ -334,7 +334,7 @@ Area S, the cross-cutting structural pass, is given in full below.)*
 `B9` **Low** `SecretRedaction` markers omit PrivateKey/ClientAuth/Signature → cleartext render — `Administration/SecretRedaction.cs:24`.
 `B10` **Nit** `ResolvedAccount.OrderedRoles` lazy cache not thread-safe on a shared record — `Accounts/ResolvedAccount.cs:23`.
 `B11` **Nit** `ValidateEntry` emits redundant "sealed but no key" per secret when the key won't load — `Accounts/AccountResolver.cs:260`.
-`B12` **Nit** Log-level alias set ("critical") disagrees with the config enum validation — `Administration/LogQueryService.cs:43`.
+`B12` **Nit** Log-level alias set ("critical") disagrees with the config enum validation — `Administration/LogQueryService.cs:43`. FIXED (item 22): extracted `LogQueryService.NormalizeLevelName` (the info/warn/critical alias table `LevelsAtOrAbove` already had) as the one shared classifier. `ActiveSyncOptionsValidator`'s `DbMinimumLevel` startup check now calls it instead of matching only the four exact names (so a file/env value like "critical" no longer bricks startup), and `SettingKeys.Validate`'s Enum branch special-cases this one catalogue key to the same helper (so `eas config set`/the web editor accept it too — the raw alias text is stored, which is safe now that the startup validator accepts it as well). Proven red-first: `ActiveSyncOptionsValidatorTests.DbMinimumLevel_AcceptsTheSameAliasesAsEasLogs` and `ConfigWriteValidationTests.DbMinimumLevel_AcceptsTheSameAliasesAsEasLogs` both failed against unmodified code (`"critical"` rejected by both) and pass now.
 **Verified correct:** fail-closed on invalid rows (+ `Enabled==false` honored); host-controlled/bootstrap key enforcement (write + read paths); empty gateway password can't hash; NaN/Infinity rejected + cadence clamp; timing-safe pinned/gateway compares; log-injection safety (`Contains` not `Like`, login validation); DB-outage resilience keeps last-good; connection-string secret redaction; provider-validation memoization; live role rebuild validated like startup; OIDC AdminClaim/Value pairing; legacy row deserialized-first.
 
 ## Area C — WebUi (9)

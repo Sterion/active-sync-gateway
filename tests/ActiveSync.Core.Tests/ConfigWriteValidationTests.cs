@@ -93,4 +93,14 @@ public sealed class ConfigWriteValidationTests
 		SettingKeys.SettingKey key = SettingKeys.Find("ActiveSync:Auth:UsersRefreshSeconds")!;
 		Assert.NotNull(SettingKeys.Validate(key, "999999999"));
 	}
+
+	// B12 — the CLI's `eas logs -l critical` already accepts the alias (LogQueryService.LevelsAtOrAbove);
+	// this write path's enum check knew only the four exact names, so a value the CLI understood
+	// fine was rejected here (and, for a file/env value, at startup — see ActiveSyncOptionsValidatorTests).
+	[Fact]
+	public void DbMinimumLevel_AcceptsTheSameAliasesAsEasLogs()
+	{
+		SettingKeys.SettingKey key = SettingKeys.Find("ActiveSync:Log:DbMinimumLevel")!;
+		Assert.Null(SettingKeys.Validate(key, "critical"));
+	}
 }
