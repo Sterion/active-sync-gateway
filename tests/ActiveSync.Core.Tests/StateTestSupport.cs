@@ -93,3 +93,39 @@ internal sealed class CountingDbContextFactory(SqliteConnection connection, Save
 {
 	public SyncDbContext CreateDbContext() => StateTestSupport.NewContext(connection, counter);
 }
+
+/// <summary>
+///   Simulates a genuine interleaved writer: the FIRST time the intercepted context saves, runs a
+///   caller-supplied action (typically inserting/committing a competing row on a SEPARATE context
+///   over the SAME connection) immediately before letting the real save proceed — so the save hits
+///   an authentic SQLite constraint violation instead of an injected exception, and any recovery
+///   path that re-reads afterward finds a row that genuinely exists.
+/// </summary>
+internal sealed class ConcurrentWriteInterceptor(Action inject) : SaveChangesInterceptor
+{
+	private bool _fired;
+
+	public override InterceptionResult<int> SavingChanges(
+		DbContextEventData eventData, InterceptionResult<int> result)
+	{
+		if (!_fired)
+		{
+			_fired = true;
+			inject();
+		}
+
+		return base.SavingChanges(eventData, result);
+	}
+
+	public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+		DbContextEventData eventData, InterceptionResult<int> result, CancellationToken ct = default)
+	{
+		if (!_fired)
+		{
+			_fired = true;
+			inject();
+		}
+
+		return base.SavingChangesAsync(eventData, result, ct);
+	}
+}

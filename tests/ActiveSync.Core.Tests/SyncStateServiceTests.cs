@@ -722,4 +722,40 @@ public sealed class SyncStateServiceTests : IDisposable
 		foreach (string href in hrefs)
 			Assert.True(map.ContainsKey(href), $"{href} missing from the returned map");
 	}
+
+	[Fact]
+	public async Task SaveOof_ConcurrentInsertRace_UpsertsInsteadOfThrowing()
+	{
+		// A3: OofSetting carries no concurrency token, and SaveOofAsync's insert path has no
+		// unique-violation guard on the (UserName) index — two concurrent first-time writers (e.g.
+		// the phone's Settings->Oof racing an `eas` CLI edit) can both read no row and both attempt
+		// to insert. The second insert used to surface the real constraint violation as an unhandled
+		// DbUpdateException (a 500) instead of being treated as an upsert, the way
+		// DeviceStore/DavItemMap already handle the identical shape of race. The interceptor inserts
+		// and COMMITS a genuine competing row (via a separate context over the same connection)
+		// right as our own save fires, so the violation and the recovery's re-read are both real,
+		// not simulated.
+		ConcurrentWriteInterceptor race = new(() =>
+		{
+			using SqliteSyncDbContext racer = StateTestSupport.NewContext(_connection);
+			racer.OofSettings.Add(new OofSetting { UserName = "u@a3", State = 0, Message = "racer" });
+			racer.SaveChanges();
+		});
+		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, race);
+		SyncStateService service = new(db);
+
+		OofSetting saved = await service.SaveOofAsync(
+			"u@a3", 1, DateTime.UtcNow, DateTime.UtcNow.AddDays(1),
+			"back tomorrow", "Text", null, CancellationToken.None); // must not throw
+
+		Assert.Equal("u@a3", saved.UserName);
+		Assert.Equal(1, saved.State);
+
+		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
+		List<OofSetting> rows = await verify.OofSettings.AsNoTracking()
+			.Where(o => o.UserName == "u@a3").ToListAsync();
+		Assert.Single(rows); // no duplicate row surviving from our own failed insert attempt
+		Assert.Equal(1, rows[0].State);
+		Assert.Equal("back tomorrow", rows[0].Message);
+	}
 }

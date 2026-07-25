@@ -202,19 +202,56 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 		return db.OofSettings.FirstOrDefaultAsync(o => o.UserName == userName, ct);
 	}
 
-	/// <summary>Upserts the out-of-office row (tracked update or insert).</summary>
+	/// <summary>
+	///   Upserts the out-of-office row (tracked update or insert). <see cref="OofSetting" /> carries
+	///   no concurrency token, so this only guards the INSERT race (A3): two concurrent first-time
+	///   writers (e.g. the phone's Settings→Oof racing an `eas` CLI edit) can both read no row and
+	///   both insert, tripping the unique index on <see cref="OofSetting.UserName" />. Mirrors the
+	///   same catch-and-re-read-as-update idiom <c>DeviceStore.GetOrCreateDeviceAsync</c> already
+	///   uses for the identical shape of race.
+	/// </summary>
 	public async Task<OofSetting> SaveOofAsync(
 		string userName, int state, DateTime? startUtc, DateTime? endUtc,
 		string message, string bodyType, string? previousActiveScript, CancellationToken ct)
 	{
 		OofSetting? row = await db.OofSettings.FirstOrDefaultAsync(o => o.UserName == userName, ct)
 			.ConfigureAwait(false);
+		bool inserting = row is null;
 		if (row is null)
 		{
 			row = new OofSetting { UserName = userName };
-			await db.OofSettings.AddAsync(row, ct).ConfigureAwait(false);
+			// DbSet.Add false positive for VSTHRD103 — see GetOrCreateDeviceAsync.
+#pragma warning disable VSTHRD103
+			db.OofSettings.Add(row);
+#pragma warning restore VSTHRD103
 		}
 
+		ApplyOofFields(row, state, startUtc, endUtc, message, bodyType, previousActiveScript);
+
+		try
+		{
+			await db.SaveChangesAsync(ct).ConfigureAwait(false);
+		}
+		catch (DbUpdateException ex) when (inserting && DbExceptions.IsUniqueViolation(ex))
+		{
+			// A concurrent writer inserted the row first — re-read the winner and re-apply this
+			// call's fields as an update instead of surfacing the unique-index violation as a 500.
+			// Only a unique violation on an INSERT takes this path; any other failure (including a
+			// unique violation on what was already an update, which cannot happen against a
+			// single-column unique index) keeps its diagnostic intact.
+			db.Entry(row).State = EntityState.Detached;
+			row = await db.OofSettings.FirstAsync(o => o.UserName == userName, ct).ConfigureAwait(false);
+			ApplyOofFields(row, state, startUtc, endUtc, message, bodyType, previousActiveScript);
+			await db.SaveChangesAsync(ct).ConfigureAwait(false);
+		}
+
+		return row;
+	}
+
+	private static void ApplyOofFields(
+		OofSetting row, int state, DateTime? startUtc, DateTime? endUtc,
+		string message, string bodyType, string? previousActiveScript)
+	{
 		row.State = state;
 		row.StartUtc = startUtc;
 		row.EndUtc = endUtc;
@@ -222,7 +259,5 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 		row.BodyType = bodyType;
 		row.PreviousActiveScript = previousActiveScript;
 		row.UpdatedUtc = DateTime.UtcNow;
-		await db.SaveChangesAsync(ct).ConfigureAwait(false);
-		return row;
 	}
 }
