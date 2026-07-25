@@ -41,6 +41,16 @@ public sealed class AccountResolver
 	private readonly ILogger<AccountResolver>? _logger;
 	private readonly SemaphoreSlim _refreshGate = new(1, 1);
 	private readonly Settings.ChangeStampRefreshGate _gate = new();
+	// B4: serializes the BUILD-AND-SWAP of _snapshot between the two independent writers —
+	// EnsureFreshAsync (account refresh, request path) and OnRolesChanged (a live "Backends" edit,
+	// config-reload thread). _refreshGate only keeps concurrent EnsureFreshAsync calls from
+	// overlapping each other; it says nothing about OnRolesChanged, which used to swap with no
+	// coordination at all. Building INSIDE this lock (not just the final assignment) matters: it
+	// means whichever writer runs SECOND observes the fully-applied state the first one just
+	// installed (current roles, current database users) rather than racing a build that started
+	// against now-superseded inputs — so neither writer can ever clobber the other's newer snapshot
+	// with one computed from stale roles.
+	private readonly object _snapshotSwapLock = new();
 	private volatile Snapshot _snapshot;
 	// A8: monotonic — bumped every time _snapshot is swapped (both rebuild paths below), NEVER on
 	// the constructor's initial build. BackendSessionFactory stamps each cached auth verdict with
@@ -128,13 +138,23 @@ public sealed class AccountResolver
 				Dictionary<string, AccountOptions>? dbUsers = stamp is null
 					? null
 					: await _store.LoadAllAsync(_logger, ct).ConfigureAwait(false);
-				_lastDbUsers = dbUsers;
-				_snapshot = BuildSnapshot(_options.CurrentValue, _rolesProvider.Current, _registry, dbUsers, _logger);
-				_lastStamp = stamp;
-				Interlocked.Increment(ref _snapshotVersion);
+				Snapshot built;
+				// B4: build AND swap under the same lock OnRolesChanged uses. A role change landing
+				// on the config-reload thread while THIS build is still running (captured against
+				// the roles in force when it started) must not have its own, newer snapshot clobbered
+				// by this one finishing last with stale role settings baked in.
+				lock (_snapshotSwapLock)
+				{
+					_lastDbUsers = dbUsers;
+					built = BuildSnapshot(_options.CurrentValue, _rolesProvider.Current, _registry, dbUsers, _logger);
+					_snapshot = built;
+					_lastStamp = stamp;
+					Interlocked.Increment(ref _snapshotVersion);
+				}
+
 				_logger?.LogInformation(
 					"Accounts snapshot rebuilt: {Count} declared user(s) ({Db} from database)",
-					_snapshot.Users.Count, _snapshot.Users.Count(u => u.Value.FromDatabase));
+					built.Users.Count, built.Users.Count(u => u.Value.FromDatabase));
 				SnapshotChanged?.Invoke();
 			}
 
@@ -158,33 +178,38 @@ public sealed class AccountResolver
 	/// <summary>
 	///   Rebuilds the snapshot when the global backend role configuration changed (a live
 	///   settings edit), so declared users inherit the new role settings. Uses the last-loaded
-	///   database users; pass-through resolution already reads the current roles directly. The
-	///   snapshot swap is atomic, so this needs no lock against the request-path refresh.
+	///   database users; pass-through resolution already reads the current roles directly.
+	///   B4: builds AND swaps under the same lock <see cref="EnsureFreshAsync" /> uses — see
+	///   <see cref="_snapshotSwapLock" /> for why a bare atomic swap is not enough.
 	/// </summary>
 	private void OnRolesChanged()
 	{
 		Snapshot rebuilt;
-		try
+		lock (_snapshotSwapLock)
 		{
-			rebuilt = BuildSnapshot(
-				_options.CurrentValue, _rolesProvider.Current, _registry, _lastDbUsers, _logger);
-		}
-		catch (Exception ex)
-		{
-			// B6: config entries are treated as strict (startup already validated them), but a LIVE
-			// backend edit can newly invalidate a config user's merge — and BuildSnapshot then throws.
-			// Left uncaught the throw escaped through this Changed handler and out of the settings
-			// reload that fired it, mislogged as a settings-refresh failure, and left the snapshot
-			// stale forever (the roles provider had already committed the new signature, so it never
-			// fired again). Keep the previous (last-good) snapshot and log against the resolver.
-			_logger?.LogWarning(ex,
-				"Backend configuration change left one or more declared users invalid; " +
-				"keeping the previous account snapshot until the configuration is corrected");
-			return;
+			try
+			{
+				rebuilt = BuildSnapshot(
+					_options.CurrentValue, _rolesProvider.Current, _registry, _lastDbUsers, _logger);
+			}
+			catch (Exception ex)
+			{
+				// B6: config entries are treated as strict (startup already validated them), but a LIVE
+				// backend edit can newly invalidate a config user's merge — and BuildSnapshot then throws.
+				// Left uncaught the throw escaped through this Changed handler and out of the settings
+				// reload that fired it, mislogged as a settings-refresh failure, and left the snapshot
+				// stale forever (the roles provider had already committed the new signature, so it never
+				// fired again). Keep the previous (last-good) snapshot and log against the resolver.
+				_logger?.LogWarning(ex,
+					"Backend configuration change left one or more declared users invalid; " +
+					"keeping the previous account snapshot until the configuration is corrected");
+				return;
+			}
+
+			_snapshot = rebuilt;
+			Interlocked.Increment(ref _snapshotVersion);
 		}
 
-		_snapshot = rebuilt;
-		Interlocked.Increment(ref _snapshotVersion);
 		SnapshotChanged?.Invoke();
 	}
 

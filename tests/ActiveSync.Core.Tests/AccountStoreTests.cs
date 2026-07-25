@@ -3,6 +3,7 @@ using ActiveSync.Contracts;
 using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
+using ActiveSync.Core.Settings;
 using ActiveSync.Core.State;
 using ActiveSync.Crypto;
 using Microsoft.Data.Sqlite;
@@ -407,6 +408,123 @@ public sealed class AccountStoreTests : IDisposable
 			Assert.Equal("phone1", survivor.UserName);
 			Assert.Equal("{\"m\":\"new\"}", survivor.Json);  // the newer row won
 		}
+	}
+
+	[Fact]
+	public async Task ConcurrentRoleChange_DuringAccountRefresh_IsNotLostToTheStaleRefreshFinishingLast()
+	{
+		// B4: EnsureFreshAsync (account refresh — captures _rolesProvider.Current at BuildSnapshot
+		// time) and OnRolesChanged (a live "Backends" edit, on the config-reload thread) swap
+		// _snapshot with no shared lock. If a role change lands WHILE an account refresh's
+		// BuildSnapshot is still running against the OLD roles, the refresh can finish (and swap)
+		// LAST, overwriting the role-aware snapshot OnRolesChanged just installed.
+		//
+		// Reproduced with a provider whose ValidateConfiguration blocks (once) until released,
+		// assigned to the Notes role — every declared user validates it, so this opens a real
+		// window between "roles captured" and "swap" inside BuildSnapshot, the same shape a slow
+		// CA read or a plugin's own validation would create in production.
+		GateProvider slow = new();
+		BackendProviderRegistry registry = new(
+		[
+			new ActiveSync.Backends.Imap.ImapBackendProvider(
+				TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
+			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
+			// Calendar/Tasks/Contacts auto-fallback to "local" (no explicit assignment below) — must
+			// be registered so their validation doesn't add unrelated noise to `failures`.
+			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!),
+			slow,
+		], NullLogger<BackendProviderRegistry>.Instance);
+
+		DbSettingsConfigurationSource dbSource = new();
+		dbSource.Provider.SetData(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:Notes:Provider"] = "slow",
+			["ActiveSync:Backends:Notes:Tag"] = "v1",
+		});
+		IConfigurationRoot root = new ConfigurationBuilder()
+			.AddInMemoryCollection(new Dictionary<string, string?>
+			{
+				["ActiveSync:Backends:MailStore:Provider"] = "imap",
+				["ActiveSync:Backends:MailStore:Host"] = "imap.global",
+				["ActiveSync:Backends:MailSubmit:Provider"] = "smtp",
+				["ActiveSync:Backends:MailSubmit:Host"] = "smtp.global",
+			})
+			.Add(dbSource)
+			.Build();
+		// No registry here: this BackendRolesProvider's OWN live-edit provider validation (B14) must
+		// stay OUT of the gate — only AccountResolver's BuildSnapshot should hit the slow provider.
+		BackendRolesProvider rolesProvider = new(root);
+
+		// No config Users yet: the CONSTRUCTOR itself calls BuildSnapshot synchronously (with
+		// dbUsers null too), and that would hit the slow gate on the calling thread before the test
+		// even starts the refresh — declare "u" only AFTER construction (TestOptionsMonitor.Of
+		// exposes the live, mutable ActiveSyncOptions instance, so this is picked up by the refresh).
+		ActiveSyncOptions options = new() { Encryption = new EncryptionOptions { AllowPlaintext = true } };
+		AccountResolver resolver = new(TestOptionsMonitor.Of(options), rolesProvider, registry, _store);
+		options.Users = new Dictionary<string, AccountOptions> { ["u"] = new() };
+
+		// A DB stamp move so EnsureFreshAsync actually rebuilds (rather than no-op on Store is null).
+		await _store.UpsertAsync("dbuser", new AccountOptions(), CancellationToken.None);
+
+		// Kick off the account refresh; it captures roles v1 and then blocks INSIDE BuildSnapshot
+		// (validating the Notes role) until released.
+		Task refreshTask = Task.Run(() => resolver.EnsureFreshAsync(true, CancellationToken.None));
+		Assert.True(slow.Entered.Wait(TimeSpan.FromSeconds(5)), "refresh did not reach the slow validator");
+
+		// While the refresh is still mid-build against roles v1, land a live role change to v2 — on
+		// a background task too, so this test cannot deadlock against a fix that serializes the two
+		// swaps under one lock (the role-change build would then block waiting for that lock).
+		Task roleChangeTask = Task.Run(() => dbSource.Provider.SetData(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:Notes:Provider"] = "slow",
+			["ActiveSync:Backends:Notes:Tag"] = "v2",
+		}));
+
+		// Give the role change a real chance to run to completion BEFORE releasing the blocked
+		// refresh. It does no I/O and its own ValidateConfiguration call doesn't block (the gate
+		// only blocks the FIRST ever call, already consumed by the refresh) — on UNFIXED code this
+		// reliably finishes well within the margin. On FIXED code it instead blocks acquiring the
+		// same lock the refresh holds, so this wait is expected to time out — that's fine, it isn't
+		// what makes the test deterministic; releasing the refresh below is what unblocks it either
+		// way, and the ASSERTION is what actually proves which snapshot survived.
+		await Task.WhenAny(roleChangeTask, Task.Delay(TimeSpan.FromSeconds(2)));
+
+		// Let the blocked refresh finish; on UNFIXED code it swaps in its stale, roles-v1-based
+		// snapshot over whatever the role change already installed above.
+		slow.Release.Set();
+		await refreshTask;
+		await roleChangeTask;
+
+		string? tag = resolver.Resolve(new BackendCredentials("u", "pw"))
+			.Roles[BackendRole.Notes].Settings.Section["Tag"];
+		Assert.Equal("v2", tag); // the live role change must not be lost to the stale refresh
+	}
+
+	/// <summary>Test-only provider whose ValidateConfiguration blocks ONCE, on the first call, until
+	/// released — used to open a deterministic window inside BuildSnapshot (B4).</summary>
+	private sealed class GateProvider : IBackendProvider
+	{
+		private int _callCount;
+
+		public ManualResetEventSlim Entered { get; } = new(false);
+		public ManualResetEventSlim Release { get; } = new(false);
+
+		public string Name => "slow";
+		public IReadOnlySet<BackendRole> SupportedRoles { get; } = new HashSet<BackendRole> { BackendRole.Notes };
+
+		public Task<IBackendConnection> CreateConnectionAsync(
+			BackendConnectionContext context, CancellationToken ct) => throw new NotSupportedException();
+
+		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures)
+		{
+			if (Interlocked.Increment(ref _callCount) == 1)
+			{
+				Entered.Set();
+				Release.Wait();
+			}
+		}
+
+		public string DescribeRole(BackendRole role, ProviderSettings settings) => "slow";
 	}
 
 	private sealed class CapturingLogger : ILogger
