@@ -210,8 +210,8 @@ public static class JsCalendarConverter
 		string recurrenceMember = plural ? RecurrenceRulesMember : RecurrenceRuleMember;
 		if (evt.RecurrenceRule is { } rp)
 			js[recurrenceMember] = plural
-				? new object[] { FromRecurrenceRule(rp) }
-				: FromRecurrenceRule(rp);
+				? new object[] { FromRecurrenceRule(rp, evt.Start?.TzId) }
+				: FromRecurrenceRule(rp, evt.Start?.TzId);
 
 		// Update (not create): explicitly null every managed member the event did not produce, so
 		// clearing a location / recurrence / attendee list survives PatchObject update semantics.
@@ -309,7 +309,7 @@ public static class JsCalendarConverter
 			.Where(i => i != 0);
 	}
 
-	private static Dictionary<string, object?> FromRecurrenceRule(RecurrenceRule pattern)
+	private static Dictionary<string, object?> FromRecurrenceRule(RecurrenceRule pattern, string? tzId)
 	{
 		Dictionary<string, object?> rule = new()
 		{
@@ -321,7 +321,7 @@ public static class JsCalendarConverter
 		if (pattern.Count > 0)
 			rule["count"] = pattern.Count;
 		if (pattern.Until is { } until)
-			rule["until"] = until.Value.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+			rule["until"] = FormatUntil(until, tzId);
 		if (pattern.ByDay.Count > 0)
 			rule["byDay"] = pattern.ByDay
 				.Select(object (w) =>
@@ -345,6 +345,34 @@ public static class JsCalendarConverter
 		if (pattern.BySetPosition is { Count: > 0 } bySetPosition)
 			rule["bySetPosition"] = bySetPosition.ToArray();
 		return rule;
+	}
+
+	/// <summary>
+	///   RFC 8984 §4.3.4: <c>until</c> is a LocalDateTime in the event's OWN zone — unlike an
+	///   iCalendar RRULE <c>UNTIL</c>, which is always UTC once DTSTART carries a TZID (H8). The
+	///   parsed <paramref name="until" /> is that UTC instant; converting it into
+	///   <paramref name="tzId" /> before formatting keeps the written wall-clock time consistent
+	///   with the event's own start/end. A floating event (no zone) or an unresolvable zone id
+	///   falls back to writing the UTC digits verbatim, matching the pre-fix behaviour.
+	/// </summary>
+	private static string FormatUntil(CalDateTime until, string? tzId)
+	{
+		DateTime utc = until.AsUtc;
+		if (tzId is { Length: > 0 })
+			try
+			{
+				TimeZoneInfo zone = TimeZoneInfo.FindSystemTimeZoneById(tzId);
+				return TimeZoneInfo.ConvertTimeFromUtc(utc, zone)
+					.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+			}
+			catch (TimeZoneNotFoundException)
+			{
+			}
+			catch (InvalidTimeZoneException)
+			{
+			}
+
+		return utc.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
 	}
 
 	private static readonly Dictionary<string, DayOfWeek> DayMap = new()

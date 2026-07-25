@@ -233,6 +233,29 @@ public class JsCalendarConverterTests
 		Assert.Equal("PT5H", back.GetProperty("duration").GetString());
 	}
 
+	// H8: recurrence "until" is a RFC 8984 LocalDateTime in the event's OWN zone, unlike an
+	// iCalendar RRULE UNTIL (always UTC when DTSTART carries a TZID). Writing the raw UTC digits
+	// as if they were already local shifts the recurrence end by the zone's offset. 2026-10-01 is
+	// still Europe/Copenhagen summer time (CEST, UTC+2; DST doesn't end until 2026-10-25), so
+	// 07:00 UTC is 09:00 local.
+	[Fact]
+	public void Recurrence_Until_IsWrittenInTheEventsOwnZone_NotRawUtc()
+	{
+		const string ics =
+			"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n" +
+			"BEGIN:VEVENT\r\nUID:until-1\r\n" +
+			"DTSTART;TZID=Europe/Copenhagen:20260601T090000\r\n" +
+			"DTEND;TZID=Europe/Copenhagen:20260601T093000\r\n" +
+			"RRULE:FREQ=WEEKLY;UNTIL=20261001T070000Z\r\n" +
+			"SUMMARY:Standup\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+		Dictionary<string, object?> js = JsCalendarConverter.FromICalendar(ics, null);
+		JsonElement back = JsonSerializer.SerializeToElement(js);
+
+		string? until = back.GetProperty("recurrenceRule").GetProperty("until").GetString();
+		Assert.Equal("2026-10-01T09:00:00", until);
+	}
+
 	[Fact]
 	public void FromICalendar_DropsServerManagedMembers()
 	{
