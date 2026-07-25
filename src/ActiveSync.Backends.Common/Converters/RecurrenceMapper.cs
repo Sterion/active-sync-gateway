@@ -125,10 +125,16 @@ internal static class RecurrenceMapper
 
 		if (int.TryParse(V("Interval"), out int interval) && interval > 1)
 			pattern.Interval = interval;
-		if (int.TryParse(V("Occurrences"), out int occurrences) && occurrences > 0)
-			pattern.Count = occurrences;
-		else if (V("Until") is { } until && EasDateTime.TryParse(until, out DateTime untilUtc))
+
+		// D13: RRULE (and Ical.Net's RecurrencePattern) allows only one of COUNT/UNTIL, so a
+		// client that sends both forces a choice — checking Occurrences first (as this used to)
+		// always silently dropped Until, which can leave an effectively unbounded series if
+		// Occurrences is large/careless with no date backstop. Until is checked first instead:
+		// dropping Occurrences in its favor only ever narrows the series, the safer failure mode.
+		if (V("Until") is { } until && EasDateTime.TryParse(until, out DateTime untilUtc))
 			pattern.Until = new CalDateTime(untilUtc, "UTC");
+		else if (int.TryParse(V("Occurrences"), out int occurrences) && occurrences > 0)
+			pattern.Count = occurrences;
 		return pattern;
 
 		void ApplyNthDay(RecurrencePattern p)
