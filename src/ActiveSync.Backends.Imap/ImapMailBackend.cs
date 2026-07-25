@@ -101,7 +101,7 @@ public sealed partial class ImapMailBackend(
 			// delivered after the original SELECT indefinitely (observed on Stalwart).
 			await client.NoOpAsync(ct).ConfigureAwait(false);
 			SearchQuery query = filter.SinceUtc is { } since
-				? SearchQuery.DeliveredAfter(since.Date)
+				? SearchQuery.DeliveredAfter(SearchFloor(since))
 				: SearchQuery.All;
 			IList<UniqueId> uids = await folder.SearchAsync(query, ct).ConfigureAwait(false);
 			if (uids.Count == 0)
@@ -556,6 +556,25 @@ public sealed partial class ImapMailBackend(
 		    TrashNames.Contains(folder.FullName, StringComparer.OrdinalIgnoreCase))
 			return EasFolderType.DeletedItems;
 		return EasFolderType.UserMail;
+	}
+
+	/// <summary>
+	///   D2: RFC 3501's SEARCH SINCE compares only the calendar date and "disregard[s] ...
+	///   timezone" of the server's own INTERNALDATE — which is not necessarily UTC. A UTC
+	///   <paramref name="sinceUtc" /> truncated straight to <c>.Date</c> can therefore land one
+	///   calendar day later than the server's own idea of that boundary (a message delivered at
+	///   23:50 UTC is 01:50 the next day in CEST), silently EXCLUDING a message that should still
+	///   be inside the filter window — not a "delete" (the diff engine's aged-out reconciliation
+	///   in SyncHandler.Collection.cs only rescues items that were seen before and later fall out
+	///   of the window; a message excluded from its very first appearance never gets that
+	///   treatment). Backing the floor off by one extra day makes the IMAP-side filter a strict
+	///   superset of the caller's intended UTC window regardless of the server's timezone, so
+	///   nothing is silently missed — at the cost of occasionally including one extra day near
+	///   the edge, which the "roughly last N days" FilterType semantics already tolerate.
+	/// </summary>
+	internal static DateTime SearchFloor(DateTime sinceUtc)
+	{
+		return sinceUtc.AddDays(-1).Date;
 	}
 
 	// A mail item's "revision" is a 3-digit string encoding the sync-relevant flags in a
