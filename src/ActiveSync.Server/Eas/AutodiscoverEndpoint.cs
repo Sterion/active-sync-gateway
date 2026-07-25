@@ -90,14 +90,33 @@ public static class AutodiscoverEndpoint
 			Encoding.UTF8.GetBytes(doc.Declaration + "\r\n" + doc), ct);
 	}
 
-	private static async Task<string?> ExtractEmailAsync(HttpContext http, ILogger wireLogger, CancellationToken ct)
+	// E11: real Autodiscover request bodies are a few hundred bytes. Without a cap, an
+	// authenticated caller could POST up to MaxRequestBodySize (64 MB) and have it fully buffered
+	// into one string and XML-parsed, per request.
+	private const int MaxBodyBytes = 16 * 1024;
+
+	internal static async Task<string?> ExtractEmailAsync(HttpContext http, ILogger wireLogger, CancellationToken ct)
 	{
 		if (!HttpMethods.IsPost(http.Request.Method) || http.Request.ContentLength is null or 0)
 			return null;
 		try
 		{
-			using StreamReader reader = new(http.Request.Body, Encoding.UTF8);
-			string body = await reader.ReadToEndAsync(ct);
+			// Read capped at MaxBodyBytes regardless of what Content-Length claims (chunked
+			// transfer carries none at all) — an oversized body is treated like any other
+			// malformed request: no email extracted, the caller falls back to the login below.
+			using MemoryStream buffer = new();
+			byte[] chunk = new byte[4096];
+			int total = 0;
+			int read;
+			while ((read = await http.Request.Body.ReadAsync(chunk, ct)) > 0)
+			{
+				total += read;
+				if (total > MaxBodyBytes)
+					return null;
+				await buffer.WriteAsync(chunk.AsMemory(0, read), ct);
+			}
+
+			string body = Encoding.UTF8.GetString(buffer.ToArray());
 			if (wireLogger.IsEnabled(LogLevel.Trace))
 				wireLogger.LogTrace("Autodiscover request: {Payload}", WireLog.Payload(body));
 			if (string.IsNullOrWhiteSpace(body))
