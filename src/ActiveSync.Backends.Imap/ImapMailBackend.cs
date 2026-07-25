@@ -365,7 +365,10 @@ public sealed partial class ImapMailBackend(
 			}
 
 			// F5: fetch the moved message's flags at the destination so the caller can store the
-			// item's REAL revision, not a placeholder that can never match the next listing.
+			// item's REAL revision, not a placeholder that can never match the next listing. FETCH
+			// requires the folder to be open (STATUS above does not), so open it read-only first.
+			if (!destination.IsOpen)
+				await destination.OpenAsync(FolderAccess.ReadOnly, ct).ConfigureAwait(false);
 			IList<IMessageSummary> summaries = await destination
 				.FetchAsync([newUid.Value], MessageSummaryItems.UniqueId | MessageSummaryItems.Flags, ct)
 				.ConfigureAwait(false);
