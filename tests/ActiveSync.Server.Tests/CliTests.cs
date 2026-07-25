@@ -134,6 +134,12 @@ public class CliTests
 			Assert.Contains("ActiveSync gateway", stdout);
 			Assert.Contains("NOT running", stdout);
 			Assert.Contains("eas serve", stdout);
+			// The licence notice is load-bearing, not decoration: a noncommercial licence is
+			// far easier to enforce when the terms are put in front of the operator, so a
+			// refactor must not quietly drop it. The copyright half comes from the assembly's
+			// <Copyright> attribute, so this also catches that going missing.
+			Assert.Contains("PolyForm Noncommercial", stdout);
+			Assert.Contains("Ruben Andersen", stdout);
 		}
 		finally
 		{

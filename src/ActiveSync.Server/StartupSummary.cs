@@ -43,6 +43,11 @@ public static class StartupSummary
 		                 ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString()
 		                 ?? "unknown";
 
+		// Read the holder from the assembly attribute (stamped by <Copyright> in
+		// Directory.Build.props) rather than repeating it here, so the two cannot drift.
+		string copyright = Assembly.GetExecutingAssembly()
+			.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright ?? "";
+
 		IReadOnlyDictionary<string, MergedAccount> users = mergedUsers
 			?? options.Users?.ToDictionary(
 				kv => kv.Key, kv => new MergedAccount(kv.Value, false, false), StringComparer.OrdinalIgnoreCase)
@@ -50,6 +55,13 @@ public static class StartupSummary
 
 		logger.LogInformation("========================================================");
 		logger.LogInformation("ActiveSync gateway v{Version} — EAS 16.1 → mail/DAV backends", version);
+		// A visible licence notice is what stops an operator claiming they never saw the terms,
+		// which matters more for a noncommercial licence than for a permissive one. Both
+		// surfaces reach this method: the serve banner and bare `eas` (BannerCommand →
+		// CliVerbs.ShowBannerAsync).
+		logger.LogInformation(
+			"Licence:  PolyForm Noncommercial 1.0.0 — noncommercial use only (see LICENSE){Copyright}",
+			copyright.Length > 0 ? $" — {copyright}" : "");
 		logger.LogInformation(
 			options.ReadOnly
 				? "Mode:     READ-ONLY (all client writes are suppressed/reverted)"
