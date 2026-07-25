@@ -85,6 +85,8 @@ finding rather than merely compiling and passing.
 >
 > For each item in order, spawn **one subagent** to implement it following the working protocol. Run
 > them **strictly sequentially** — never two at once; they collide in git and in `review-items.md`.
+> Spawn every worker on **Sonnet** (`model: "sonnet"` on the Agent call) — do not let it inherit the
+> orchestrator's model.
 >
 > When a subagent returns, **verify independently — do not trust its report**:
 > - run the integrity check below against the invariants recorded in `review-items.md`
@@ -92,7 +94,13 @@ finding rather than merely compiling and passing.
 > - confirm the cursor advanced — resume must now return the *next* item
 > - confirm the build is clean at the project's baseline, and that tests actually **ran**
 >
+> - read the diff of **every** finding the item landed against its `review-items-detail.md` entry —
+>   a sample is not a verification
+>
 > Then append an entry to `review-results.md`. If a check fails, **stop and report** — do not continue.
+>
+> Before you finish the run, do the **end-of-run sweep** over every item the run landed and record a
+> run-summary entry.
 
 ### Verify, don't trust — this is load-bearing
 
@@ -102,6 +110,53 @@ line, so the cursor never advanced and the next session would have redone the wh
 the worker ran passed. The one it did not run was the one that mattered.
 
 An orchestrator that reads the summary and moves on inherits exactly that class of failure.
+
+### Read every finding's diff — a sample is not a verification
+
+For each item, read the diff of **every** finding it landed, against that finding's entry in
+`review-items-detail.md`. Not one or two per item, not "the interesting ones" — all of them. Three
+questions per finding, and they are cheap because the detail entry already states the answer:
+
+1. Does the change touch the **site the finding names** (the type and member, the quoted expression)?
+2. Does it implement **the defect's remedy**, or something adjacent that merely compiles and passes?
+3. Was the test **red first** on unmodified code — or is it labelled coverage, with a stated reason
+   the symptom cannot be exhibited here?
+
+A worker following a spec fails by *drifting off the spec*, not by writing code that fails to build.
+The build and the suite catch nothing here: a fix aimed at the wrong expression compiles, passes its
+own test, and gets struck through — and the strike is what stops anyone ever looking again. Sampling
+finds this only in the findings you happen to sample.
+
+Where the diff is uninspectable at that granularity — a tight-cluster commit covering several
+findings — read the whole commit against **all** the IDs in its subject and say so in the results
+entry, as the existing entries for items 2 and 5 do.
+
+### The end-of-run sweep
+
+Per-item verification is done with a worker's report in front of you and one item of context. Before
+you finish a run — hand off, hit a phase boundary, or stop — do one pass over **everything the run
+landed**, cold:
+
+```sh
+git log --oneline <commit before the run>..HEAD          # one commit per finding, ID in each subject
+git diff --stat <commit before the run>..HEAD            # nothing touched outside the items' scope
+```
+
+Then, over that whole range:
+
+- **Every finding claimed in the run is struck in Part 1** and its ID appears in exactly one commit
+  subject — reconcile the two lists, do not eyeball them.
+- **Nothing landed outside the items' declared file clusters.** A worker straying into a neighbouring
+  file is in-scope-creep the per-item check reads as normal.
+- **Run the integrity check and the full unit suite once more at HEAD**, plus the live suite if any
+  item in the run was `[LIVE]`, landed a migration, or changed auth or the pipeline. Per-item runs
+  each proved a tree that no longer exists; only this one proves the tree you are handing over.
+- **Re-read the notes you wrote** for the run's items. A caveat that looked local at item 3 —
+  a behaviour change, a coverage-not-proof test, a judgment call — often reads differently once
+  items 4–8 have landed on top of it.
+
+Record the result as a **run summary** entry in `review-results.md` (see Recording results). If the
+sweep contradicts an entry you already wrote, the sweep wins: correct the entry and say what changed.
 
 ### The orchestrator never edits source or tests
 
@@ -174,6 +229,37 @@ it fails three ways:
 The one exception is a **live anomaly the worker cannot derive from the git tree or the docs** — an
 active stash, a half-finished item, a backend mid-restart. For that, and only that, add one line:
 `Situational: <the fact>`. Nothing else.
+
+### The worker model is pinned, not inherited
+
+Spawn workers with an explicit **`model: "sonnet"`**. This is a *spawn parameter*, not brief text —
+the brief above stays a constant, byte-identical for every worker.
+
+Without it a subagent inherits the orchestrator's model, so the run's cost and behaviour drift with
+whatever the human happened to start the session on. Pinning splits the two roles the way the
+protocol already assumes they differ:
+
+- **The worker executes a spec.** The expensive thinking is already done — the finding names the
+  defect, the file, the symbol and usually the remedy; the protocol dictates red-first, one commit
+  per finding, where to mark the cursor. That is instruction-following against a written contract,
+  which is what the queue was flattened into one-session items to make it.
+- **The orchestrator judges.** It decides whether a diff matches the finding rather than merely
+  compiling, whether a result is in scope, whether a repair brief is right, whether a finding
+  contradicts the architecture. It is also the participant that accumulates context and degrades.
+  Leave it on whatever model the human started; do not pin it here.
+
+The protection against a weaker worker is the verification that already exists — integrity check,
+one commit per finding, cursor advanced, build clean, tests actually ran, and the diff read against
+the finding's detail entry. If a worker's output does not survive that, the answer is the documented
+one: bisect, spawn a scoped repair subagent, or stop and report. **Never** relax a verification step
+because of the model a worker ran on, and never quietly upgrade a single worker to get an item to
+pass — an item that needs a bigger model to land is a signal the *item* is mis-sized or the finding
+is under-specified, and that is a human decision.
+
+The one standing exception is an item `review-items.md` marks **"Run alone"** — the big structural
+operations (assembly moves, decompositions, wholesale anchor rewrites). Those are architecture
+execution rather than spec execution, and the human may choose a stronger worker model for them;
+say so explicitly when starting that run.
 
 ---
 
@@ -468,3 +554,18 @@ independent evidence, and keeping them separate is the point.
 **The notes are the most valuable part.** A diff shows what changed, never that a change forces a
 one-time full re-sync on upgrade, or that a passing test proves nothing, or that a judgment call went
 one way and could reasonably have gone the other.
+
+And one **run summary** per run, from the end-of-run sweep:
+
+```markdown
+## Run summary — items N–M
+**Swept:** `git log` range · every claimed finding struck in Part 1 and present in exactly one commit
+subject ✓ · no changes outside the items' file clusters ✓
+**At HEAD:** integrity <numbers> ✓ · build clean ✓ · unit <counts> ✓ · live <counts, or why not required> ✓
+**Carried forward:** <caveats that read differently now that later items landed on top · anything
+the next orchestrator must know · where the cursor rests>
+```
+
+This is the entry a fresh orchestrator reads first. The per-item entries say what each item did; the
+run summary says what state the tree is actually in — verified at HEAD, not at eight intermediate
+trees that no longer exist.
