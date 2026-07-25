@@ -342,6 +342,34 @@ public sealed class FolderUpdateHandler(
 		string displayName = root.Element(FH + "DisplayName")?.Value
 		                     ?? throw new FolderOperationException("10", "Missing DisplayName");
 		(UserFolder Folder, IContentStore Store) resolved = await ResolveWritableAsync(context, serverId, ct);
+
+		// F6: MS-ASCMD FolderUpdate carries a mandatory ParentId. Only DisplayName used to be
+		// honoured — a client asking to MOVE the folder (a different ParentId) got a silent rename
+		// in place, reported as success; the client believes it moved the folder and the next
+		// FolderSync re-asserts the old parent (churn). No store here can actually change a
+		// folder's parent, so reject a real move instead of pretending it happened.
+		string requestedParentId = root.Element(FH + "ParentId")?.Value ?? "0";
+		bool parentUnchanged;
+		if (requestedParentId == "0")
+		{
+			parentUnchanged = resolved.Folder.ParentBackendKey is null;
+		}
+		else
+		{
+			(UserFolder Folder, IContentStore Store)? requestedParent =
+				await Folders.ResolveCollectionAsync(context.Session, context.Device.UserName, requestedParentId, ct);
+			parentUnchanged = requestedParent is not null &&
+			                  requestedParent.Value.Folder.BackendKey == resolved.Folder.ParentBackendKey;
+		}
+
+		if (!parentUnchanged)
+		{
+			logger.LogInformation(
+				"FolderUpdate: rejecting a parent change for \"{Folder}\" for {User} (folder move is not supported)",
+				resolved.Folder.DisplayName, context.Device.UserName);
+			throw new FolderOperationException("3", "Folder move (ParentId change) is not supported");
+		}
+
 		IFolderOperations folderOps = resolved.Store as IFolderOperations
 			?? throw new BackendException("This folder's store does not support folder rename.");
 		await folderOps.RenameFolderAsync(resolved.Folder.BackendKey, displayName, ct);

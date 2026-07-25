@@ -261,7 +261,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **24. Converter correctness** [LIVE] — ~~`D2`~~ ~~`D3`~~ ~~`D4`~~ ~~`D5`~~ ~~`D13`~~ ~~`D15`~~ **COMPLETE**
 > `D5` all-day calendar events shift a day in a non-UTC zone. `D3` duplicate EMAIL lines on contact merge. `D4` Type-4 MIME corrupted by the plaintext truncator. `D2`/`D15` mail listing filter narrows the "whole truth" map and holds the gate across a full flags fetch. `D13` `Occurrences`+`Until` mutual exclusion drops the bound. `Backends.Common/Converters` + `Imap`.
 
-**25. Compose, move & folder handlers** [LIVE] — `F2` ~~`F4`~~ ~~`F5`~~ `F6`
+**25. Compose, move & folder handlers** [LIVE] — `F2` ~~`F4`~~ ~~`F5`~~ ~~`F6`~~
 > `F2` draft-submit/occurrence-CANCEL record the replay ledger after the irreversible send → resend-on-crash duplicates. `F5` MoveItems poisons the destination snapshot with `"moved"` → needless Change re-send. `F4` double source resolution per reply/forward. `F6` FolderUpdate silently ignores a parent move.
 
 **26. Sync command conformance** [LIVE] — `F3` `F7` `F8` `F9`

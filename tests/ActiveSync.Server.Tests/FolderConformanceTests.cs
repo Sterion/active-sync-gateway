@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
+using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using ActiveSync.Server.Eas.Handlers;
@@ -17,6 +18,9 @@ namespace ActiveSync.Server.Tests;
 ///       uncaught HTTP 500.</item>
 ///     <item>F27: FolderCreate must honour the requested Type instead of silently creating a mail
 ///       folder for a calendar/contacts/tasks request.</item>
+///     <item>F6: FolderUpdate must not silently ignore a requested parent change (folder move) —
+///       renaming in place while reporting success leaves the client believing it moved the folder,
+///       and the next FolderSync re-asserts the old parent (churn).</item>
 ///   </list>
 /// </summary>
 public sealed class FolderConformanceTests : IDisposable
@@ -162,6 +166,82 @@ public sealed class FolderConformanceTests : IDisposable
 
 		Assert.Equal("1", response?.Root?.Element(FH + "Status")?.Value);
 		Assert.Equal(1, _harness.Session.Store.ListFoldersCalls);
+	}
+
+	// ---- F6 --------------------------------------------------------------------------------
+
+	[Fact]
+	public async Task FolderUpdate_WithADifferentParentId_IsRejected_NotSilentlyRenamedInPlace()
+	{
+		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:Parent", "Parent", null, EasFolderType.UserMail, EasClass.Email),
+			new BackendFolder("imap:Child", "Child", "imap:Parent", EasFolderType.UserMail, EasClass.Email));
+		UserFolder child = registry.Single(f => f.BackendKey == "imap:Child");
+
+		// The client asks to move Child to the root (ParentId "0") while also renaming it — a
+		// FolderUpdate request that legitimately carries both a parent change and a display-name
+		// change (MS-ASCMD requires both elements on every FolderUpdate).
+		XDocument? response = await _harness.RunAsync(UpdateHandler(), "FolderUpdate",
+			new XDocument(new XElement(FH + "FolderUpdate",
+				new XElement(FH + "SyncKey", "0"),
+				new XElement(FH + "ServerId", child.ServerId),
+				new XElement(FH + "ParentId", "0"),
+				new XElement(FH + "DisplayName", "Renamed"))));
+
+		// Not the generic success status — the client must be told the move did not happen rather
+		// than believe it did.
+		Assert.NotEqual("1", response?.Root?.Element(FH + "Status")?.Value);
+		// And the backend must never have been asked to rename it in place either — a partial
+		// "renamed but not moved" outcome is exactly the silent half-success F6 flags.
+		Assert.Empty(_harness.Session.Store.RenamedFolders);
+	}
+
+	[Fact]
+	public async Task FolderUpdate_WithTheSameParentId_StillRenames()
+	{
+		// Regression guard: a FolderUpdate that does NOT ask for a parent change (the common case —
+		// a plain rename) must keep working exactly as before.
+		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:Parent", "Parent", null, EasFolderType.UserMail, EasClass.Email),
+			new BackendFolder("imap:Child", "Child", "imap:Parent", EasFolderType.UserMail, EasClass.Email));
+		UserFolder parent = registry.Single(f => f.BackendKey == "imap:Parent");
+		UserFolder child = registry.Single(f => f.BackendKey == "imap:Child");
+
+		XDocument? response = await _harness.RunAsync(UpdateHandler(), "FolderUpdate",
+			new XDocument(new XElement(FH + "FolderUpdate",
+				new XElement(FH + "SyncKey", "0"),
+				new XElement(FH + "ServerId", child.ServerId),
+				new XElement(FH + "ParentId", parent.ServerId),
+				new XElement(FH + "DisplayName", "Renamed"))));
+
+		Assert.Equal("1", response?.Root?.Element(FH + "Status")?.Value);
+		Assert.Single(_harness.Session.Store.RenamedFolders);
+	}
+
+	[Fact]
+	public async Task FolderUpdate_OfARootFolder_WithParentId0_StillRenames()
+	{
+		// Regression guard: the common "ParentId 0" case for a top-level folder must not be
+		// mistaken for a move.
+		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+		UserFolder inbox = registry.Single();
+
+		XDocument? response = await _harness.RunAsync(UpdateHandler(), "FolderUpdate",
+			new XDocument(new XElement(FH + "FolderUpdate",
+				new XElement(FH + "SyncKey", "0"),
+				new XElement(FH + "ServerId", inbox.ServerId),
+				new XElement(FH + "ParentId", "0"),
+				new XElement(FH + "DisplayName", "Renamed"))));
+
+		Assert.Equal("1", response?.Root?.Element(FH + "Status")?.Value);
+		Assert.Single(_harness.Session.Store.RenamedFolders);
+	}
+
+	private FolderUpdateHandler UpdateHandler()
+	{
+		return new FolderUpdateHandler(_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<FolderUpdateHandler>.Instance);
 	}
 
 	private FolderCreateHandler CreateHandler()
