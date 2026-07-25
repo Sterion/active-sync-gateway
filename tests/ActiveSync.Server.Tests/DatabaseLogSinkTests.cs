@@ -3,6 +3,7 @@ using ActiveSync.Core.State;
 using ActiveSync.Server.Setup;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Serilog;
 using Serilog.Context;
@@ -193,6 +194,87 @@ public sealed class DatabaseLogSinkTests : IDisposable
 		finally
 		{
 			SelfLog.Disable();
+		}
+	}
+
+	/// <summary>
+	///   E4: the shutdown flush bounded only its own <c>Task.Wait(2s)</c>; no token reached
+	///   <c>WaitToReadAsync</c>/<c>SaveChangesAsync</c>, so a genuinely hung write was never actually
+	///   interrupted — Dispose gave up waiting, but the drain task (and its in-flight save) kept
+	///   running, unobserved, against a disposing host. A shutdown-linked token threaded into the
+	///   save must be what unblocks the hang; Dispose merely returning after 2s is not proof of that.
+	/// </summary>
+	[Fact]
+	public async Task Dispose_CancelsAnInFlightHungWrite_InsteadOfLeavingItUncancelled()
+	{
+		HangInterceptor hang = new();
+		DatabaseLogSink sink = new();
+		sink.Activate(new HangingContextFactory($"Data Source={_dbPath}", hang),
+			TestOptionsMonitor.Of(Options(true, "Information")));
+
+		using Logger logger = new LoggerConfiguration()
+			.MinimumLevel.Verbose().WriteTo.Sink(sink).CreateLogger();
+		logger.Information("this write will hang until cancelled");
+
+		// VSTHRD003: awaiting the interceptor's TaskCompletionSources on purpose — they are the
+		// synchronization gates this test uses to observe the drain reaching (and unwinding out of)
+		// the hang, not tasks representing unrelated background work.
+#pragma warning disable VSTHRD003
+		// Let the drain reach the interceptor and start hanging before we dispose.
+		Assert.True(await WaitWithTimeoutAsync(hang.Started.Task, TimeSpan.FromSeconds(5)),
+			"expected the drain to have reached the hanging save");
+
+		sink.Dispose();
+
+		// Give the cancellation a moment beyond Dispose's own bound to actually unwind the hang.
+		bool cancelled = await WaitWithTimeoutAsync(hang.Cancelled.Task, TimeSpan.FromSeconds(3));
+#pragma warning restore VSTHRD003
+		Assert.True(cancelled,
+			"expected the shutdown-linked token to cancel the in-flight save instead of abandoning it " +
+			"uncancelled once Dispose gave up waiting");
+	}
+
+	private static async Task<bool> WaitWithTimeoutAsync(Task task, TimeSpan timeout)
+	{
+#pragma warning disable VSTHRD003
+		Task completed = await Task.WhenAny(task, Task.Delay(timeout));
+#pragma warning restore VSTHRD003
+		return completed == task;
+	}
+
+	private sealed class HangInterceptor : SaveChangesInterceptor
+	{
+		public readonly TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public readonly TaskCompletionSource Cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+			DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+		{
+			Started.TrySetResult();
+			try
+			{
+				await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+			}
+			catch (OperationCanceledException)
+			{
+				Cancelled.TrySetResult();
+				throw;
+			}
+
+			return result;
+		}
+	}
+
+	private sealed class HangingContextFactory(string connectionString, SaveChangesInterceptor interceptor)
+		: ISyncDbContextFactory
+	{
+		public SyncDbContext CreateDbContext()
+		{
+			DbContextOptions<SqliteSyncDbContext> options = new DbContextOptionsBuilder<SqliteSyncDbContext>()
+				.UseSqlite(connectionString)
+				.AddInterceptors(new SqlitePragmaInterceptor(), interceptor)
+				.Options;
+			return new SqliteSyncDbContext(options);
 		}
 	}
 

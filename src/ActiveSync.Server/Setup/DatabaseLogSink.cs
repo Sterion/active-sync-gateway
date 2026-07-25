@@ -28,10 +28,12 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 		new BoundedChannelOptions(Capacity) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
 
 	private readonly string _machine = Environment.MachineName;
+	private readonly CancellationTokenSource _shutdownCts = new();
 	private ISyncDbContextFactory? _contextFactory;
 	private IOptionsMonitor<ActiveSyncOptions>? _options;
 	private Task? _drain;
 	private int _drainErrors;
+	private int _disposed;
 
 	public void Emit(LogEvent logEvent)
 	{
@@ -62,12 +64,25 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 	{
 		_contextFactory = contextFactory;
 		_options = options;
-		_drain = Task.Run(DrainAsync);
+		_drain = Task.Run(() => DrainAsync(_shutdownCts.Token));
 	}
 
 	public void Dispose()
 	{
+		// Serilog's Logger.Dispose() disposes any IDisposable sink it owns, and callers also
+		// hold/dispose the sink themselves (e.g. to Activate it before the logger exists) — Dispose
+		// must tolerate being invoked more than once. _shutdownCts.Cancel()/Dispose() are not
+		// idempotent together (a second Cancel() after Dispose() throws ObjectDisposedException), so
+		// guard the whole body to run exactly once.
+		if (Interlocked.Exchange(ref _disposed, 1) != 0)
+			return;
+
 		_channel.Writer.TryComplete();
+		// E4: signal the drain's in-flight read/write to unwind NOW instead of only bounding our own
+		// wait below — without this, a genuinely hung write (a stuck DB) was never actually
+		// interrupted: Dispose gave up waiting, but the drain task (and its SaveChangesAsync) kept
+		// running to completion on its own schedule, unobserved, against a disposing host.
+		_shutdownCts.Cancel();
 		try
 		{
 			_drain?.Wait(TimeSpan.FromSeconds(2)); // best-effort flush of what's buffered
@@ -76,14 +91,18 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 		{
 			// shutdown flush is best-effort — logs are observability, not state
 		}
+		finally
+		{
+			_shutdownCts.Dispose();
+		}
 	}
 
-	private async Task DrainAsync()
+	private async Task DrainAsync(CancellationToken shutdownToken)
 	{
 		try
 		{
 			List<LogEntry> batch = new(BatchSize);
-			while (await _channel.Reader.WaitToReadAsync().ConfigureAwait(false))
+			while (await _channel.Reader.WaitToReadAsync(shutdownToken).ConfigureAwait(false))
 			{
 				batch.Clear();
 				while (batch.Count < BatchSize && _channel.Reader.TryRead(out LogEntry? entry))
@@ -104,7 +123,13 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 #pragma warning disable VSTHRD103
 					db.LogEntries.AddRange(keep);
 #pragma warning restore VSTHRD103
-					await db.SaveChangesAsync().ConfigureAwait(false);
+					await db.SaveChangesAsync(shutdownToken).ConfigureAwait(false);
+				}
+				catch (OperationCanceledException) when (shutdownToken.IsCancellationRequested)
+				{
+					// E4: the shutdown-linked token fired mid-write — let the outer catch below treat
+					// this as a clean shutdown exit, not a "batch failed" fault to log and shrug off.
+					throw;
 				}
 				catch (Exception ex)
 				{
@@ -122,6 +147,11 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 							n, keep.Count, ex);
 				}
 			}
+		}
+		catch (OperationCanceledException) when (shutdownToken.IsCancellationRequested)
+		{
+			// E4: Dispose cancelled the shutdown token to unstick an in-flight read/write; this is the
+			// drain exiting cleanly on that signal, not an unexpected fault — nothing to announce.
 		}
 		catch (Exception ex)
 		{
