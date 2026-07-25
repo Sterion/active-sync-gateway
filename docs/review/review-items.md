@@ -258,7 +258,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **23. DAV & JMAP request correctness** [LIVE] — ~~`H2`~~ ~~`H3`~~ ~~`H4`~~ ~~`H6`~~ ~~`H7`~~ ~~`H8`~~ ~~`H10`~~ **N/A** ~~`H11`~~ **COMPLETE**
 > `H4` non-birth (wedding) anniversaries are destroyed on every contact edit. `H2` CalDAV create always does a wasted full enumeration (contradicts H13). `H3` all-day/timed duration is off across DST. `H6`/`H7`/`H8`/`H10`/`H11` SSE record buffering, wholesale mailbox-set replacement, recurrence `until` zone, an extra round-trip, malformed-address parsing. Verify JMAP on stalwart, CalDAV on a DAV stack.
 
-**24. Converter correctness** [LIVE] — ~~`D2`~~ ~~`D3`~~ `D4` `D5` `D13` `D15`
+**24. Converter correctness** [LIVE] — ~~`D2`~~ ~~`D3`~~ ~~`D4`~~ `D5` `D13` `D15`
 > `D5` all-day calendar events shift a day in a non-UTC zone. `D3` duplicate EMAIL lines on contact merge. `D4` Type-4 MIME corrupted by the plaintext truncator. `D2`/`D15` mail listing filter narrows the "whole truth" map and holds the gate across a full flags fetch. `D13` `Occurrences`+`Until` mutual exclusion drops the bound. `Backends.Common/Converters` + `Imap`.
 
 **25. Compose, move & folder handlers** [LIVE] — `F2` `F4` `F5` `F6`

@@ -144,7 +144,11 @@ public static class MailConverter
 		content = content.Replace("\0", "");
 		long estimated = Encoding.UTF8.GetByteCount(content);
 		bool truncated = false;
-		if (preference.TruncationSize is { } limit && estimated > limit)
+		// D4: type 4 is the serialized message/rfc822 stream — cutting it at an arbitrary byte
+		// offset lands mid-header or mid-part and hands the client unparsable MIME (base64
+		// attachment parts split mid-line, headers truncated). A MIME fetch is all-or-nothing,
+		// so it is exempt from the TruncationSize byte budget the plain-text/HTML bodies honor.
+		if (type != 4 && preference.TruncationSize is { } limit && estimated > limit)
 		{
 			content = BodyText.TruncateUtf8(content, limit);
 			truncated = true;
