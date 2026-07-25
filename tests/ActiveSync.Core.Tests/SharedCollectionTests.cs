@@ -40,16 +40,47 @@ public class SharedCollectionTests
 	// K62: Parse is the RUNTIME path (CalDavBackendProvider parses configured SharedCollections
 	// with it). It used to fail OPEN — any mode suffix that was not "ro" produced a read-WRITE
 	// grant, so a typo like "|read-only" or "|r" silently handed a shared collection full write
-	// access. A present-but-unrecognized suffix must fail CLOSED (read-only): read-write is only
-	// ever granted by an explicit "|rw" or by no suffix at all (a plain href is the owner's own).
+	// access. A present-but-unrecognized EXACT "ro"/"rw" suffix must fail CLOSED (read-only):
+	// read-write is only ever granted by an explicit "|rw" or by no suffix at all (a plain href is
+	// the owner's own).
+	[Theory]
+	[InlineData("/cal/team/|ro")]
+	[InlineData("/cal/team/|RO")]
+	public void Parse_RecognizedReadOnlySuffix_FailsClosedAsReadOnly(string entry)
+	{
+		Assert.True(SharedCollection.Parse(entry).ReadOnly);
+	}
+
+	// K10 (behaviour change from the old K62 test this replaces): a trailing "|xxx" segment is a
+	// mode delimiter ONLY when xxx is exactly "ro"/"rw". These entries used to be misparsed as
+	// href=truncated-before-the-pipe + readOnly=true (K10's href-corruption bug); Validate() is the
+	// layer that rejects a typo'd suffix outright — Parse() itself must not guess at one, so it now
+	// treats the whole string as a literal href (default read-write, exactly like a plain href with
+	// no suffix at all).
 	[Theory]
 	[InlineData("/cal/team/|banana")]
 	[InlineData("/cal/team/|r")]
 	[InlineData("/cal/team/|read-only")]
 	[InlineData("/cal/team/|")]
-	public void Parse_UnknownModeSuffix_FailsClosedAsReadOnly(string entry)
+	public void Parse_UnrecognizedTrailingSegment_IsKeptAsLiteralHref(string entry)
 	{
-		Assert.True(SharedCollection.Parse(entry).ReadOnly);
+		SharedCollection parsed = SharedCollection.Parse(entry);
+		Assert.Equal(entry, parsed.Href);
+		Assert.False(parsed.ReadOnly);
+	}
+
+	// K10: DAV hrefs may legitimately contain '|'. Only a trailing segment that is EXACTLY
+	// "ro"/"rw" is a mode suffix; anything else (including a bare href with a '|' in the middle
+	// of a path segment) is part of the href and must survive Parse verbatim, not get truncated
+	// at the last '|' and reinterpreted as a mode.
+	[Theory]
+	[InlineData("/cal/a|b/", "/cal/a|b/", false)]
+	[InlineData("https://dav.example.com/cal/x|y/", "https://dav.example.com/cal/x|y/", false)]
+	public void Parse_HrefContainingPipe_IsNotTruncated(string entry, string expectedHref, bool expectedReadOnly)
+	{
+		SharedCollection parsed = SharedCollection.Parse(entry);
+		Assert.Equal(expectedHref, parsed.Href);
+		Assert.Equal(expectedReadOnly, parsed.ReadOnly);
 	}
 
 	// K64: the cross-host guard used `if (Uri.TryCreate(baseUrl, ...) && hostsDiffer)`, so an

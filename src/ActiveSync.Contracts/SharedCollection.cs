@@ -14,11 +14,17 @@ public sealed record SharedCollection(string Href, bool ReadOnly)
 		if (separator < 0)
 			return new SharedCollection(entry.Trim(), false);
 		string mode = entry[(separator + 1)..].Trim();
-		// K62: fail CLOSED. A present-but-unrecognized suffix ("|banana", "|r", a typo) is treated
-		// as read-only, not read-write — the safe default for a shared collection. Read-write is
-		// granted only by an explicit "|rw" (or by no suffix at all, a plain href being the user's
-		// own collection). Validate() separately reports the typo; Parse() must never widen access
-		// because of one.
+		// K10: DAV hrefs may themselves contain '|', so the trailing segment after the LAST '|' is
+		// treated as a mode delimiter ONLY when it is exactly "ro"/"rw" — the two suffixes this
+		// format recognizes. Anything else is part of the href, not a suffix: reinterpreting it as
+		// one would both truncate the href AND silently flip the access decision, which is worse
+		// than treating the whole string as a (default read-write, like any unsuffixed href) href.
+		if (!mode.Equals("ro", StringComparison.OrdinalIgnoreCase) &&
+		    !mode.Equals("rw", StringComparison.OrdinalIgnoreCase))
+			return new SharedCollection(entry.Trim(), false);
+		// K62: fail CLOSED between the two recognized suffixes — only an explicit "|rw" grants
+		// read-write; "|ro" is read-only. (An unrecognized suffix no longer reaches this line — the
+		// K10 branch above keeps it as part of the href instead of guessing at a mode for it.)
 		bool readOnly = !mode.Equals("rw", StringComparison.OrdinalIgnoreCase);
 		return new SharedCollection(entry[..separator].Trim(), readOnly);
 	}
