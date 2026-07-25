@@ -203,7 +203,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 **9. Certificate store & TLS resolver** — ~~`K4`~~ ~~`K5`~~ ~~`K6`~~ ~~`K17`~~ ~~`K18`~~ ~~`K19`~~ **COMPLETE**
 > `K4` 20-year self-signed cert is refused by iOS (Apple's ≤398/825-day rule) — the flagship client. `K5` no IP SAN → name-mismatch for IP-addressed clients. `K6` unguarded replace-race across replicas looks like a MITM. `K17` operator cert not validated for private-key/expiry. `K18` native handle leak per describe. `K19` odd `PublicUrl` throws with no fallback.
 
-**10. Password & throttle robustness** — `K3` `K8` `K9` `K15`
+**10. Password & throttle robustness** — ~~`K3`~~ ~~`K8`~~ ~~`K9`~~ ~~`K15`~~ **COMPLETE**
 > `K3` unbounded PBKDF2 iteration count from a stored hash → per-login DoS. `K8` torn `DateTime` prune stamp. `K9` no `TimeProvider` (untestable rate limiter). `K15` parse accepts weaker-than-generated hashes. `Security/GatewayPasswordHasher` + `AuthThrottle`.
 
 **11. CLI auth & envelope hardening** — `K7` `K16` `E3` `E8`
