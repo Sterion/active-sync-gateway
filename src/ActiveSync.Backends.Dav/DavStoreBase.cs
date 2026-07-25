@@ -94,9 +94,12 @@ public abstract class DavStoreBase(
 	{
 		string collection = FromBackendKey(folderBackendKey);
 		// Listing snapshot from before the PUT — the fallback way to spot where the server
-		// actually stored the new resource.
-		IReadOnlyDictionary<string, string> before =
-			await GetItemRevisionsAsync(folderBackendKey, ContentFilter.All, ct).ConfigureAwait(false);
+		// actually stored the new resource. Deferred (H2): a well-behaved server's UID query
+		// resolves the href directly, so this full collection enumeration is only fetched (and
+		// only once, memoized) when the fallback path in ResolveStoredHrefAsync actually needs it.
+		Task<IReadOnlyDictionary<string, string>>? beforeTask = null;
+		Func<Task<IReadOnlyDictionary<string, string>>> before = () =>
+			beforeTask ??= GetItemRevisionsAsync(folderBackendKey, ContentFilter.All, ct);
 
 		string uid = Guid.NewGuid().ToString();
 		string content = FromApplicationData(applicationData, uid, null);
@@ -195,17 +198,19 @@ public abstract class DavStoreBase(
 	///   the next diff would see an alien Add plus a Delete of the item the client just created,
 	///   duplicating it on the device. Tries a UID query first, then falls back to diffing the
 	///   collection listing from before the PUT; the listing is the same call the sync diff uses,
-	///   so an adopted key always matches future diffs.
+	///   so an adopted key always matches future diffs. <paramref name="before" /> is lazy (H2):
+	///   on a well-behaved server the UID query alone resolves the href at the PUT target and this
+	///   full enumeration is never invoked.
 	/// </summary>
 	protected async Task<(string Href, string? ETag)> ResolveStoredHrefAsync(
 		string folderBackendKey, string collection, string putHref, string uid,
-		IReadOnlyDictionary<string, string> before, CancellationToken ct)
+		Func<Task<IReadOnlyDictionary<string, string>>> before, CancellationToken ct)
 	{
 		// Trust the UID query only when it points at the PUT target or at a genuinely new
 		// resource — weak servers ignore the filter and return pre-existing items.
 		(string Href, string? ETag)? byUid = await FindByUidAsync(collection, uid, ct).ConfigureAwait(false);
 		if (byUid is { } hit &&
-		    (PathsEqual(hit.Href, putHref) || !before.ContainsKey(hit.Href)))
+		    (PathsEqual(hit.Href, putHref) || !(await before().ConfigureAwait(false)).ContainsKey(hit.Href)))
 		{
 			if (!PathsEqual(hit.Href, putHref))
 				logger.LogDebug("{Protocol} stored {PutHref} under canonical href {CanonicalHref}",
@@ -219,7 +224,8 @@ public abstract class DavStoreBase(
 		if (exact is not null)
 			return (exact, after[exact]);
 
-		List<string> appeared = after.Keys.Where(k => !before.ContainsKey(k)).ToList();
+		IReadOnlyDictionary<string, string> beforeMap = await before().ConfigureAwait(false);
+		List<string> appeared = after.Keys.Where(k => !beforeMap.ContainsKey(k)).ToList();
 		if (appeared.Count == 1)
 		{
 			logger.LogDebug(

@@ -4,6 +4,7 @@ using System.Xml.Linq;
 using ActiveSync.Backends.Dav;
 using ActiveSync.Contracts;
 using ActiveSync.Protocol;
+using ActiveSync.Protocol.Wbxml;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Core.Tests;
@@ -146,6 +147,56 @@ public sealed class CardDavStoreTests
 		Assert.Equal(2, results.Count);
 		Assert.Equal(0, getCount);       // no per-contact GET
 		Assert.True(reportCount >= 1);   // one addressbook-query REPORT instead
+	}
+
+	// H2: CreateItemAsync fetched a full pre-PUT collection listing (PROPFIND) unconditionally,
+	// even when the UID-query REPORT already located the stored item at the exact PUT href —
+	// wasting a full enumeration on every single create against a well-behaved server (the fix
+	// is meant to defer it to the listing-diff fallback only). Counting PROPFIND calls
+	// distinguishes "always fetched" (unmodified) from "never needed on this path" (fixed).
+	[Fact]
+	public async Task CreateItem_WhenUidQueryMatchesPutHref_SkipsTheFullEnumeration()
+	{
+		int propfindCount = 0;
+		string? createdHref = null;
+		StubHandler stub = new(request =>
+		{
+			string method = request.Method.Method;
+			if (method == "PUT")
+			{
+				createdHref = request.RequestUri!.AbsolutePath;
+				HttpResponseMessage put = new(HttpStatusCode.Created);
+				put.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"etag1\"");
+				return put;
+			}
+			if (method == "REPORT")
+			{
+				string href = createdHref!;
+				return Xml($"""
+				<D:multistatus xmlns:D="DAV:">
+				  <D:response><D:href>{href}</D:href>
+				    <D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop><D:getetag>"etag1"</D:getetag></D:prop></D:propstat>
+				  </D:response>
+				</D:multistatus>
+				""");
+			}
+			// PROPFIND — the pre-PUT/post-PUT full listing this test asserts is skipped when the
+			// UID query already resolved the canonical href.
+			propfindCount++;
+			return Xml("""<D:multistatus xmlns:D="DAV:"></D:multistatus>""");
+		});
+		using WebDavClient dav = new(Base, new HttpClient(stub));
+		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
+		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+
+		XElement app = new("ApplicationData",
+			new XElement(EasNamespaces.Contacts + "FirstName", "Ada"));
+		(string itemKey, string revision) = await store.CreateItemAsync(
+			CardDavStore.KeyPrefix + "/dav/ab/default/", app, CancellationToken.None);
+
+		Assert.Equal(0, propfindCount);
+		Assert.False(string.IsNullOrEmpty(itemKey));
+		Assert.False(string.IsNullOrEmpty(revision));
 	}
 
 	private static HttpResponseMessage Xml(string body)
