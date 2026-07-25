@@ -80,7 +80,9 @@ internal static class SettingKeys
 		new("ActiveSync:Auth:NegativeCacheSeconds", ValueType.Int, false, "15",
 			"Bad-credential cache TTL (0 disables).", Min: 0, Max: 86400),
 		new("ActiveSync:Auth:SuccessCacheMinutes", ValueType.Int, false, "5",
-			"Good-credential cache TTL (0 disables).", Min: 0, Max: 1440),
+			"Good-credential cache TTL. A password revoked or changed on the mail backend keeps " +
+			"working against the gateway for up to this long (0 disables — every request re-verifies).",
+			Min: 0, Max: 1440),
 		new("ActiveSync:Auth:UsersRefreshSeconds", ValueType.Number, false, "1",
 			"Database change-stamp poll cadence in seconds (0 = check on every request).", Min: 0, Max: 86400),
 
