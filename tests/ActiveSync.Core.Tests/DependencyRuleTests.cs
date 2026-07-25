@@ -94,4 +94,29 @@ public sealed class DependencyRuleTests
 
 		Assert.Empty(offenders);
 	}
+
+	// S1 (round 2): Server references Core pervasively (CliServices, BackendProviderRegistry, ...) but
+	// only ever picked it up TRANSITIVELY via its Backends/WebUi ProjectReferences — the compiled
+	// assembly's reference list looks identical either way (MSBuild flows every transitive project
+	// output onto the compile path, so a reflection-based "does Server.dll reference Core.dll" check
+	// can't distinguish an explicit reference from an accidental one). The only place the distinction is
+	// visible is the csproj itself: a Backends project quietly dropping its own Core reference would
+	// break Server's build for a reason nothing in Server's own file explains. Read the file directly.
+	[Fact]
+	public void Server_HasExplicitProjectReferenceToCore()
+	{
+		string csproj = File.ReadAllText(
+			Path.Combine(FindRepoRoot(), "src", "ActiveSync.Server", "ActiveSync.Server.csproj"));
+
+		Assert.Contains("ActiveSync.Core.csproj", csproj);
+	}
+
+	private static string FindRepoRoot()
+	{
+		DirectoryInfo? dir = new(AppContext.BaseDirectory);
+		while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "ActiveSync.slnx")))
+			dir = dir.Parent;
+		return dir?.FullName
+			?? throw new InvalidOperationException("Could not locate repo root (ActiveSync.slnx) above the test binary.");
+	}
 }

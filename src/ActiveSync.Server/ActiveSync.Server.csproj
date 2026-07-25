@@ -23,6 +23,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<!-- Explicit even though every backend/WebUi reference below already pulls it in transitively —
+		     Server depends on Core pervasively (CliServices, BackendProviderRegistry, ...) and this makes
+		     that dependency honest instead of an accident of the other references (S1). -->
+		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Common\ActiveSync.Backends.Common.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Imap\ActiveSync.Backends.Imap.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Jmap\ActiveSync.Backends.Jmap.csproj" />
