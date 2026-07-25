@@ -12,9 +12,10 @@ namespace ActiveSync.Core.Security;
 ///   Loads — or generates on first serve — the gateway's self-signed TLS certificate. The
 ///   PKCS#12 blob lives as a single well-known row in the state database (base64, sealed with
 ///   the Encryption master key via <see cref="LocalContentProtector" />), so every restart and
-///   every replica serves the same certificate and devices only have to trust it once. The
-///   20-year validity deliberately outlives any deployment: there is no renewal logic —
-///   deleting the row is the (never normally needed) regeneration lever.
+///   every replica serves the same certificate and devices only have to trust it once. Validity
+///   is capped under Apple's server-certificate lifetime rule (K4), so <see cref="GetOrCreateAsync" />
+///   renews the certificate on its own ahead of expiry — deleting the row remains a manual
+///   regeneration lever, but is no longer required for the certificate to keep working.
 /// </summary>
 public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory, LocalContentProtector protector)
 {
@@ -24,6 +25,20 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 
 	/// <summary>Subject/SAN host used when no <c>PublicUrl</c> is configured.</summary>
 	public const string FallbackHost = "activesync-gateway";
+
+	/// <summary>
+	///   Certificate validity, in days — capped under Apple's ≤398-day rule for server certs (a
+	///   day of margin under the limit; see <c>Generate</c>). iOS/macOS hard-refuse a longer-lived
+	///   leaf, so the previous 20-year certificate silently didn't work on the primary EAS client.
+	/// </summary>
+	private const int ValidityDays = 397;
+
+	/// <summary>
+	///   How far ahead of <c>NotAfter</c> a stored certificate is treated as due for renewal.
+	///   With validity now capped at <see cref="ValidityDays" /> (rather than 20 years), the store
+	///   must renew on its own — there is no operator-facing renewal flow.
+	/// </summary>
+	private static readonly TimeSpan RenewalWindow = TimeSpan.FromDays(30);
 
 	/// <summary>The DNS host to certify: the PublicUrl's host when set, else a fixed name.</summary>
 	public static string HostFromPublicUrl(string? publicUrl)
@@ -56,9 +71,20 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 		{
 			X509Certificate2? stored = TryLoad(row.PfxProtected, logger);
 			if (stored is not null)
-				return stored;
-			// Unreadable row (encryption key changed, tampering): a dead HTTPS endpoint would
-			// be worse than a fingerprint change, so fall through and replace it.
+			{
+				if (stored.NotAfter.ToUniversalTime() > DateTime.UtcNow + RenewalWindow)
+					return stored;
+				// K4: validity is now capped well under a year, so — unlike the historical 20-year
+				// certificate — this one WILL approach expiry during a deployment's lifetime with no
+				// operator action. Renew ahead of time rather than let it lapse.
+				logger.LogInformation(
+					"Stored gateway TLS certificate expires {NotAfter:u} — regenerating ahead of expiry",
+					stored.NotAfter.ToUniversalTime());
+				stored.Dispose();
+			}
+			// Unreadable or expiring row (encryption key changed, tampering, due for renewal): a
+			// dead HTTPS endpoint would be worse than a fingerprint change, so fall through and
+			// replace it.
 		}
 
 		(X509Certificate2 certificate, string pfxProtected) = Generate(host);
@@ -143,9 +169,12 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 			san.AddDnsName("localhost");
 		request.CertificateExtensions.Add(san.Build());
 
-		// Backdated an hour so a device with mild clock skew accepts it immediately.
+		// Backdated an hour so a device with mild clock skew accepts it immediately. Validity is
+		// capped at ValidityDays (K4) — Apple refuses a longer-lived leaf on iOS/macOS, the
+		// primary EAS client; GetOrCreateAsync renews ahead of expiry (RenewalWindow) so the cap
+		// doesn't require operator action.
 		DateTimeOffset now = DateTimeOffset.UtcNow;
-		using X509Certificate2 generated = request.CreateSelfSigned(now.AddHours(-1), now.AddYears(20));
+		using X509Certificate2 generated = request.CreateSelfSigned(now.AddHours(-1), now.AddDays(ValidityDays));
 		byte[] pfx = generated.Export(X509ContentType.Pkcs12);
 		// K9: the exported PKCS#12 holds the unencrypted private key — zero it once it has been
 		// sealed and reloaded. (The base64 string handed to the protector is transient and out of

@@ -61,16 +61,17 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 	}
 
 	[Fact]
-	public async Task GeneratedCertificate_HasServerShape_And20YearValidity()
+	public async Task GeneratedCertificate_HasServerShape()
 	{
+		// K4 BEHAVIOUR CHANGE: validity was historically 20 years (asserted here); it is now
+		// capped at ~397 days (see GeneratedCertificate_ValidityIsCappedForAppleCompatibility)
+		// with self-renewal ahead of expiry (see NearExpiryCertificate_IsRegeneratedAheadOfExpiry).
 		using LocalContentProtector protector = Protector();
 		using X509Certificate2 certificate = await Store(protector).GetOrCreateAsync(
 			"eas.example.com", NullLogger.Instance, CancellationToken.None);
 
 		Assert.True(certificate.HasPrivateKey);
 		Assert.Equal("CN=eas.example.com", certificate.Subject);
-		Assert.InRange(certificate.NotAfter.ToUniversalTime(),
-			DateTime.UtcNow.AddYears(20).AddDays(-2), DateTime.UtcNow.AddYears(20).AddDays(2));
 
 		string san = certificate.Extensions.OfType<X509SubjectAlternativeNameExtension>()
 			.Single().Format(false);
@@ -112,6 +113,54 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 		using X509Certificate2 reloaded = await Store(newKey).GetOrCreateAsync(
 			"eas.example.com", NullLogger.Instance, CancellationToken.None);
 		Assert.Equal(replacement.Thumbprint, reloaded.Thumbprint);
+	}
+
+	[Fact]
+	public async Task GeneratedCertificate_ValidityIsCappedForAppleCompatibility()
+	{
+		// K4: iOS/macOS refuse server certs valid for more than 398 days (Apple's ≤825/≤398-day
+		// rule); the historical 20-year validity is hard-refused by the primary EAS client.
+		using LocalContentProtector protector = Protector();
+		using X509Certificate2 certificate = await Store(protector).GetOrCreateAsync(
+			"eas.example.com", NullLogger.Instance, CancellationToken.None);
+
+		TimeSpan validity = certificate.NotAfter.ToUniversalTime() - certificate.NotBefore.ToUniversalTime();
+		Assert.True(validity.TotalDays <= 398,
+			$"Certificate validity of {validity.TotalDays:F1} days exceeds Apple's 398-day limit");
+	}
+
+	[Fact]
+	public async Task NearExpiryCertificate_IsRegeneratedAheadOfExpiry()
+	{
+		// K4: with validity now capped well under a year, a certificate that is never renewed
+		// would eventually be refused by clients (or expire outright). GetOrCreateAsync must
+		// notice a stored certificate is close to its NotAfter and regenerate ahead of time,
+		// the same way it already replaces an unreadable row.
+		using LocalContentProtector protector = Protector();
+		const string host = "eas.example.com";
+
+		// Seed a row directly with a certificate that expires in 5 days — bypassing
+		// GatewayCertificateStore.Generate (which enforces the capped validity itself), so the
+		// seeded blob's expiry is fully under this test's control.
+		using RSA key = RSA.Create(2048);
+		CertificateRequest request = new($"CN={host}", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+		DateTimeOffset now = DateTimeOffset.UtcNow;
+		using X509Certificate2 expiringSoon = request.CreateSelfSigned(now.AddDays(-390), now.AddDays(5));
+		string sealedPfx = protector.Protect(
+			Convert.ToBase64String(expiringSoon.Export(X509ContentType.Pkcs12)), "_gateway", "tls");
+		await using (SyncDbContext seed = _factory.CreateDbContext())
+		{
+#pragma warning disable VSTHRD103
+			seed.ServerCertificates.Add(new ServerCertificate { Id = 1, PfxProtected = sealedPfx, CreatedUtc = DateTime.UtcNow });
+#pragma warning restore VSTHRD103
+			await seed.SaveChangesAsync();
+		}
+
+		using X509Certificate2 renewed = await Store(protector).GetOrCreateAsync(
+			host, NullLogger.Instance, CancellationToken.None);
+
+		Assert.NotEqual(expiringSoon.Thumbprint, renewed.Thumbprint);
+		Assert.True(renewed.NotAfter.ToUniversalTime() > now.AddDays(300));
 	}
 
 	[Fact]
