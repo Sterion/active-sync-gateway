@@ -591,3 +591,46 @@ on a fresh clean-volume Stalwart ✓
 - **The orchestrator caught things no worker did**, which is the case for keeping the every-finding diff
   read: item 12's three live failures, the `C10` regression, `K10`'s half-closure, and `K7`'s invalid
   red-first proof (re-established independently rather than accepted).
+
+---
+
+## Item 14 — Explicit Core reference & CLI testability
+**Findings:** `S1` `S8`
+**Commits:** `7086924` (S1) · `8a3056b` (S8)
+**Verification:** integrity items=32 live=10 assigned=132 unique=132 dupes=0 encoding=0 ✓ · cursor → item
+15 ✓ · one commit per finding, ID in each subject, strike shipped WITH each fix (`git show --stat` lists
+`review-items.md` in both) ✓ · build 0 warnings ✓ · unit **1110 passed, 0 skipped** (Cli.Tests 16 new ·
+Protocol 85 · Core 669 · WebUi 76 · Server 264), up from 1093 ✓ · no live suite — the item's only source
+change is the slim `eas` CLIENT executable (`src/ActiveSync.Cli`), which is not reachable from any request
+path; the Server change is a csproj ProjectReference with no code effect, and the build proves it.
+**Diffs read against the detail entries:**
+- `S1` — exactly the prescribed fix: `<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />`
+  added to `ActiveSync.Server.csproj`, nothing else. The red-first test reads the csproj text rather than
+  reflecting over the built assembly; that is the right call and the worker justified it — MSBuild flows
+  transitive project outputs onto the compile path, so a reflection check cannot distinguish an explicit
+  reference from an accidental one and would have passed before the fix.
+- `S8` — the extraction is mechanical and faithful: every branch of the old top-level statements
+  (local-only verbs, `EAS_NO_FORWARD`, stdin capture, colour/width, key load, seal, 404-only fallback,
+  timeout/unreadable-body refusals with their L36 comments) survives verbatim in
+  `ActiveSync.Cli.EasForwardingClient`; `Program.cs` is a thin entry point; the Cli assembly now has a
+  namespace. `tests/ActiveSync.Cli.Tests` references Cli + Crypto and asserts what the finding asks for —
+  the envelope round-trips through the real `LocalCliEnvelope` (incl. a wrong-key-cannot-open case), the
+  plaintext fallback when no key is configured, `serve`/`protect`/`EAS_NO_FORWARD` force local, and the
+  target is always 127.0.0.1 (localhost and wildcard both rewritten).
+**Notes:**
+- **`S8`'s red-first is compile-level, not behavioural** — the test file was written against a type that
+  did not exist and failed CS0103/CS0122 on unmodified code. That is the honest proof shape for a
+  *testability* finding (there is no defect to reproduce, the defect is the absence of a seam); it follows
+  the `K9` precedent recorded under item 10. Do not read the strike as evidence that the CLI's forwarding
+  behaviour was verified against a running gateway — it was not.
+- **One incidental source change rides in `S8`:** five `Console.Error.WriteLine` / `Console.Out.Write`
+  call sites became `WriteLineAsync` / `WriteAsync`. This was forced, not optional — VSTHRD103 is a build
+  *error* here and fires inside an explicit `async` method where it did not for the compiler-synthesized
+  top-level `Main`. Same output; no user-visible change.
+- **The HTTP round trip in `RunAsync` remains untested** (no injectable `HttpMessageHandler`). Judgment
+  call, and I agree with it: `S8` scopes the ask to the envelope window, the loopback-only target, the
+  plaintext fallback and the local-only verbs, all of which are now covered. The 404-only-fallback rule
+  (L36) is the highest-value thing still uncovered if anyone extends this later.
+- Test-project internals are reached via `InternalsVisibleTo`, matching the existing Server/Server.Tests
+  pattern; the `eas` exe grows no public API.
+- No behaviour or breaking changes. No new findings filed.
