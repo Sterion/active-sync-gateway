@@ -145,6 +145,22 @@ public class JsContactConverterTests
 		Assert.Equal("birth", anniversaries.GetProperty("b").GetProperty("kind").GetString());
 	}
 
+	// H11: a malformed angle-bracket EAS email (an unmatched '<' with no closing '>') kept the
+	// WHOLE original string — including the display-name text and the stray '<' — as the JMAP
+	// "address" member, which isn't a valid email address at all.
+	[Fact]
+	public void FromApplicationData_MalformedAngleBracketEmail_ExtractsTheAddressPart()
+	{
+		XElement app = new("ApplicationData",
+			new XElement(C + "Email1Address", "Display Name <notanemail"));
+
+		Dictionary<string, object?> card = JsContactConverter.FromApplicationData(app, null);
+		JsonElement rebuilt = JsonSerializer.SerializeToElement(card);
+
+		string? address = rebuilt.GetProperty("emails").GetProperty("e1").GetProperty("address").GetString();
+		Assert.Equal("notanemail", address);
+	}
+
 	[Fact]
 	public void RoundTrip_EasToJsContactToEas_PreservesFields()
 	{

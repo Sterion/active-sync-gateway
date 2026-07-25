@@ -6,6 +6,7 @@ using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
+using MimeKit;
 
 namespace ActiveSync.Backends.Jmap;
 
@@ -419,6 +420,13 @@ public static class JsContactConverter
 
 	private static string StripEmailDisplay(string value)
 	{
+		// H11: a malformed "<" with no matching ">" (or the brackets swapped) used to fall through
+		// to returning the WHOLE string, display-name text and stray bracket included — not a valid
+		// email. MimeKit's mailbox parser is lenient enough to recover the intended address from a
+		// truncated "Name <addr" shape; only genuinely unparseable input (no recognizable address at
+		// all) keeps the old substring-or-whole-string heuristic as a last resort.
+		if (MailboxAddress.TryParse(value, out MailboxAddress? mailbox) && !string.IsNullOrEmpty(mailbox.Address))
+			return mailbox.Address;
 		int lt = value.IndexOf('<');
 		int gt = value.IndexOf('>');
 		return lt >= 0 && gt > lt ? value[(lt + 1)..gt].Trim() : value.Trim();
