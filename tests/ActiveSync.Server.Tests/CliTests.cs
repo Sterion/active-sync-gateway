@@ -78,6 +78,30 @@ public class CliTests
 		Assert.Contains("Usage", stderr);
 	}
 
+	// E8 — COVERAGE, NOT PROOF. The fix moves the master-key ZeroMemory into a finally so the
+	// empty-secret early return also zeroes it (previously only the successful-seal path did).
+	// The key is a local byte[] with no external handle, so the zeroing itself is not observable
+	// from a test (mirrors the L42 precedent for UserSecretCommand); this only exercises the
+	// early-return path to prove behavior is unchanged (still exits 1 with the usage message)
+	// with the finally now wrapping it.
+	[Fact]
+	public void Protect_EmptySecret_StillFailsCleanly_WithKeyConfigured()
+	{
+		string? original = Environment.GetEnvironmentVariable("ActiveSync__Encryption__Key");
+		try
+		{
+			Environment.SetEnvironmentVariable("ActiveSync__Encryption__Key", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=");
+			(int exitCode, _, string stderr) = RunCaptured(CreateTester(), ["protect"], "");
+
+			Assert.Equal(1, exitCode);
+			Assert.Contains("Usage", stderr);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ActiveSync__Encryption__Key", original);
+		}
+	}
+
 	[Fact]
 	public void Healthcheck_NoServer_ExitsNonZero()
 	{

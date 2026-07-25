@@ -173,16 +173,24 @@ internal static class CliVerbs
 			return 1;
 		}
 
-		string secret = (await Console.In.ReadToEndAsync()).TrimEnd('\r', '\n');
-		if (secret.Length == 0)
+		// E8: zero the key on every exit — including the empty-secret early return — not only
+		// after a successful seal. Mirrors the try/finally UserSecretCommand already uses.
+		try
 		{
-			await Console.Error.WriteLineAsync("Usage: echo -n 'secret' | eas protect");
-			return 1;
-		}
+			string secret = (await Console.In.ReadToEndAsync()).TrimEnd('\r', '\n');
+			if (secret.Length == 0)
+			{
+				await Console.Error.WriteLineAsync("Usage: echo -n 'secret' | eas protect");
+				return 1;
+			}
 
-		await Console.Out.WriteLineAsync(SecretValue.Seal(secret, key));
-		CryptographicOperations.ZeroMemory(key);
-		return 0;
+			await Console.Out.WriteLineAsync(SecretValue.Seal(secret, key));
+			return 0;
+		}
+		finally
+		{
+			CryptographicOperations.ZeroMemory(key);
+		}
 	}
 
 	/// <summary>Hashes a gateway password from stdin (pbkdf2$...), for per-user overrides.</summary>
