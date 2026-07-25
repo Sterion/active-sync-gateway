@@ -226,7 +226,7 @@ Findings are grouped by *what breaks* and by *which files they touch*, so an ite
 ## Phase 3 — Boundaries (structural)
 *Do before the deep correctness refactors — each lands on a clean tree. See Area S detail below.*
 
-**14. Explicit Core reference & CLI testability** — ~~`S1`~~ `S8`
+**14. Explicit Core reference & CLI testability** — ~~`S1`~~ ~~`S8`~~ **COMPLETE**
 > `S1` Server depends on Core pervasively but references it only transitively (an accident of the backend/WebUi references) — add the explicit ProjectReference. `S8` the slim `eas` client (holds the master key, gates admin commands) has no test project and no namespace — extract the forwarding logic from top-level `Program.cs` into a testable class and add `ActiveSync.Cli.Tests`.
 
 **15. Unify AES-GCM framing** — `S2` `K11`

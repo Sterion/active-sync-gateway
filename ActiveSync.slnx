@@ -16,6 +16,7 @@
 		<Project Path="src/ActiveSync.WebUi/ActiveSync.WebUi.csproj" />
 	</Folder>
 	<Folder Name="/tests/">
+		<Project Path="tests/ActiveSync.Cli.Tests/ActiveSync.Cli.Tests.csproj" />
 		<Project Path="tests/ActiveSync.Core.Tests/ActiveSync.Core.Tests.csproj" />
 		<Project Path="tests/ActiveSync.Integration.Tests/ActiveSync.Integration.Tests.csproj" />
 		<Project Path="tests/ActiveSync.Protocol.Tests/ActiveSync.Protocol.Tests.csproj" />
