@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using ActiveSync.Server.Setup;
@@ -276,6 +277,44 @@ public sealed class DatabaseLogSinkTests : IDisposable
 				.Options;
 			return new SqliteSyncDbContext(options);
 		}
+	}
+
+	/// <summary>
+	///   E13: once `Log:Database` flips off live, the drain re-read and discarded every buffered
+	///   batch in a tight `continue` loop with no pause at all -- CPU proportional to however fast
+	///   the writer had filled the channel. Prove throttling exists (rather than a tight spin) by
+	///   timing how long it takes to discard a large pre-buffered backlog once the drain starts
+	///   against an already-disabled option: a tight loop drains thousands of buffered entries in a
+	///   handful of milliseconds; a throttled drain takes measurably, boundedly longer.
+	/// </summary>
+	[Fact]
+	public async Task DisabledLive_DiscardsBufferedBacklog_WithoutTightSpinning()
+	{
+		DatabaseLogSink sink = new();
+		using Logger logger = new LoggerConfiguration()
+			.MinimumLevel.Verbose().WriteTo.Sink(sink).CreateLogger();
+
+		// Buffered while the sink is not yet Activate()d (Emit always buffers pre-Activate), so the
+		// whole backlog is sitting in the channel the instant the drain starts against Database=false.
+		const int entryCount = 6000;
+		for (int i = 0; i < entryCount; i++)
+			logger.Information("backlog entry {Index}", i);
+		Assert.True(sink.BufferedCount > 0, "expected the backlog to be buffered before Activate");
+
+		Stopwatch sw = Stopwatch.StartNew();
+		sink.Activate(_factory, TestOptionsMonitor.Of(Options(false, "Information")));
+
+		DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+		while (sink.BufferedCount > 0 && DateTime.UtcNow < deadline)
+			await Task.Delay(20);
+		sw.Stop();
+
+		Assert.Equal(0, sink.BufferedCount);
+		Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(700),
+			"expected the disabled-live discard path to be throttled rather than tight-spin drain the " +
+			$"whole backlog near-instantly; it took only {sw.Elapsed}");
+
+		sink.Dispose();
 	}
 
 	private sealed class RenderSpy

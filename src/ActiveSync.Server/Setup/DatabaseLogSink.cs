@@ -24,6 +24,9 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 	private const int Capacity = 10_000;
 	private const int BatchSize = 500;
 
+	/// <summary>E13: throttle for the disabled-live discard path — bounds CPU regardless of inbound rate.</summary>
+	private static readonly TimeSpan DisabledDiscardPause = TimeSpan.FromMilliseconds(200);
+
 	private readonly Channel<LogEntry> _channel = Channel.CreateBounded<LogEntry>(
 		new BoundedChannelOptions(Capacity) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
 
@@ -34,6 +37,9 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 	private Task? _drain;
 	private int _drainErrors;
 	private int _disposed;
+
+	/// <summary>Test hook: the number of entries currently sitting in the buffer, unread.</summary>
+	internal int BufferedCount => _channel.Reader.Count;
 
 	public void Emit(LogEvent logEvent)
 	{
@@ -110,7 +116,22 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 
 				ActiveSyncOptions options = _options!.CurrentValue;
 				if (!options.Log.Database)
-					continue; // persistence disabled live — discard the batch
+				{
+					// E13: discard the batch, but don't immediately loop back to re-read — with data
+					// continuously available, WaitToReadAsync returns instantly and this becomes a tight
+					// spin, CPU proportional to however fast the channel refills. A short pause bounds
+					// the discard rate regardless of the inbound rate, while still draining the backlog
+					// (a full batch per pause) rather than stalling it.
+					try
+					{
+						await Task.Delay(DisabledDiscardPause, shutdownToken).ConfigureAwait(false);
+					}
+					catch (OperationCanceledException) when (shutdownToken.IsCancellationRequested)
+					{
+						throw;
+					}
+					continue;
+				}
 				int min = Rank(options.Log.DbMinimumLevel);
 				List<LogEntry> keep = batch.Where(e => Rank(e.Level) >= min).ToList();
 				if (keep.Count == 0)
