@@ -87,14 +87,33 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 }
 
 /// <summary>
+///   A question the gateway needs answered before it will carry out a destructive command, plus
+///   the exact argument list to send back once the operator says yes.
+///   <para>
+///     The SERVER supplies <see cref="ResendArgs" /> and the client never constructs them. The
+///     slim client is a dumb forwarder by design: teaching it which flag means "confirmed" — or
+///     letting it re-assemble a command line, with the quoting bugs that invites — would make
+///     every future confirmable command a client change. This way it is none.
+///   </para>
+/// </summary>
+public sealed record ConfirmRequest(string Question, string[] ResendArgs);
+
+/// <summary>
 ///   The response half of the <c>/cli</c> exchange. Requests are sealed because they carry secrets;
 ///   so do plenty of responses (<c>eas device password</c> prints a live credential, <c>eas user
 ///   secret</c> echoes what it stored), so whenever a master key is configured the gateway seals the
 ///   captured stdout/stderr/exit-code with it and the client opens it. No timestamp: a response is
 ///   only ever produced for a caller that already proved key possession, so there is nothing a
 ///   replay of it can reach.
+///   <para>
+///     <see cref="Confirm" /> carries a question back to the CLIENT, which is a real terminal and
+///     can prompt — the forwarded console cannot (<c>InteractionSupport.No</c>), which is why
+///     <c>eas purge</c> over <c>/cli</c> always failed with "confirm with --yes" and its
+///     interactive branch only ever ran in the local-fallback path.
+///   </para>
 /// </summary>
-public sealed record LocalCliResult(int ExitCode, string Stdout, string Stderr)
+public sealed record LocalCliResult(
+	int ExitCode, string Stdout, string Stderr, ConfirmRequest? Confirm = null)
 {
 	private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 

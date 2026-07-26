@@ -48,6 +48,24 @@ public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, Use
 
 	public sealed record PurgeCount(string Table, int Count);
 
+	/// <summary>
+	///   What deleting a user (or one of its devices) WOULD destroy, counted before anything is
+	///   issued. <see cref="Content" /> is the part that matters: <c>LocalItem</c> rows are real
+	///   PIM data — contacts, calendar, tasks and always notes — which in a local-stores
+	///   deployment exist NOWHERE ELSE. Sync state rebuilds on the next sync and is not worth
+	///   prompting over, so the two are counted apart and the caller graduates the friction.
+	/// </summary>
+	public sealed record DeletionImpact(
+		IReadOnlyList<PurgeCount> Content, IReadOnlyList<PurgeCount> SyncState)
+	{
+		/// <summary>True when something irreplaceable would go — the trigger for a typed echo.</summary>
+		public bool DestroysContent => Content.Any(c => c.Count > 0);
+
+		/// <summary>"342 contacts, 89 events, 12 notes" — the phrase both surfaces put in front of the operator.</summary>
+		public string DescribeContent() =>
+			string.Join(", ", Content.Where(c => c.Count > 0).Select(c => $"{c.Count} {c.Table}"));
+	}
+
 	public sealed record SummaryCounts(int DeviceUsers, int Devices, int Blocks, int PendingWipes);
 
 	/// <summary>
@@ -226,6 +244,62 @@ public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, Use
 			new PurgeCount("Devices", devDevices), new PurgeCount("DeviceFolders", devDeviceFolders),
 			new PurgeCount("CollectionStates", devCollections), new PurgeCount("LoginBlocks", devBlocks),
 		];
+	}
+
+	/// <summary>
+	///   Counts what a delete WOULD remove, changing nothing. <see cref="PurgeAsync" /> reports
+	///   the same tables but only AFTER deleting, which is no use to a guard that has to decide
+	///   first — so this is the count-only sibling, and the ONE implementation both the CLI's
+	///   question text and the web dialog's warning are built from.
+	/// </summary>
+	public async Task<DeletionImpact> CountDeletionImpactAsync(
+		string user, string? deviceId, CancellationToken ct)
+	{
+		int? found = await users.FindUserIdAsync(user, ct).ConfigureAwait(false);
+		if (found is not { } userId)
+			return new DeletionImpact([], []);
+
+		await using SyncDbContext db = contextFactory.CreateDbContext();
+		if (deviceId is not null)
+		{
+			// A device delete touches sync state only — local items belong to the USER.
+			return new DeletionImpact([],
+			[
+				new PurgeCount("devices", await db.Devices
+					.CountAsync(d => d.UserId == userId && d.DeviceId == deviceId, ct).ConfigureAwait(false)),
+				new PurgeCount("acknowledged folders", await db.DeviceFolders
+					.CountAsync(f => f.Device.UserId == userId && f.Device.DeviceId == deviceId, ct).ConfigureAwait(false)),
+				new PurgeCount("collection states", await db.CollectionStates
+					.CountAsync(c => c.Device.UserId == userId && c.Device.DeviceId == deviceId, ct).ConfigureAwait(false)),
+			]);
+		}
+
+		// Content is counted per collection, because "342 contacts" reads and warns very
+		// differently from "443 local items". Projected to an anonymous type in SQL and shaped
+		// afterwards — EF cannot translate a constructor call inside a GroupBy projection.
+		var perCollection = await db.LocalItems
+			.Where(i => i.UserId == userId)
+			.GroupBy(i => i.Collection)
+			.Select(g => new { Collection = g.Key, Count = g.Count() })
+			.ToListAsync(ct).ConfigureAwait(false);
+		List<PurgeCount> content = perCollection
+			.OrderBy(c => c.Collection, StringComparer.Ordinal)
+			.Select(c => new PurgeCount(c.Collection, c.Count))
+			.ToList();
+
+		return new DeletionImpact(content,
+		[
+			new PurgeCount("devices", await db.Devices
+				.CountAsync(d => d.UserId == userId, ct).ConfigureAwait(false)),
+			new PurgeCount("folders", await db.UserFolders
+				.CountAsync(f => f.UserId == userId, ct).ConfigureAwait(false)),
+			new PurgeCount("collection states", await db.CollectionStates
+				.CountAsync(c => c.Device.UserId == userId, ct).ConfigureAwait(false)),
+			new PurgeCount("shared-calendar grants", await db.SharedCalendarGrants
+				.CountAsync(g => g.UserId == userId, ct).ConfigureAwait(false)),
+			new PurgeCount("device blocks", await db.LoginBlocks
+				.CountAsync(b => b.Device.UserId == userId, ct).ConfigureAwait(false)),
+		]);
 	}
 
 	/// <summary>Cheap DB-derived dashboard tallies (distinct device users, devices, blocks, pending wipes).</summary>

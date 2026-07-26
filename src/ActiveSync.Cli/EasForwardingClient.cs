@@ -131,6 +131,49 @@ internal static class EasForwardingClient
 	/// </summary>
 	internal static async Task<int> RunAsync(string[] arguments)
 	{
+		// A destructive command may come back asking a question instead of acting; the client is
+		// a real terminal, so it asks and re-sends the argument list the SERVER supplied. Bounded
+		// to one round-trip: the resend already carries the confirmed flag, so a second question
+		// would be a server bug rather than something to loop on.
+		int exitCode = await RunOnceAsync(arguments);
+		if (PendingConfirmation is not { } confirm)
+			return exitCode;
+
+		PendingConfirmation = null;
+		if (!await ConfirmAsync(confirm.Question))
+			return 1;
+		return await RunOnceAsync(confirm.ResendArgs);
+	}
+
+	/// <summary>Set by <see cref="RunOnceAsync" /> when the gateway asked a question.</summary>
+	private static ConfirmRequest? PendingConfirmation;
+
+	/// <summary>
+	///   Asks the operator to confirm. A client that is NOT interactive (piped or scripted) must
+	///   never auto-confirm: it prints the question to stderr and fails, telling the operator to
+	///   pass --yes — which is today's behaviour for a non-interactive destructive command,
+	///   preserved. The SERVER never has to distinguish "forwarded" from "piped": it always
+	///   returns the question and the client decides.
+	/// </summary>
+	private static async Task<bool> ConfirmAsync(string question)
+	{
+		if (Console.IsInputRedirected)
+		{
+			await Console.Error.WriteLineAsync(question);
+			await Console.Error.WriteLineAsync(
+				"eas: refusing to assume an answer when stdin is not a terminal — re-run with --yes.");
+			return false;
+		}
+
+		await Console.Error.WriteAsync($"{question} [y/N] ");
+		string? answer = await Console.In.ReadLineAsync();
+		return answer is not null &&
+			(answer.Equals("y", StringComparison.OrdinalIgnoreCase) ||
+			 answer.Equals("yes", StringComparison.OrdinalIgnoreCase));
+	}
+
+	private static async Task<int> RunOnceAsync(string[] arguments)
+	{
 		string appDirectory = AppContext.BaseDirectory;
 		Func<string, string?> getEnv = Environment.GetEnvironmentVariable;
 
@@ -181,13 +224,16 @@ internal static class EasForwardingClient
 								"The command may have already run — do not simply retry it.");
 							return 1;
 						}
-						result = new CliResponse(opened.ExitCode, opened.Stdout, opened.Stderr, null);
+						result = new CliResponse(
+							opened.ExitCode, opened.Stdout, opened.Stderr, null, opened.Confirm);
 					}
 
 					if (result.Stdout.Length > 0)
 						await Console.Out.WriteAsync(result.Stdout);
 					if (result.Stderr.Length > 0)
 						await Console.Error.WriteAsync(result.Stderr);
+					// The gateway wants an answer before it acts — nothing has been done yet.
+					PendingConfirmation = result.Confirm;
 					return result.ExitCode;
 				}
 
@@ -231,4 +277,5 @@ internal static class EasForwardingClient
 
 internal sealed record CliRequest(string[]? Args, string? Stdin, string? Sealed, bool Color, int Width);
 
-internal sealed record CliResponse(int ExitCode, string Stdout, string Stderr, string? Sealed);
+internal sealed record CliResponse(
+	int ExitCode, string Stdout, string Stderr, string? Sealed, ConfirmRequest? Confirm = null);

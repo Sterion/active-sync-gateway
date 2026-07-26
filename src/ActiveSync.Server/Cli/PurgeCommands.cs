@@ -23,26 +23,48 @@ internal abstract class PurgeCommand<TSettings>(IAnsiConsole terminal) : Databas
 	protected abstract Task<IReadOnlyList<DeviceAdminService.PurgeCount>> DeleteAsync(
 		DeviceAdminService devices, TSettings settings, CancellationToken cancellationToken);
 
+	/// <summary>The (user, device) this command targets, for the impact count.</summary>
+	protected abstract (string User, string? DeviceId) Target(TSettings settings);
+
 	protected sealed override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, TSettings settings, CancellationToken cancellationToken)
 	{
+		DeviceAdminService devices = services.GetRequiredService<DeviceAdminService>();
 		if (!settings.Yes)
 		{
-			if (!Terminal.Profile.Capabilities.Interactive)
+			// Count first, then ask naming what is actually at stake. The question goes back to
+			// the CLIENT when this command was forwarded (the captured console cannot prompt),
+			// which is what makes `eas purge` work over /cli at all — it used to fail outright
+			// telling the operator to pass --yes.
+			(string user, string? deviceId) = Target(settings);
+			DeviceAdminService.DeletionImpact impact =
+				await devices.CountDeletionImpactAsync(user, deviceId, cancellationToken);
+			string question = impact.DestroysContent
+				? $"Permanently delete {Describe(settings)}? This destroys {impact.DescribeContent()} " +
+				  "which exist nowhere else."
+				: $"Permanently delete {Describe(settings)}?";
+
+			// Forwarded: the client asks and re-sends. Nothing has been deleted.
+			if (CliConfirmation.CanAsk)
 			{
-				await Console.Error.WriteLineAsync(
-					"This permanently deletes data; confirm with --yes when running non-interactively.");
+				CliConfirmation.Ask(question);
 				return 1;
 			}
 
-			if (!await Terminal.ConfirmAsync($"Permanently delete {Describe(settings)}?", false, cancellationToken))
+			if (!Terminal.Profile.Capabilities.Interactive)
+			{
+				await Console.Error.WriteLineAsync(
+					$"{question}\nThis permanently deletes data; confirm with --yes when running non-interactively.");
+				return 1;
+			}
+
+			if (!await Terminal.ConfirmAsync(question, false, cancellationToken))
 			{
 				Terminal.WriteLine("Aborted; nothing was deleted.");
 				return 1;
 			}
 		}
 
-		DeviceAdminService devices = services.GetRequiredService<DeviceAdminService>();
 		IReadOnlyList<DeviceAdminService.PurgeCount> deleted = await DeleteAsync(devices, settings, cancellationToken);
 		if (deleted.All(d => d.Count == 0))
 		{
@@ -69,6 +91,8 @@ internal sealed class PurgeUserCommand(IAnsiConsole terminal) : PurgeCommand<Pur
 	protected override string Describe(Settings settings)
 		=> $"ALL gateway state of user '{settings.User}'";
 
+	protected override (string User, string? DeviceId) Target(Settings settings) => (settings.User, null);
+
 	protected override Task<IReadOnlyList<DeviceAdminService.PurgeCount>> DeleteAsync(
 		DeviceAdminService devices, Settings settings, CancellationToken ct)
 		=> devices.PurgeAsync(settings.User, null, ct);
@@ -88,6 +112,9 @@ internal sealed class PurgeDeviceCommand(IAnsiConsole terminal) : PurgeCommand<P
 
 	protected override string Describe(Settings settings)
 		=> $"device '{settings.DeviceId}' of user '{settings.User}'";
+
+	protected override (string User, string? DeviceId) Target(Settings settings)
+		=> (settings.User, settings.DeviceId);
 
 	protected override Task<IReadOnlyList<DeviceAdminService.PurgeCount>> DeleteAsync(
 		DeviceAdminService devices, Settings settings, CancellationToken ct)

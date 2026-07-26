@@ -79,7 +79,8 @@ internal static class LocalCliEndpoint
 	///   <see cref="Sealed" /> (see <see cref="ProtectResponse" />) and the plaintext fields are
 	///   empty; in AllowPlaintext dev/test the plaintext fields carry it and <c>Sealed</c> is null.
 	/// </summary>
-	internal sealed record CliResponse(int ExitCode, string Stdout, string Stderr, string? Sealed = null);
+	internal sealed record CliResponse(
+		int ExitCode, string Stdout, string Stderr, string? Sealed = null, ConfirmRequest? Confirm = null);
 
 	internal static void Map(WebApplication app)
 	{
@@ -309,7 +310,8 @@ internal static class LocalCliEndpoint
 		key is null
 			? response
 			: new CliResponse(0, "", "",
-				new LocalCliResult(response.ExitCode, response.Stdout, response.Stderr).Seal(key));
+				new LocalCliResult(response.ExitCode, response.Stdout, response.Stderr, response.Confirm)
+					.Seal(key));
 
 	/// <summary>
 	///   Runs one CLI command line in-process and returns its captured output + exit code. Refuses
@@ -322,7 +324,19 @@ internal static class LocalCliEndpoint
 		if (args.Length > 0 && string.Equals(args[0], "serve", StringComparison.OrdinalIgnoreCase))
 			return new CliResponse(1, "", "serve is not available over /cli; run it locally.\n");
 
-		return await RunCapturedAsync(args, stdin, ct, color, width, hostServices);
+		// A command that needs the operator to answer something cannot prompt through the
+		// captured console (InteractionSupport.No), so it parks the question here and the CLIENT
+		// asks it — see CliConfirmation.
+		CliConfirmation.Begin(args);
+		try
+		{
+			CliResponse response = await RunCapturedAsync(args, stdin, ct, color, width, hostServices);
+			return CliConfirmation.End() is { } confirm ? response with { Confirm = confirm } : response;
+		}
+		finally
+		{
+			CliConfirmation.End();
+		}
 	}
 
 	/// <summary>
