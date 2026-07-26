@@ -579,6 +579,29 @@ derive an address from `UserName` with `Contains('@')`.
   `Directory.Build.targets` gated on `IsPackable` (a .props gate would evaluate too early), so a
   host-only assembly carries no license/authors at all. See docs/plugins.md (contract NOT
   ABI-stable pre-2.0).
+- > ### ⛔ CHANGING THE CONTRACT SURFACE? RAISE `ContractVersionMinor` FIRST.
+  >
+  > **If you add, remove, rename or retype ANY public member of `ActiveSync.Contracts` or
+  > `ActiveSync.Protocol`, you MUST raise `<ContractVersionMinor>` in `Directory.Build.props`
+  > in the same change.** Every out-of-repo plugin declares an exact contract `major.minor` and
+  > is refused by the loader on a mismatch, so a changed surface shipped under an unchanged
+  > version silently breaks plugins that still claim compatibility.
+  >
+  > **Raising `<ContractVersionMajor>` is a HUMAN decision — never do it unless explicitly
+  > asked.** Minor absorbs every breaking change by policy; that is precisely why major stays
+  > meaningful.
+  >
+  > This is enforced, not merely documented: `ContractSurfaceApprovalTests` snapshots the public
+  > surface of both assemblies and pins its hash per contract version in
+  > `tests/ActiveSync.Core.Tests/ContractSurface.approved.txt`. Change the surface without a bump
+  > and the build fails with instructions. The history block is **append-only** — editing an
+  > existing line defeats the guard instead of satisfying it. After a deliberate change:
+  > raise the minor → update the literal in
+  > `ContractSurfaceTests.ContractVersion_IsTheExpectedSurfaceVersion` → regenerate with
+  > `EAS_APPROVE_CONTRACT_SURFACE=1 dotnet test --filter FullyQualifiedName~ContractSurfaceApprovalTests`.
+  >
+  > Think twice before moving a type INTO either assembly at all: it also becomes permanently
+  > MIT-licensed (see the Licensing section) and permanently part of the plugin ABI.
 - **Contract version ≠ release version — do not conflate them.** `$(ContractVersion)` in
   `Directory.Build.props` is the single definition, pinned onto Contracts' and Protocol's
   `AssemblyVersion`/`FileVersion`/`PackageVersion` so the release tag (which CI passes as a global
@@ -929,6 +952,11 @@ banner. Rules:
 
 ## Testing expectations
 
+- **Public-surface changes to `ActiveSync.Contracts`/`ActiveSync.Protocol` → raise
+  `<ContractVersionMinor>` in `Directory.Build.props` and regenerate the approved snapshot**
+  (`EAS_APPROVE_CONTRACT_SURFACE=1`). `ContractSurfaceApprovalTests` fails the build otherwise.
+  Never raise `<ContractVersionMajor>` unless a human asked — see the callout in the provider-engine
+  notes.
 - WBXML/codec changes → round-trip tests in `tests/ActiveSync.Protocol.Tests` (include a
   hand-crafted byte fixture when adding decode paths).
 - Sync-state changes → tests in `tests/ActiveSync.Core.Tests` (in-memory SQLite via
