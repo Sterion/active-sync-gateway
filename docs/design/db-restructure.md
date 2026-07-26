@@ -139,7 +139,7 @@ Recorded so a fresh session executes rather than re-litigates.
 | 16 | **Deleting a user must not silently destroy content — confirm-and-cascade.** The DB cascades; the application counts what would be lost first and demands confirmation naming it. The CLI gets a `ConfirmRequest` round-trip so the forwarded path can ask (it cannot today); the web reuses its existing typed-echo. One dry-run counting service behind both. |
 | 17 | **Config-declared users get rows at startup** (identity from the row, values from config). |
 | 18 | **`AccountsStamp` + `SettingsStamp` merge into one `DataChanges` table**, keyed by area string, **one row per watched area**. A stamp belongs to a consumer's aggregate, not to a table — so `UserBackendRoles` bumps `"users"` rather than getting its own. |
-| 19 | **`LoginBlock` is per-device only** — `DeviceKey` is a non-nullable FK. Whole-user blocking is `Users.Enabled = false`, and `eas block` becomes device-scoped so the CLI does not recreate the duplication the schema just removed. |
+| 19 | **`LoginBlock` is per-device only** — a single non-nullable `DeviceKey` FK, **and no `UserId`** (it reaches the user through the device). Whole-user blocking is `Users.Enabled = false`, and `eas block` becomes device-scoped — on both the CLI and the admin API — so the duplication the schema removes is not recreated a level up. |
 
 > **The shape is still settling.** Decisions 1–9 have been through a full round of review; 10–17 are
 > newer and the owner expects them to move. Treat the *direction* as agreed and the field-level detail
@@ -406,7 +406,7 @@ links become real:
 | `LocalItem` | `UserName` string | **`UserId` FK, cascade** |
 | `UserFolder` | `UserName` string | **`UserId` FK, cascade** |
 | `Device` | `UserName` string | **`UserId` FK, cascade** |
-| `LoginBlock` | `UserName` + nullable `DeviceId` **string** | **`UserId` FK + `DeviceKey` FK → `Device.Id`, both cascade** |
+| `LoginBlock` | `UserName` + nullable `DeviceId` **string** | **`DeviceKey` FK → `Device.Id`, cascade — and NO `UserId`** (see below) |
 | `SharedCalendarGrant`, `OofSetting`, `WebSessionRevocation` | `UserName` string | **`UserId` FK, cascade** |
 | `SentCommandToken` | `DeviceKey` int, **no FK** | **real FK → `Device.Id`, cascade** — closes the orphan-on-device-delete gap |
 | `UserBackendRole` | *(new)* | **`UserId` FK, cascade** |
@@ -417,7 +417,14 @@ persistent-property counterpart to the ad-hoc `LoginBlock`"). A mandatory FK for
 case out of `LoginBlock` entirely, leaving exactly one mechanism for each concept:
 
 - **`Users.Enabled = false`** — the user is off. Every device, EAS and web.
-- **`LoginBlock(UserId, DeviceKey)`** — this one device is cut off. Nothing else changes.
+- **`LoginBlock(DeviceKey)`** — this one device is cut off. Nothing else changes.
+
+**And `LoginBlock` carries NO `UserId`** — a device already belongs to exactly one user, so the column
+would be derivable, and that is precisely the case this document's own rule forbids: *do not add a
+`UserId` to a table that already reaches a user through a FK, or the two paths can disagree and there
+is no constraint that would catch it.* The only argument for keeping it was that "all blocks for this
+user" needs a join — but it needs a join either way, `Users → LoginBlock` versus
+`Users → Device → LoginBlock`. One extra hop is not a reason to carry a column that can go stale.
 
 **Consequence for the CLI, which must not recreate the duplication a level up.** `eas block <user>`
 today means "block everything" via a null-device row, and that shape no longer exists. Make

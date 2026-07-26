@@ -131,14 +131,11 @@ device-scoped); `CompleteAccountWipeAsync`.
 
 **Links:** → `Device` (**FK, cascade**), and through it to `Users`.
 
-> ⚠️ **This differs from `db-restructure.md`, deliberately — please rule on it.** That document's FK
-> table says `LoginBlock` gets **both** a `UserId` FK and a `DeviceKey` FK. But a device already
-> belongs to exactly one user, so `UserId` here would be derivable — and the same document's own rule
-> says *"do not add a `UserId` to a table that already reaches a user through a FK, or the two paths
-> can disagree and there is no constraint that would catch it."* By that rule `LoginBlock` should
-> carry `DeviceKey` alone, which is what is shown above. The counter-argument is query convenience
-> ("all blocks for this user" becomes a join) — real, but the rule exists precisely because
-> convenience columns drift.
+**No `UserId` here — settled.** A device belongs to exactly one user, so the column would be
+derivable, and this is exactly the case the rule forbids: *do not add a `UserId` to a table that
+already reaches a user through a FK.* The only argument for it was query convenience, and that turns
+out to be no argument at all — "all blocks for this user" is a join either way, `Users → LoginBlock`
+versus `Users → Device → LoginBlock`. `db-restructure.md` was corrected to match.
 
 ## `SharedCalendarGrant`
 
@@ -331,8 +328,7 @@ The lines most likely to have drifted from this projection:
 
 1. **Everything marked ⓘ** — `UpdatedUtc` on `Users`, the `OidcSubject` index, `Role` as string,
    `LogEntry.User`, `DataChanges.UpdatedUtc`.
-2. **`LoginBlock`'s shape** — see the ruling requested above; `db-restructure.md` and this document
-   currently differ.
+2. ~~`LoginBlock`'s shape~~ — settled: `DeviceKey` alone, no `UserId`. Both documents agree.
 3. **Whether `CollectionId`-as-string survived** — kept here because `ServerId` is an EAS wire value,
    but it is the last soft link that could mis-scope rows.
 4. **The AAD framing** — the exact byte layout is a suggestion in `db-restructure.md`, not a decision.
