@@ -156,8 +156,15 @@ public static class StartupSummary
 	}
 
 	/// <summary>
-	///   One-line, full-detail description of a declared user — origin, mail address and every
-	///   overridden role. Passwords never render; only a masked marker with their format.
+	///   One-line, full-detail description of a user — origin, mail address and every overridden
+	///   role. Passwords never render; only a masked marker with their format.
+	///   <para>
+	///     Values are the PER-FIELD merge of the database declaration over the configuration one,
+	///     so each field is tagged with the level it actually came from — <c>{db}</c> or
+	///     <c>{cfg}</c> — whenever both levels are in play. Without that, a merged line reads as
+	///     if one source produced all of it, which is exactly the question an operator has when
+	///     a user is declared in two places.
+	///   </para>
 	/// </summary>
 	internal static string DescribeUser(MergedUser account)
 	{
@@ -166,44 +173,65 @@ public static class StartupSummary
 		[
 			account.FromDatabase
 				? o.AutoProvisioned == true ? "[db, auto-provisioned]"
-				: account.ShadowsConfig ? "[db, shadows config]" : "[db]"
+				: account.ShadowsConfig ? "[db+config, merged per field]" : "[db]"
 				: "[config]",
 		];
+		// Only worth the noise when the two levels can actually disagree.
+		bool showSources = account.ShadowsConfig;
+		string Tag(string path) => showSources
+			? account.SourceOf(path) switch
+			{
+				UserFieldSource.UserDatabase => "{db}",
+				UserFieldSource.UserConfig => "{cfg}",
+				_ => "",
+			}
+			: "";
+
 		if (account.Invalid)
 			parts.Add("INVALID (refused)");
 		if (o.Enabled == false)
-			parts.Add("DISABLED");
+			parts.Add($"DISABLED{Tag("Enabled")}");
 		if (!string.IsNullOrWhiteSpace(o.MailAddress))
-			parts.Add($"mail={o.MailAddress}");
+			parts.Add($"mail={o.MailAddress}{Tag("MailAddress")}");
 		if (!string.IsNullOrWhiteSpace(o.Password))
-			parts.Add(GatewayPasswordHasher.IsHashed(o.Password)
+			parts.Add((GatewayPasswordHasher.IsHashed(o.Password)
 				? "password=***(pbkdf2)"
-				: "password=***(PLAINTEXT)");
+				: "password=***(PLAINTEXT)") + Tag("Password"));
+		if (!string.IsNullOrWhiteSpace(o.DefaultBackendLogin))
+			parts.Add($"backend-user={o.DefaultBackendLogin}{Tag("DefaultBackendLogin")}");
+		if (!string.IsNullOrWhiteSpace(o.DefaultBackendPassword))
+			parts.Add((SecretValue.IsSealed(o.DefaultBackendPassword)
+				? "backend-pw=***(sealed)"
+				: "backend-pw=***(PLAINTEXT)") + Tag("DefaultBackendPassword"));
 		if (o.Admin == true)
-			parts.Add("admin");
+			parts.Add($"admin{Tag("Admin")}");
 		foreach ((string roleName, BackendRoleOverride roleOverride) in
 		         (o.Backends ?? []).OrderBy(b => b.Key, StringComparer.OrdinalIgnoreCase))
-			parts.Add($"{roleName.ToLowerInvariant()}[{DescribeRoleOverride(roleOverride)}]");
+			parts.Add($"{roleName.ToLowerInvariant()}[{DescribeRoleOverride(roleOverride, roleName, Tag)}]");
 		if (parts.Count == 1)
 			parts.Add("(allowlist grant — pure pass-through)");
 		return string.Join("  ", parts);
 	}
 
-	private static string DescribeRoleOverride(BackendRoleOverride roleOverride)
+	private static string DescribeRoleOverride(
+		BackendRoleOverride roleOverride, string roleName, Func<string, string> tag)
 	{
 		if (roleOverride.Enabled == false)
-			return "off";
+			return "off" + tag($"Backends:{roleName}:Enabled");
 		List<string> fields = [];
 		if (roleOverride.Provider is not null)
-			fields.Add($"provider={roleOverride.Provider}");
+			fields.Add($"provider={roleOverride.Provider}{tag($"Backends:{roleName}:Provider")}");
 		if (roleOverride.UserName is not null)
-			fields.Add($"user={roleOverride.UserName}");
+			fields.Add($"user={roleOverride.UserName}{tag($"Backends:{roleName}:UserName")}");
 		if (roleOverride.Password is not null)
-			fields.Add(SecretValue.IsSealed(roleOverride.Password) ? "pw=***(sealed)" : "pw=***(PLAINTEXT)");
+			fields.Add((SecretValue.IsSealed(roleOverride.Password) ? "pw=***(sealed)" : "pw=***(PLAINTEXT)")
+				+ tag($"Backends:{roleName}:Password"));
 		foreach ((string key, string? value) in
 		         (roleOverride.Settings ?? []).OrderBy(s => s.Key, StringComparer.OrdinalIgnoreCase))
-			if (value is not null)
-				fields.Add($"{key}={SecretRedaction.MaskIfSecret(key, value)}");
+			fields.Add(value is null
+				// A null Settings value is the explicit-clear directive, not an absent key.
+				? $"{key}=(cleared){tag($"Backends:{roleName}:Settings:{key}")}"
+				: $"{key}={SecretRedaction.MaskIfSecret(key, value)}{tag($"Backends:{roleName}:Settings:{key}")}");
 		return string.Join(" ", fields);
 	}
 

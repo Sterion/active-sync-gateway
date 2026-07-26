@@ -1,8 +1,10 @@
-# Current database schema — as it exists today
+# Database schema BEFORE the restructure — historical
 
-> **This describes the schema as it is NOW**, before the restructure. It is a reference for planning
-> that work, not a description of the target. For the target, see
-> [`db-restructure.md`](db-restructure.md).
+> **⚠️ SUPERSEDED (2026-07-27).** This describes the schema as it was before the restructure, which
+> has since landed. It is kept because the "notes for the restructure" at the end explain what the
+> old shape cost and therefore why the new one looks as it does — but it is **not** a description of
+> the current database. For that, see [`future-db.md`](future-db.md) (the implemented projection)
+> and [`db-restructure.md`](db-restructure.md) (the reasoning).
 >
 > Note the terminology shift: this document uses the **current** code's vocabulary (`AccountEntry`,
 > `AccountOptions`, …). The target renames the internal `Account*` family to `User*`, matching the

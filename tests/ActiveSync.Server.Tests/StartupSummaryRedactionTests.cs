@@ -39,7 +39,7 @@ public class StartupSummaryRedactionTests
 		Assert.Contains("password=***(PLAINTEXT)", line);
 		Assert.Contains("pw=***(sealed)", line);
 		Assert.Contains("pw=***(PLAINTEXT)", line);
-		Assert.Contains("[db, shadows config]", line);
+		Assert.Contains("[db+config, merged per field]", line);
 		Assert.Contains("mail=alice@example.com", line);
 		Assert.Contains("Host=imap.example.com", line);
 		Assert.Contains("calendar[off]", line);

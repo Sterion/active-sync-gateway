@@ -45,14 +45,16 @@ See [Database-declared users](../README.md#database-declared-users-eas-user-) fo
 
 | Command | What it does |
 | --- | --- |
-| `user show <login>` | The effective entry for one login, secrets masked. (`eas users` lists them all.) |
-| `user add <login>` | Declare a user in the database (an empty entry is an allowlist grant; copies a same-login config entry as the starting point). |
-| `user remove <login>` | Delete the database entry — a same-login config entry becomes active again. |
-| `user disable <login>` · `user enable <login>` | Turn an account off/on. A disabled account refuses **every** login — all devices, EAS and web — with 403 after valid credentials, until re-enabled (a persistent property of the account, distinct from an ad-hoc `block`). |
-| `user set <login> <key> <value>` | Set one field by path (`MailAddress`, `Admin` — grants the web admin UI, `Enabled` — `false` disables the account, `OidcSubject` — pins the account to one identity-provider `sub`, `Backends:Calendar:Enabled`, `Backends:MailStore:Settings:Host`, ...); password keys are hashed/sealed automatically. |
-| `user unset <login> <key>` | Clear one field (an emptied entry remains an allowlist grant). |
-| `user password <login>` | Set the gateway password from stdin (stored as a pbkdf2$ hash). |
-| `user secret <login> <key>` | Set a backend password (`Backends:MailStore:Password`, ...) from stdin (stored sealed, enc:v1:). |
+| `user show <login>` | The effective entry for one login, secrets masked, each field tagged with the level it came from. (`eas users` lists them all.) |
+| `user add <login>` | Declare a user in the database (an empty entry is an allowlist grant). |
+| `user remove <login>` | Delete the database **declaration** — the fields it set fall back to a same-login config entry, then to the global settings. The user itself, its devices and its locally-stored items are untouched (that is `user delete`). |
+| `user rename <login> <newLogin>` | Change the login the phone presents. A single-row update: sync state, devices and locally-stored items are unaffected, so the holder only updates the username on the device. Refused for a login declared in configuration (change it there) and for one already taken. |
+| `user delete <login> [--yes]` | **DELETE the user and everything it owns** — devices, folders, shares, and locally-stored contacts/calendar/tasks/notes, which in a local-stores deployment exist nowhere else. Asks first, naming exactly what would be lost. |
+| `user disable <login>` · `user enable <login>` | Turn a user off/on. A disabled user refuses **every** login — all devices, EAS and web — with 403 after valid credentials, until re-enabled. This is the whole-user switch; `block` is the per-device one. |
+| `user set <login> <key> <value>` | Set one field by path (`MailAddress`, `Admin` — grants the web admin UI, `Enabled` — `false` disables the user, `OidcSubject` — pins the user to one identity-provider `sub`, `DefaultBackendLogin`/`DefaultBackendPassword` — the backend credentials every role falls back to, `Backends:Calendar:Enabled`, `Backends:MailStore:Settings:Host`, ...); password keys are hashed/sealed automatically. |
+| `user unset <login> <key>` | Clear one field — it falls back to the config entry, then the global setting (an emptied entry remains an allowlist grant). |
+| `user password <login>` | Set the **gateway** password from stdin (stored as a pbkdf2$ hash; device → gateway, verified locally, never sent to a backend). |
+| `user secret <login> <key>` | Set a **backend** password (`DefaultBackendPassword`, `Backends:MailStore:Password`, ...) from stdin (stored sealed, enc:v1:). |
 
 ## Global settings
 
@@ -76,13 +78,18 @@ The settable keys, defaults and tiers are catalogued in
 
 | Command | What it does |
 | --- | --- |
-| `block <user> [deviceId]` | Refuse logins with **403** — the whole user, or one device. |
-| `unblock <user> [deviceId]` | Remove a login block. |
+| `block <user> <deviceId>` | Cut off **one device** with **403** after valid credentials. The device id is required — to refuse a user everywhere, use `user disable` (one mechanism per concept). |
+| `unblock <user> <deviceId>` | Remove a device block. |
 | `share add <user> <collectionHref> [--read-only]` | Grant an extra CalDAV collection to a user as a shared calendar folder (`--read-only` = client edits silently reverted by the gateway). Applies at the next backend-session build (idle recycle or restart). |
 | `share remove <user> <collectionHref>` | Remove a grant — the folder disappears at the next session build. |
 | `share list [user]` | List shared-calendar grants. |
-| `purge user <user>` | Delete ALL of a user's state (asks for confirmation, or `--yes`). |
+| `purge user <user>` | Delete all of a user's state but keep the user (asks for confirmation naming what is lost, or `--yes`). |
 | `purge device <user> <deviceId>` | Delete one device registration (it re-syncs from scratch). |
+
+Confirmation works the same whether `eas` runs forwarded (the normal case inside a container)
+or locally: the gateway returns the question and the `eas` client asks it. With stdin piped or
+scripted nothing is assumed — the question goes to stderr and the command exits non-zero,
+telling you to pass `--yes`.
 
 ## Secret helpers
 
@@ -102,8 +109,14 @@ echo -n 'phone-password' | docker exec -i <container> eas hash-password
 # Who is syncing, and when were they last seen?
 kubectl exec <pod> -- eas users
 
-# Lock out a lost phone (or a whole account) without touching the mail server.
+# Lock out a lost phone without touching the mail server (per-device).
 kubectl exec <pod> -- eas block user@example.com ABCDEF123456
+
+# Lock out the whole user instead.
+kubectl exec <pod> -- eas user disable user@example.com
+
+# Change someone's login without losing their sync state or local items.
+kubectl exec <pod> -- eas user rename old@example.com new@example.com
 ```
 
 Secrets travel via **stdin** (never argv, so they stay out of shell history and `ps`).

@@ -1,9 +1,28 @@
 # Database restructure — user identity, per-field resolution, schema hygiene
 
-> **Status: proposed, not implemented.** Nothing here describes how the gateway works today. It is a
-> design brief to be executed on the **schema reinit** (see Standing context). Do not cite it as
-> documentation of current behaviour; `AGENTS.md`, `README.md` and `docs/webui.md` are the authority
-> on what exists now.
+> **Status: IMPLEMENTED (2026-07-27).** Every item of both phases has landed; this document is now
+> the RATIONALE for what exists rather than a plan for what should. `AGENTS.md`, `README.md`,
+> `docs/configuration.md`, `docs/cli.md` and `docs/webui.md` are the authority on current
+> behaviour — read them first and treat this as the "why".
+>
+> Deviations from the brief as written, all deliberate and each argued at its commit:
+>
+> 1. **The pinned-password rule generalised** (item 5). The brief left auth precedence "unchanged",
+>    naming the *configured MailStore* password as the pinned compare. With user-wide backend
+>    defaults added, the pin had to cover the EFFECTIVE MailStore password — role override, else
+>    `DefaultBackendPassword` — because whenever the gateway holds a backend password the probe
+>    authenticates with *that*, so an unpinned default would make any presented password work.
+> 2. **`UserEditing.LoadStartingEntryAsync` stopped cloning config** (item 6). Cloning was right
+>    under whole-entry replacement; under per-field resolution it would freeze config values as
+>    database overrides, so later config changes would stop reaching the user.
+> 3. **`DefaultBackendLogin`/`DefaultBackendPassword` are admin-only.** The permission table does
+>    not list them; they apply to every role at once and the password additionally pins the user's
+>    own authentication, so they are administered rather than self-service.
+> 4. **`User.Json` became typed columns plus a `Declared` flag** (item 3) rather than a nullable
+>    blob, so an identity-only row is distinguishable from a declaration without parsing anything.
+> 5. **The live suite has not been run** against these changes. Every Phase A item changes the
+>    schema and items 4–6 change auth and the request pipeline, so per this document's own
+>    Verification section that is still outstanding.
 
 **Who this is for:** an agent or contributor implementing this in a fresh session, with no knowledge
 of the conversation that produced it. Everything needed to execute is here or named here.

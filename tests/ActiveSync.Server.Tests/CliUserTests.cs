@@ -318,7 +318,7 @@ public sealed class CliUserTests : IDisposable
 		// later config change still reaches this user).
 		Assert.Contains("mail=cfg@example.com", output);
 		Assert.Contains("Host=imap.override", output);
-		Assert.Contains("[db, shadows config]", output);
+		Assert.Contains("[db+config, merged per field]", output);
 
 		(int removeExit, _, string removeOutput) = Run(null, "user", "remove", "confuser");
 		Assert.Equal(0, removeExit);

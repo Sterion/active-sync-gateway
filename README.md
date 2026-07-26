@@ -132,9 +132,9 @@ worked through item by item:
   picks database edits up within ~1 s). Override only what differs: another SMTP login, a
   personal DAV server, a fully decoupled phone password (PBKDF2 hash), sealed backend
   secrets (`enc:v1:`, AES-GCM under the master key).
-- `AutoProvisionUsers=false` **allowlist mode**, per-user/per-device **login blocking** (403),
-  brute-force throttling per (client address, user), and negative/positive auth caches
-  that shield the IMAP server from password floods.
+- `AutoProvisionUsers=false` **allowlist mode**, **disable a user** or **block one device**
+  (403 after valid credentials), brute-force throttling per (client address, user), and
+  negative/positive auth caches that shield the IMAP server from password floods.
 - The startup banner lists every declared user with origin (`[config]` / `[db]`) and all
   overridden fields — passwords only ever render as masked markers.
 
@@ -379,19 +379,38 @@ invalid on the two mail roles.
 | # | Entry has | The phone's password is |
 |---|-----------|-------------------------|
 | 1 | `Password` (pbkdf2$ or plaintext) | verified against it locally — fully decoupled from the mail backend |
-| 2 | `Backends:MailStore:Password` (no `Password`) | pinned: it must equal the configured MailStore password (timing-safe compare, no probe) |
+| 2 | a stored MailStore backend password (`Backends:MailStore:Password`, else `DefaultBackendPassword`) | pinned: it must equal that password (timing-safe compare, no probe). Whenever the gateway knows a backend password it would authenticate with *that*, so the presented one has to be checked against it or it would mean nothing |
 | 3 | neither | the mail password — validated by the MailStore provider's login probe against the user's *effective* host/user name (overrides apply) |
 | 4 | *(no entry)* | same as 3 with the global MailStore section — classic pass-through |
+
+**Backend credentials resolve most-specific-first**, per role and per field:
+
+```
+this role's override  →  the user's DefaultBackendLogin/Password  →  pass-through
+```
+
+Pass-through is the terminal step and the reason nothing needs configuring: an unset
+`DefaultBackendLogin` is the gateway login, an unset `DefaultBackendPassword` is the password
+the phone presented. Set the two defaults once and every role uses them; override a single role
+(a different SMTP login, say) and only that role differs.
 
 #### Database-declared users (`eas user ...`)
 
 The exact same entries can live in the **state database**, managed entirely by the CLI —
-no config edit, no redeploy. Three sources, per-login precedence:
+no config edit, no redeploy.
 
-1. `ActiveSync:Users` in appsettings / environment variables,
-2. the `UsersFile` (merged over 1 at startup),
-3. **database entries** — a database row **replaces the whole config entry** for that
-   login; `eas user remove` falls back to the config entry.
+**Everything resolves per field, most specific first.** This is the one rule; it is the same
+one global settings follow, with two user levels added on top:
+
+```
+user (database)  →  user (config)  →  global (database)  →  global (config)  →  built-in default
+```
+
+So a database entry is a **deviation, not a replacement**: set one field with `eas user set` and
+every other field of that login keeps coming from configuration. Clear it again and the field
+reverts to configuration — an override you remove leaves no trace. The three sources are
+`ActiveSync:Users` in appsettings/env, the `UsersFile` (merged over it at startup), and database
+entries; `eas user remove` drops the database deviations and leaves the config entry.
 
 A running gateway notices database edits within `Auth:UsersRefreshSeconds` (default **1 s**;
 one primary-key point-read on the next request — `0` checks every request; a negative or
@@ -399,33 +418,48 @@ non-finite value is clamped to `0` rather than disabling live pickup, so it can 
 permanently lock refresh off). An edit also resets the auth verdict caches, so a rotated gateway
 password applies to the very next request. Database entries count as declared under
 `AutoProvisionUsers=false`, and the startup banner lists every user with its origin
-(`[config]` / `[db]` / `[db, shadows config]`) and all overridden fields — passwords render
-only as `***(pbkdf2)` / `***(sealed)` / `***(PLAINTEXT)` markers.
+(`[config]` / `[db]` / `[db+config, merged per field]`) and all overridden fields — tagging each
+value `{db}` or `{cfg}` when both levels are in play, and rendering passwords only as
+`***(pbkdf2)` / `***(sealed)` / `***(PLAINTEXT)` markers.
+
+**Renaming a login is supported and non-destructive.** `eas user rename old new` (or the admin
+UI) changes the login the phone presents; the user's identity is an internal id, so sync state,
+devices and locally-stored items are all unaffected — the holder just updates the username on
+the device. A login declared in *configuration* is immutable: change it there, so the two sides
+can never drift apart. Deleting a user outright is `eas user delete`, which asks first and names
+exactly what would be lost (see below).
 
 ```bash
 kubectl exec <pod> -- eas user add phone-dana                         # allowlist grant
 echo -n 'phone-pw' | kubectl exec -i <pod> -- eas user password phone-dana
 kubectl exec <pod> -- eas user set phone-dana MailAddress dana@example.com
-kubectl exec <pod> -- eas user set phone-dana Backends:MailStore:UserName dana@example.com
-echo -n 'imap-pw' | kubectl exec -i <pod> -- eas user secret phone-dana Backends:MailStore:Password
+kubectl exec <pod> -- eas user set phone-dana DefaultBackendLogin dana@example.com
+echo -n 'imap-pw' | kubectl exec -i <pod> -- eas user secret phone-dana DefaultBackendPassword
 kubectl exec <pod> -- eas user show phone-dana
 ```
 
-`user set` addresses every field by its path — `MailAddress`, `Password`, and per-role keys
+`user set` addresses every field by its path — `MailAddress`, `Password`,
+`DefaultBackendLogin`/`DefaultBackendPassword`, and per-role keys
 `Backends:<Role>:Provider|Enabled|UserName|Password` plus free-form provider settings under
 `Backends:<Role>:Settings:<Key>` (e.g. `Backends:MailStore:Settings:Host`). It accepts
 password keys too: plaintext values are hashed (`Password` → pbkdf2$) or sealed
-(`Backends:<Role>:Password` → `enc:v1:`) on the spot, already-prepared values are stored
+(backend passwords → `enc:v1:`) on the spot, already-prepared values are stored
 verbatim — but plaintext on the command line lands in shell history, so the stdin forms
 above are preferred (the CLI warns).
 
 Rules worth knowing:
 
-- **Merging**: any field a user sets wins; anything unset inherits the global section.
-  SMTP/DAV credentials default to the effective IMAP credentials; the IMAP user name
-  defaults to the gateway login. A per-user DAV section with its own `BaseUrl` works even
-  without a global one; `"Enabled": false` disables a globally-configured DAV side for
-  that user.
+- **Merging**: any field a user sets wins; anything unset inherits the level below — the
+  config entry, then the global role section. Backend credentials add one step of scope: a role
+  override beats `DefaultBackendLogin`/`DefaultBackendPassword`, which beat pass-through. Each
+  role stands on its own — setting a MailStore credential does *not* silently become the SMTP or
+  DAV credential (use the defaults for that). A per-user DAV section with its own `BaseUrl` works
+  even without a global one; `"Enabled": false` disables a globally-configured DAV side for that
+  user.
+- **Two passwords, two trust domains.** `Password` authenticates the *device to the gateway* and
+  is verified locally, never sent anywhere. `DefaultBackendPassword` (and the per-role ones)
+  authenticate the *gateway to the backends*. The CLI keeps them apart: `user password` hashes,
+  `user secret` seals.
 - **Secrets**: backend passwords may be plaintext (put the file in a Secret) or
   `enc:v1:...` values sealed with the `Encryption` master key (file can then live in a
   ConfigMap): `echo -n 'imap-password' | ActiveSync.Server protect`. Gateway password
@@ -633,7 +667,8 @@ lie in the handshake, exactly as with Exchange itself. And a client that cannot 
 the policy (or does not implement provisioning at all) is locked out of everything except
 Provision — that is the point, but remember it when a device suddenly gets 449 loops
 after you tighten the policy. There is deliberately **no remote wipe**: a gateway config
-should never be able to factory-reset a phone. To cut a device off, use `eas block`.
+should never be able to factory-reset a phone. To cut one device off use
+`eas block <user> <device>`; to refuse a user everywhere use `eas user disable <user>`.
 
 ### Read-only mode
 
@@ -688,7 +723,7 @@ dotnet ef migrations add <Name> --context NpgsqlSyncDbContext \
 ## Operator CLI (`eas`)
 
 The Docker image puts an `eas` command on the PATH, so the whole admin surface is one line
-inside any container (`kubectl exec <pod> -- eas users`, `docker exec <c> eas block <user>`).
+inside any container (`kubectl exec <pod> -- eas users`, `docker exec <c> eas user disable <user>`).
 It is a **slim forwarding client**: it POSTs the command to the running gateway's `/cli`
 endpoint (sealed with the `ActiveSync:Encryption` master key) so it returns in a fraction of
 a second, falling back to in-process execution when no gateway is running. Outside a

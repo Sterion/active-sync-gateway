@@ -1,13 +1,25 @@
 # Target database schema — after the restructure
 
-> **This is a projection, not a record.** It applies the decisions in
-> [`db-restructure.md`](db-restructure.md) to the schema in [`current-db.md`](current-db.md) to show
-> what the database should look like when the work lands. **None of it exists yet.** Where this
-> disagrees with `db-restructure.md`, that document wins — it holds the reasoning; this one only
-> renders the result.
+> **This projection was IMPLEMENTED as written (2026-07-27).** It is now a description of the
+> schema, not a proposal. The generated `Initial` migration pair matches it: 18 tables, 11
+> cascading foreign keys, nine surrogate keys dropped.
 >
-> Anything marked **ⓘ inferred** was *not* explicitly decided and is my best reading. Those are the
-> lines most likely to change when someone implements this.
+> How the **ⓘ inferred** lines resolved:
+>
+> - **`UpdatedUtc` on `Users`** — kept, as inferred.
+> - **`OidcSubject` index** — added, and made UNIQUE (filtered on null). The inference called it
+>   "worth a unique index — two users bound to one subject is a takeover vector"; that reasoning
+>   held, so the database now forbids it rather than trusting the writer.
+> - **`Role` as a string** — kept, as inferred.
+> - **`LogEntry.User` stays a login string** — kept, as inferred, for the reason given (a log line
+>   records what was true at the time and must survive the user row being deleted).
+> - **`DataChanges.UpdatedUtc`** — kept, as inferred.
+> - **`CollectionId`-as-string survived** — yes, deliberately: `ServerId` is an EAS wire value.
+> - **No table gained a convenience `UserId`** it should not have.
+>
+> One shape changed from the projection: `Users` has no `Json` column at all. Every scalar is a
+> typed column (as projected) plus a `Declared` flag, so an identity-only row is distinguishable
+> from a declaration without parsing anything.
 
 **Still 18 tables.** Two stamps merge into one, one table is added, one is renamed and normalised:
 
