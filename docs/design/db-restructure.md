@@ -87,6 +87,7 @@ Recorded so a fresh session executes rather than re-litigates.
 | 16 | **Deleting a user must not silently destroy content.** The DB cascades; the application counts what would be lost and demands confirmation naming it. |
 | 17 | **Config-declared users get rows at startup** (identity from the row, values from config). |
 | 18 | **`AccountsStamp` + `SettingsStamp` merge into one `DataChanges` table**, keyed by area string, **one row per watched area**. A stamp belongs to a consumer's aggregate, not to a table — so `UserBackendRoles` bumps `"users"` rather than getting its own. |
+| 19 | **`LoginBlock` is per-device only** — `DeviceKey` is a non-nullable FK. Whole-user blocking is `Users.Enabled = false`, and `eas block` becomes device-scoped so the CLI does not recreate the duplication the schema just removed. |
 
 > **The shape is still settling.** Decisions 1–9 have been through a full round of review; 10–17 are
 > newer and the owner expects them to move. Treat the *direction* as agreed and the field-level detail
@@ -94,17 +95,16 @@ Recorded so a fresh session executes rather than re-litigates.
 
 ### Open — needs a decision before Phase A completes
 
-1. **`LoginBlock.DeviceId`: non-nullable FK (recommended) or nullable?** Non-nullable removes the
-   whole-user case from `LoginBlock` and leaves `Enabled = false` owning it — one mechanism per
-   concept instead of two overlapping ones. Nullable preserves today's "block the whole user" shape.
+1. ~~`LoginBlock.DeviceId` nullable?~~ — **settled: non-nullable.** Whole-user blocking is
+   `Users.Enabled = false`; `LoginBlock` is per-device only. See "Real foreign keys and cascade
+   delete" for the CLI consequence.
 2. ~~Config identity~~ — **settled**: no config-side identifier; match by login, and make the login
    immutable per user while it is config-declared. See "Config-declared users need rows too".
 3. **Delete guard: confirm-and-cascade (as written) or refuse-until-purged?** The latter makes
    accidental content loss structurally impossible rather than confirmation-dependent.
-4. **Terminology: `User` or `User`?** This document uses **User** throughout. A rename to
-   `User`/`Users` was raised — it reads more naturally to operators and keeps `eas user` working
-   unchanged — then apparently reversed. Settle it before item 1, because it is the one decision that
-   touches every file.
+4. ~~Terminology: `Account` or `User`?~~ — **settled: `User`.** The internal `Account*` family is
+   renamed to `User*`; the operator-facing surface already said "user" and does not change. See
+   "The vocabulary is ambiguous".
 
 ---
 
@@ -407,16 +407,29 @@ links become real:
 | `SentCommandToken` | `DeviceKey` int, **no FK** | **real FK → `Device.Id`, cascade** — closes the orphan-on-device-delete gap |
 | `UserBackendRole` | *(new)* | **`UserId` FK, cascade** |
 
-**`LoginBlock.DeviceId` should become a NON-nullable FK, and that is a simplification, not a
-restriction.** Today a null `DeviceId` means "block the whole user", which duplicates
-`Enabled = false` — two mechanisms for one concept, and `AGENTS.md` already has to explain the
-difference ("the persistent-property counterpart to the ad-hoc `LoginBlock`"). Making the FK
-mandatory forces the whole-user case out of `LoginBlock` entirely, leaving one mechanism each:
+**`LoginBlock.DeviceKey` is NON-nullable — decided.** Today a null `DeviceId` means "block the whole
+user", which duplicates `Enabled = false`; `AGENTS.md` already has to explain the difference ("the
+persistent-property counterpart to the ad-hoc `LoginBlock`"). A mandatory FK forces the whole-user
+case out of `LoginBlock` entirely, leaving exactly one mechanism for each concept:
 
 - **`Users.Enabled = false`** — the user is off. Every device, EAS and web.
 - **`LoginBlock(UserId, DeviceKey)`** — this one device is cut off. Nothing else changes.
 
-*(This is my recommendation, not a settled decision — see Open questions.)*
+**Consequence for the CLI, which must not recreate the duplication a level up.** `eas block <user>`
+today means "block everything" via a null-device row, and that shape no longer exists. Make
+`eas block` **device-scoped only**, and have the bare form fail with a pointer rather than silently
+doing something subtly different:
+
+```
+eas block <user> <device>     → per-device LoginBlock
+eas block <user>              → error: "use `eas user disable <user>` to disable the whole user"
+```
+
+Having both `eas block <user>` and `eas user disable <user>` write the same state would put back, in
+the CLI, precisely the two-mechanisms-one-concept problem this removes from the schema.
+
+**No impact on the wipe path:** `CompleteAccountWipeAsync` already inserts a *per-partnership* block
+on the `(user, device)` unique index, so it is unaffected by the column becoming mandatory.
 
 ### Deleting a user must not silently destroy data
 
