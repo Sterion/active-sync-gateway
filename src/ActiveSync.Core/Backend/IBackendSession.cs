@@ -15,8 +15,11 @@ namespace ActiveSync.Core.Backend;
 /// </summary>
 public interface IBackendSession : IAsyncDisposable
 {
-	/// <summary>The gateway credentials — the user's identity, not any backend login.</summary>
+	/// <summary>The gateway credentials — the presented login, never a backend login.</summary>
 	BackendCredentials Credentials { get; }
+
+	/// <summary>The immutable gateway user id — THE identity (DB scoping, encryption AAD).</summary>
+	int UserId { get; }
 
 	/// <summary>
 	///   The user's mail address (explicit in Accounts mode; in PassThrough the login when it
@@ -51,7 +54,8 @@ public interface IBackendSessionFactory
 	Task<bool> AuthenticateAsync(BackendCredentials credentials, CancellationToken ct);
 
 	/// <summary>Gets or creates a cached session for the user/device pair.</summary>
-	Task<IBackendSession> GetSessionAsync(BackendCredentials credentials, string deviceId, CancellationToken ct);
+	Task<IBackendSession> GetSessionAsync(
+		BackendCredentials credentials, int userId, string deviceId, CancellationToken ct);
 }
 
 /// <summary>One live backend session of the factory cache (for the admin dashboard).</summary>

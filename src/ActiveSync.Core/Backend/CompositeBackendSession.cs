@@ -21,11 +21,13 @@ public sealed class CompositeBackendSession : IBackendSession
 	// reference but leaves the live socket intact until the request lets go.
 	private int _leaseCount = 1;
 
-	private CompositeBackendSession(BackendCredentials gatewayCredentials, string? mailAddress)
+	private CompositeBackendSession(BackendCredentials gatewayCredentials, int userId, string? mailAddress)
 	{
-		// The gateway credentials are the IDENTITY (DB scoping, encryption AAD, cache keys);
-		// each backend authenticates with its role's resolved credentials.
+		// The gateway UserId is the IDENTITY (DB scoping, encryption AAD, durable keys); the
+		// credentials carry the presented login. Each backend authenticates with its role's
+		// resolved credentials.
 		Credentials = gatewayCredentials;
+		UserId = userId;
 		MailAddress = mailAddress;
 	}
 
@@ -37,12 +39,13 @@ public sealed class CompositeBackendSession : IBackendSession
 	public static async Task<CompositeBackendSession> CreateAsync(
 		BackendProviderRegistry registry,
 		BackendCredentials gatewayCredentials,
+		int userId,
 		string? mailAddress,
 		IReadOnlyList<ResolvedRole> roles,
 		IReadOnlyList<SharedCollection> sharedCollections,
 		CancellationToken ct)
 	{
-		CompositeBackendSession session = new(gatewayCredentials, mailAddress);
+		CompositeBackendSession session = new(gatewayCredentials, userId, mailAddress);
 
 		IMailSubmitOperations? mailSubmit = null;
 		IOofBackend? oof = null;
@@ -54,7 +57,7 @@ public sealed class CompositeBackendSession : IBackendSession
 			foreach (ResolvedRole role in assigned)
 				registry.GetFor(group.Key, role.Role); // validates every assigned role
 			IBackendConnection connection = await provider.CreateConnectionAsync(
-				new BackendConnectionContext(gatewayCredentials, mailAddress, assigned, sharedCollections), ct)
+				new BackendConnectionContext(gatewayCredentials, userId, mailAddress, assigned, sharedCollections), ct)
 				.ConfigureAwait(false);
 			session._connections.Add(connection);
 			session._stores.AddRange(connection.Stores);
@@ -84,6 +87,7 @@ public sealed class CompositeBackendSession : IBackendSession
 	}
 
 	public BackendCredentials Credentials { get; }
+	public int UserId { get; }
 	public string? MailAddress { get; }
 	public IReadOnlyList<IContentStore> Stores => _stores;
 	public IMailStoreOperations MailStore { get; private set; } = null!;

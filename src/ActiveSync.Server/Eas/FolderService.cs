@@ -11,7 +11,7 @@ namespace ActiveSync.Server.Eas;
 /// </summary>
 public sealed class FolderService(SyncStateService state, ILogger<FolderService> logger)
 {
-	public async Task<List<UserFolder>> RefreshAsync(IBackendSession session, string userName, CancellationToken ct)
+	public async Task<List<UserFolder>> RefreshAsync(IBackendSession session, int userId, CancellationToken ct)
 	{
 		List<BackendFolder> all = new();
 		// The stored registry is fetched lazily and AT MOST ONCE (E25): when several DAV stores
@@ -29,19 +29,19 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 				// A dead DAV server must not break mail sync: skip that store's folders
 				// (existing registry rows survive because we merge, not replace-all).
 				logger.LogWarning(ex, "Listing folders failed for store {Class}", store.EasClass);
-				existing ??= await state.GetFoldersAsync(userName, ct);
+				existing ??= await state.GetFoldersAsync(userId, ct);
 				all.AddRange(existing
 					.Where(f => f.EasClass == store.EasClass)
 					.Select(f => new BackendFolder(f.BackendKey, f.DisplayName, f.ParentBackendKey, f.Type, f.EasClass)));
 			}
 
-		return await state.RefreshFolderRegistryAsync(userName, all, ct);
+		return await state.RefreshFolderRegistryAsync(userId, all, ct);
 	}
 
 	public async Task<(UserFolder Folder, IContentStore Store)?> ResolveCollectionAsync(
-		IBackendSession session, string userName, string collectionId, CancellationToken ct)
+		IBackendSession session, int userId, string collectionId, CancellationToken ct)
 	{
-		UserFolder? folder = await state.GetFolderByServerIdAsync(userName, collectionId, ct);
+		UserFolder? folder = await state.GetFolderByServerIdAsync(userId, collectionId, ct);
 		if (folder is null)
 			return null;
 		IContentStore? store = session.GetStoreForBackendKey(folder.BackendKey);

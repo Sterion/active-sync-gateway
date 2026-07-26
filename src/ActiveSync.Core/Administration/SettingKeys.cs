@@ -42,10 +42,8 @@ internal static class SettingKeys
 	[
 		new("ActiveSync:ReadOnly", ValueType.Bool, false, "false",
 			"Pure-mirror mode: silently revert all client writes."),
-		new("ActiveSync:RequireDeclaredUsers", ValueType.Bool, false, "false",
-			"Only logins declared in config/database may authenticate."),
 		new("ActiveSync:AutoProvisionUsers", ValueType.Bool, false, "true",
-			"Create a database account for a pass-through login on its first successful EAS sign-in (on by default)."),
+			"Create a user for any login on its first successful sign-in (on, the default); off = refuse undeclared logins before any backend probe."),
 		new("ActiveSync:PublicUrl", ValueType.String, false, null,
 			"Public base URL advertised by Autodiscover (else derived from the request)."),
 		// ActiveSync:UsersFile and ActiveSync:Plugins:Directory are deliberately ABSENT — see

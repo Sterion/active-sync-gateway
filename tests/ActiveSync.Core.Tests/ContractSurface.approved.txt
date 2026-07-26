@@ -7,10 +7,11 @@
 # The history below is APPEND-ONLY: each line pins the surface a contract version
 # shipped with. Editing an existing line defeats the guard that a surface change
 # must come with a version bump.
-# Current contract version: 1.0
+# Current contract version: 1.1
 
 === VERSION HISTORY (append-only) ===
 1.0  6985799512ffa341b07b1eb951c0bf0e4975c4c14a1541db6c341ac23f9abddd
+1.1  c8f8776e4f743228eb42a2e7da8fb2dd868c46c5edd60453aa4faae06965a07b
 
 === SURFACE ===
 assembly ActiveSync.Contracts
@@ -51,17 +52,18 @@ assembly ActiveSync.Contracts
     property ActiveSync.Contracts.IOofBackend Oof { get; }
     property System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.IContentStore> Stores { get; }
   class ActiveSync.Contracts.BackendConnectionContext implements System.IEquatable<ActiveSync.Contracts.BackendConnectionContext>
-    ctor (ActiveSync.Contracts.BackendCredentials GatewayCredentials, System.String MailAddress, System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.ResolvedRole> Roles, System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.SharedCollection> SharedCollections)
+    ctor (ActiveSync.Contracts.BackendCredentials GatewayCredentials, System.Int32 GatewayUserId, System.String MailAddress, System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.ResolvedRole> Roles, System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.SharedCollection> SharedCollections)
     method System.Boolean Equals(ActiveSync.Contracts.BackendConnectionContext other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.BackendConnectionContext left, ActiveSync.Contracts.BackendConnectionContext right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.BackendConnectionContext left, ActiveSync.Contracts.BackendConnectionContext right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(ActiveSync.Contracts.BackendCredentials& GatewayCredentials, System.String& MailAddress, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Contracts.ResolvedRole, ActiveSync.Contracts, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]& Roles, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Contracts.SharedCollection, ActiveSync.Contracts, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]& SharedCollections)
+    method System.Void Deconstruct(ActiveSync.Contracts.BackendCredentials& GatewayCredentials, System.Int32& GatewayUserId, System.String& MailAddress, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Contracts.ResolvedRole, ActiveSync.Contracts, Version=1.1.0.0, Culture=neutral, PublicKeyToken=null]]& Roles, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Contracts.SharedCollection, ActiveSync.Contracts, Version=1.1.0.0, Culture=neutral, PublicKeyToken=null]]& SharedCollections)
     property ActiveSync.Contracts.BackendCredentials GatewayCredentials { get;set; }
     property System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.ResolvedRole> Roles { get;set; }
     property System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.SharedCollection> SharedCollections { get;set; }
+    property System.Int32 GatewayUserId { get;set; }
     property System.String MailAddress { get;set; }
   class ActiveSync.Contracts.BackendCredentials implements System.IEquatable<ActiveSync.Contracts.BackendCredentials>
     ctor (System.String UserName, System.String Password)
@@ -391,7 +393,7 @@ assembly ActiveSync.Protocol
     method System.Boolean op_Inequality(ActiveSync.Protocol.Sync.CollectionChanges left, ActiveSync.Protocol.Sync.CollectionChanges right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]& Adds, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]& Changes, System.Collections.Generic.IReadOnlyList`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& Deletes, System.Boolean& MoreAvailable, System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& NewSnapshot)
+    method System.Void Deconstruct(System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.1.0.0, Culture=neutral, PublicKeyToken=null]]& Adds, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.1.0.0, Culture=neutral, PublicKeyToken=null]]& Changes, System.Collections.Generic.IReadOnlyList`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& Deletes, System.Boolean& MoreAvailable, System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& NewSnapshot)
     property System.Boolean MoreAvailable { get;set; }
     property System.Collections.Generic.Dictionary<System.String, System.String> NewSnapshot { get;set; }
     property System.Collections.Generic.IReadOnlyList<ActiveSync.Protocol.Sync.ItemChange> Adds { get;set; }

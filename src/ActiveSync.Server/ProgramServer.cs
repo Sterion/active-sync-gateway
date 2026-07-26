@@ -279,7 +279,7 @@ public partial class Program
 		builder.Services.AddSingleton<UserStore>();
 		builder.Services.AddSingleton<UserResolver>();
 		builder.Services.AddAdministrationServices();
-		builder.Services.AddSingleton<PassThroughProvisioner>();
+		builder.Services.AddSingleton<UserProvisioner>();
 		builder.Services.AddSingleton<GlobalSettingStore>();
 		builder.Services.AddSingleton(settingsSource.Provider);
 		builder.Services.AddSingleton<SettingsRefresher>();
@@ -331,11 +331,6 @@ public partial class Program
 		// can query the database on a fresh install. Pass ApplicationStopping (E22) so a container
 		// SIGTERMed during a slow first-boot migration is interrupted rather than SIGKILLed.
 		await app.ApplyMigrationsAsync(startupLogger, app.Lifetime.ApplicationStopping);
-
-		// One-time upgrade of pre-role-model account rows (imap/calDav/... JSON shapes) —
-		// without it the deserializer would silently DROP those overrides.
-		await app.Services.GetRequiredService<UserStore>()
-			.UpgradeLegacyRowsAsync(startupLogger, CancellationToken.None);
 
 		// Refresh the live database settings view now the schema exists (the build-time load
 		// already covered host construction) and prime the change-stamp poll before the banner.

@@ -58,7 +58,7 @@ public sealed class FolderServiceFallbackTests : IDisposable
 			.Select(i => (IContentStore)new FailingStore($"caldav-{i}:"))
 			.ToArray();
 		_counter.Reset();
-		await service.RefreshAsync(new StoresOnlySession(stores), "u@example.test", CancellationToken.None);
+		await service.RefreshAsync(new StoresOnlySession(stores), 1, CancellationToken.None);
 		return _counter.RegistryReads;
 	}
 
@@ -129,6 +129,7 @@ public sealed class FolderServiceFallbackTests : IDisposable
 	private sealed class StoresOnlySession(IReadOnlyList<IContentStore> stores) : IBackendSession
 	{
 		public BackendCredentials Credentials => new("u@example.test", "pw");
+		public int UserId => 1;
 		public string? MailAddress => "u@example.test";
 		public IReadOnlyList<IContentStore> Stores => stores;
 		public IMailStoreOperations MailStore => null!;

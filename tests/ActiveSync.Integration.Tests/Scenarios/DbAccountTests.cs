@@ -15,7 +15,7 @@ namespace ActiveSync.Integration.Tests.Scenarios;
 
 /// <summary>
 ///   Database-declared accounts (eas user ...): they authenticate and sync exactly like
-///   config entries, grant RequireDeclaredUsers allowlist entries, and edits apply to the
+///   config entries, grant AutoProvisionUsers=false allowlist entries, and edits apply to the
 ///   running gateway via the stamp check without a restart.
 /// </summary>
 [Collection("gateway")]
@@ -73,12 +73,12 @@ public class DbAccountTests(GatewayFixture gateway)
 	}
 
 	[BackendFact]
-	public async Task RequireDeclaredUsers_DbGrantAdmits_UndeclaredStays401()
+	public async Task AutoProvisionOff_DbGrantAdmits_UndeclaredStays401()
 	{
 		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
 			new Dictionary<string, string?>
 			{
-				["ActiveSync:RequireDeclaredUsers"] = "true",
+				["ActiveSync:AutoProvisionUsers"] = "false",
 				["ActiveSync:Auth:UsersRefreshSeconds"] = "0",
 			});
 

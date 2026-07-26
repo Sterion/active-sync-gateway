@@ -161,7 +161,7 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 	{
 		if (info.Attendees.Count == 0 || info.Organizer is null)
 			return false;
-		string identity = context.Session.MailAddress ?? context.Device.UserName;
+		string identity = context.Session.MailAddress ?? context.UserName;
 		if (!MailboxEquals(info.Organizer, identity))
 			return false;
 		return await calendar.ShouldSendInvitationsAsync(ct);
@@ -194,7 +194,7 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 	private static List<(string Email, string? Name)> Recipients(
 		CalendarConverter.SchedulingInfo info, EasContext context)
 	{
-		string identity = context.Session.MailAddress ?? context.Device.UserName;
+		string identity = context.Session.MailAddress ?? context.UserName;
 		return info.Attendees
 			.Where(a => !MailboxEquals(a.Email, identity) &&
 			            (info.Organizer is null || !MailboxEquals(a.Email, info.Organizer)))
@@ -208,7 +208,7 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 		await context.Session.MailSubmit.SendAsync(output.ToArray(), ct);
 		logger.LogInformation("iMIP {Method} sent to {Count} recipient(s) for {User}",
 			(message.Body as MimePart)?.ContentType.Parameters["method"] ?? "?",
-			message.To.Count, context.Device.UserName);
+			message.To.Count, context.UserName);
 	}
 
 	private static bool MailboxEquals(string a, string b)

@@ -34,32 +34,36 @@ public sealed class CliInspectTests : IDisposable
 
 		LocalContentProtector protector = LocalContentProtector.CreateProtected(Convert.FromBase64String(KeyBase64));
 		DateTime seen = new(2026, 7, 16, 12, 0, 0, DateTimeKind.Utc);
+		User user1 = new() { Login = "user1@x", UpdatedUtc = seen };
+		User user2 = new() { Login = "user2@x", UpdatedUtc = seen };
+		db.Users.AddRange(user1, user2);
+		db.SaveChanges();
 		db.Devices.Add(new Device
 		{
-			UserName = "user1@x", DeviceId = "DEVAAA111", DeviceType = "iPhone",
+			UserId = user1.UserId, DeviceId = "DEVAAA111", DeviceType = "iPhone",
 			CreatedUtc = seen.AddDays(-30), LastSeenUtc = seen,
 		});
 		db.UserFolders.Add(new UserFolder
 		{
-			UserName = "user1@x", BackendKey = "local:contacts", DisplayName = "Contacts",
+			UserId = user1.UserId, BackendKey = "local:contacts", DisplayName = "Contacts",
 			EasClass = "Contacts", Type = 9,
 		});
 		db.LocalItems.Add(new LocalItem
 		{
-			UserName = "user1@x", Collection = "contacts", Uid = "c-1", Version = 3,
-			Content = protector.Protect("BEGIN:VCARD\r\nFN:Alice Example\r\nEND:VCARD", "user1@x", "contacts"),
+			UserId = user1.UserId, Collection = "contacts", Uid = "c-1", Version = 3,
+			Content = protector.Protect("BEGIN:VCARD\r\nFN:Alice Example\r\nEND:VCARD", user1.UserId, "contacts"),
 			LastModifiedUtc = seen,
 		});
 		db.LocalItems.Add(new LocalItem
 		{
-			UserName = "user1@x", Collection = "calendar", Uid = "e-1", Version = 1,
-			Content = protector.Protect("BEGIN:VCALENDAR\r\nEND:VCALENDAR", "user1@x", "calendar"),
+			UserId = user1.UserId, Collection = "calendar", Uid = "e-1", Version = 1,
+			Content = protector.Protect("BEGIN:VCALENDAR\r\nEND:VCALENDAR", user1.UserId, "calendar"),
 			ItemDateUtc = seen.AddDays(2), LastModifiedUtc = seen,
 		});
 		db.LocalItems.Add(new LocalItem
 		{
-			UserName = "user2@x", Collection = "notes", Uid = "n-1", Version = 1,
-			Content = protector.Protect("a note", "user2@x", "notes"),
+			UserId = user2.UserId, Collection = "notes", Uid = "n-1", Version = 1,
+			Content = protector.Protect("a note", user2.UserId, "notes"),
 			LastModifiedUtc = seen,
 		});
 		db.SaveChanges();
@@ -171,24 +175,26 @@ public sealed class CliInspectTests : IDisposable
 	}
 
 	[Fact]
-	public void Users_MatchesStateRowsCaseInsensitively()
+	public void Users_ShowsBlockAgainstTheDeviceLogin()
 	{
-		// L41 (item 37): projecting the per-login state (devices, blocks, ...) into OrdinalIgnoreCase
-		// lookups also fixes the case-sensitive matching the old O(n²) FirstOrDefault scans used. Seed
-		// a device and a user-level block whose login casing DIFFERS; the block must show against the
-		// (lower-cased) device login. On the unmodified ordinal `==` scan it reads "-".
+		// Post-restructure both the device and the block FK to the SAME UserId (Login is stored
+		// case-folded, one row per user), so the old case-variant mismatch is unconstructable by
+		// schema. This pins the joined view: a user-level block shows against the device's login.
 		using (SqliteSyncDbContext seed = new(new DbContextOptionsBuilder<SqliteSyncDbContext>()
 			       .UseSqlite($"Data Source={_dbPath}").Options))
 		{
+			User caseUser = new() { Login = "caseuser@x", UpdatedUtc = DateTime.UtcNow };
+			seed.Users.Add(caseUser);
+			seed.SaveChanges();
 			seed.Devices.Add(new Device
 			{
-				UserName = "caseuser@x", DeviceId = "DEVCASE01", DeviceType = "iPhone",
+				UserId = caseUser.UserId, DeviceId = "DEVCASE01", DeviceType = "iPhone",
 				CreatedUtc = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc),
 				LastSeenUtc = new DateTime(2026, 7, 16, 0, 0, 0, DateTimeKind.Utc),
 			});
 			seed.LoginBlocks.Add(new LoginBlock
 			{
-				UserName = "CASEUSER@X", DeviceId = null,
+				UserId = caseUser.UserId, DeviceId = null,
 				CreatedUtc = new DateTime(2026, 7, 16, 0, 0, 0, DateTimeKind.Utc),
 			});
 			seed.SaveChanges();
@@ -198,7 +204,7 @@ public sealed class CliInspectTests : IDisposable
 		Assert.Equal(0, exitCode);
 
 		string row = output.Split('\n').Single(line => line.Contains("caseuser@x"));
-		Assert.Contains("yes", row); // blocked, matched across casing
+		Assert.Contains("yes", row); // blocked
 	}
 
 	[Fact]

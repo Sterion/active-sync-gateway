@@ -53,22 +53,25 @@ public sealed class FolderRetentionServiceTests : IDisposable
 
 		await using (SyncDbContext seed = NewContext())
 		{
-			Device device = new() { UserName = "u@a35", DeviceId = "DEV1", DeviceType = "Phone" };
+			User user = new() { Login = "u@a35", UpdatedUtc = now };
+			await seed.Users.AddAsync(user);
+			await seed.SaveChangesAsync();
+			Device device = new() { UserId = user.UserId, DeviceId = "DEV1", DeviceType = "Phone" };
 			await seed.Devices.AddAsync(device);
 
 			UserFolder stale = new()
 			{
-				UserName = "u@a35", BackendKey = "imap:Gone", DisplayName = "Gone", EasClass = "Email",
+				UserId = user.UserId, BackendKey = "imap:Gone", DisplayName = "Gone", EasClass = "Email",
 				Deleted = true, DeletedUtc = now.AddDays(-40)
 			};
 			UserFolder fresh = new()
 			{
-				UserName = "u@a35", BackendKey = "imap:RecentlyGone", DisplayName = "RecentlyGone", EasClass = "Email",
+				UserId = user.UserId, BackendKey = "imap:RecentlyGone", DisplayName = "RecentlyGone", EasClass = "Email",
 				Deleted = true, DeletedUtc = now.AddDays(-5)
 			};
 			UserFolder live = new()
 			{
-				UserName = "u@a35", BackendKey = "imap:INBOX", DisplayName = "Inbox", EasClass = "Email"
+				UserId = user.UserId, BackendKey = "imap:INBOX", DisplayName = "Inbox", EasClass = "Email"
 			};
 			await seed.UserFolders.AddRangeAsync(stale, fresh, live);
 			await seed.SaveChangesAsync();

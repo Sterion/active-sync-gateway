@@ -8,8 +8,9 @@ namespace ActiveSync.Core.Security;
 
 /// <summary>
 ///   Encrypts locally-stored item content (the LocalItems Content column) at rest with
-///   AES-256-GCM. The owning user name and collection are bound as additional authenticated
-///   data, so a ciphertext row cannot be replayed under another user or collection. Stored
+///   AES-256-GCM. The owning user's immutable <c>UserId</c> and the collection are bound as
+///   additional authenticated data, so a ciphertext row cannot be replayed under another user
+///   or collection — and a login rename leaves every row decryptable. Stored
 ///   format: "v1:" + base64(12-byte nonce ‖ ciphertext ‖ 16-byte tag) — the prefix versions
 ///   the format so a future key-rotation scheme can introduce "v2:" without ambiguity.
 ///   Random 96-bit nonces are safe far beyond this gateway's write volume (birthday bound
@@ -46,12 +47,18 @@ public sealed class LocalContentProtector : IDisposable
 		return new LocalContentProtector(null);
 	}
 
-	public string Protect(string plaintext, string userName, string collection)
+	/// <summary>
+	///   The sentinel owner id for gateway-global (non-user) sealed rows, e.g. the TLS
+	///   certificate. Real users never get this id — identity columns start at 1.
+	/// </summary>
+	public const int GatewayUserId = 0;
+
+	public string Protect(string plaintext, int userId, string collection)
 	{
 		if (_key is null)
 			return plaintext;
 
-		return SealedBlob.Seal(FormatPrefix, Aad(userName, collection), _key, plaintext);
+		return SealedBlob.Seal(FormatPrefix, Aad(userId, collection), _key, plaintext);
 	}
 
 	/// <summary>
@@ -62,12 +69,12 @@ public sealed class LocalContentProtector : IDisposable
 	///   the current key throws <see cref="BackendException" /> — never item-not-found, which
 	///   would make the sync engine delete the item from devices.
 	/// </summary>
-	public string Unprotect(string stored, string userName, string collection)
+	public string Unprotect(string stored, int userId, string collection)
 	{
 		if (_key is null)
 			return stored;
 
-		if (SealedBlob.TryUnseal(FormatPrefix, Aad(userName, collection), _key, stored,
+		if (SealedBlob.TryUnseal(FormatPrefix, Aad(userId, collection), _key, stored,
 			    out string? plaintext, out SealedBlobError error, out Exception? inner))
 			return plaintext!;
 
@@ -86,27 +93,22 @@ public sealed class LocalContentProtector : IDisposable
 	}
 
 	// K2: the AAD binds a ciphertext row to its (user, collection) so it cannot be replayed under
-	// another identity. "\n" is the field delimiter, so a control character (the "\n" itself in
-	// particular) inside either part would make the encoding non-injective — ("a\nb","c") and
-	// ("a","b\nc") would both encode to "a\nb\nc" and cross-decrypt. The user name arrives as an
-	// attacker-influenced HTTP Basic login, so reject any C0 control character in either part; the
-	// "\n"-join is then unambiguous. Legitimate logins and the fixed internal collection names never
-	// contain control characters.
-	private static byte[] Aad(string userName, string collection)
+	// another identity. The owner is the immutable UserId — never the login, so a rename leaves
+	// every sealed row decryptable (db-restructure item 2). Framing is versioned and
+	// self-delimiting: "v2" ‖ LE64(userId) ‖ LE32(byteLen(collection)) ‖ UTF8(collection). The
+	// fixed-width id and the length prefix make the encoding injective by construction — no
+	// delimiter, so no delimiter-injection ambiguity, and no control-character rules to depend on.
+	// The version tag costs two bytes and buys an unambiguous future re-key path ("v3").
+	private static byte[] Aad(long userId, string collection)
 	{
-		RejectControlChars(userName, nameof(userName));
-		RejectControlChars(collection, nameof(collection));
-		return Encoding.UTF8.GetBytes(userName + "\n" + collection);
-	}
-
-	private static void RejectControlChars(string value, string part)
-	{
-		foreach (char c in value)
-		{
-			if (c < ' ')
-				throw new ArgumentException(
-					$"LocalContentProtector {part} must not contain control characters.", part);
-		}
+		int collectionBytes = Encoding.UTF8.GetByteCount(collection);
+		byte[] aad = new byte[2 + 8 + 4 + collectionBytes];
+		aad[0] = (byte)'v';
+		aad[1] = (byte)'2';
+		System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(aad.AsSpan(2, 8), userId);
+		System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(aad.AsSpan(10, 4), collectionBytes);
+		Encoding.UTF8.GetBytes(collection, aad.AsSpan(14));
+		return aad;
 	}
 
 	private static BackendException UndecryptableRow(Exception? inner)

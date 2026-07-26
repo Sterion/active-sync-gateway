@@ -28,13 +28,19 @@ public sealed class EasContext
 
 	public CancellationToken Aborted => Http.RequestAborted;
 
+	/// <summary>The gateway login the device presented — for logs, metrics and mail identity.</summary>
+	public string UserName => Credentials.UserName;
+
+	/// <summary>The immutable gateway user id — for every state/store scoping call.</summary>
+	public int UserId => Device.UserId;
+
 	/// <summary>The negotiated protocol version; gate 16.x behavior with >= EasVersion.V160.</summary>
 	public EasVersion Version => EasVersion.Parse(Parameters.ProtocolVersion);
 
 	private void TraceWire(string direction, string payload)
 	{
 		WireLogger.LogTrace("{Cmd} {User} ({Device}) {Direction}: {Payload}",
-			LogText.Clean(Parameters.Command), LogText.Clean(Device.UserName),
+			LogText.Clean(Parameters.Command), LogText.Clean(Credentials.UserName),
 			LogText.Clean(Device.DeviceId), direction, WireLog.Payload(payload));
 	}
 

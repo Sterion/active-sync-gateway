@@ -38,7 +38,7 @@ public sealed class FolderServiceTests : IDisposable
 	{
 		UserFolder folder = new()
 		{
-			Id = 7, UserName = "u@x", BackendKey = "imap:INBOX", DisplayName = "Inbox", EasClass = EasClass.Email
+			Id = 7, UserId = 1, BackendKey = "imap:INBOX", DisplayName = "Inbox", EasClass = EasClass.Email
 		};
 		MailStoreStub store = new();
 

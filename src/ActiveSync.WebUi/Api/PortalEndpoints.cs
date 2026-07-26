@@ -178,7 +178,8 @@ internal static class PortalEndpoints
 			// A password change signs every OTHER session of this login out — including any
 			// session an attacker still holds a cookie for, which is the point of changing it.
 			// This browser is then re-signed-in so the user is not thrown out of their own act.
-			await state.RevokeSessionsBeforeAsync(login, DateTime.UtcNow, ct);
+			if (await store.FindUserIdAsync(login, ct) is { } revokeUserId)
+				await state.RevokeSessionsBeforeAsync(revokeUserId, DateTime.UtcNow, ct);
 			await http.SignInAsync(WebUiAuth.Scheme, ReissueSession(principal));
 			loggerFactory.CreateLogger("ActiveSync.WebUi.Portal")
 				.LogInformation("Portal password change for {User}", login);

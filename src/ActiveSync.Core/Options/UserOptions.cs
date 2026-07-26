@@ -41,7 +41,7 @@ public sealed class BackendRoleOverride
 /// <summary>
 ///   Optional per-user overrides, keyed by the login the phone sends. Everything is
 ///   optional — an empty entry changes nothing (it only matters as an allowlist grant
-///   when <see cref="ActiveSyncOptions.RequireDeclaredUsers" /> is set). Undeclared
+///   when <see cref="ActiveSyncOptions.AutoProvisionUsers" /> is off). Undeclared
 ///   logins are pure pass-through.
 /// </summary>
 public sealed class UserOptions

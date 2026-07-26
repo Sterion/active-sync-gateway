@@ -217,13 +217,15 @@ public sealed class UserResolver
 	///   Local gateway-password verdict, or null when only a backend login probe can decide.
 	///   Precedence: explicit gateway Password (hash/plaintext) → configured MailStore
 	///   Password (presented must equal it) → null (probe). Undeclared logins: definitive
-	///   false when <see cref="ActiveSyncOptions.RequireDeclaredUsers" /> is set, else null.
+	///   false when <see cref="ActiveSyncOptions.AutoProvisionUsers" /> is OFF — the refusal
+	///   lands here, BEFORE any backend probe, so undeclared logins never reach the mail
+	///   server (a brute-force shield, not just policy); else null.
 	/// </summary>
 	public bool? VerifyLocally(string login, string presented)
 	{
 		UserTemplate? template = _snapshot.Templates?.GetValueOrDefault(login);
 		if (template is null)
-			return _options.CurrentValue.RequireDeclaredUsers ? false : null;
+			return _options.CurrentValue.AutoProvisionUsers ? null : false;
 		// B3: an invalid stored row fails closed — it never authenticates and never falls through to
 		// the backend probe (which would admit it as pass-through with the presented credentials).
 		if (template.Invalid)

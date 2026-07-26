@@ -139,12 +139,12 @@ public class UserOverrideTests(GatewayFixture gateway) : IDisposable
 	}
 
 	[BackendFact]
-	public async Task RequireDeclaredUsers_RejectsUndeclared_EvenWithValidImapCredentials()
+	public async Task AutoProvisionOff_RejectsUndeclared_EvenWithValidImapCredentials()
 	{
 		using WebApplicationFactory<Program> allowlistGateway = gateway.CreateIsolatedFactory(
 			new Dictionary<string, string?>
 			{
-				["ActiveSync:RequireDeclaredUsers"] = "true",
+				["ActiveSync:AutoProvisionUsers"] = "false",
 				// An (effectively) empty entry is a pure allowlist grant — auth still runs
 				// through the normal IMAP probe. (In-memory config needs one subkey to
 				// materialize the entry; a JSON users file can use a literal {}.)

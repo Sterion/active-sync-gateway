@@ -48,7 +48,7 @@ public sealed class MeetingResponseHandler(
 				if (options.Value.ReadOnly)
 				{
 					logger.LogInformation("Read-only: rejecting MeetingResponse for {RequestId} from {User}",
-						requestId, context.Device.UserName);
+						requestId, context.UserName);
 					results.Add(Result("2"));
 					continue;
 				}
@@ -60,7 +60,7 @@ public sealed class MeetingResponseHandler(
 				}
 
 				(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
-					context.Session, context.Device.UserName, collectionId, ct);
+					context.Session, context.UserId, collectionId, ct);
 				if (resolved is null)
 				{
 					results.Add(Result("2"));
@@ -130,7 +130,7 @@ public sealed class MeetingResponseHandler(
 					subject = message.Subject ?? subject;
 					// A mail-filed invite has no folder of its own to point at — fall back to the
 					// user's default calendar for the PARTSTAT write.
-					List<UserFolder> registry = await context.State.GetFoldersAsync(context.Device.UserName, ct);
+					List<UserFolder> registry = await context.State.GetFoldersAsync(context.UserId, ct);
 					calendarFolder = registry.FirstOrDefault(f => f.Type == EasFolderType.Calendar);
 				}
 
@@ -143,7 +143,7 @@ public sealed class MeetingResponseHandler(
 				{
 					logger.LogInformation(
 						"Read-only folder: rejecting MeetingResponse for {RequestId} from {User}",
-						requestId, context.Device.UserName);
+						requestId, context.UserName);
 					results.Add(Result("2"));
 					continue;
 				}
@@ -272,7 +272,7 @@ public sealed class MeetingResponseHandler(
 		string verb = userResponse switch { 1 => "Accepted", 2 => "Tentative", 3 => "Declined", _ => "Accepted" };
 		// The iTIP REPLY needs the user's mail address; the gateway login is only a fallback
 		// (identical in PassThrough, where MailAddress is the login when it contains '@').
-		string user = context.Session.MailAddress ?? context.Device.UserName;
+		string user = context.Session.MailAddress ?? context.UserName;
 		string uid = ExtractUid(ics) ?? Guid.NewGuid().ToString();
 
 		string replyIcs = new StringBuilder()

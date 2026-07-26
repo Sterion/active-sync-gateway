@@ -64,7 +64,7 @@ public sealed partial class SyncHandler
 				if (readOnly)
 				{
 					logger.LogInformation("Read-only: rejecting new {Noun} in \"{Folder}\" for {User}",
-						NounFor(store), folder.DisplayName, context.Device.UserName);
+						NounFor(store), folder.DisplayName, context.UserName);
 					return ClientCommandStatus(command, "6");
 				}
 
@@ -177,7 +177,7 @@ public sealed partial class SyncHandler
 					logger.LogInformation(
 						"Read-only: reverting change ({What}) on {Noun} {ServerId} in \"{Folder}\" for {User}",
 						DescribeChange(store, appData), NounFor(store), serverId,
-						folder.DisplayName, context.Device.UserName);
+						folder.DisplayName, context.UserName);
 					snapshot[itemKey] = ReadOnlyRevertRevision;
 					return null;
 				}
@@ -197,7 +197,7 @@ public sealed partial class SyncHandler
 					logger.LogInformation(
 						"Conflict on {Noun} {ServerId} in \"{Folder}\" for {User}: backend moved on since " +
 						"the client last synced — server wins (Status 7)",
-						NounFor(store), serverId, folder.DisplayName, context.Device.UserName);
+						NounFor(store), serverId, folder.DisplayName, context.UserName);
 					snapshot[itemKey] = ReadOnlyRevertRevision;
 					return ClientCommandStatus(command, "7");
 				}
@@ -238,7 +238,7 @@ public sealed partial class SyncHandler
 					{
 						logger.LogWarning(ex,
 							"Draft {ServerId} submitted for {User} but removing it from Drafts failed",
-							serverId, context.Device.UserName);
+							serverId, context.UserName);
 					}
 
 					snapshot.Remove(itemKey);
@@ -327,7 +327,7 @@ public sealed partial class SyncHandler
 						// Silent revert: forget the item so the next diff re-Adds it.
 						logger.LogInformation(
 							"Read-only: reverting delete of {Noun} {ServerId} in \"{Folder}\" for {User}",
-							NounFor(store), serverId, folder.DisplayName, context.Device.UserName);
+							NounFor(store), serverId, folder.DisplayName, context.UserName);
 						snapshot.Remove(itemKey);
 						return null;
 					}
@@ -400,14 +400,14 @@ public sealed partial class SyncHandler
 		// filing to Sent must never turn an already-sent message into a reported failure, or the
 		// client resends and the recipient gets it twice (F10).
 		await context.Session.MailSubmit.SendAsync(mime, ct);
-		Core.Observability.GatewayMetrics.RecordMailSent(context.Device.UserName, "draft_submit");
+		Core.Observability.GatewayMetrics.RecordMailSent(context.UserName, "draft_submit");
 		try
 		{
 			await context.Session.MailStore.SaveToSentAsync(mime, ct);
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
-			logger.LogWarning(ex, "Draft submitted for {User} but filing to Sent failed", context.Device.UserName);
+			logger.LogWarning(ex, "Draft submitted for {User} but filing to Sent failed", context.UserName);
 		}
 	}
 

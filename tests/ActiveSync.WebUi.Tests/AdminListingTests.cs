@@ -13,16 +13,24 @@ namespace ActiveSync.WebUi.Tests;
 /// </summary>
 public sealed class AdminListingTests
 {
+	private static async Task<int> UserIdAsync(ISyncDbContextFactory factory, string login)
+	{
+		(int userId, _) = await new ActiveSync.Core.Accounts.UserStore(factory)
+			.GetOrCreateUserAsync(login, null, CancellationToken.None);
+		return userId;
+	}
+
 	private static async Task SeedDevicesAsync(
 		ISyncDbContextFactory factory, int count, string user = "alice")
 	{
+		int userId = await UserIdAsync(factory, user);
 		await using SyncDbContext db = factory.CreateDbContext();
 		for (int i = 0; i < count; i++)
 			// DbSet.Add is synchronous and local (no I/O).
 #pragma warning disable VSTHRD103
 			db.Devices.Add(new Device
 			{
-				UserName = user,
+				UserId = userId,
 				DeviceId = $"device{i:0000}",
 				DeviceType = "Test",
 				CreatedUtc = DateTime.UtcNow,
@@ -34,12 +42,13 @@ public sealed class AdminListingTests
 
 	private static async Task SeedSharesAsync(ISyncDbContextFactory factory, int count)
 	{
+		int userId = await UserIdAsync(factory, "alice");
 		await using SyncDbContext db = factory.CreateDbContext();
 		for (int i = 0; i < count; i++)
 #pragma warning disable VSTHRD103
 			db.SharedCalendarGrants.Add(new SharedCalendarGrant
 			{
-				UserName = "alice",
+				UserId = userId,
 				CollectionHref = $"/dav/shared/{i:0000}/",
 				CreatedUtc = DateTime.UtcNow
 			});
@@ -108,7 +117,7 @@ public sealed class AdminListingTests
 #pragma warning disable VSTHRD103
 			db.LoginBlocks.Add(new LoginBlock
 			{
-				UserName = "alice", DeviceId = "device0001", CreatedUtc = DateTime.UtcNow
+				UserId = await UserIdAsync(host.Factory, "alice"), DeviceId = "device0001", CreatedUtc = DateTime.UtcNow
 			});
 #pragma warning restore VSTHRD103
 			await db.SaveChangesAsync(CancellationToken.None);
@@ -136,7 +145,7 @@ public sealed class AdminListingTests
 		await using (SyncDbContext db = host.Factory.CreateDbContext())
 		{
 #pragma warning disable VSTHRD103
-			db.LoginBlocks.Add(new LoginBlock { UserName = "carol", CreatedUtc = DateTime.UtcNow });
+			db.LoginBlocks.Add(new LoginBlock { UserId = await UserIdAsync(host.Factory, "carol"), CreatedUtc = DateTime.UtcNow });
 #pragma warning restore VSTHRD103
 			await db.SaveChangesAsync(CancellationToken.None);
 		}

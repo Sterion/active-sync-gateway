@@ -10,17 +10,17 @@ public sealed class LocalChangeNotifier
 	private readonly Lock _lock = new();
 	private readonly Dictionary<string, List<TaskCompletionSource>> _waiters = new(StringComparer.Ordinal);
 
-	private static string Key(string userName, string collection)
+	private static string Key(int userId, string collection)
 	{
-		return $"{userName}\n{collection}";
+		return $"{userId}\n{collection}";
 	}
 
-	public void NotifyChanged(string userName, string collection)
+	public void NotifyChanged(int userId, string collection)
 	{
 		List<TaskCompletionSource>? waiters;
 		lock (_lock)
 		{
-			if (!_waiters.Remove(Key(userName, collection), out waiters))
+			if (!_waiters.Remove(Key(userId, collection), out waiters))
 				return;
 		}
 
@@ -30,10 +30,10 @@ public sealed class LocalChangeNotifier
 
 	/// <summary>Waits for a change signal; returns false on timeout.</summary>
 	public async Task<bool> WaitAsync(
-		string userName, string collection, TimeSpan timeout, CancellationToken ct)
+		int userId, string collection, TimeSpan timeout, CancellationToken ct)
 	{
 		TaskCompletionSource tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
-		string key = Key(userName, collection);
+		string key = Key(userId, collection);
 		lock (_lock)
 		{
 			if (!_waiters.TryGetValue(key, out List<TaskCompletionSource>? list))

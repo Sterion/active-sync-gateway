@@ -35,7 +35,7 @@ public sealed partial class SyncHandler
 		if (outcome.Result && outcome.FoundByWatchdog)
 			logger.LogWarning(
 				"Watchdog: pending changes for {User} found by re-check during Sync wait (missed by the backend watcher)",
-				context.Device.UserName);
+				context.UserName);
 		return outcome.Result;
 
 		async Task<bool> WatchdogAsync()

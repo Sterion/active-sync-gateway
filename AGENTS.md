@@ -402,18 +402,25 @@ TProvider>`), and the connection string is resolved **lazily** from `IOptions` i
 entity, add a migration for **both** contexts (see README) — never hand-edit the model
 snapshot. **All 18 entities** (one `DbSet` each — `SyncDbContext.cs:14-31` is the definitive list),
 by purpose: **sync state** — `Device`, `UserFolder`, `DeviceFolder`, `CollectionState`,
-`SentCommandToken`, `DavItem`; **local user data** — `LocalItem` (contacts/calendar/tasks/notes;
-`AddLocalItems` migration); **accounts & access** — `AccountEntry` + `AccountsStamp`,
-`LoginBlock`, `SharedCalendarGrant`, `OofSetting`, `WebSessionRevocation`; **settings & ops** —
-`GlobalSetting` + `SettingsStamp`, `LogEntry`, `ServerCertificate`, `DataProtectionKeyEntry`.
-**Per-user scoping is split two ways, and it matters when touching identity:** eight entities carry
-the gateway login as a `UserName` column — `Device`, `UserFolder`, `LocalItem`, `LoginBlock`,
-`WebSessionRevocation`, `SharedCalendarGrant`, `AccountEntry`, `OofSetting` — while
+`SentCommandToken`, `DavItem`; **local user data** — `LocalItem` (contacts/calendar/tasks/notes);
+**users & access** — `User` + `AccountsStamp`, `LoginBlock`, `SharedCalendarGrant`, `OofSetting`,
+`WebSessionRevocation`; **settings & ops** — `GlobalSetting` + `SettingsStamp`, `LogEntry`,
+`ServerCertificate`, `DataProtectionKeyEntry`.
+**Per-user scoping is split two ways, and it matters when touching identity:** seven entities carry
+a real **`UserId` FK to `User` with cascade delete** — `Device`, `UserFolder`, `LocalItem`,
+`LoginBlock`, `WebSessionRevocation`, `SharedCalendarGrant`, `OofSetting` — while
 `DeviceFolder`/`CollectionState`/`SentCommandToken` scope transitively via `DeviceKey` and `DavItem`
-via `UserFolderKey`. The remaining six are global (not per-user).
-`LocalItem.Content` is **AES-256-GCM ciphertext at rest** (`"v1:" + base64`,
-sealed by `LocalContentProtector` with user+collection as AAD) — never read or write the
-column except through the local stores, which decrypt/encrypt at their seams.
+via `UserFolderKey`. The remaining six are global (not per-user). **Never add a `UserId` to a table
+that already reaches a user through a FK** — the two paths could disagree and no constraint would
+catch it. `User.Login` is the mutable, unique, case-folded login attribute; `User.Json` is the
+optional serialized `UserOptions` declaration (null = an identity-only row: the user exists, but the
+database declares nothing and configuration keeps supplying the values).
+`LocalItem.Content` is **AES-256-GCM ciphertext at rest** (`"v1:" + base64`, sealed by
+`LocalContentProtector` with a versioned length-prefixed AAD binding the immutable **`UserId`** and
+the collection — `"v2" ‖ LE64(userId) ‖ LE32(len) ‖ collection`, injective by construction) — never
+read or write the column except through the local stores, which decrypt/encrypt at their seams.
+Gateway-global sealed rows (the TLS certificate) use the reserved sentinel
+`LocalContentProtector.GatewayUserId` (0), which no real user can ever hold.
 JSON blobs (snapshots, cached options, ping params, cached sync requests) use
 `System.Text.Json`. Use `SyncStateService.PersistAsync` to save mutations on tracked
 entities — do not repurpose `SaveDeviceInfoAsync` as a generic save.
@@ -436,24 +443,27 @@ deliberately avoid the `required` modifier so the validators produce the error m
 **Auth model**: pass-through is the baseline (EAS Basic credentials forwarded to every
 backend, validated by the MailStore provider's login probe via `ICredentialVerifier`).
 `ActiveSync:Users` (or a mounted `UsersFile`) is an optional per-user OVERLAY resolved by
-`Core/Accounts/AccountResolver` — role-keyed overrides (Provider / Enabled / UserName /
+`Core/Accounts/UserResolver` — role-keyed overrides (Provider / Enabled / UserName /
 Password / free-form Settings per role); unset passwords inherit the presented EAS
 password, every non-MailStore role's credentials default to the effective MailStore pair,
 and the merge/unseal rules live ONCE (shared with the validator via `ValidateUsers`). Auth
 precedence per login: explicit gateway `Password` (`GatewayPasswordHasher`,
 pbkdf2$/plaintext, local verify) → configured MailStore `Password` (presented must equal
 it, timing-safe) → MailStore provider probe against the user's EFFECTIVE endpoint+username
-→ undeclared = global probe. `RequireDeclaredUsers=true` turns `Users`
-into an allowlist (undeclared logins get a local 401; an empty entry is a grant).
-`AutoProvisionUsers` (**default true**) is the inverse: `PassThroughProvisioner` (called from
-`EasEndpoint` after a verified login, idempotent + best-effort) writes an empty
-`AutoProvisioned`-marked `AccountEntry` for a pass-through login on first sync, so it becomes
-listable/blockable and can use the portal (the portal's "declared only" gate then passes and
-probes the backend) — this is what unifies the "synced users" and "declared accounts" views.
-Inert under the allowlist (that 401s before auth). A disabled account
-(`AccountOptions.Enabled == false`, set via `eas user disable`/the Users page) is refused with 403
+→ undeclared = global probe.
+**`AutoProvisionUsers` (default true) is the single switch over undeclared logins** — it absorbed
+the deleted `RequireDeclaredUsers`, keeping its name but sharpening its meaning. `true`: any login
+that authenticates gets a user row on first sign-in (a fresh immutable `UserId` plus an
+`AutoProvisioned`-marked declaration), so it is listable/blockable and can use the portal — this is
+what unifies the "synced users" and "declared accounts" views. `false`: an undeclared login is
+refused by `UserResolver.VerifyLocally` **before any backend probe** (a brute-force shield, not just
+policy); declared logins still authenticate and still get their identity row. **`UserProvisioner
+.EnsureUserAsync` runs on EVERY authenticated endpoint** (EAS, Autodiscover, the web login), so past
+the auth boundary a `UserId` always exists — no caller handles a missing user, and no code path may
+defer provisioning. A disabled account
+(`UserOptions.Enabled == false`, set via `eas user disable`/the Users page) is refused with 403
 after valid auth on every device — enforced at `EasEndpoint`/`AuthEndpoints`/`OidcLogin` via
-`AccountResolver.IsLoginDisabled` (an in-memory snapshot read); it is the persistent-property
+`UserResolver.IsLoginDisabled` (an in-memory snapshot read); it is the persistent-property
 counterpart to the ad-hoc `LoginBlock`. Backend
 passwords may be `enc:v1:` values sealed by `SecretValue` under the Encryption master key
 — CLI commands `protect` / `hash-password` (Spectre.Console.Cli app in
@@ -522,12 +532,20 @@ enrichers) × `:Format` (Text, or Json = CLEF `RenderedCompactJsonFormatter`). R
 `Serilog:WriteTo` is configured the gateway adds NO console sink (operator sinks rule; the
 CLI banner passes `alwaysConsole: true` so bare `eas` still prints). Values validated in
 ActiveSyncOptionsValidator; keep Simple byte-identical to the historical output.
-**Hard identity invariant**: DB row scoping (`Device`/`UserFolder`/`LocalItem.UserName`),
-`LocalChangeNotifier` keys, the `LocalContentProtector` AAD and session/watcher cache keys
-are all the GATEWAY login — never a per-backend user name. Changing that orphans sync
-state and makes encrypted local rows undecryptable. The user's mail address is
-`IBackendSession.MailAddress` (explicit override, else login-if-it-contains-'@') — never
-derive an address from `UserName` with `Contains('@')`.
+**Hard identity invariant**: `User.UserId` — an int identity column — is THE identity. Every
+durable per-user thing keys on it: DB row scoping (`Device`/`UserFolder`/`LocalItem.UserId` and the
+four other FKs), `LocalChangeNotifier` keys, the `LocalContentProtector` AAD, and
+`IBackendSession.UserId` / `BackendConnectionContext.GatewayUserId` inside a provider connection.
+**It is immutable and NEVER reused** — reuse is a cross-user disclosure bug, not hygiene: a
+recycled id would decrypt a deleted user's surviving sealed rows under a different person's AAD.
+That non-reuse rides an annotation (`Sqlite:Autoincrement`, Postgres identity) asserted by
+`UserIdentityTests`, not by convention. Consequently the **login is a mutable attribute**: renaming
+it is a single-row update that leaves sync state attached and local items decryptable. What survives
+unchanged: **a per-backend user name is never an identity**. The gateway LOGIN is still the right
+key for ephemeral, credential-bearing caches (the `BackendSessionFactory` session cache, watcher
+keys) — a rename there should land on a fresh entry, since those embed pass-through credentials. The
+user's mail address is `IBackendSession.MailAddress` (explicit override, else
+login-if-it-contains-'@') — never derive an address from a login with `Contains('@')`.
 
 ## Backend layer notes
 
@@ -541,7 +559,7 @@ derive an address from `UserName` with `Contains('@')`.
   moves the `Backends` subtree — the session cache recycles, no restart; absent mail roles =
   UNCONFIGURED, so EAS/Autodiscover answer 503 until set — but `/readyz` stays READY and only
   reports `"configured": false`, since configuring the gateway is what the admin UI is for);
-  `AccountResolver` produces role→provider resolutions
+  `UserResolver` produces role→provider resolutions
   (`ResolvedRole`), per-user overrides are role-keyed with subtree-replace list merges, and
   each provider binds its OWN options from its raw `ProviderSettings` (the host never knows
   a plugin provider's option shape — that is the whole point). Providers validate their
@@ -555,9 +573,9 @@ derive an address from `UserName` with `Contains('@')`.
   own (BackendSchemaTests binds an empty section and compares — a drift renders a wrong
   "(default: X)"). `BackendConfigValidation` holds the generic shape checks + the
   effective-section pass, `ProviderSettings.FromFlat` materializes entered values, and
-  `BackendKeyValidator` applies the schema to `eas config set ActiveSync:Backends:...`. Pre-role-model DB account rows are upgraded at startup by
-  `AccountStore.UpgradeLegacyRowsAsync` (`LegacyAccountJson`) — unconvertible rows are
-  logged as errors, never silently dropped. Optional provider capabilities:
+  `BackendKeyValidator` applies the schema to `eas config set ActiveSync:Backends:...`.
+  (The pre-role-model row upgrade — `UpgradeLegacyRowsAsync`/`LegacyAccountJson` — is GONE with the
+  schema reinit: no old-shape data exists to convert.) Optional provider capabilities:
   `ICredentialVerifier` (auth probe — the MailStore role's provider verifies pass-through
   logins; a provider without it means declared-users-only), `IPerUserResourceOwner`
   (per-user cache trim on the eviction sweep), `IReadinessSource` (/readyz probe).

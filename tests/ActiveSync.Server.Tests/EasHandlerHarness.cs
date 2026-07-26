@@ -38,6 +38,11 @@ public sealed class EasHandlerHarness : IDisposable
 			.Options;
 		_db = new SqliteSyncDbContext(dbOptions);
 		_db.Database.EnsureCreated();
+		// The harness user's identity row — everything per-user is keyed by UserId now.
+		User user = new() { Login = UserName, UpdatedUtc = DateTime.UtcNow };
+		_db.Users.Add(user);
+		_db.SaveChanges();
+		UserId = user.UserId;
 		State = new SyncStateService(_db);
 		Folders = new FolderService(State, NullLogger<FolderService>.Instance);
 	}
@@ -50,6 +55,9 @@ public sealed class EasHandlerHarness : IDisposable
 	public int FolderResolutionQueries => _folderQueryCounter.Count;
 
 	public const string UserName = "u@example.test";
+
+	/// <summary>The harness user's immutable id (created in the constructor).</summary>
+	public int UserId { get; }
 
 	public SyncStateService State { get; }
 	public FolderService Folders { get; }
@@ -80,7 +88,7 @@ public sealed class EasHandlerHarness : IDisposable
 	/// <summary>Registers folders and returns the live registry (ServerIds assigned by the store).</summary>
 	public Task<List<UserFolder>> RegisterFoldersAsync(params BackendFolder[] folders)
 	{
-		return State.RefreshFolderRegistryAsync(UserName, folders, CancellationToken.None);
+		return State.RefreshFolderRegistryAsync(UserId, folders, CancellationToken.None);
 	}
 
 	/// <summary>
@@ -92,7 +100,7 @@ public sealed class EasHandlerHarness : IDisposable
 	{
 		DefaultHttpContext http = new();
 		http.Response.Body = new MemoryStream();
-		Device device = await State.GetOrCreateDeviceAsync(UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+		Device device = await State.GetOrCreateDeviceAsync(UserId, "TESTDEVICE01", "TestClient", CancellationToken.None);
 		return new EasContext
 		{
 			Http = http,
@@ -120,7 +128,7 @@ public sealed class EasHandlerHarness : IDisposable
 		MemoryStream responseBody = new();
 		http.Response.Body = responseBody;
 
-		Device device = await State.GetOrCreateDeviceAsync(UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+		Device device = await State.GetOrCreateDeviceAsync(UserId, "TESTDEVICE01", "TestClient", CancellationToken.None);
 		EasContext context = new()
 		{
 			Http = http,
@@ -158,6 +166,7 @@ public sealed class EasHandlerHarness : IDisposable
 		public RecordingStore? SecondaryStore { get; set; }
 
 		public BackendCredentials Credentials => new(UserName, "pw");
+		public int UserId => 1;
 		public string? MailAddress => UserName;
 		public IReadOnlyList<IContentStore> Stores =>
 			SecondaryStore is null ? [Store] : [Store, SecondaryStore];

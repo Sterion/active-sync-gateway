@@ -41,6 +41,7 @@ public static class AutodiscoverEndpoint
 		IBackendSessionFactory sessionFactory,
 		AuthThrottle authThrottle,
 		UserResolver resolver,
+		UserProvisioner provisioner,
 		SyncStateService state,
 		IOptionsMonitor<ActiveSyncOptions> options,
 		BackendRolesProvider rolesProvider,
@@ -54,7 +55,8 @@ public static class AutodiscoverEndpoint
 		// auth, and the disabled/blocked ⇒ 403 gate. It carries no device id, so the block is
 		// necessarily the user-level one — the device-scoped variant applies only on EAS.
 		AuthOutcome auth = await EndpointAuth.TryAuthorizeAsync(
-			http, rolesProvider, options.CurrentValue.Auth, authThrottle, sessionFactory, resolver, state, null, logger, ct);
+			http, rolesProvider, options.CurrentValue.Auth, authThrottle, sessionFactory, resolver,
+			provisioner, state, null, logger, ct);
 		if (!auth.Authorized)
 			return;
 		BackendCredentials credentials = auth.Credentials!;

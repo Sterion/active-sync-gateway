@@ -21,7 +21,7 @@ namespace ActiveSync.Core.Security;
 public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory, LocalContentProtector protector)
 {
 	/// <summary>AAD binding for the sealed blob — no user owns the gateway certificate.</summary>
-	private const string AadUser = "_gateway";
+	private const int AadUser = LocalContentProtector.GatewayUserId;
 	private const string AadCollection = "tls";
 
 	/// <summary>Subject/SAN host used when no <c>PublicUrl</c> is configured.</summary>

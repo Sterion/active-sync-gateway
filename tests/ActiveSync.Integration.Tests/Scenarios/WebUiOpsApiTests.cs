@@ -54,13 +54,16 @@ public sealed class WebUiOpsApiTests(GatewayFixture gateway) : IAsyncLifetime
 	private async Task SeedDeviceAsync(string user, string deviceId)
 	{
 		using IServiceScope scope = _factory.Services.CreateScope();
+		(int userId, _) = await scope.ServiceProvider
+			.GetRequiredService<ActiveSync.Core.Accounts.UserStore>()
+			.GetOrCreateUserAsync(user, null, CancellationToken.None);
 		SyncDbContext db = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
 		// DbSet.Add is synchronous and local (no I/O) — AddAsync exists only for async value
 		// generators, which this project doesn't use.
 #pragma warning disable VSTHRD103
 		db.Devices.Add(new Device
 		{
-			UserName = user,
+			UserId = userId,
 			DeviceId = deviceId,
 			DeviceType = "TestPhone",
 			LastProtocolVersion = "16.1",

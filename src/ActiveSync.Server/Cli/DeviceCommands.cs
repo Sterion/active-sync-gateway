@@ -32,8 +32,9 @@ internal sealed class DevicePasswordCommand(IAnsiConsole terminal)
 	protected override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, Settings settings, CancellationToken cancellationToken)
 	{
+		string normalizedLogin = ActiveSync.Core.Accounts.UserStore.NormalizeLogin(settings.User);
 		Device? device = await db.Devices.FirstOrDefaultAsync(
-			d => d.UserName == settings.User && d.DeviceId == settings.DeviceId, cancellationToken);
+			d => d.User.Login == normalizedLogin && d.DeviceId == settings.DeviceId, cancellationToken);
 		if (device is null)
 		{
 			await Console.Error.WriteLineAsync($"No device '{settings.DeviceId}' for '{settings.User}'.");
@@ -53,7 +54,7 @@ internal sealed class DevicePasswordCommand(IAnsiConsole terminal)
 		{
 			// Raw password to stdout (pipe-friendly); errors never mix into it.
 			await Console.Out.WriteLineAsync(protector.Unprotect(
-				device.RecoveryPasswordProtected, device.UserName, "recovery:" + device.DeviceId));
+				device.RecoveryPasswordProtected, device.UserId, "recovery:" + device.DeviceId));
 			return 0;
 		}
 		catch (BackendException ex)

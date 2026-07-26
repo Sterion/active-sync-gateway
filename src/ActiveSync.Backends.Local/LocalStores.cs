@@ -15,9 +15,9 @@ namespace ActiveSync.Backends.Local;
 public sealed class LocalContactStore(
 	ISyncDbContextFactory dbFactory,
 	LocalChangeNotifier notifier,
-	BackendCredentials credentials,
+	int userId,
 	LocalContentProtector protector)
-	: LocalStoreBase(dbFactory, notifier, credentials, protector), IContactOperations
+	: LocalStoreBase(dbFactory, notifier, userId, protector), IContactOperations
 {
 	public const string BackendKey = KeyPrefix + "contacts";
 
@@ -41,7 +41,7 @@ public sealed class LocalContactStore(
 		{
 			if (results.Count >= maxResults)
 				break;
-			string vcf = Protector.Unprotect(stored, Credentials.UserName, "contacts");
+			string vcf = Protector.Unprotect(stored, UserId, "contacts");
 			List<XElement>? gal = ContactConverter.BuildGalEntry(
 				vcf, query, photos is not null, photos?.MaxSizeBytes,
 				photosGranted >= (photos?.MaxCount ?? int.MaxValue), out bool granted);
@@ -70,10 +70,11 @@ public sealed class LocalContactStore(
 public sealed class LocalCalendarStore(
 	ISyncDbContextFactory dbFactory,
 	LocalChangeNotifier notifier,
-	BackendCredentials credentials,
+	int userId,
 	LocalContentProtector protector,
+	string gatewayLogin,
 	string partStatIdentity)
-	: LocalStoreBase(dbFactory, notifier, credentials, protector),
+	: LocalStoreBase(dbFactory, notifier, userId, protector),
 		ICalendarOperations, ICalendarAttachmentSource, IFreeBusySource
 {
 	public const string BackendKey = KeyPrefix + "calendar";
@@ -90,13 +91,13 @@ public sealed class LocalCalendarStore(
 		LocalItem? row = await Rows(db).FirstOrDefaultAsync(i => i.Uid == eventUid, ct).ConfigureAwait(false);
 		if (row is null)
 			return null;
-		string plain = Protector.Unprotect(row.Content, Credentials.UserName, "calendar");
+		string plain = Protector.Unprotect(row.Content, UserId, "calendar");
 		// partStatIdentity = mail address ?? gateway login; the row scope and encryption AAD
-		// above stay on the gateway login (Credentials).
+		// above stay on the gateway UserId.
 		string? updated = CalendarConverter.SetPartStat(plain, userResponse, partStatIdentity);
 		if (updated is not null)
 		{
-			row.Content = Protector.Protect(updated, Credentials.UserName, "calendar");
+			row.Content = Protector.Protect(updated, UserId, "calendar");
 			row.Version++;
 			row.LastModifiedUtc = DateTime.UtcNow;
 			await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -110,7 +111,7 @@ public sealed class LocalCalendarStore(
 	{
 		await using SyncDbContext db = DbFactory.CreateDbContext();
 		LocalItem? row = await FindAsync(db, itemKey, ct).ConfigureAwait(false);
-		return row is null ? null : Protector.Unprotect(row.Content, Credentials.UserName, "calendar");
+		return row is null ? null : Protector.Unprotect(row.Content, UserId, "calendar");
 	}
 
 	public Task<bool> ShouldSendInvitationsAsync(CancellationToken ct)
@@ -140,7 +141,7 @@ public sealed class LocalCalendarStore(
 		LocalItem? row = await FindAsync(db, itemKey, ct).ConfigureAwait(false);
 		if (row is null)
 			return null;
-		string ics = Protector.Unprotect(row.Content, Credentials.UserName, "calendar");
+		string ics = Protector.Unprotect(row.Content, UserId, "calendar");
 		return CalendarConverter.ExtractAttachment(ics, index);
 	}
 
@@ -152,7 +153,7 @@ public sealed class LocalCalendarStore(
 		string targetAddress, DateTime startUtc, DateTime endUtc, CancellationToken ct)
 	{
 		if (!targetAddress.Equals(partStatIdentity, StringComparison.OrdinalIgnoreCase) &&
-		    !targetAddress.Equals(Credentials.UserName, StringComparison.OrdinalIgnoreCase))
+		    !targetAddress.Equals(gatewayLogin, StringComparison.OrdinalIgnoreCase))
 			return null;
 
 		await using SyncDbContext db = DbFactory.CreateDbContext();
@@ -160,7 +161,7 @@ public sealed class LocalCalendarStore(
 		List<string> contents = await Rows(db).AsNoTracking().Select(i => i.Content).ToListAsync(ct)
 			.ConfigureAwait(false);
 		return CalendarConverter.BusyPeriodsFromEvents(
-			contents.Select(c => Protector.Unprotect(c, Credentials.UserName, "calendar")),
+			contents.Select(c => Protector.Unprotect(c, UserId, "calendar")),
 			startUtc, endUtc);
 	}
 
@@ -196,9 +197,9 @@ public sealed class LocalCalendarStore(
 public sealed class LocalTaskStore(
 	ISyncDbContextFactory dbFactory,
 	LocalChangeNotifier notifier,
-	BackendCredentials credentials,
+	int userId,
 	LocalContentProtector protector)
-	: LocalStoreBase(dbFactory, notifier, credentials, protector)
+	: LocalStoreBase(dbFactory, notifier, userId, protector)
 {
 	public const string BackendKey = KeyPrefix + "tasks";
 
@@ -225,9 +226,9 @@ public sealed class LocalTaskStore(
 public sealed class LocalNotesStore(
 	ISyncDbContextFactory dbFactory,
 	LocalChangeNotifier notifier,
-	BackendCredentials credentials,
+	int userId,
 	LocalContentProtector protector)
-	: LocalStoreBase(dbFactory, notifier, credentials, protector)
+	: LocalStoreBase(dbFactory, notifier, userId, protector)
 {
 	public const string BackendKey = KeyPrefix + "notes";
 

@@ -26,6 +26,8 @@ public sealed class LocalGalSearchTests : IDisposable
 	private readonly TestDbContextFactory _factory;
 	private readonly LocalContactStore _store;
 
+	private readonly int _userId;
+
 	public LocalGalSearchTests()
 	{
 		_connection = new SqliteConnection("Data Source=:memory:");
@@ -33,8 +35,14 @@ public sealed class LocalGalSearchTests : IDisposable
 		_factory = new TestDbContextFactory(_connection);
 		using SyncDbContext db = _factory.CreateDbContext();
 		db.Database.EnsureCreated();
+		User user = new() { Login = "u", UpdatedUtc = DateTime.UtcNow };
+#pragma warning disable VSTHRD103
+		db.Users.Add(user);
+#pragma warning restore VSTHRD103
+		db.SaveChanges();
+		_userId = user.UserId;
 		_store = new LocalContactStore(
-			_factory, new LocalChangeNotifier(), new BackendCredentials("u", "p"),
+			_factory, new LocalChangeNotifier(), _userId,
 			LocalContentProtector.CreatePlaintext());
 	}
 
@@ -76,7 +84,7 @@ public sealed class LocalGalSearchTests : IDisposable
 		using SyncDbContext db = _factory.CreateDbContext();
 		db.LocalItems.Add(new LocalItem
 		{
-			UserName = "u",
+			UserId = _userId,
 			Collection = "contacts",
 			Uid = Guid.NewGuid().ToString(),
 			Content = vcf,

@@ -162,7 +162,7 @@ public sealed partial class SyncHandler(
 		{
 			wait = Math.Clamp(wait, options.Value.Eas.MinHeartbeatSeconds, options.Value.Eas.MaxHeartbeatSeconds);
 			using IDisposable longPoll =
-				Core.Observability.GatewayMetrics.TrackLongPoll(context.Device.UserName);
+				Core.Observability.GatewayMetrics.TrackLongPoll(context.UserName);
 			bool changed = await WaitWithWatchdogAsync(
 				context, pendingWaitCollections, TimeSpan.FromSeconds(wait), ct);
 			if (changed)

@@ -4,7 +4,11 @@ namespace ActiveSync.Core.State;
 public class Device
 {
 	public int Id { get; set; }
-	public required string UserName { get; set; }
+
+	/// <summary>The owning user — THE identity (never a login string, never a backend name).</summary>
+	public int UserId { get; set; }
+
+	public User User { get; set; } = null!;
 	public required string DeviceId { get; set; }
 	public string DeviceType { get; set; } = "";
 	public uint PolicyKey { get; set; }
@@ -61,7 +65,11 @@ public class Device
 public class UserFolder
 {
 	public int Id { get; set; }
-	public required string UserName { get; set; }
+
+	/// <summary>The owning user (FK, cascade).</summary>
+	public int UserId { get; set; }
+
+	public User User { get; set; } = null!;
 
 	/// <summary>Backend identity, e.g. "imap:INBOX/Sub" or "caldav:/dav/user/calendar/".</summary>
 	public required string BackendKey { get; set; }
@@ -196,7 +204,11 @@ public class DavItem
 public class LocalItem
 {
 	public int Id { get; set; }
-	public required string UserName { get; set; }
+
+	/// <summary>The owning user (FK, cascade). Also bound into the content's encryption AAD.</summary>
+	public int UserId { get; set; }
+
+	public User User { get; set; } = null!;
 
 	/// <summary>Content class bucket: "contacts", "calendar" or "notes".</summary>
 	public required string Collection { get; set; }
@@ -223,7 +235,11 @@ public class LocalItem
 public class LoginBlock
 {
 	public int Id { get; set; }
-	public required string UserName { get; set; }
+
+	/// <summary>The blocked user (FK, cascade).</summary>
+	public int UserId { get; set; }
+
+	public User User { get; set; } = null!;
 	public string? DeviceId { get; set; }
 	public DateTime CreatedUtc { get; set; }
 }
@@ -239,7 +255,10 @@ public class LoginBlock
 public class WebSessionRevocation
 {
 	public int Id { get; set; }
-	public required string UserName { get; set; }
+
+	/// <summary>The owning user (FK, cascade). One row per user.</summary>
+	public int UserId { get; set; }
+
 	public DateTime ValidAfterUtc { get; set; }
 }
 
@@ -251,23 +270,37 @@ public class WebSessionRevocation
 public class SharedCalendarGrant
 {
 	public int Id { get; set; }
-	public required string UserName { get; set; }
+
+	/// <summary>The grantee (FK, cascade).</summary>
+	public int UserId { get; set; }
+
+	public User User { get; set; } = null!;
 	public required string CollectionHref { get; set; }
 	public bool ReadOnly { get; set; }
 	public DateTime CreatedUtc { get; set; }
 }
 
 /// <summary>
-///   A database-declared user account entry: <see cref="Json" /> holds the serialized
-///   ActiveSync.Core.Options.UserOptions shape, secrets stored exactly as config would
-///   hold them (pbkdf2$/plaintext/enc:v1:). A row REPLACES the whole config entry for the
-///   same login; deleting it falls back to config.
+///   One gateway user — THE identity record. <see cref="UserId" /> is the immutable surrogate
+///   key everything per-user hangs off (sync state, local items, blocks, grants, the encryption
+///   AAD); it is NEVER reused. <see cref="Login" /> is the identity string the phone sends — a
+///   mutable, unique, case-folded attribute. <see cref="Json" /> optionally holds the serialized
+///   ActiveSync.Core.Options.UserOptions declaration (secrets stored exactly as config would
+///   hold them: pbkdf2$/plaintext/enc:v1:); null = an identity-only row (the user exists — e.g.
+///   it authenticated while declared in configuration — but the database declares nothing, so
+///   the resolver ignores it and config keeps supplying the values).
 /// </summary>
 public class User
 {
-	public int Id { get; set; }
-	public required string UserName { get; set; }
-	public required string Json { get; set; }
+	/// <summary>THE identity — immutable, never reused (AUTOINCREMENT/identity enforced).</summary>
+	public int UserId { get; set; }
+
+	/// <summary>The gateway login, stored case-folded, unique. Mutable (rename = one-row update).</summary>
+	public required string Login { get; set; }
+
+	/// <summary>The serialized declaration, or null for an identity-only row.</summary>
+	public string? Json { get; set; }
+
 	public DateTime UpdatedUtc { get; set; }
 }
 
@@ -370,7 +403,9 @@ public class DataProtectionKeyEntry
 public class OofSetting
 {
 	public int Id { get; set; }
-	public required string UserName { get; set; }
+
+	/// <summary>The owning user (FK, cascade). One row per user.</summary>
+	public int UserId { get; set; }
 
 	/// <summary>0 = disabled, 1 = enabled, 2 = scheduled (EAS OofState values).</summary>
 	public int State { get; set; }

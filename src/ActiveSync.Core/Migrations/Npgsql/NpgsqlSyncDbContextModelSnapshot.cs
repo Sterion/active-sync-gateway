@@ -22,33 +22,6 @@ namespace ActiveSync.Core.Migrations.Npgsql
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("ActiveSync.Core.State.AccountEntry", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Json")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("UpdatedUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserName")
-                        .IsUnique();
-
-                    b.ToTable("AccountEntries");
-                });
-
             modelBuilder.Entity("ActiveSync.Core.State.AccountsStamp", b =>
                 {
                     b.Property<int>("Id")
@@ -208,13 +181,12 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.Property<string>("RecoveryPasswordProtected")
                         .HasColumnType("text");
 
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserName", "DeviceId")
+                    b.HasIndex("UserId", "DeviceId")
                         .IsUnique();
 
                     b.ToTable("Devices");
@@ -310,16 +282,15 @@ namespace ActiveSync.Core.Migrations.Npgsql
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
 
                     b.Property<int>("Version")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserName", "Collection");
+                    b.HasIndex("UserId", "Collection");
 
                     b.ToTable("LocalItems");
                 });
@@ -376,13 +347,12 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.Property<string>("DeviceId")
                         .HasColumnType("text");
 
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserName", "DeviceId")
+                    b.HasIndex("UserId", "DeviceId")
                         .IsUnique();
 
                     b.ToTable("LoginBlocks");
@@ -419,13 +389,12 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.Property<DateTime>("UpdatedUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserName")
+                    b.HasIndex("UserId")
                         .IsUnique();
 
                     b.ToTable("OofSettings");
@@ -519,16 +488,41 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.Property<bool>("ReadOnly")
                         .HasColumnType("boolean");
 
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserName", "CollectionHref")
+                    b.HasIndex("UserId", "CollectionHref")
                         .IsUnique();
 
                     b.ToTable("SharedCalendarGrants");
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.User", b =>
+                {
+                    b.Property<int>("UserId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("UserId"));
+
+                    b.Property<string>("Json")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Login")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("UserId");
+
+                    b.HasIndex("Login")
+                        .IsUnique();
+
+                    b.ToTable("Users");
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.UserFolder", b =>
@@ -563,13 +557,12 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.Property<int>("Type")
                         .HasColumnType("integer");
 
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserName", "BackendKey")
+                    b.HasIndex("UserId", "BackendKey")
                         .IsUnique();
 
                     b.ToTable("UserFolders");
@@ -583,16 +576,15 @@ namespace ActiveSync.Core.Migrations.Npgsql
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("ValidAfterUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserName")
+                    b.HasIndex("UserId")
                         .IsUnique();
 
                     b.ToTable("WebSessionRevocations");
@@ -620,6 +612,17 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.Navigation("Folder");
                 });
 
+            modelBuilder.Entity("ActiveSync.Core.State.Device", b =>
+                {
+                    b.HasOne("ActiveSync.Core.State.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("ActiveSync.Core.State.DeviceFolder", b =>
                 {
                     b.HasOne("ActiveSync.Core.State.Device", "Device")
@@ -629,6 +632,68 @@ namespace ActiveSync.Core.Migrations.Npgsql
                         .IsRequired();
 
                     b.Navigation("Device");
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.LocalItem", b =>
+                {
+                    b.HasOne("ActiveSync.Core.State.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.LoginBlock", b =>
+                {
+                    b.HasOne("ActiveSync.Core.State.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.OofSetting", b =>
+                {
+                    b.HasOne("ActiveSync.Core.State.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.SharedCalendarGrant", b =>
+                {
+                    b.HasOne("ActiveSync.Core.State.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.UserFolder", b =>
+                {
+                    b.HasOne("ActiveSync.Core.State.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.WebSessionRevocation", b =>
+                {
+                    b.HasOne("ActiveSync.Core.State.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.Device", b =>

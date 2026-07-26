@@ -41,7 +41,7 @@ public sealed partial class SyncHandler
 		}
 
 		(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
-			context.Session, context.Device.UserName, collectionId, ct);
+			context.Session, context.UserId, collectionId, ct);
 		if (resolved is null)
 			return new CollectionResult(Error("12"), true, null); // folder hierarchy out of date
 
@@ -140,7 +140,7 @@ public sealed partial class SyncHandler
 						clientResponses.Add(handled);
 					snapshotDirty = true;
 					Core.Observability.GatewayMetrics.RecordSyncItems(
-						context.Device.UserName, store.EasClass, "client_to_server",
+						context.UserName, store.EasClass, "client_to_server",
 						command.Name.LocalName.ToLowerInvariant(), 1);
 				}
 				catch (BackendItemNotFoundException)
@@ -259,16 +259,16 @@ public sealed partial class SyncHandler
 			// (vanished mid-sync) is not in serverCommands and must not be counted as delivered.
 			// The same counts feed the activity log below.
 			Core.Observability.GatewayMetrics.RecordSyncItems(
-				context.Device.UserName, store.EasClass, "server_to_client", "add",
+				context.UserName, store.EasClass, "server_to_client", "add",
 				serverCommands.Count(c => c.Name.LocalName == "Add"));
 			Core.Observability.GatewayMetrics.RecordSyncItems(
-				context.Device.UserName, store.EasClass, "server_to_client", "change",
+				context.UserName, store.EasClass, "server_to_client", "change",
 				serverCommands.Count(c => c.Name.LocalName == "Change"));
 			Core.Observability.GatewayMetrics.RecordSyncItems(
-				context.Device.UserName, store.EasClass, "server_to_client", "delete",
+				context.UserName, store.EasClass, "server_to_client", "delete",
 				serverCommands.Count(c => c.Name.LocalName == "Delete"));
 			Core.Observability.GatewayMetrics.RecordSyncItems(
-				context.Device.UserName, store.EasClass, "server_to_client", "soft_delete",
+				context.UserName, store.EasClass, "server_to_client", "soft_delete",
 				serverCommands.Count(c => c.Name.LocalName == "SoftDelete"));
 		}
 
@@ -280,7 +280,7 @@ public sealed partial class SyncHandler
 			logger.LogInformation(
 				"Sync \"{Folder}\" for {User}: client {ClientAdds} add/{ClientChanges} change/{ClientDeletes} delete, " +
 				"sent {SentAdds} add/{SentChanges} change/{SentDeletes} delete",
-				folder.DisplayName, context.Device.UserName,
+				folder.DisplayName, context.UserName,
 				clientAdds, clientChanges, clientDeletes, sentAdds, sentChanges, sentDeletes);
 
 		bool hasPayload = clientResponses.Count > 0 || serverCommands.Count > 0;

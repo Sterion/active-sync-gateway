@@ -65,7 +65,7 @@ public sealed class WebUiAdminApiTests(GatewayFixture gateway) : IAsyncLifetime
 		// renders the default as a placeholder); a fixture-set key reports source=config.
 		JsonElement list = await _client.GetFromJsonAsync<JsonElement>("/admin/api/settings");
 		JsonElement declared = list.EnumerateArray()
-			.Single(e => e.GetProperty("key").GetString() == "ActiveSync:RequireDeclaredUsers");
+			.Single(e => e.GetProperty("key").GetString() == "ActiveSync:Policy:Enabled");
 		Assert.Equal("default", declared.GetProperty("source").GetString());
 		Assert.Equal("false", declared.GetProperty("default").GetString());
 		Assert.Null(declared.GetProperty("value").GetString());

@@ -19,7 +19,7 @@ namespace ActiveSync.Backends.Local;
 public abstract class LocalStoreBase(
 	ISyncDbContextFactory dbFactory,
 	LocalChangeNotifier notifier,
-	BackendCredentials credentials,
+	int userId,
 	LocalContentProtector protector) : IContentStore
 {
 	public const string KeyPrefix = "local:";
@@ -30,13 +30,14 @@ public abstract class LocalStoreBase(
 	protected abstract string FolderDisplayName { get; }
 	protected abstract int FolderType { get; }
 
-	protected BackendCredentials Credentials => credentials;
+	/// <summary>The owning gateway user — THE identity (DB scoping, AAD, notifier keys).</summary>
+	protected int UserId => userId;
 	protected ISyncDbContextFactory DbFactory => dbFactory;
 
 	/// <summary>Wakes Ping/Sync waiters after a write on this user's collection.</summary>
 	protected void NotifyChanged()
 	{
-		notifier.NotifyChanged(credentials.UserName, Collection);
+		notifier.NotifyChanged(userId, Collection);
 	}
 	protected LocalContentProtector Protector => protector;
 
@@ -74,7 +75,7 @@ public abstract class LocalStoreBase(
 		LocalItem? row = await FindAsync(db, itemKey, ct).ConfigureAwait(false);
 		if (row is null)
 			return null;
-		string content = protector.Unprotect(row.Content, credentials.UserName, Collection);
+		string content = protector.Unprotect(row.Content, userId, Collection);
 		IReadOnlyList<XElement>? elements = ToApplicationData(content, bodyPreference);
 		return elements is null ? null : new BackendItem(elements);
 	}
@@ -87,10 +88,10 @@ public abstract class LocalStoreBase(
 		await using SyncDbContext db = dbFactory.CreateDbContext();
 		LocalItem row = new()
 		{
-			UserName = credentials.UserName,
+			UserId = userId,
 			Collection = Collection,
 			Uid = uid,
-			Content = protector.Protect(content, credentials.UserName, Collection),
+			Content = protector.Protect(content, userId, Collection),
 			Version = 1,
 			ItemDateUtc = ExtractItemDate(content),
 			LastModifiedUtc = DateTime.UtcNow
@@ -101,7 +102,7 @@ public abstract class LocalStoreBase(
 		db.LocalItems.Add(row);
 #pragma warning restore VSTHRD103
 		await db.SaveChangesAsync(ct).ConfigureAwait(false);
-		notifier.NotifyChanged(credentials.UserName, Collection);
+		notifier.NotifyChanged(userId, Collection);
 		return (row.Id.ToString(), row.Version.ToString());
 	}
 
@@ -120,9 +121,9 @@ public abstract class LocalStoreBase(
 				                $"Local {Collection} item {itemKey} no longer exists.");
 			// Converters merge ApplicationData into the existing content, so it must be decrypted
 			// first — and ExtractItemDate parses the new plaintext before it is sealed again.
-			string existing = protector.Unprotect(row.Content, credentials.UserName, Collection);
+			string existing = protector.Unprotect(row.Content, userId, Collection);
 			string content = BuildContent(applicationData, row.Uid, existing);
-			row.Content = protector.Protect(content, credentials.UserName, Collection);
+			row.Content = protector.Protect(content, userId, Collection);
 			row.Version++;
 			row.ItemDateUtc = ExtractItemDate(content);
 			row.LastModifiedUtc = DateTime.UtcNow;
@@ -135,7 +136,7 @@ public abstract class LocalStoreBase(
 				continue;
 			}
 
-			notifier.NotifyChanged(credentials.UserName, Collection);
+			notifier.NotifyChanged(userId, Collection);
 			return row.Version.ToString();
 		}
 	}
@@ -148,7 +149,7 @@ public abstract class LocalStoreBase(
 			return;
 		db.LocalItems.Remove(row);
 		await db.SaveChangesAsync(ct).ConfigureAwait(false);
-		notifier.NotifyChanged(credentials.UserName, Collection);
+		notifier.NotifyChanged(userId, Collection);
 	}
 
 	// K58: local stores expose a single fixed folder and cannot move items — so they implement
@@ -158,7 +159,7 @@ public abstract class LocalStoreBase(
 	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
 		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
 	{
-		return await notifier.WaitAsync(credentials.UserName, Collection, timeout, ct).ConfigureAwait(false)
+		return await notifier.WaitAsync(userId, Collection, timeout, ct).ConfigureAwait(false)
 			? [FolderBackendKey]
 			: [];
 	}
@@ -177,7 +178,7 @@ public abstract class LocalStoreBase(
 
 	protected IQueryable<LocalItem> Rows(SyncDbContext db)
 	{
-		return db.LocalItems.Where(i => i.UserName == credentials.UserName && i.Collection == Collection);
+		return db.LocalItems.Where(i => i.UserId == userId && i.Collection == Collection);
 	}
 
 	protected async Task<LocalItem?> FindAsync(SyncDbContext db, string itemKey, CancellationToken ct)

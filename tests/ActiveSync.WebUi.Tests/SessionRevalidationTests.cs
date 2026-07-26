@@ -76,13 +76,15 @@ public sealed class SessionRevalidationTests : IDisposable
 		builder.AddWebUi();
 
 		using ServiceProvider services = builder.Services.BuildServiceProvider();
+		(int loginUserId, _) = await new ActiveSync.Core.Accounts.UserStore(factory)
+			.GetOrCreateUserAsync(login, null, CancellationToken.None);
 		if (blocked)
 		{
 			await using SyncDbContext db = factory.CreateDbContext();
 			// DbSet.Add is synchronous and local (no I/O); AddAsync exists only for async value
 			// generators, which this model does not use.
 #pragma warning disable VSTHRD103
-			db.LoginBlocks.Add(new LoginBlock { UserName = login, CreatedUtc = DateTime.UtcNow });
+			db.LoginBlocks.Add(new LoginBlock { UserId = loginUserId, CreatedUtc = DateTime.UtcNow });
 #pragma warning restore VSTHRD103
 			await db.SaveChangesAsync(CancellationToken.None);
 		}
@@ -91,7 +93,7 @@ public sealed class SessionRevalidationTests : IDisposable
 		{
 			await using SyncDbContext db = factory.CreateDbContext();
 			await new SyncStateService(db)
-				.RevokeSessionsBeforeAsync(login, revoked, CancellationToken.None);
+				.RevokeSessionsBeforeAsync(loginUserId, revoked, CancellationToken.None);
 		}
 
 		using IServiceScope scope = services.CreateScope();

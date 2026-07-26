@@ -109,12 +109,12 @@ public sealed class ItemOperationsHandler(
 			// own OwnsBackendKey() is only a shape test — it says "imap:..." is mine, not
 			// "this folder is yours". The per-user folder registry is what says that, and it
 			// is the same gate CollectionId Fetch goes through.
-			List<UserFolder> registry = await context.State.GetFoldersAsync(context.Device.UserName, ct);
+			List<UserFolder> registry = await context.State.GetFoldersAsync(context.UserId, ct);
 			if (!registry.Any(f => string.Equals(f.BackendKey, parts[0], StringComparison.Ordinal)))
 			{
 				logger.LogWarning("ItemOperations Fetch refused: LongId names folder {BackendKey}, " +
 				                  "which is not in {User}'s registry",
-					LogText.Clean(parts[0], 128), context.Device.UserName);
+					LogText.Clean(parts[0], 128), context.UserName);
 				return Failure("6");
 			}
 
@@ -136,7 +136,7 @@ public sealed class ItemOperationsHandler(
 			return Failure("2");
 
 		(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
-			context.Session, context.Device.UserName, collectionId, ct);
+			context.Session, context.UserId, collectionId, ct);
 		if (resolved is null)
 			return Failure("6");
 		(UserFolder folder, IContentStore store) = resolved.Value;
@@ -171,7 +171,7 @@ public sealed class ItemOperationsHandler(
 			return null;
 
 		(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
-			context.Session, context.Device.UserName, serverId[..colon], ct);
+			context.Session, context.UserId, serverId[..colon], ct);
 		if (resolved is null || resolved.Value.Store is not ICalendarAttachmentSource source)
 			return null;
 		string? itemKey = await folders.ResolveItemKeyAsync(
@@ -185,7 +185,7 @@ public sealed class ItemOperationsHandler(
 	{
 		string collectionId = operation.Element(AS + "CollectionId")?.Value ?? "";
 		(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
-			context.Session, context.Device.UserName, collectionId, ct);
+			context.Session, context.UserId, collectionId, ct);
 		// Distinct statuses for distinct causes so the client can tell them apart: 6 unresolvable,
 		// 2 not a mail folder, 3 read-only/access-denied (emptying is a bulk delete, so a read-only
 		// grant on the folder blocks it just like global ReadOnly mode does).

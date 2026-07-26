@@ -37,16 +37,18 @@ public sealed class LocalBackendProvider(
 
 	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
 	{
-		BackendCredentials gateway = context.GatewayCredentials;
-		string partStatIdentity = context.MailAddress ?? gateway.UserName;
+		int userId = context.GatewayUserId;
+		string gatewayLogin = context.GatewayCredentials.UserName;
+		string partStatIdentity = context.MailAddress ?? gatewayLogin;
 		List<IContentStore> stores = new();
 		foreach (ResolvedRole role in context.Roles)
 			stores.Add(role.Role switch
 			{
-				BackendRole.Calendar => new LocalCalendarStore(dbFactory, notifier, gateway, protector, partStatIdentity),
-				BackendRole.Tasks => new LocalTaskStore(dbFactory, notifier, gateway, protector),
-				BackendRole.Contacts => new LocalContactStore(dbFactory, notifier, gateway, protector),
-				BackendRole.Notes => new LocalNotesStore(dbFactory, notifier, gateway, protector),
+				BackendRole.Calendar => new LocalCalendarStore(
+					dbFactory, notifier, userId, protector, gatewayLogin, partStatIdentity),
+				BackendRole.Tasks => new LocalTaskStore(dbFactory, notifier, userId, protector),
+				BackendRole.Contacts => new LocalContactStore(dbFactory, notifier, userId, protector),
+				BackendRole.Notes => new LocalNotesStore(dbFactory, notifier, userId, protector),
 				_ => throw new InvalidOperationException($"local cannot serve the {role.Role} role.")
 			});
 		return Task.FromResult<IBackendConnection>(new BackendConnection(stores));

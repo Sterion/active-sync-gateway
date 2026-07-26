@@ -19,15 +19,20 @@ public class LoginBlockTests(GatewayFixture gateway)
 	private async Task SetUserBlockAsync(string userName, string? deviceId, bool blocked)
 	{
 		using IServiceScope scope = gateway.Factory.Services.CreateScope();
+		// Blocks are keyed by the immutable UserId, so mint/find the identity first — exactly
+		// what `eas block` does for a user that never synced.
+		ActiveSync.Core.Accounts.UserStore users =
+			scope.ServiceProvider.GetRequiredService<ActiveSync.Core.Accounts.UserStore>();
+		(int userId, _) = await users.GetOrCreateUserAsync(userName, null, CancellationToken.None);
 		SyncDbContext db = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
 		LoginBlock? existing = await db.LoginBlocks.FirstOrDefaultAsync(
-			b => b.UserName == userName && b.DeviceId == deviceId);
+			b => b.UserId == userId && b.DeviceId == deviceId);
 		if (blocked && existing is null)
 		{
 			// DbSet.Add is synchronous and local (no I/O) — AddAsync exists only to support
 			// async value generators (e.g. HiLo/Cosmos), which this project doesn't use.
 #pragma warning disable VSTHRD103
-			db.LoginBlocks.Add(new LoginBlock { UserName = userName, DeviceId = deviceId, CreatedUtc = DateTime.UtcNow });
+			db.LoginBlocks.Add(new LoginBlock { UserId = userId, DeviceId = deviceId, CreatedUtc = DateTime.UtcNow });
 #pragma warning restore VSTHRD103
 		}
 		else if (!blocked && existing is not null)

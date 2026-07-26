@@ -34,7 +34,9 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	{
 		modelBuilder.Entity<Device>(e =>
 		{
-			e.HasIndex(d => new { d.UserName, d.DeviceId }).IsUnique();
+			e.HasIndex(d => new { d.UserId, d.DeviceId }).IsUnique();
+			e.HasOne(d => d.User).WithMany().HasForeignKey(d => d.UserId)
+				.OnDelete(DeleteBehavior.Cascade);
 			e.HasMany(d => d.Folders).WithOne(f => f.Device).HasForeignKey(f => f.DeviceKey)
 				.OnDelete(DeleteBehavior.Cascade);
 			e.HasMany(d => d.Collections).WithOne(c => c.Device).HasForeignKey(c => c.DeviceKey)
@@ -45,7 +47,9 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 
 		modelBuilder.Entity<UserFolder>(e =>
 		{
-			e.HasIndex(f => new { f.UserName, f.BackendKey }).IsUnique();
+			e.HasIndex(f => new { f.UserId, f.BackendKey }).IsUnique();
+			e.HasOne(f => f.User).WithMany().HasForeignKey(f => f.UserId)
+				.OnDelete(DeleteBehavior.Cascade);
 			e.HasMany(f => f.DavItems).WithOne(i => i.Folder).HasForeignKey(i => i.UserFolderKey)
 				.OnDelete(DeleteBehavior.Cascade);
 		});
@@ -69,21 +73,21 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 
 		modelBuilder.Entity<LocalItem>(e =>
 		{
-			e.HasIndex(i => new { i.UserName, i.Collection });
+			e.HasIndex(i => new { i.UserId, i.Collection });
+			e.HasOne(i => i.User).WithMany().HasForeignKey(i => i.UserId)
+				.OnDelete(DeleteBehavior.Cascade);
 			e.Property(i => i.ConcurrencyToken).IsConcurrencyToken();
 		});
 
 		modelBuilder.Entity<LoginBlock>(e =>
-			e.HasIndex(b => new { b.UserName, b.DeviceId }).IsUnique());
+		{
+			e.HasIndex(b => new { b.UserId, b.DeviceId }).IsUnique();
+			e.HasOne(b => b.User).WithMany().HasForeignKey(b => b.UserId)
+				.OnDelete(DeleteBehavior.Cascade);
+		});
 
 		modelBuilder.Entity<User>(e =>
-		{
-			// Transitional pin: the CLR type is renamed ahead of the schema reinit (item 2 of
-			// docs/design/db-restructure.md); the physical table keeps its historical name until
-			// the migration chain is regenerated. Drop this together with the old migrations.
-			e.ToTable("AccountEntries");
-			e.HasIndex(a => a.UserName).IsUnique();
-		});
+			e.HasIndex(u => u.Login).IsUnique());
 
 		// Deliberately no identity column: the CLI writes Id=1 explicitly so the stamp
 		// stays a single well-known row on both providers.
@@ -112,14 +116,26 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 		});
 
 		modelBuilder.Entity<OofSetting>(e =>
-			e.HasIndex(o => o.UserName).IsUnique());
+		{
+			e.HasIndex(o => o.UserId).IsUnique();
+			e.HasOne<User>().WithMany().HasForeignKey(o => o.UserId)
+				.OnDelete(DeleteBehavior.Cascade);
+		});
 
 		modelBuilder.Entity<SharedCalendarGrant>(e =>
-			e.HasIndex(g => new { g.UserName, g.CollectionHref }).IsUnique());
+		{
+			e.HasIndex(g => new { g.UserId, g.CollectionHref }).IsUnique();
+			e.HasOne(g => g.User).WithMany().HasForeignKey(g => g.UserId)
+				.OnDelete(DeleteBehavior.Cascade);
+		});
 
-		// One row per login; the unique index is what keeps the revocation a rewrite.
+		// One row per user; the unique index is what keeps the revocation a rewrite.
 		modelBuilder.Entity<WebSessionRevocation>(e =>
-			e.HasIndex(r => r.UserName).IsUnique());
+		{
+			e.HasIndex(r => r.UserId).IsUnique();
+			e.HasOne<User>().WithMany().HasForeignKey(r => r.UserId)
+				.OnDelete(DeleteBehavior.Cascade);
+		});
 	}
 
 	// Re-stamp the concurrency token on every insert/update so a lost update (two writers

@@ -16,17 +16,17 @@ internal sealed class FolderRegistry(SyncDbContext db)
 	///   backends and returns the live registry (excluding soft-deleted rows).
 	/// </summary>
 	public async Task<List<UserFolder>> RefreshFolderRegistryAsync(
-		string userName, IReadOnlyList<BackendFolder> backendFolders, CancellationToken ct)
+		int userId, IReadOnlyList<BackendFolder> backendFolders, CancellationToken ct)
 	{
 		// The registry is per-user and shared across devices, so two devices' first sync can
-		// race to insert the same (UserName, BackendKey). On a unique-constraint failure,
+		// race to insert the same (UserId, BackendKey). On a unique-constraint failure,
 		// re-read (the concurrent inserts are now visible, so they reconcile as updates) and
 		// retry the whole reconcile.
 		const int maxAttempts = 4;
 		for (int attempt = 1; ; attempt++)
 		{
 			List<UserFolder> existing = await db.UserFolders
-				.Where(f => f.UserName == userName)
+				.Where(f => f.UserId == userId)
 				.ToListAsync(ct).ConfigureAwait(false);
 			Dictionary<string, UserFolder> byKey = existing.ToDictionary(f => f.BackendKey, StringComparer.Ordinal);
 			HashSet<string> seen = new(StringComparer.Ordinal);
@@ -49,7 +49,7 @@ internal sealed class FolderRegistry(SyncDbContext db)
 #pragma warning disable VSTHRD103
 					db.UserFolders.Add(new UserFolder
 					{
-						UserName = userName,
+						UserId = userId,
 						BackendKey = bf.BackendKey,
 						DisplayName = bf.DisplayName,
 						ParentBackendKey = bf.ParentBackendKey,
@@ -87,21 +87,21 @@ internal sealed class FolderRegistry(SyncDbContext db)
 		}
 
 		return await db.UserFolders
-			.Where(f => f.UserName == userName && !f.Deleted)
+			.Where(f => f.UserId == userId && !f.Deleted)
 			.ToListAsync(ct).ConfigureAwait(false);
 	}
 
-	public Task<UserFolder?> GetFolderByServerIdAsync(string userName, string serverId, CancellationToken ct)
+	public Task<UserFolder?> GetFolderByServerIdAsync(int userId, string serverId, CancellationToken ct)
 	{
 		if (!int.TryParse(serverId, out int id))
 			return Task.FromResult<UserFolder?>(null);
 		return db.UserFolders
-			.FirstOrDefaultAsync(f => f.Id == id && f.UserName == userName && !f.Deleted, ct);
+			.FirstOrDefaultAsync(f => f.Id == id && f.UserId == userId && !f.Deleted, ct);
 	}
 
-	public Task<List<UserFolder>> GetFoldersAsync(string userName, CancellationToken ct)
+	public Task<List<UserFolder>> GetFoldersAsync(int userId, CancellationToken ct)
 	{
-		return db.UserFolders.Where(f => f.UserName == userName && !f.Deleted).ToListAsync(ct);
+		return db.UserFolders.Where(f => f.UserId == userId && !f.Deleted).ToListAsync(ct);
 	}
 
 	public async Task<FolderHierarchyDiff> ComputeFolderDiffAsync(

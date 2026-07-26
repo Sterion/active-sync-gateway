@@ -114,7 +114,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			return false;
 
 		// Declared users may carry a local rule (gateway Password override or a configured
-		// Imap:Password the presented value must equal); RequireDeclaredUsers rejects
+		// Imap:Password the presented value must equal); AutoProvisionUsers=false rejects
 		// undeclared logins outright. The caches above bound the PBKDF2/compare cost, and
 		// a false verdict feeds the per-IP throttle via the normal 401 path.
 		if (_resolver.VerifyLocally(credentials.UserName, credentials.Password) is { } verified)
@@ -165,15 +165,17 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	}
 
 	public async Task<IBackendSession> GetSessionAsync(
-		BackendCredentials credentials, string deviceId, CancellationToken ct)
+		BackendCredentials credentials, int userId, string deviceId, CancellationToken ct)
 	{
 		await _resolver.EnsureFreshAsync(false, ct).ConfigureAwait(false);
 		ResolvedUser account = _resolver.Resolve(credentials);
 		IReadOnlyList<ResolvedRole> roles = account.OrderedRoles;
 
-		// Cache keys and rotation compares stay on the GATEWAY login/password — per-backend
-		// user names never become identity, and in Accounts mode the backend credentials are
-		// config-static (restart to apply changes).
+		// Cache keys stay on the GATEWAY login (+device) deliberately: a rename lands on a NEW
+		// key, so the renamed user's next request builds a fresh session with fresh backend
+		// credentials while the stale one idles out — sessions embed login-derived pass-through
+		// credentials, so surviving a rename would be wrong. Durable identity (DB scoping, AAD)
+		// rides the UserId inside the session, never this ephemeral key.
 		string key = $"{credentials.UserName}\n{deviceId}";
 
 		// A10: bounds the faulted-build retry below to exactly one extra attempt, so a backend
@@ -200,10 +202,10 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 				{
 					created = true;
 					IReadOnlyList<SharedCollection> sharedCalendars =
-						await LoadShareGrantsAsync(credentials.UserName, CancellationToken.None).ConfigureAwait(false);
+						await LoadShareGrantsAsync(userId, CancellationToken.None).ConfigureAwait(false);
 					return await CompositeBackendSession.CreateAsync(
-						_registry, credentials, account.MailAddress, roles, sharedCalendars, CancellationToken.None)
-						.ConfigureAwait(false);
+						_registry, credentials, userId, account.MailAddress, roles, sharedCalendars,
+						CancellationToken.None).ConfigureAwait(false);
 				});
 
 			Lazy<Task<CompositeBackendSession>> lazy = _sessions.GetOrAdd(key, _ => NewLazy());
@@ -258,11 +260,11 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	///   for the same collection overrides the config entry's mode).
 	/// </summary>
 	private async Task<IReadOnlyList<SharedCollection>> LoadShareGrantsAsync(
-		string userName, CancellationToken ct)
+		int userId, CancellationToken ct)
 	{
 		await using SyncDbContext db = _dbFactory.CreateDbContext();
 		List<SharedCalendarGrant> grants = await db.SharedCalendarGrants.AsNoTracking()
-			.Where(g => g.UserName == userName)
+			.Where(g => g.UserId == userId)
 			.ToListAsync(ct).ConfigureAwait(false);
 		return grants
 			.Select(g => new SharedCollection(g.CollectionHref, g.ReadOnly))

@@ -20,18 +20,18 @@ public class LocalContentProtectorTests
 	public void RoundTrip_RestoresPlaintext_AndStoresCiphertext()
 	{
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(Key());
-		string stored = protector.Protect(Vcard, "alice", "contacts");
+		string stored = protector.Protect(Vcard, 1, "contacts");
 		Assert.StartsWith(LocalContentProtector.FormatPrefix, stored);
 		Assert.DoesNotContain("VCARD", stored);
-		Assert.Equal(Vcard, protector.Unprotect(stored, "alice", "contacts"));
+		Assert.Equal(Vcard, protector.Unprotect(stored, 1, "contacts"));
 	}
 
 	[Fact]
 	public void SamePlaintextTwice_ProducesDifferentCiphertexts()
 	{
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(Key());
-		string first = protector.Protect(Vcard, "alice", "contacts");
-		string second = protector.Protect(Vcard, "alice", "contacts");
+		string first = protector.Protect(Vcard, 1, "contacts");
+		string second = protector.Protect(Vcard, 1, "contacts");
 		Assert.NotEqual(first, second); // fresh random nonce per write
 	}
 
@@ -40,35 +40,35 @@ public class LocalContentProtectorTests
 	{
 		using LocalContentProtector writer = LocalContentProtector.CreateProtected(Key(1));
 		using LocalContentProtector reader = LocalContentProtector.CreateProtected(Key(2));
-		string stored = writer.Protect(Vcard, "alice", "contacts");
-		Assert.Throws<BackendException>(() => reader.Unprotect(stored, "alice", "contacts"));
+		string stored = writer.Protect(Vcard, 1, "contacts");
+		Assert.Throws<BackendException>(() => reader.Unprotect(stored, 1, "contacts"));
 	}
 
 	[Fact]
 	public void DifferentUser_Throws()
 	{
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(Key());
-		string stored = protector.Protect(Vcard, "alice", "contacts");
-		Assert.Throws<BackendException>(() => protector.Unprotect(stored, "bob", "contacts"));
+		string stored = protector.Protect(Vcard, 1, "contacts");
+		Assert.Throws<BackendException>(() => protector.Unprotect(stored, 2, "contacts"));
 	}
 
 	[Fact]
 	public void DifferentCollection_Throws()
 	{
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(Key());
-		string stored = protector.Protect(Vcard, "alice", "contacts");
-		Assert.Throws<BackendException>(() => protector.Unprotect(stored, "alice", "calendar"));
+		string stored = protector.Protect(Vcard, 1, "contacts");
+		Assert.Throws<BackendException>(() => protector.Unprotect(stored, 1, "calendar"));
 	}
 
 	[Fact]
 	public void TamperedPayload_Throws()
 	{
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(Key());
-		string stored = protector.Protect(Vcard, "alice", "contacts");
+		string stored = protector.Protect(Vcard, 1, "contacts");
 		byte[] payload = Convert.FromBase64String(stored[LocalContentProtector.FormatPrefix.Length..]);
 		payload[payload.Length / 2] ^= 0xFF;
 		string tampered = LocalContentProtector.FormatPrefix + Convert.ToBase64String(payload);
-		Assert.Throws<BackendException>(() => protector.Unprotect(tampered, "alice", "contacts"));
+		Assert.Throws<BackendException>(() => protector.Unprotect(tampered, 1, "contacts"));
 	}
 
 	[Theory]
@@ -78,30 +78,41 @@ public class LocalContentProtectorTests
 	public void MalformedStoredValue_ThrowsBackendException(string stored)
 	{
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(Key());
-		Assert.Throws<BackendException>(() => protector.Unprotect(stored, "alice", "contacts"));
+		Assert.Throws<BackendException>(() => protector.Unprotect(stored, 1, "contacts"));
 	}
 
 	[Fact]
-	public void ControlCharInIdentity_Rejected_ClosingAadCollision()
+	public void AadFraming_IsInjective_WithoutCharacterRules()
 	{
-		// K2 (red-first): the AAD is "userName + \n + collection" — the sole guard against replaying a
-		// ciphertext row under a different (user, collection). That "\n"-join is NOT injective: the
-		// distinct pairs ("a\nb","c") and ("a","b\nc") both encode to the bytes of "a\nb\nc", so a row
-		// sealed for one identity decrypts under the other (gateway logins arrive as an
-		// attacker-influenced HTTP Basic username). The protector must reject a control character —
-		// the "\n" delimiter in particular — in either part, making that collision unconstructable.
+		// K2, v2 framing: "v2" ‖ LE64(userId) ‖ LE32(len) ‖ collection. The fixed-width id and
+		// the length prefix make the encoding injective BY CONSTRUCTION — no delimiter exists to
+		// inject, so even a collection containing "\n" binds unambiguously (the old string-user
+		// framing had to reject control characters to stay collision-free).
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(Key());
-		Assert.Throws<ArgumentException>(() => protector.Protect(Vcard, "a\nb", "c"));
-		Assert.Throws<ArgumentException>(() => protector.Protect(Vcard, "a", "b\nc"));
+		string stored = protector.Protect(Vcard, 1, "a\nb");
+		Assert.Equal(Vcard, protector.Unprotect(stored, 1, "a\nb"));
+		Assert.Throws<BackendException>(() => protector.Unprotect(stored, 1, "a"));
+		Assert.Throws<BackendException>(() => protector.Unprotect(stored, 1, "b"));
+	}
+
+	[Fact]
+	public void GatewaySentinelId_IsItsOwnIdentity()
+	{
+		// Gateway-global rows (TLS certificate) seal under the reserved id 0 — never a real
+		// user's identity (identity columns start at 1).
+		using LocalContentProtector protector = LocalContentProtector.CreateProtected(Key());
+		string stored = protector.Protect("pfx", LocalContentProtector.GatewayUserId, "tls");
+		Assert.Equal("pfx", protector.Unprotect(stored, LocalContentProtector.GatewayUserId, "tls"));
+		Assert.Throws<BackendException>(() => protector.Unprotect(stored, 1, "tls"));
 	}
 
 	[Fact]
 	public void EmptyString_RoundTrips()
 	{
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(Key());
-		string stored = protector.Protect("", "alice", "notes");
+		string stored = protector.Protect("", 1, "notes");
 		Assert.StartsWith(LocalContentProtector.FormatPrefix, stored);
-		Assert.Equal("", protector.Unprotect(stored, "alice", "notes"));
+		Assert.Equal("", protector.Unprotect(stored, 1, "notes"));
 	}
 
 	[Theory]
@@ -118,10 +129,10 @@ public class LocalContentProtectorTests
 	{
 		using LocalContentProtector protector = LocalContentProtector.CreatePlaintext();
 		Assert.False(protector.IsEncrypting);
-		Assert.Equal(Vcard, protector.Protect(Vcard, "alice", "contacts"));
-		Assert.Equal(Vcard, protector.Unprotect(Vcard, "alice", "contacts"));
+		Assert.Equal(Vcard, protector.Protect(Vcard, 1, "contacts"));
+		Assert.Equal(Vcard, protector.Unprotect(Vcard, 1, "contacts"));
 		// Even a "v1:" row passes through — operator error, but the escape hatch must not throw.
-		Assert.Equal("v1:abc", protector.Unprotect("v1:abc", "alice", "contacts"));
+		Assert.Equal("v1:abc", protector.Unprotect("v1:abc", 1, "contacts"));
 	}
 
 	[Fact]
@@ -131,7 +142,7 @@ public class LocalContentProtectorTests
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(key);
 		Assert.True(protector.IsEncrypting);
 		CryptographicOperations.ZeroMemory(key); // caller zeroes its buffer; protector must hold a copy
-		string stored = protector.Protect(Vcard, "alice", "contacts");
-		Assert.Equal(Vcard, protector.Unprotect(stored, "alice", "contacts"));
+		string stored = protector.Protect(Vcard, 1, "contacts");
+		Assert.Equal(Vcard, protector.Unprotect(stored, 1, "contacts"));
 	}
 }

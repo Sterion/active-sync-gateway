@@ -105,6 +105,12 @@ internal sealed class WebUiHost : IAsyncDisposable
 		builder.Services.AddSingleton(provider => new UserResolver(
 			provider.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>(),
 			rolesProvider, registry, provider.GetRequiredService<UserStore>()));
+		builder.Services.AddSingleton(provider => new UserProvisioner(
+			provider.GetRequiredService<UserResolver>(),
+			provider.GetRequiredService<UserStore>(),
+			registry,
+			provider.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>(),
+			NullLogger<UserProvisioner>.Instance));
 		builder.Services.AddSingleton(TimeProvider.System);
 		builder.Services.AddSingleton<AuthThrottle>();
 		builder.Services.AddSingleton(new GlobalSettingStore(factory));
@@ -176,7 +182,7 @@ internal sealed class WebUiHost : IAsyncDisposable
 		}
 
 		public Task<IBackendSession> GetSessionAsync(
-			BackendCredentials credentials, string deviceId, CancellationToken ct)
+			BackendCredentials credentials, int userId, string deviceId, CancellationToken ct)
 		{
 			throw new NotSupportedException();
 		}

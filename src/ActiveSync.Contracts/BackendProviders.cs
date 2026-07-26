@@ -73,12 +73,15 @@ public sealed record ResolvedRole(
 
 /// <summary>
 ///   Everything a provider needs to open one account's connection: the gateway identity
-///   (DB scoping, encryption AAD, cache keys — never a backend login), the roles assigned
-///   to THIS provider, and the shared-calendar grants. Host services (db factory, change
-///   notifier, logging) reach providers through normal constructor injection instead.
+///   (<see cref="GatewayUserId" /> — the immutable per-user id used for DB scoping, the
+///   encryption AAD and durable keys; <see cref="GatewayCredentials" /> carries the login the
+///   phone presented — never a backend login), the roles assigned to THIS provider, and the
+///   shared-calendar grants. Host services (db factory, change notifier, logging) reach
+///   providers through normal constructor injection instead.
 /// </summary>
 public sealed record BackendConnectionContext(
 	BackendCredentials GatewayCredentials,
+	int GatewayUserId,
 	string? MailAddress,
 	IReadOnlyList<ResolvedRole> Roles,
 	IReadOnlyList<SharedCollection> SharedCollections);

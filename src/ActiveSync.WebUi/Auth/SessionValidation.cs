@@ -132,10 +132,12 @@ internal static class SessionValidation
 			await resolver.EnsureFreshAsync(false, ct);
 			resolver.MergedUsers.TryGetValue(login, out account);
 			SyncStateService state = services.GetRequiredService<SyncStateService>();
-			blocked = !string.IsNullOrEmpty(login) && await state.IsLoginBlockedAsync(login, null, ct);
-			validAfter = string.IsNullOrEmpty(login)
-				? null
-				: await state.GetSessionsValidAfterAsync(login, ct);
+			UserStore users = services.GetRequiredService<UserStore>();
+			int? userId = string.IsNullOrEmpty(login) ? null : await users.FindUserIdAsync(login, ct);
+			blocked = userId is { } blockId && await state.IsLoginBlockedAsync(blockId, null, ct);
+			validAfter = userId is { } revokeId
+				? await state.GetSessionsValidAfterAsync(revokeId, ct)
+				: null;
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{

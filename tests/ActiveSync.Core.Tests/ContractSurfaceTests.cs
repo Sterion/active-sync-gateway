@@ -42,7 +42,7 @@ public sealed class ContractSurfaceTests
 	[Fact]
 	public void ContractVersion_IsTheExpectedSurfaceVersion()
 	{
-		Assert.Equal(new Version(1, 0), ContractVersion.Current);
+		Assert.Equal(new Version(1, 1), ContractVersion.Current);
 	}
 
 	// K67: BackendItemNotFoundException derived straight from Exception, so the codebase-wide

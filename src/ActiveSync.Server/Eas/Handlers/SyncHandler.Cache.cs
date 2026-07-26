@@ -27,7 +27,7 @@ public sealed partial class SyncHandler
 		if (cache is null || cache.Collections.Count == 0)
 			return null;
 		logger.LogDebug("Replaying cached Sync request with {Count} collections for {User}",
-			cache.Collections.Count, context.Device.UserName);
+			cache.Collections.Count, context.UserName);
 		waitSeconds = cache.WaitSeconds;
 		globalWindow = cache.GlobalWindowSize;
 		return cache.Collections;

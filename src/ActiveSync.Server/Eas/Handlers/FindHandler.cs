@@ -90,7 +90,7 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 		if (collectionId is not null && !deepTraversal)
 		{
 			(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
-				context.Session, context.Device.UserName, collectionId, ct);
+				context.Session, context.UserId, collectionId, ct);
 			if (resolved is not null)
 			{
 				searchFolder = resolved.Value.Folder;

@@ -184,7 +184,7 @@ public sealed class SyncConformanceTests : IDisposable
 
 		// Prime the collection at key 1 with the client's last-acked revision of item "10".
 		Device device = await _harness.State.GetOrCreateDeviceAsync(
-			EasHandlerHarness.UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+			_harness.UserId, "TESTDEVICE01", "TestClient", CancellationToken.None);
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
@@ -244,7 +244,7 @@ public sealed class SyncConformanceTests : IDisposable
 		// A collection at key 1 whose snapshot holds an item the backend no longer has → a Delete
 		// command, so the round emits a real Collection response (the steady-state path).
 		Device device = await _harness.State.GetOrCreateDeviceAsync(
-			EasHandlerHarness.UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+			_harness.UserId, "TESTDEVICE01", "TestClient", CancellationToken.None);
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
@@ -285,7 +285,7 @@ public sealed class SyncConformanceTests : IDisposable
 		// Two items known to the client, both gone from the backend → two Deletes; a WindowSize of 1
 		// truncates to one and sets MoreAvailable, so the response carries both Commands and MoreAvailable.
 		Device device = await _harness.State.GetOrCreateDeviceAsync(
-			EasHandlerHarness.UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+			_harness.UserId, "TESTDEVICE01", "TestClient", CancellationToken.None);
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
@@ -311,7 +311,7 @@ public sealed class SyncConformanceTests : IDisposable
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		Device device = await _harness.State.GetOrCreateDeviceAsync(
-			EasHandlerHarness.UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+			_harness.UserId, "TESTDEVICE01", "TestClient", CancellationToken.None);
 
 		// Advance the collection to SyncKey 2 with a live previous (SyncKey-1) generation.
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(

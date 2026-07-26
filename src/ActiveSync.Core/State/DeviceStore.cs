@@ -15,19 +15,19 @@ internal sealed class DeviceStore(SyncDbContext db)
 	///   True when an operator block refuses this login: a user-level block (DeviceId null)
 	///   matches every device; a device-level block matches only that DeviceId.
 	/// </summary>
-	public Task<bool> IsLoginBlockedAsync(string userName, string? deviceId, CancellationToken ct)
+	public Task<bool> IsLoginBlockedAsync(int userId, string? deviceId, CancellationToken ct)
 		=> db.LoginBlocks
-			.AnyAsync(b => b.UserName == userName && (b.DeviceId == null || b.DeviceId == deviceId), ct);
+			.AnyAsync(b => b.UserId == userId && (b.DeviceId == null || b.DeviceId == deviceId), ct);
 
 	/// <summary>
 	///   The cut-off for this login's web sessions: one started before it is no longer valid.
 	///   Null = nothing was ever revoked.
 	/// </summary>
-	public async Task<DateTime?> GetSessionsValidAfterAsync(string userName, CancellationToken ct)
+	public async Task<DateTime?> GetSessionsValidAfterAsync(int userId, CancellationToken ct)
 	{
 		WebSessionRevocation? row = await db.WebSessionRevocations
 			.AsNoTracking()
-			.FirstOrDefaultAsync(r => r.UserName == userName, ct)
+			.FirstOrDefaultAsync(r => r.UserId == userId, ct)
 			.ConfigureAwait(false);
 		return row?.ValidAfterUtc;
 	}
@@ -38,17 +38,17 @@ internal sealed class DeviceStore(SyncDbContext db)
 	///   stays cryptographically valid after the browser drops it. Monotonic: an earlier cut-off
 	///   never replaces a later one.
 	/// </summary>
-	public async Task RevokeSessionsBeforeAsync(string userName, DateTime whenUtc, CancellationToken ct)
+	public async Task RevokeSessionsBeforeAsync(int userId, DateTime whenUtc, CancellationToken ct)
 	{
 		WebSessionRevocation? row = await db.WebSessionRevocations
-			.FirstOrDefaultAsync(r => r.UserName == userName, ct)
+			.FirstOrDefaultAsync(r => r.UserId == userId, ct)
 			.ConfigureAwait(false);
 		if (row is null)
 		{
 			// DbSet.Add is synchronous and local (no I/O) — see GetOrCreateDeviceAsync.
 #pragma warning disable VSTHRD103
 			db.WebSessionRevocations.Add(
-				new WebSessionRevocation { UserName = userName, ValidAfterUtc = whenUtc });
+				new WebSessionRevocation { UserId = userId, ValidAfterUtc = whenUtc });
 #pragma warning restore VSTHRD103
 		}
 		else if (row.ValidAfterUtc < whenUtc)
@@ -64,17 +64,17 @@ internal sealed class DeviceStore(SyncDbContext db)
 	}
 
 	public async Task<Device> GetOrCreateDeviceAsync(
-		string userName, string deviceId, string deviceType, CancellationToken ct,
+		int userId, string deviceId, string deviceType, CancellationToken ct,
 		string? protocolVersion = null)
 	{
 		Device? device = await db.Devices
-			.FirstOrDefaultAsync(d => d.UserName == userName && d.DeviceId == deviceId, ct)
+			.FirstOrDefaultAsync(d => d.UserId == userId && d.DeviceId == deviceId, ct)
 			.ConfigureAwait(false);
 		if (device is null)
 		{
 			device = new Device
 			{
-				UserName = userName,
+				UserId = userId,
 				DeviceId = deviceId,
 				DeviceType = deviceType,
 				CreatedUtc = DateTime.UtcNow
@@ -103,7 +103,7 @@ internal sealed class DeviceStore(SyncDbContext db)
 			// takes this path — any other failure propagates with its diagnostic intact (A9).
 			db.Entry(device).State = EntityState.Detached;
 			device = await db.Devices
-				.FirstAsync(d => d.UserName == userName && d.DeviceId == deviceId, ct).ConfigureAwait(false);
+				.FirstAsync(d => d.UserId == userId && d.DeviceId == deviceId, ct).ConfigureAwait(false);
 			device.LastSeenUtc = DateTime.UtcNow;
 			if (!string.IsNullOrEmpty(deviceType))
 				device.DeviceType = deviceType;
@@ -154,14 +154,14 @@ internal sealed class DeviceStore(SyncDbContext db)
 		{
 			device.PendingAccountWipe = false;
 			bool alreadyBlocked = await db.LoginBlocks
-				.AnyAsync(b => b.UserName == device.UserName && b.DeviceId == device.DeviceId, ct)
+				.AnyAsync(b => b.UserId == device.UserId && b.DeviceId == device.DeviceId, ct)
 				.ConfigureAwait(false);
 			LoginBlock? added = null;
 			if (!alreadyBlocked)
 			{
 				added = new LoginBlock
 				{
-					UserName = device.UserName,
+					UserId = device.UserId,
 					DeviceId = device.DeviceId,
 					CreatedUtc = DateTime.UtcNow
 				};

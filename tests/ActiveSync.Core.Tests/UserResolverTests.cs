@@ -440,10 +440,12 @@ public class UserResolverTests
 	}
 
 	[Fact]
-	public void RequireDeclaredUsers_RejectsUndeclared_WithoutProbing()
+	public void AutoProvisionOff_RejectsUndeclared_WithoutProbing()
 	{
+		// AutoProvisionUsers=false absorbed the deleted RequireDeclaredUsers allowlist
+		// (db-restructure decisions 6/7): undeclared logins are refused BEFORE any probe.
 		ActiveSyncOptions options = HostOptions();
-		options.RequireDeclaredUsers = true;
+		options.AutoProvisionUsers = false;
 		options.Users = new Dictionary<string, UserOptions> { ["allowed"] = new() };
 		UserResolver resolver = Resolver(options, BaseConfig());
 

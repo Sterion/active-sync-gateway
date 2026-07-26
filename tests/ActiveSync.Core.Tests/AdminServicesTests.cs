@@ -1,3 +1,4 @@
+using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Administration;
 using ActiveSync.Core.State;
 using Microsoft.Data.Sqlite;
@@ -38,40 +39,50 @@ public sealed class AdminServicesTests : IDisposable
 		await db.SaveChangesAsync(CancellationToken.None);
 	}
 
+	/// <summary>Get-or-create an identity row and return its id (rows key on UserId now).</summary>
+	private async Task<int> UserAsync(string login)
+	{
+		UserStore store = new(_factory);
+		(int userId, _) = await store.GetOrCreateUserAsync(login, null, CancellationToken.None);
+		return userId;
+	}
+
 	// ---- DeviceAdminService ----
 
 	[Fact]
 	public async Task ListDevices_ResolvesUserAndDeviceBlocks_AndPages()
 	{
+		int alice = await UserAsync("alice");
+		int carol = await UserAsync("carol");
 		await SeedAsync(db =>
 		{
 			for (int i = 0; i < 3; i++)
 				db.Devices.Add(new Device
 				{
-					UserName = "alice", DeviceId = $"d{i}", DeviceType = "T",
+					UserId = alice, DeviceId = $"d{i}", DeviceType = "T",
 					CreatedUtc = DateTime.UtcNow, LastSeenUtc = DateTime.UtcNow
 				});
 			db.Devices.Add(new Device
 			{
-				UserName = "carol", DeviceId = "d0", DeviceType = "T",
+				UserId = carol, DeviceId = "d0", DeviceType = "T",
 				CreatedUtc = DateTime.UtcNow, LastSeenUtc = DateTime.UtcNow
 			});
-			db.LoginBlocks.Add(new LoginBlock { UserName = "alice", DeviceId = "d1", CreatedUtc = DateTime.UtcNow });
-			db.LoginBlocks.Add(new LoginBlock { UserName = "carol", DeviceId = null, CreatedUtc = DateTime.UtcNow });
+			db.LoginBlocks.Add(new LoginBlock { UserId = alice, DeviceId = "d1", CreatedUtc = DateTime.UtcNow });
+			db.LoginBlocks.Add(new LoginBlock { UserId = carol, DeviceId = null, CreatedUtc = DateTime.UtcNow });
 		});
-		DeviceAdminService service = new(_factory);
+		DeviceAdminService service = new(_factory, new UserStore(_factory));
 
 		DeviceAdminService.DevicePage all = await service.ListAsync(null, 0, null, CancellationToken.None);
 		Assert.Equal(4, all.Total);
 		Assert.Equal(4, all.Devices.Count);
 
-		DeviceAdminService.DeviceListing aliceD1 = all.Devices.Single(l => l.Device.UserName == "alice" && l.Device.DeviceId == "d1");
+		DeviceAdminService.DeviceListing aliceD1 = all.Devices.Single(l => l.Login == "alice" && l.Device.DeviceId == "d1");
 		Assert.True(aliceD1.Blocked);
 		Assert.False(aliceD1.UserBlocked); // device-scoped block only
 
-		DeviceAdminService.DeviceListing carol = all.Devices.Single(l => l.Device.UserName == "carol");
-		Assert.True(carol.Blocked);
-		Assert.True(carol.UserBlocked); // user-level block
+		DeviceAdminService.DeviceListing carolListing = all.Devices.Single(l => l.Login == "carol");
+		Assert.True(carolListing.Blocked);
+		Assert.True(carolListing.UserBlocked); // user-level block
 
 		// Filter + page: alice has 3, take 2 from offset 1.
 		DeviceAdminService.DevicePage page = await service.ListAsync("alice", 1, 2, CancellationToken.None);
@@ -82,7 +93,7 @@ public sealed class AdminServicesTests : IDisposable
 	[Fact]
 	public async Task Block_IsIdempotent_AndUnblockReportsRemaining()
 	{
-		DeviceAdminService service = new(_factory);
+		DeviceAdminService service = new(_factory, new UserStore(_factory));
 		Assert.True(await service.BlockAsync("alice", null, CancellationToken.None));
 		Assert.False(await service.BlockAsync("alice", null, CancellationToken.None)); // already blocked
 		Assert.True(await service.BlockAsync("alice", "phone", CancellationToken.None));
@@ -98,12 +109,13 @@ public sealed class AdminServicesTests : IDisposable
 	[Fact]
 	public async Task SetPendingWipe_TogglesTheFlag_AndReportsMissing()
 	{
+		int aliceWipe = await UserAsync("alice");
 		await SeedAsync(db => db.Devices.Add(new Device
 		{
-			UserName = "alice", DeviceId = "phone", DeviceType = "T",
+			UserId = aliceWipe, DeviceId = "phone", DeviceType = "T",
 			CreatedUtc = DateTime.UtcNow, LastSeenUtc = DateTime.UtcNow
 		}));
-		DeviceAdminService service = new(_factory);
+		DeviceAdminService service = new(_factory, new UserStore(_factory));
 
 		Assert.Null(await service.SetPendingWipeAsync("alice", "nope", true, CancellationToken.None));
 		Device? armed = await service.SetPendingWipeAsync("alice", "phone", true, CancellationToken.None);
@@ -117,16 +129,17 @@ public sealed class AdminServicesTests : IDisposable
 	[Fact]
 	public async Task PurgeUser_CountsAndRemoves()
 	{
+		int alicePurge = await UserAsync("alice");
 		await SeedAsync(db =>
 		{
 			db.Devices.Add(new Device
 			{
-				UserName = "alice", DeviceId = "phone", DeviceType = "T",
+				UserId = alicePurge, DeviceId = "phone", DeviceType = "T",
 				CreatedUtc = DateTime.UtcNow, LastSeenUtc = DateTime.UtcNow
 			});
-			db.LoginBlocks.Add(new LoginBlock { UserName = "alice", DeviceId = null, CreatedUtc = DateTime.UtcNow });
+			db.LoginBlocks.Add(new LoginBlock { UserId = alicePurge, DeviceId = null, CreatedUtc = DateTime.UtcNow });
 		});
-		DeviceAdminService service = new(_factory);
+		DeviceAdminService service = new(_factory, new UserStore(_factory));
 
 		IReadOnlyList<DeviceAdminService.PurgeCount> counts = await service.PurgeAsync("alice", null, CancellationToken.None);
 		Assert.Equal(1, counts.Single(c => c.Table == "Devices").Count);
@@ -142,7 +155,7 @@ public sealed class AdminServicesTests : IDisposable
 	[Fact]
 	public async Task Share_Add_Remode_Unchanged_List_Remove()
 	{
-		ShareAdminService service = new(_factory);
+		ShareAdminService service = new(_factory, new UserStore(_factory));
 
 		ShareAdminService.ShareUpsert created =
 			await service.AddOrUpdateAsync("alice", "/cal/family/", false, CancellationToken.None);
@@ -158,8 +171,8 @@ public sealed class AdminServicesTests : IDisposable
 		Assert.Equal(ShareAdminService.UpsertKind.Remoded, remoded.Kind);
 
 		ShareAdminService.SharePage page = await service.ListAsync("alice", 0, null, CancellationToken.None);
-		SharedCalendarGrant grant = Assert.Single(page.Grants);
-		Assert.True(grant.ReadOnly);
+		ShareAdminService.ShareListing grant = Assert.Single(page.Grants);
+		Assert.True(grant.Grant.ReadOnly);
 
 		Assert.True(await service.RemoveAsync("alice", "/cal/family/", CancellationToken.None));
 		Assert.False(await service.RemoveAsync("alice", "/cal/family/", CancellationToken.None));

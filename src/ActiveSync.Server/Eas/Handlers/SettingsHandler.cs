@@ -83,7 +83,7 @@ public sealed class SettingsHandler(
 					}
 
 					await context.State.SetRecoveryPasswordAsync(context.Device,
-						protector.Protect(password, context.Device.UserName, "recovery:" + context.Device.DeviceId), ct);
+						protector.Protect(password, context.UserId, "recovery:" + context.Device.DeviceId), ct);
 					response.Add(new XElement(ST + "DevicePassword", new XElement(ST + "Status", "1")));
 					break;
 				}
@@ -108,7 +108,7 @@ public sealed class SettingsHandler(
 	/// </summary>
 	private static async Task<XElement> BuildOofGetAsync(EasContext context, CancellationToken ct)
 	{
-		OofSetting? row = await context.State.GetOofAsync(context.Device.UserName, ct);
+		OofSetting? row = await context.State.GetOofAsync(context.UserId, ct);
 		XElement get = new(ST + "Get", new XElement(ST + "OofState", (row?.State ?? 0).ToString()));
 		if (row is { State: 2, StartUtc: not null, EndUtc: not null })
 		{
@@ -141,7 +141,7 @@ public sealed class SettingsHandler(
 		if (options.Value.ReadOnly)
 		{
 			logger.LogInformation("Read-only: rejecting Oof Set for {User}",
-				LogText.Clean(context.Device.UserName, 128));
+				LogText.Clean(context.UserName, 128));
 			return new XElement(ST + "Oof", new XElement(ST + "Status", "3"));
 		}
 
@@ -149,7 +149,7 @@ public sealed class SettingsHandler(
 		if (oof is null)
 			return new XElement(ST + "Oof", new XElement(ST + "Status", "1"));
 
-		OofSetting? row = await context.State.GetOofAsync(context.Device.UserName, ct);
+		OofSetting? row = await context.State.GetOofAsync(context.UserId, ct);
 		int state = int.TryParse(set.Element(ST + "OofState")?.Value, out int s) ? s : row?.State ?? 0;
 		DateTime? start = ParseEasTime(set.Element(ST + "StartTime")?.Value) ?? row?.StartUtc;
 		DateTime? end = ParseEasTime(set.Element(ST + "EndTime")?.Value) ?? row?.EndUtc;
@@ -186,14 +186,14 @@ public sealed class SettingsHandler(
 			}
 
 			await context.State.SaveOofAsync(
-				context.Device.UserName, state, start, end, message, bodyType, previousActive, ct);
+				context.UserId, state, start, end, message, bodyType, previousActive, ct);
 			return new XElement(ST + "Oof", new XElement(ST + "Status", "1"));
 		}
 		catch (BackendException ex)
 		{
 			// MS-ASCMD Settings status 4: server unavailable — the phone shows a retry hint.
 			logger.LogWarning(ex, "Oof Set failed against the Oof backend for {User}",
-				LogText.Clean(context.Device.UserName, 128));
+				LogText.Clean(context.UserName, 128));
 			return new XElement(ST + "Oof", new XElement(ST + "Status", "4"));
 		}
 	}

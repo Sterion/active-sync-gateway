@@ -41,7 +41,7 @@ public sealed class FolderSyncHandler(FolderService folders) : IEasCommandHandle
 		// path's N-1 replay (PreviousSnapshotCompressed).
 		if (!initial && parsed && key == device.FolderSyncKey - 1)
 		{
-			List<UserFolder> replayRegistry = await folders.RefreshAsync(context.Session, device.UserName, ct);
+			List<UserFolder> replayRegistry = await folders.RefreshAsync(context.Session, context.UserId, ct);
 			FolderHierarchyDiff replayDiff =
 				await context.State.ComputeFolderDiffAsync(device, replayRegistry, ct, true);
 			await context.WriteResponseAsync(new XDocument(
@@ -52,7 +52,7 @@ public sealed class FolderSyncHandler(FolderService folders) : IEasCommandHandle
 			return;
 		}
 
-		List<UserFolder> registry = await folders.RefreshAsync(context.Session, device.UserName, ct);
+		List<UserFolder> registry = await folders.RefreshAsync(context.Session, context.UserId, ct);
 		FolderHierarchyDiff diff = await context.State.ComputeFolderDiffAsync(device, registry, ct, initial);
 
 		if (initial || diff.Adds.Count > 0 || diff.Updates.Count > 0 || diff.Deletes.Count > 0)
@@ -134,7 +134,7 @@ public abstract class FolderModifyHandlerBase(
 		if (options.Value.ReadOnly)
 		{
 			logger.LogInformation("Read-only: rejecting {Command} of \"{Folder}\" for {User}",
-				Command, RequestedFolderName(request.Root), context.Device.UserName);
+				Command, RequestedFolderName(request.Root), context.UserName);
 			await WriteStatusAsync(context, "3", null); // folder operations not permitted
 			return;
 		}
@@ -154,7 +154,7 @@ public abstract class FolderModifyHandlerBase(
 		catch (FolderOperationException ex) // a client error that knows its own EAS status (F26)
 		{
 			logger.LogInformation("{Command} rejected for {User}: {Reason} (Status {Status})",
-				Command, context.Device.UserName, ex.Message, ex.Status);
+				Command, context.UserName, ex.Message, ex.Status);
 			await WriteStatusAsync(context, ex.Status, null);
 			return;
 		}
@@ -167,7 +167,7 @@ public abstract class FolderModifyHandlerBase(
 		{
 			// A backend/transport failure (e.g. IMAP down) must surface as EAS Status 6, not escape
 			// to the endpoint as an HTTP 500 the client cannot interpret (F26).
-			logger.LogError(ex, "{Command} failed for {User}", Command, context.Device.UserName);
+			logger.LogError(ex, "{Command} failed for {User}", Command, context.UserName);
 			await WriteStatusAsync(context, "6", null);
 			return;
 		}
@@ -176,7 +176,7 @@ public abstract class FolderModifyHandlerBase(
 		// Folders.RefreshAsync just to map the new backend key to a ServerId, and this refresh ran
 		// a second — two full multi-backend enumerations. ExecuteAsync now returns the backend key
 		// and the new folder's ServerId is resolved from this single refresh.
-		List<UserFolder> registry = await Folders.RefreshAsync(context.Session, context.Device.UserName, ct);
+		List<UserFolder> registry = await Folders.RefreshAsync(context.Session, context.UserId, ct);
 		int newKey;
 		try
 		{
@@ -192,7 +192,7 @@ public abstract class FolderModifyHandlerBase(
 			? null
 			: registry.FirstOrDefault(f => f.BackendKey == newBackendKey)?.ServerId;
 		logger.LogInformation("{Command} \"{Folder}\" for {User}",
-			Command, RequestedFolderName(request.Root), context.Device.UserName);
+			Command, RequestedFolderName(request.Root), context.UserName);
 		await WriteStatusAsync(context, "1", newKey.ToString(), newServerId);
 	}
 
@@ -221,12 +221,12 @@ public abstract class FolderModifyHandlerBase(
 		EasContext context, string serverId, CancellationToken ct, string notFoundStatus = "4")
 	{
 		(UserFolder Folder, IContentStore Store) resolved =
-			await Folders.ResolveCollectionAsync(context.Session, context.Device.UserName, serverId, ct)
+			await Folders.ResolveCollectionAsync(context.Session, context.UserId, serverId, ct)
 			?? throw new FolderOperationException(notFoundStatus, $"Unknown folder \"{serverId}\"");
 		if (!WritePermission.IsBlocked(context, options.Value, resolved.Folder))
 			return resolved;
 		logger.LogInformation("Read-only folder: rejecting {Command} of \"{Folder}\" for {User}",
-			Command, resolved.Folder.DisplayName, context.Device.UserName);
+			Command, resolved.Folder.DisplayName, context.UserName);
 		throw new BackendException($"Folder \"{resolved.Folder.DisplayName}\" is granted read-only.");
 	}
 
@@ -357,7 +357,7 @@ public sealed class FolderUpdateHandler(
 		else
 		{
 			(UserFolder Folder, IContentStore Store)? requestedParent =
-				await Folders.ResolveCollectionAsync(context.Session, context.Device.UserName, requestedParentId, ct);
+				await Folders.ResolveCollectionAsync(context.Session, context.UserId, requestedParentId, ct);
 			parentUnchanged = requestedParent is not null &&
 			                  requestedParent.Value.Folder.BackendKey == resolved.Folder.ParentBackendKey;
 		}
@@ -366,7 +366,7 @@ public sealed class FolderUpdateHandler(
 		{
 			logger.LogInformation(
 				"FolderUpdate: rejecting a parent change for \"{Folder}\" for {User} (folder move is not supported)",
-				resolved.Folder.DisplayName, context.Device.UserName);
+				resolved.Folder.DisplayName, context.UserName);
 			throw new FolderOperationException("3", "Folder move (ParentId change) is not supported");
 		}
 

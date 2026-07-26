@@ -63,14 +63,14 @@ public class SecretValueTests
 	public void LocalContentProtectorOutput_IsNotUnsealable()
 	{
 		// The two sealed formats must never be interchangeable: different prefix, and
-		// SecretValue's constant AAD can never equal the protector's "user\ncollection".
+		// SecretValue's constant AAD can never equal the protector's v2 user-id framing.
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(Key());
-		string row = protector.Protect("BEGIN:VCARD", "alice", "contacts");
+		string row = protector.Protect("BEGIN:VCARD", 1, "contacts");
 		Assert.False(SecretValue.IsSealed(row));
 		Assert.False(SecretValue.TryUnseal(row, Key(), out _, out _));
 		// And vice versa: a config secret is not a decryptable content row.
 		string sealedValue = SecretValue.Seal("pw", Key());
 		Assert.Throws<ActiveSync.Contracts.BackendException>(
-			() => protector.Unprotect(sealedValue, "alice", "contacts"));
+			() => protector.Unprotect(sealedValue, 1, "contacts"));
 	}
 }

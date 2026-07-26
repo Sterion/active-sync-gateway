@@ -42,11 +42,11 @@ internal static class DevicesEndpoints
 			{
 				total = page.Total,
 				entries = page.Devices.Select(listing => new DeviceDto(
-					listing.Device.UserName, listing.Device.DeviceId, listing.Device.DeviceType,
+					listing.Login, listing.Device.DeviceId, listing.Device.DeviceType,
 					listing.Device.CreatedUtc, listing.Device.LastSeenUtc,
 					listing.Device.LastProtocolVersion, listing.Device.PendingAccountWipe,
 					listing.Blocked, listing.UserBlocked,
-					resolver.IsLoginDisabled(listing.Device.UserName))).ToList()
+					resolver.IsLoginDisabled(listing.Login))).ToList()
 			});
 		});
 

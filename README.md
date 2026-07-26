@@ -132,7 +132,7 @@ worked through item by item:
   picks database edits up within ~1 s). Override only what differs: another SMTP login, a
   personal DAV server, a fully decoupled phone password (PBKDF2 hash), sealed backend
   secrets (`enc:v1:`, AES-GCM under the master key).
-- `RequireDeclaredUsers` **allowlist mode**, per-user/per-device **login blocking** (403),
+- `AutoProvisionUsers=false` **allowlist mode**, per-user/per-device **login blocking** (403),
   brute-force throttling per (client address, user), and negative/positive auth caches
   that shield the IMAP server from password floods.
 - The startup banner lists every declared user with origin (`[config]` / `[db]`) and all
@@ -397,8 +397,8 @@ A running gateway notices database edits within `Auth:UsersRefreshSeconds` (defa
 one primary-key point-read on the next request — `0` checks every request; a negative or
 non-finite value is clamped to `0` rather than disabling live pickup, so it can never
 permanently lock refresh off). An edit also resets the auth verdict caches, so a rotated gateway
-password applies to the very next request. Database entries count as declared for
-`RequireDeclaredUsers`, and the startup banner lists every user with its origin
+password applies to the very next request. Database entries count as declared under
+`AutoProvisionUsers=false`, and the startup banner lists every user with its origin
 (`[config]` / `[db]` / `[db, shadows config]`) and all overridden fields — passwords render
 only as `***(pbkdf2)` / `***(sealed)` / `***(PLAINTEXT)` markers.
 
@@ -432,23 +432,24 @@ Rules worth knowing:
   hashes: `echo -n 'phone-password' | ActiveSync.Server hash-password`. In a running
   container the same verbs are available as the `eas` command — see
   [Operator CLI](docs/cli.md).
-- **Allowlist**: `"RequireDeclaredUsers": true` rejects any login without a `Users` entry
-  before touching a backend. An empty entry (`"dora@example.com": {}`) grants access with
-  zero overrides.
-- **Auto-provisioning** (`AutoProvisionUsers`, **on by default**): the first time a plain
-  pass-through login clears its backend probe over EAS, the gateway writes an empty database
-  entry for it (marked `[db, auto-provisioned]`). The user then shows up in `eas users`/the
-  admin UI, can be blocked, and can sign in to the self-service portal (verified against the
-  same backend); auth itself is unchanged (the row has no gateway password, so it still
-  probes). This is what ties the "who has synced" view to the "declared accounts" view — every
-  real user becomes a first-class account. Set it to `false` to keep pass-through logins
-  ephemeral (nothing persisted). Inert under the allowlist (which rejects the login before it
-  can authenticate). Deleting an auto-created row is not permanent while the flag is on: the
-  user's next sync re-creates it — `eas block` them, or turn the flag off, to make removal stick.
-- **Identity is the gateway login.** Sync state, locally-stored items and their encryption
-  are all keyed by it — keep logins stable (e.g. when introducing an entry for an existing
-  user, keep the login they already sync with) or devices re-sync from scratch and locally
-  stored items become unreadable.
+- **`AutoProvisionUsers` (on by default) is the one switch over undeclared logins**, and it
+  now does the job the removed `RequireDeclaredUsers` used to:
+  - **On** — the first time any login clears its backend probe, the gateway creates a user
+    for it (marked `[db, auto-provisioned]`). The user then shows up in `eas users`/the admin
+    UI, can be blocked, and can sign in to the self-service portal (verified against the same
+    backend); auth itself is unchanged (no gateway password, so it still probes). This is what
+    ties the "who has synced" view to the "declared accounts" view — every real user becomes a
+    first-class account. Deleting an auto-created declaration is not permanent while the flag is
+    on: the user's next sync re-creates it — disable or block them, or turn the flag off, to
+    make removal stick.
+  - **Off** — **allowlist mode**: a login without a `Users` entry (config *or* database) is
+    rejected before any backend is touched, so undeclared credentials never reach the mail
+    server. An empty entry (`"dora@example.com": {}`) grants access with zero overrides.
+- **Identity is a stable internal user id, not the login.** Every user gets an immutable
+  numeric id on first sign-in, and sync state, locally-stored items and their encryption all
+  key on it. Renaming a login is therefore a supported, non-destructive operation: devices keep
+  their sync state and locally-stored items stay readable. (The id is never reused — that is a
+  security property, not a detail.)
 - **Pickup semantics**: config and `UsersFile` entries are loaded once at startup (edits
   need a restart); database entries are picked up live within `Auth:UsersRefreshSeconds`.
 - Rules 1/2 verify locally, so the per-address `Auth` throttle is the primary brute-force

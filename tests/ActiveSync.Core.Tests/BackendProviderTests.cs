@@ -39,7 +39,7 @@ public class BackendProviderTests
 	{
 		FakeProvider mail = new("mail", [BackendRole.MailStore, BackendRole.MailSubmit]);
 		FakeProvider rest = new("rest", [BackendRole.Calendar, BackendRole.Contacts]);
-		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(mail, rest), Gateway, "user@x",
+		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(mail, rest), Gateway, 1, "user@x",
 			[
 				new ResolvedRole(BackendRole.MailStore, "mail", ProviderSettings.Empty, Gateway),
 				new ResolvedRole(BackendRole.MailSubmit, "mail", ProviderSettings.Empty, Gateway),
@@ -71,10 +71,10 @@ public class BackendProviderTests
 		FakeProvider store = new("store", [BackendRole.MailStore]);
 		FakeProvider submit = new("submit", [BackendRole.MailSubmit]);
 		await Assert.ThrowsAsync<InvalidOperationException>(() => CompositeBackendSession.CreateAsync(
-			Registry(store, submit), Gateway, null,
+			Registry(store, submit), Gateway, 1, null,
 			[new ResolvedRole(BackendRole.MailStore, "store", ProviderSettings.Empty, Gateway)], [], CancellationToken.None));
 		await Assert.ThrowsAsync<InvalidOperationException>(() => CompositeBackendSession.CreateAsync(
-			Registry(store, submit), Gateway, null,
+			Registry(store, submit), Gateway, 1, null,
 			[new ResolvedRole(BackendRole.MailSubmit, "submit", ProviderSettings.Empty, Gateway)], [], CancellationToken.None));
 	}
 
@@ -82,7 +82,7 @@ public class BackendProviderTests
 	public async Task Session_Dispose_DisposesEveryConnectionResource()
 	{
 		FakeProvider mail = new("mail", [BackendRole.MailStore, BackendRole.MailSubmit]);
-		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(mail), Gateway, null,
+		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(mail), Gateway, 1, null,
 			[
 				new ResolvedRole(BackendRole.MailStore, "mail", ProviderSettings.Empty, Gateway),
 				new ResolvedRole(BackendRole.MailSubmit, "mail", ProviderSettings.Empty, Gateway)
@@ -98,7 +98,7 @@ public class BackendProviderTests
 		// must not strand the other providers' connections — they still hold live sockets.
 		FakeProvider bad = new("bad", [BackendRole.MailStore, BackendRole.MailSubmit], throwOnDispose: true);
 		FakeProvider good = new("good", [BackendRole.Calendar]);
-		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(bad, good), Gateway, null,
+		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(bad, good), Gateway, 1, null,
 			[
 				new ResolvedRole(BackendRole.MailStore, "bad", ProviderSettings.Empty, Gateway),
 				new ResolvedRole(BackendRole.MailSubmit, "bad", ProviderSettings.Empty, Gateway),

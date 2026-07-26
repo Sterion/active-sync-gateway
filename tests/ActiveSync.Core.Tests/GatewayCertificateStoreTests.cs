@@ -195,7 +195,7 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 		DateTimeOffset now = DateTimeOffset.UtcNow;
 		using X509Certificate2 expiringSoon = request.CreateSelfSigned(now.AddDays(-390), now.AddDays(5));
 		string sealedPfx = protector.Protect(
-			Convert.ToBase64String(expiringSoon.Export(X509ContentType.Pkcs12)), "_gateway", "tls");
+			Convert.ToBase64String(expiringSoon.Export(X509ContentType.Pkcs12)), LocalContentProtector.GatewayUserId, "tls");
 		await using (SyncDbContext seed = _factory.CreateDbContext())
 		{
 #pragma warning disable VSTHRD103

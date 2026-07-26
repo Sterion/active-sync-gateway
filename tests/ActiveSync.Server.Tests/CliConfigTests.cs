@@ -70,26 +70,26 @@ public sealed class CliConfigTests : IDisposable
 	[Fact]
 	public void Set_Get_List_Unset_RoundTrip()
 	{
-		// RequireDeclaredUsers is absent from appsettings, so its baseline is the code default.
-		(int getExit, _, string getOut) = Run("config", "get", "ActiveSync:RequireDeclaredUsers");
+		// ReadOnly is absent from appsettings, so its baseline is the code default.
+		(int getExit, _, string getOut) = Run("config", "get", "ActiveSync:ReadOnly");
 		Assert.Equal(0, getExit);
 		Assert.Contains("false", getOut);
 		Assert.Contains("source: default", getOut);
 
-		(int setExit, _, string setOut) = Run("config", "set", "ActiveSync:RequireDeclaredUsers", "true");
+		(int setExit, _, string setOut) = Run("config", "set", "ActiveSync:ReadOnly", "true");
 		Assert.Equal(0, setExit);
 		Assert.Contains("within ~1s", setOut);
 
-		(_, _, string get2) = Run("config", "get", "ActiveSync:RequireDeclaredUsers");
+		(_, _, string get2) = Run("config", "get", "ActiveSync:ReadOnly");
 		Assert.Contains("true", get2);
 		Assert.Contains("source: db", get2);
 
 		(_, _, string listOut) = Run("config", "list");
-		Assert.Contains("ActiveSync:RequireDeclaredUsers", listOut);
+		Assert.Contains("ActiveSync:ReadOnly", listOut);
 
-		(int unsetExit, _, string unsetOut) = Run("config", "unset", "ActiveSync:RequireDeclaredUsers");
+		(int unsetExit, _, string unsetOut) = Run("config", "unset", "ActiveSync:ReadOnly");
 		Assert.Equal(0, unsetExit);
-		(_, _, string get3) = Run("config", "get", "ActiveSync:RequireDeclaredUsers");
+		(_, _, string get3) = Run("config", "get", "ActiveSync:ReadOnly");
 		Assert.Contains("source: default", get3);
 	}
 

@@ -99,7 +99,7 @@ public sealed class PingHandler(
 		foreach (string collectionId in parameters.FolderIds)
 		{
 			(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
-				context.Session, context.Device.UserName, collectionId, ct);
+				context.Session, context.UserId, collectionId, ct);
 			if (resolved is null)
 			{
 				await WriteStatusAsync(context, "7"); // hierarchy changed — client must FolderSync
@@ -115,7 +115,7 @@ public sealed class PingHandler(
 		}
 
 		logger.LogDebug("Ping: watching {Count} folders for {User} (heartbeat {Heartbeat}s)",
-			parameters.FolderIds.Count, context.Device.UserName, parameters.HeartbeatSeconds);
+			parameters.FolderIds.Count, context.UserName, parameters.HeartbeatSeconds);
 
 		List<(string CollectionId, UserFolder Folder, IContentStore Store)> watched = byStore
 			.SelectMany(kv => kv.Value.Select(v => (v.CollectionId, v.Folder, Store: kv.Key)))
@@ -156,7 +156,7 @@ public sealed class PingHandler(
 		{
 			logger.LogInformation(
 				"Ping: pending changes in {Folders} for {User} at start (arrived between requests)",
-				Describe(pending), context.Device.UserName);
+				Describe(pending), context.UserName);
 			await WriteChangesAsync(pending);
 			return;
 		}
@@ -164,7 +164,7 @@ public sealed class PingHandler(
 		TimeSpan timeout = TimeSpan.FromSeconds(parameters.HeartbeatSeconds);
 		DateTime deadline = DateTime.UtcNow + timeout;
 		using IDisposable longPoll =
-			Core.Observability.GatewayMetrics.TrackLongPoll(context.Device.UserName);
+			Core.Observability.GatewayMetrics.TrackLongPoll(context.UserName);
 		// Also observe host shutdown: an active long-poll must never delay process exit.
 		using CancellationTokenSource cts =
 			CancellationTokenSource.CreateLinkedTokenSource(ct, lifetime.ApplicationStopping);
@@ -224,10 +224,10 @@ public sealed class PingHandler(
 		if (outcome.FoundByWatchdog)
 			logger.LogWarning(
 				"Watchdog: pending changes in {Folders} for {User} found by re-check (missed by the backend watcher)",
-				Describe(changedCollections), context.Device.UserName);
+				Describe(changedCollections), context.UserName);
 		else
 			logger.LogInformation("Ping: changes in {Folders} for {User}",
-				Describe(changedCollections), context.Device.UserName);
+				Describe(changedCollections), context.UserName);
 
 		await WriteChangesAsync(changedCollections);
 	}

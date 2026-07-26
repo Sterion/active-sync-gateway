@@ -36,7 +36,7 @@ public sealed class MoveItemsSnapshotTests : IDisposable
 		UserFolder archive = folders.Single(f => f.BackendKey == "imap:Archive");
 
 		Device device = await _harness.State.GetOrCreateDeviceAsync(
-			EasHandlerHarness.UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+			_harness.UserId, "TESTDEVICE01", "TestClient", CancellationToken.None);
 
 		// Two commits so the source collection carries a live previous generation that also holds
 		// item "10" (the item about to be moved).
@@ -93,7 +93,7 @@ public sealed class MoveItemsSnapshotTests : IDisposable
 		_harness.Session.Store.Revisions["10"] = "101";
 
 		Device device = await _harness.State.GetOrCreateDeviceAsync(
-			EasHandlerHarness.UserName, "TESTDEVICE01", "TestClient", CancellationToken.None);
+			_harness.UserId, "TESTDEVICE01", "TestClient", CancellationToken.None);
 
 		// Prime the destination collection with a live generation so the move's snapshot patch has
 		// somewhere to land.

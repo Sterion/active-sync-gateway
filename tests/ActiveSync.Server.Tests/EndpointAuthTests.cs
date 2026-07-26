@@ -135,7 +135,7 @@ public class EndpointAuthTests
 		}
 
 		public Task<IBackendSession> GetSessionAsync(
-			BackendCredentials credentials, string deviceId, CancellationToken ct)
+			BackendCredentials credentials, int userId, string deviceId, CancellationToken ct)
 		{
 			throw new NotSupportedException();
 		}
@@ -149,7 +149,7 @@ public class EndpointAuthTests
 		}
 
 		public Task<IBackendSession> GetSessionAsync(
-			BackendCredentials credentials, string deviceId, CancellationToken ct)
+			BackendCredentials credentials, int userId, string deviceId, CancellationToken ct)
 		{
 			throw new NotSupportedException();
 		}

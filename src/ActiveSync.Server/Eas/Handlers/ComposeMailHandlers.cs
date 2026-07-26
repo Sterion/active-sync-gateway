@@ -30,7 +30,7 @@ public abstract class ComposeMailHandlerBase(
 		{
 			(string to, string subject) = await PeekHeadersAsync(request?.Mime, ct);
 			logger.LogInformation("Read-only: rejecting {Command} from {User}: to {To}, subject {Subject}",
-				Command, context.Device.UserName, to, subject);
+				Command, context.UserName, to, subject);
 			await WriteErrorAsync(context, "120"); // mail submission failed
 			return;
 		}
@@ -56,7 +56,7 @@ public abstract class ComposeMailHandlerBase(
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
 			logger.LogError(ex, "{Command}: building the outgoing message failed for {User}",
-				Command, context.Device.UserName);
+				Command, context.UserName);
 			await WriteErrorAsync(context, "120"); // mail submission failed
 			return;
 		}
@@ -68,7 +68,7 @@ public abstract class ComposeMailHandlerBase(
 			// silently drop the quote/forwarded message, so fail the command (F29).
 			logger.LogWarning(
 				"{Command} for {User}: the referenced source item could not be resolved; not sending a degraded message",
-				Command, context.Device.UserName);
+				Command, context.UserName);
 			await WriteErrorAsync(context, "150"); // MS-ASCMD: the referenced original item was not found
 			return;
 		}
@@ -85,12 +85,12 @@ public abstract class ComposeMailHandlerBase(
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
-			logger.LogError(ex, "{Command} failed for {User}", Command, context.Device.UserName);
+			logger.LogError(ex, "{Command} failed for {User}", Command, context.UserName);
 			await WriteErrorAsync(context, "120"); // mail submission failed
 			return;
 		}
 
-		Core.Observability.GatewayMetrics.RecordMailSent(context.Device.UserName, Command switch
+		Core.Observability.GatewayMetrics.RecordMailSent(context.UserName, Command switch
 		{
 			"SmartReply" => "smart_reply",
 			"SmartForward" => "smart_forward",
@@ -104,7 +104,7 @@ public abstract class ComposeMailHandlerBase(
 		{
 			(string to, string subject) = await PeekHeadersAsync(outgoing, ct);
 			logger.LogInformation("{Command} by {User}: to {To}, subject {Subject}",
-				Command, context.Device.UserName, to, subject);
+				Command, context.UserName, to, subject);
 			if (request.SaveInSent)
 				await context.Session.MailStore.SaveToSentAsync(outgoing, ct);
 			await MarkSourceAsync(context, request, ct);
@@ -113,7 +113,7 @@ public abstract class ComposeMailHandlerBase(
 		{
 			logger.LogWarning(ex,
 				"{Command} sent for {User} but a post-submit step (file to Sent / flag source) failed",
-				Command, context.Device.UserName);
+				Command, context.UserName);
 		}
 
 		await context.WriteEmptyAsync(); // success = empty 200
@@ -243,7 +243,7 @@ public abstract class ComposeMailHandlerBase(
 		if (request.SourceFolderId is null || request.SourceItemId is null)
 			return _resolvedSource = null;
 		(UserFolder Folder, IContentStore Store)? resolved = await Folders.ResolveCollectionAsync(
-			context.Session, context.Device.UserName, request.SourceFolderId, ct);
+			context.Session, context.UserId, request.SourceFolderId, ct);
 		if (resolved is null)
 			return _resolvedSource = null;
 		string? itemKey = await Folders.ResolveItemKeyAsync(
@@ -297,7 +297,7 @@ public sealed class SendMailHandler(
 		if (request.Mime.Length > 0 || request.SourceFolderId is null || request.SourceItemId is null)
 			return;
 		(UserFolder Folder, IContentStore Store)? resolved = await Folders.ResolveCollectionAsync(
-			context.Session, context.Device.UserName, request.SourceFolderId, ct);
+			context.Session, context.UserId, request.SourceFolderId, ct);
 		if (resolved is null)
 			return;
 		string? itemKey = await Folders.ResolveItemKeyAsync(

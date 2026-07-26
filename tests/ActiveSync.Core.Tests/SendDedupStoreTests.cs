@@ -38,10 +38,27 @@ public sealed class SendDedupStoreTests : IDisposable
 		_connection.Dispose();
 	}
 
+	/// <summary>Get-or-create the identity row for a login (rows are keyed by UserId now).</summary>
+	private async Task<int> UserAsync(string login)
+	{
+		string normalized = login.ToLowerInvariant();
+		User? user = await _db.Users.FirstOrDefaultAsync(u => u.Login == normalized);
+		if (user is null)
+		{
+			user = new User { Login = normalized, UpdatedUtc = DateTime.UtcNow };
+#pragma warning disable VSTHRD103
+			_db.Users.Add(user);
+#pragma warning restore VSTHRD103
+			await _db.SaveChangesAsync();
+		}
+
+		return user.UserId;
+	}
+
 	[Fact]
 	public async Task TryClaimSendAsync_SecondClaimAfterCompletion_ReturnsAlreadySent()
 	{
-		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@x"), "DEV1", "Phone", CancellationToken.None);
 
 		SendClaimOutcome first = await _service.TryClaimSendAsync(device, "5", 1, "add:c1", CancellationToken.None);
 		Assert.Equal(SendClaimOutcome.PerformSend, first);
@@ -59,7 +76,7 @@ public sealed class SendDedupStoreTests : IDisposable
 		// happened — only MarkSendCompletedAsync durably records that. Without it (the action never
 		// finished — crashed, or failed with an ordinary transient error), a resend must retry, not
 		// silently report success.
-		Device device = await _service.GetOrCreateDeviceAsync("u@x2", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@x2"), "DEV1", "Phone", CancellationToken.None);
 
 		SendClaimOutcome first = await _service.TryClaimSendAsync(device, "5", 1, "add:c1", CancellationToken.None);
 		Assert.Equal(SendClaimOutcome.PerformSend, first);
@@ -74,7 +91,7 @@ public sealed class SendDedupStoreTests : IDisposable
 		// A LEGITIMATE later edit reusing the same ServerId (e.g. a second, unrelated draft edit on
 		// the same item) must not be mistaken for a crash-retry of an earlier, unrelated attempt —
 		// the two are scoped to different generations.
-		Device device = await _service.GetOrCreateDeviceAsync("u@y", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@y"), "DEV1", "Phone", CancellationToken.None);
 
 		SendClaimOutcome atGenerationOne = await _service.TryClaimSendAsync(device, "5", 1, "change:5:42", CancellationToken.None);
 		SendClaimOutcome atGenerationTwo = await _service.TryClaimSendAsync(device, "5", 2, "change:5:42", CancellationToken.None);
@@ -86,7 +103,7 @@ public sealed class SendDedupStoreTests : IDisposable
 	[Fact]
 	public async Task CommitCollectionStateAsync_PrunesClaimsOlderThanTheNewGeneration()
 	{
-		Device device = await _service.GetOrCreateDeviceAsync("u@z", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@z"), "DEV1", "Phone", CancellationToken.None);
 
 		(SyncKeyValidation validation, CollectionState? state) =
 			await _service.ValidateSyncKeyAsync(device, "5", "0", CancellationToken.None);
@@ -121,7 +138,7 @@ public sealed class SendDedupStoreTests : IDisposable
 		// a claim tagged with that SAME still-current key must survive — a second genuine replay of
 		// the identical resend must still find it (and, once the original attempt completed, must
 		// still report it as already sent).
-		Device device = await _service.GetOrCreateDeviceAsync("u@w", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@w"), "DEV1", "Phone", CancellationToken.None);
 
 		await using (SqliteSyncDbContext seed = StateTestSupport.NewContext(_connection))
 		{

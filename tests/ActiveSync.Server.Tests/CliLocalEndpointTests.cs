@@ -51,7 +51,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	public async Task ForwardsCommand_CapturesOutputAndExitCode()
 	{
 		LocalCliEndpoint.CliResponse get = await LocalCliEndpoint.ExecuteAsync(
-			["config", "get", "ActiveSync:RequireDeclaredUsers"], "", CancellationToken.None);
+			["config", "get", "ActiveSync:ReadOnly"], "", CancellationToken.None);
 		Assert.Equal(0, get.ExitCode);
 		Assert.Contains("false", get.Stdout);
 		Assert.Contains("source: default", get.Stdout);
@@ -62,12 +62,12 @@ public sealed class CliLocalEndpointTests : IDisposable
 	public async Task ForwardsCommand_AppliesWrites()
 	{
 		LocalCliEndpoint.CliResponse set = await LocalCliEndpoint.ExecuteAsync(
-			["config", "set", "ActiveSync:RequireDeclaredUsers", "true"], "", CancellationToken.None);
+			["config", "set", "ActiveSync:ReadOnly", "true"], "", CancellationToken.None);
 		Assert.Equal(0, set.ExitCode);
 		Assert.Contains("within ~1s", set.Stdout);
 
 		LocalCliEndpoint.CliResponse get = await LocalCliEndpoint.ExecuteAsync(
-			["config", "get", "ActiveSync:RequireDeclaredUsers"], "", CancellationToken.None);
+			["config", "get", "ActiveSync:ReadOnly"], "", CancellationToken.None);
 		Assert.Contains("true", get.Stdout);
 		Assert.Contains("source: db", get.Stdout);
 	}

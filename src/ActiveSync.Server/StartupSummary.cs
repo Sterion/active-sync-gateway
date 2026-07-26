@@ -73,7 +73,7 @@ public static class StartupSummary
 				"Auth:     backend pass-through + {Count} user override entr{Plural} " +
 				"({ConfigCount} config, {DbCount} database){Restricted}",
 				users.Count, users.Count == 1 ? "y" : "ies", users.Count - fromDb, fromDb,
-				options.RequireDeclaredUsers ? " (declared users only)" : "");
+				options.AutoProvisionUsers ? "" : " (declared users only — AutoProvisionUsers off)");
 			foreach ((string login, MergedUser account) in
 			         users.OrderBy(u => u.Key, StringComparer.OrdinalIgnoreCase))
 				logger.LogInformation("User:     {Login}  {Details}", login, DescribeUser(account));
@@ -87,9 +87,9 @@ public static class StartupSummary
 		else
 		{
 			logger.LogInformation("Auth:     backend pass-through (EAS credentials forwarded to backends)");
-			if (options.RequireDeclaredUsers)
+			if (!options.AutoProvisionUsers)
 				logger.LogWarning(
-					"Auth:     RequireDeclaredUsers is ON but no users are declared (config or database) — " +
+					"Auth:     AutoProvisionUsers is OFF but no users are declared (config or database) — " +
 					"every login will be rejected. Declare users or run 'eas user add'.");
 		}
 

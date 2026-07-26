@@ -70,7 +70,7 @@ public static class EasEndpoint
 		AuthThrottle authThrottle,
 		IOptionsMonitor<ActiveSyncOptions> options,
 		BackendRolesProvider rolesProvider,
-		PassThroughProvisioner provisioner,
+		UserProvisioner provisioner,
 		UserResolver userResolver,
 		ILoggerFactory loggerFactory)
 	{
@@ -160,11 +160,17 @@ public static class EasEndpoint
 		// Authenticated: the username is now a real account, so it is safe as a label.
 		http.Items[MetricsKey] = (parameters.Command, LogText.Clean(credentials.UserName, 128));
 
-		// First successful sign-in of a pass-through login: turn it into a managed database
-		// account (ActiveSync:AutoProvisionUsers, on by default). Idempotent and best-effort — it
-		// never fails the request. Runs before the block check so an operator can see (and block)
-		// even a user they intend to block.
-		await provisioner.ProvisionIfEnabledAsync(credentials.UserName, ct);
+		// Identity is total past the auth boundary: every authenticated login has a user row and
+		// a known immutable UserId before anything user-scoped runs (db-restructure item 2). On
+		// first sign-in this mints the row (an auto-provisioned declaration for undeclared
+		// logins; identity-only for config-declared ones). Runs before the block check so an
+		// operator can see (and block) even a user they intend to block.
+		int? ensuredUserId = await provisioner.EnsureUserAsync(credentials.UserName, ct);
+		if (ensuredUserId is not { } userId)
+		{
+			http.Response.StatusCode = StatusCodes.Status403Forbidden;
+			return;
+		}
 
 		// A disabled account (eas user disable) refuses every device; operator blocks (eas
 		// block/unblock) are the ad-hoc/device-scoped variant. Both are enforced after auth so
@@ -172,7 +178,7 @@ public static class EasEndpoint
 		// Autodiscover prologue uses (EndpointAuth.CheckLoginRefusalAsync — the E14 drift point).
 		// 403, not 401 — a challenge would loop the client through credential prompts.
 		LoginRefusal refusal = await EndpointAuth.CheckLoginRefusalAsync(
-			userResolver, state, credentials.UserName, parameters.DeviceId, ct);
+			userResolver, state, credentials.UserName, userId, parameters.DeviceId, ct);
 		if (refusal != LoginRefusal.None)
 		{
 			logger.LogWarning("Refused {State} EAS login {User} ({DeviceId})",
@@ -200,7 +206,7 @@ public static class EasEndpoint
 		}
 
 		Device device = await state.GetOrCreateDeviceAsync(
-			credentials.UserName, parameters.DeviceId, parameters.DeviceType, ct,
+			userId, parameters.DeviceId, parameters.DeviceType, ct,
 			parameters.ProtocolVersion);
 
 		// Pending account-only wipe (16.1): herd the device into Provision, where the wipe
@@ -241,7 +247,8 @@ public static class EasEndpoint
 
 		// A2: the returned session is a lease — disposing it at the end of the request releases the
 		// lease (the cache keeps the connection alive for reuse; the last release tears it down).
-		await using IBackendSession session = await sessionFactory.GetSessionAsync(credentials, parameters.DeviceId, ct);
+		await using IBackendSession session =
+			await sessionFactory.GetSessionAsync(credentials, userId, parameters.DeviceId, ct);
 
 		EasContext context = new()
 		{

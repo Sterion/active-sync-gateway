@@ -30,7 +30,7 @@ internal static class SharesEndpoints
 			return Results.Ok(new
 			{
 				total = page.Total,
-				entries = page.Grants.Select(g => new ShareDto(g.UserName, g.CollectionHref, g.ReadOnly, g.CreatedUtc))
+				entries = page.Grants.Select(g => new ShareDto(g.Login, g.Grant.CollectionHref, g.Grant.ReadOnly, g.Grant.CreatedUtc))
 			});
 		});
 

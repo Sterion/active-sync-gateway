@@ -82,19 +82,21 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 
 		// State side: usage aggregates grouped by login (the former `eas users`).
 		var deviceStats = await db.Devices
-			.GroupBy(d => d.UserName)
+			.GroupBy(d => d.User.Login)
 			.Select(g => new { User = g.Key, Count = g.Count(), LastSeen = g.Max(d => d.LastSeenUtc) })
 			.ToListAsync(cancellationToken);
 		var folderStats = await db.UserFolders
 			.Where(f => !f.Deleted)
-			.GroupBy(f => f.UserName)
+			.GroupBy(f => f.User.Login)
 			.Select(g => new { User = g.Key, Count = g.Count() })
 			.ToListAsync(cancellationToken);
 		var itemStats = await db.LocalItems
-			.GroupBy(i => new { i.UserName, i.Collection })
-			.Select(g => new { g.Key.UserName, g.Key.Collection, Count = g.Count() })
+			.GroupBy(i => new { i.User.Login, i.Collection })
+			.Select(g => new { UserName = g.Key.Login, g.Key.Collection, Count = g.Count() })
 			.ToListAsync(cancellationToken);
-		List<LoginBlock> blocks = await db.LoginBlocks.ToListAsync(cancellationToken);
+		var blocks = await db.LoginBlocks
+			.Select(b => new { Login = b.User.Login, b.DeviceId })
+			.ToListAsync(cancellationToken);
 
 		// Full outer join: everyone declared OR seen in the state database.
 		SortedSet<string> users = new(StringComparer.OrdinalIgnoreCase);
@@ -103,7 +105,7 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 		users.UnionWith(deviceStats.Select(s => s.User));
 		users.UnionWith(folderStats.Select(s => s.User));
 		users.UnionWith(itemStats.Select(s => s.UserName));
-		users.UnionWith(blocks.Select(b => b.UserName));
+		users.UnionWith(blocks.Select(b => b.Login));
 		if (users.Count == 0)
 		{
 			Terminal.WriteLine("No users are declared or have any state.");
@@ -126,8 +128,8 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 			.ToDictionary(g => g.Key, g => g.Sum(s => s.Count), StringComparer.OrdinalIgnoreCase);
 		ILookup<string, (string Collection, int Count)> itemsByUser = itemStats
 			.ToLookup(s => s.UserName, s => (s.Collection, s.Count), StringComparer.OrdinalIgnoreCase);
-		ILookup<string, LoginBlock> blocksByUser =
-			blocks.ToLookup(b => b.UserName, StringComparer.OrdinalIgnoreCase);
+		ILookup<string, string?> blocksByUser =
+			blocks.ToLookup(b => b.Login, b => b.DeviceId, StringComparer.OrdinalIgnoreCase);
 
 		Table table = new Table().Border(TableBorder.Rounded);
 		table.AddColumns("User", "Origin", "Mail", "Admin", "Gateway pw", "Overrides",
@@ -163,11 +165,11 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 			int folders = foldersByUser.GetValueOrDefault(user);
 			int ItemCount(string collection) =>
 				itemsByUser[user].Where(i => i.Collection == collection).Sum(i => i.Count);
-			IEnumerable<LoginBlock> userBlocks = blocksByUser[user];
-			int deviceBlocks = userBlocks.Count(b => b.DeviceId is not null);
+			IEnumerable<string?> userBlocks = blocksByUser[user];
+			int deviceBlocks = userBlocks.Count(deviceId => deviceId is not null);
 			string blocked = declared?.Enabled == false
 				? "disabled"
-				: userBlocks.Any(b => b.DeviceId is null)
+				: userBlocks.Any(deviceId => deviceId is null)
 					? "yes"
 					: deviceBlocks > 0
 						? $"{deviceBlocks} device(s)"
@@ -219,7 +221,7 @@ internal sealed class DevicesCommand(IAnsiConsole terminal) : DatabaseCommand<De
 		{
 			Device device = listing.Device;
 			string blocked = listing.UserBlocked ? "user" : listing.Blocked ? "yes" : "-";
-			AddRow(table, device.UserName, device.DeviceId,
+			AddRow(table, listing.Login, device.DeviceId,
 				device.DeviceType.Length > 0 ? device.DeviceType : "-",
 				Utc(device.CreatedUtc), Utc(device.LastSeenUtc),
 				device.FolderSyncKey.ToString(),
@@ -243,8 +245,9 @@ internal sealed class FoldersCommand(IAnsiConsole terminal) : DatabaseCommand<Fo
 	protected override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, Settings settings, CancellationToken cancellationToken)
 	{
+		string normalizedFolderLogin = UserStore.NormalizeLogin(settings.User);
 		var folders = await db.UserFolders
-			.Where(f => f.UserName == settings.User && !f.Deleted)
+			.Where(f => f.User.Login == normalizedFolderLogin && !f.Deleted)
 			.Select(f => new { f.Id, f.DisplayName, f.BackendKey, f.EasClass, DavItems = f.DavItems.Count })
 			.OrderBy(f => f.BackendKey)
 			.ToListAsync(cancellationToken);
@@ -255,7 +258,7 @@ internal sealed class FoldersCommand(IAnsiConsole terminal) : DatabaseCommand<Fo
 		}
 
 		Dictionary<string, int> localCounts = await db.LocalItems
-			.Where(i => i.UserName == settings.User)
+			.Where(i => i.User.Login == normalizedFolderLogin)
 			.GroupBy(i => i.Collection)
 			.Select(g => new { Collection = g.Key, Count = g.Count() })
 			.ToDictionaryAsync(g => g.Collection, g => g.Count, cancellationToken);
@@ -301,7 +304,8 @@ internal sealed class ItemsCommand(IAnsiConsole terminal) : DatabaseCommand<Item
 	protected override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, Settings settings, CancellationToken cancellationToken)
 	{
-		IQueryable<LocalItem> query = db.LocalItems.Where(i => i.UserName == settings.User);
+		string normalizedItemsLogin = UserStore.NormalizeLogin(settings.User);
+		IQueryable<LocalItem> query = db.LocalItems.Where(i => i.User.Login == normalizedItemsLogin);
 		if (settings.Collection is not null)
 			query = query.Where(i => i.Collection == settings.Collection);
 		var items = await query
@@ -343,8 +347,9 @@ internal sealed class ShowCommand(IAnsiConsole terminal) : DatabaseCommand<ShowC
 	protected override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, Settings settings, CancellationToken cancellationToken)
 	{
+		string normalizedShowLogin = UserStore.NormalizeLogin(settings.User);
 		LocalItem? item = await db.LocalItems.FirstOrDefaultAsync(
-			i => i.UserName == settings.User && i.Collection == settings.Collection && i.Uid == settings.Uid,
+			i => i.User.Login == normalizedShowLogin && i.Collection == settings.Collection && i.Uid == settings.Uid,
 			cancellationToken);
 		if (item is null)
 		{
@@ -357,7 +362,7 @@ internal sealed class ShowCommand(IAnsiConsole terminal) : DatabaseCommand<ShowC
 		try
 		{
 			// Raw content to stdout (pipe-friendly); errors and tables never mix into it.
-			await Console.Out.WriteLineAsync(protector.Unprotect(item.Content, item.UserName, item.Collection));
+			await Console.Out.WriteLineAsync(protector.Unprotect(item.Content, item.UserId, item.Collection));
 			return 0;
 		}
 		catch (BackendException ex)

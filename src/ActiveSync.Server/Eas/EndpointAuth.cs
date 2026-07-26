@@ -18,9 +18,9 @@ internal enum LoginRefusal
 
 /// <summary>
 ///   Outcome of <see cref="EndpointAuth.TryAuthorizeAsync" />: authorized plus the verified
-///   credentials, or a stop (the response has already been written).
+///   credentials and the user's immutable id, or a stop (the response has already been written).
 /// </summary>
-internal readonly record struct AuthOutcome(bool Authorized, BackendCredentials? Credentials);
+internal readonly record struct AuthOutcome(bool Authorized, BackendCredentials? Credentials, int UserId = 0);
 
 /// <summary>
 ///   Shared Basic-auth prologue for the authenticated endpoints (EAS + Autodiscover): the
@@ -223,11 +223,12 @@ internal static class EndpointAuth
 	///   credentials can observe it — the caller writes the 403 so each endpoint keeps its own body.
 	/// </summary>
 	public static async Task<LoginRefusal> CheckLoginRefusalAsync(
-		UserResolver resolver, SyncStateService state, string userName, string? deviceId, CancellationToken ct)
+		UserResolver resolver, SyncStateService state, string userName, int userId, string? deviceId,
+		CancellationToken ct)
 	{
 		if (resolver.IsLoginDisabled(userName))
 			return LoginRefusal.Disabled;
-		if (await state.IsLoginBlockedAsync(userName, deviceId, ct))
+		if (await state.IsLoginBlockedAsync(userId, deviceId, ct))
 			return LoginRefusal.Blocked;
 		return LoginRefusal.None;
 	}
@@ -252,6 +253,7 @@ internal static class EndpointAuth
 		AuthThrottle throttle,
 		IBackendSessionFactory sessionFactory,
 		UserResolver resolver,
+		UserProvisioner provisioner,
 		SyncStateService state,
 		string? blockDeviceId,
 		ILogger logger,
@@ -280,7 +282,16 @@ internal static class EndpointAuth
 		if (!await AuthenticateAsync(http, sessionFactory, throttle, clientKey, credentials, logger, ct))
 			return new AuthOutcome(false, null);
 
-		LoginRefusal refusal = await CheckLoginRefusalAsync(resolver, state, credentials.UserName, blockDeviceId, ct);
+		// Identity is total past the auth boundary (db-restructure item 2).
+		int? userId = await provisioner.EnsureUserAsync(credentials.UserName, ct);
+		if (userId is null)
+		{
+			http.Response.StatusCode = StatusCodes.Status403Forbidden;
+			return new AuthOutcome(false, null);
+		}
+
+		LoginRefusal refusal = await CheckLoginRefusalAsync(
+			resolver, state, credentials.UserName, userId.Value, blockDeviceId, ct);
 		if (refusal != LoginRefusal.None)
 		{
 			logger.LogWarning("Refused {State} login {User}",
@@ -289,6 +300,6 @@ internal static class EndpointAuth
 			return new AuthOutcome(false, null);
 		}
 
-		return new AuthOutcome(true, credentials);
+		return new AuthOutcome(true, credentials, userId.Value);
 	}
 }

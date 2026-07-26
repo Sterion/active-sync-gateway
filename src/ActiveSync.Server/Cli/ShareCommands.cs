@@ -103,12 +103,12 @@ internal sealed class ShareListCommand(IAnsiConsole terminal) : DatabaseCommand<
 		}
 
 		Table table = new Table().AddColumns("User", "Collection", "Mode", "Granted (UTC)");
-		foreach (SharedCalendarGrant grant in page.Grants)
+		foreach (ShareAdminService.ShareListing listing in page.Grants)
 			table.AddRow(
-				Markup.Escape(grant.UserName),
-				Markup.Escape(grant.CollectionHref),
-				grant.ReadOnly ? "read-only" : "read-write",
-				Utc(grant.CreatedUtc));
+				Markup.Escape(listing.Login),
+				Markup.Escape(listing.Grant.CollectionHref),
+				listing.Grant.ReadOnly ? "read-only" : "read-write",
+				Utc(listing.Grant.CreatedUtc));
 		Terminal.Write(table);
 		return 0;
 	}

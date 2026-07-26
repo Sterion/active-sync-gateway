@@ -194,8 +194,12 @@ public static class WebUiServiceCollectionExtensions
 			});
 
 		// A user-level login block disables OIDC sign-in exactly like the local form.
-		bool blocked = verdict.Allowed && await services.GetRequiredService<SyncStateService>()
-			.IsLoginBlockedAsync(verdict.Login!, null, ct);
+		int? verdictUserId = verdict.Allowed
+			? await services.GetRequiredService<ActiveSync.Core.Accounts.UserStore>()
+				.FindUserIdAsync(verdict.Login!, ct)
+			: null;
+		bool blocked = verdictUserId is { } blockUserId && await services.GetRequiredService<SyncStateService>()
+			.IsLoginBlockedAsync(blockUserId, null, ct);
 		if (!verdict.Allowed || blocked)
 		{
 			logger.LogWarning("OIDC sign-in rejected for {Login}: {Reason}",

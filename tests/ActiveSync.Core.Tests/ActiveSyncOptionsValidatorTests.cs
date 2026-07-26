@@ -199,12 +199,13 @@ public class ActiveSyncOptionsValidatorTests
 	}
 
 	[Fact]
-	public void RequireDeclaredUsers_WithoutConfigUsers_IsValid()
+	public void AutoProvisionOff_WithoutConfigUsers_IsValid()
 	{
 		// Declared users may live in the state database (eas user add), which the validator
 		// cannot see — an empty config Users list is no longer a hard failure.
+		// (AutoProvisionUsers=false absorbed the deleted RequireDeclaredUsers allowlist.)
 		ActiveSyncOptions options = Valid();
-		options.RequireDeclaredUsers = true;
+		options.AutoProvisionUsers = false;
 		ValidateOptionsResult result = Validator.Validate(null, options);
 		Assert.True(result.Succeeded);
 	}

@@ -158,7 +158,7 @@ public sealed class UserStoreTests : IDisposable
 #pragma warning disable VSTHRD103
 			db.Users.Add(new User
 			{
-				UserName = "broken", Json = "{not json", UpdatedUtc = DateTime.UtcNow,
+				Login = "broken", Json = "{not json", UpdatedUtc = DateTime.UtcNow,
 			});
 #pragma warning restore VSTHRD103
 			await db.SaveChangesAsync();
@@ -172,10 +172,11 @@ public sealed class UserStoreTests : IDisposable
 	}
 
 	[Fact]
-	public async Task RequireDeclaredUsers_DbGrantAdmits_UndeclaredStaysRejected()
+	public async Task AutoProvisionOff_DbGrantAdmits_UndeclaredStaysRejected()
 	{
+		// AutoProvisionUsers=false absorbed the deleted RequireDeclaredUsers allowlist.
 		ActiveSyncOptions options = BaseOptions();
-		options.RequireDeclaredUsers = true;
+		options.AutoProvisionUsers = false;
 		UserResolver resolver = Resolver(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
@@ -275,7 +276,7 @@ public sealed class UserStoreTests : IDisposable
 #pragma warning disable VSTHRD103
 			db.Users.Add(new User
 			{
-				UserName = "broken", Json = "{not json", UpdatedUtc = DateTime.UtcNow,
+				Login = "broken", Json = "{not json", UpdatedUtc = DateTime.UtcNow,
 			});
 #pragma warning restore VSTHRD103
 			await db.SaveChangesAsync();
@@ -287,9 +288,9 @@ public sealed class UserStoreTests : IDisposable
 
 		// ListAsync: the bad row is SURFACED (flagged invalid), never omitted or thrown on.
 		var all = await _store.ListAsync(CancellationToken.None);
-		Assert.Equal(["broken", "good"], all.Select(e => e.UserName));
-		Assert.False(all.Single(e => e.UserName == "broken").Valid);
-		Assert.True(all.Single(e => e.UserName == "good").Valid);
+		Assert.Equal(["broken", "good"], all.Select(e => e.Login));
+		Assert.False(all.Single(e => e.Login == "broken").Valid);
+		Assert.True(all.Single(e => e.Login == "good").Valid);
 	}
 
 	[Fact]
@@ -324,16 +325,16 @@ public sealed class UserStoreTests : IDisposable
 		Assert.Equal("a@x", a?.MailAddress);
 		Assert.Null(await _store.GetAsync("missing", CancellationToken.None));
 
-		List<(string UserName, UserOptions Options, DateTime UpdatedUtc, bool Valid)> all =
+		List<(string Login, UserOptions Options, DateTime UpdatedUtc, bool Valid)> all =
 			await _store.ListAsync(CancellationToken.None);
-		Assert.Equal(["a", "b"], all.Select(e => e.UserName));
+		Assert.Equal(["a", "b"], all.Select(e => e.Login));
 		Assert.All(all, e => Assert.True(e.Valid));
 	}
 
 	[Fact]
 	public async Task Upsert_NormalizesStoredCasing_SoIndexAndLookupAgree()
 	{
-		// B1/B8: the stored UserName must be canonical (lowercase) so the raw unique index enforces
+		// B1/B8: the stored Login must be canonical (lowercase) so the raw unique index enforces
 		// case-folded uniqueness and lookups are exact (index seek), not a non-sargable LOWER() scan
 		// that leaves the case-variant pair reachable. Round 1's fix only added LOWER() to the read
 		// predicates; it never normalized the stored value.
@@ -341,7 +342,7 @@ public sealed class UserStoreTests : IDisposable
 
 		await using SyncDbContext db = _factory.CreateDbContext();
 		User row = await db.Users.AsNoTracking().SingleAsync();
-		Assert.Equal("phone1", row.UserName);
+		Assert.Equal("phone1", row.Login);
 	}
 
 	[Fact]
@@ -353,8 +354,8 @@ public sealed class UserStoreTests : IDisposable
 		await using (SyncDbContext db = _factory.CreateDbContext())
 		{
 #pragma warning disable VSTHRD103
-			db.Users.Add(new User { UserName = "phone1", Json = "{}", UpdatedUtc = DateTime.UtcNow });
-			db.Users.Add(new User { UserName = "Phone1", Json = "{}", UpdatedUtc = DateTime.UtcNow });
+			db.Users.Add(new User { Login = "phone1", Json = "{}", UpdatedUtc = DateTime.UtcNow });
+			db.Users.Add(new User { Login = "Phone1", Json = "{}", UpdatedUtc = DateTime.UtcNow });
 #pragma warning restore VSTHRD103
 			await db.SaveChangesAsync();
 		}
@@ -365,50 +366,9 @@ public sealed class UserStoreTests : IDisposable
 		Assert.Contains(logger.Lines, l => l.Level == LogLevel.Warning);
 	}
 
-	[Fact]
-	public async Task Migration_DedupSql_CollapsesCaseVariantPair_KeepingNewestAndFolding()
-	{
-		// Proves the NormalizeAccountUserNameCasing data migration's dedup+fold SQL on POPULATED data
-		// (the full-suite Migrate() only exercises it on empty DBs). Two case-variant rows are seeded
-		// directly — the raw unique index allows the pair — then the migration's two statements must
-		// collapse them to the most-recently-updated survivor, case-folded. SQL mirrors the migration.
-		DateTime older = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-		DateTime newer = new(2026, 2, 2, 0, 0, 0, DateTimeKind.Utc);
-		await using (SyncDbContext db = _factory.CreateDbContext())
-		{
-#pragma warning disable VSTHRD103
-			db.Users.Add(new User { UserName = "phone1", Json = "{\"m\":\"old\"}", UpdatedUtc = older });
-			db.Users.Add(new User { UserName = "PHONE1", Json = "{\"m\":\"new\"}", UpdatedUtc = newer });
-#pragma warning restore VSTHRD103
-			await db.SaveChangesAsync();
-		}
-
-		await using (SyncDbContext db = _factory.CreateDbContext())
-		{
-			await db.Database.ExecuteSqlRawAsync(
-				"""
-				DELETE FROM "AccountEntries"
-				WHERE "Id" NOT IN (
-				    SELECT a."Id" FROM "AccountEntries" a
-				    WHERE NOT EXISTS (
-				        SELECT 1 FROM "AccountEntries" b
-				        WHERE lower(b."UserName") = lower(a."UserName")
-				          AND (b."UpdatedUtc" > a."UpdatedUtc"
-				               OR (b."UpdatedUtc" = a."UpdatedUtc" AND b."Id" > a."Id"))
-				    )
-				);
-				""");
-			await db.Database.ExecuteSqlRawAsync(
-				"""UPDATE "AccountEntries" SET "UserName" = lower("UserName") WHERE "UserName" <> lower("UserName");""");
-		}
-
-		await using (SyncDbContext db = _factory.CreateDbContext())
-		{
-			User survivor = await db.Users.AsNoTracking().SingleAsync();
-			Assert.Equal("phone1", survivor.UserName);
-			Assert.Equal("{\"m\":\"new\"}", survivor.Json);  // the newer row won
-		}
-	}
+	// (The NormalizeAccountUserNameCasing data-migration test is gone with the migration chain:
+	// the schema reinit replaced the chain with a fresh Initial pair, and the store has always
+	// written the login case-folded since B1/B8 — covered by Upsert_NormalizesStoredCasing.)
 
 	[Fact]
 	public async Task ConcurrentRoleChange_DuringAccountRefresh_IsNotLostToTheStaleRefreshFinishingLast()

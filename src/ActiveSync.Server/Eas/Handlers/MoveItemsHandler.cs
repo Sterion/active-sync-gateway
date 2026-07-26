@@ -57,9 +57,9 @@ public sealed class MoveItemsHandler(
 			try
 			{
 				(UserFolder Folder, IContentStore Store)? source = await folders.ResolveCollectionAsync(
-					context.Session, context.Device.UserName, srcFldId, ct);
+					context.Session, context.UserId, srcFldId, ct);
 				(UserFolder Folder, IContentStore Store)? destination = await folders.ResolveCollectionAsync(
-					context.Session, context.Device.UserName, dstFldId, ct);
+					context.Session, context.UserId, dstFldId, ct);
 				if (source is null)
 				{
 					responses.Add(Response("1"));
@@ -95,7 +95,7 @@ public sealed class MoveItemsHandler(
 					logger.LogInformation(
 						"Read-only: rejecting move of {SrcMsgId} from \"{Source}\" to \"{Destination}\" for {User}",
 						srcMsgId, source.Value.Folder.DisplayName,
-						destination.Value.Folder.DisplayName, context.Device.UserName);
+						destination.Value.Folder.DisplayName, context.UserName);
 					QueueEdit(srcFldId, itemKey, true, null);
 					responses.Add(Response("5"));
 					continue;
@@ -124,7 +124,7 @@ public sealed class MoveItemsHandler(
 
 				logger.LogInformation("Moved {SrcMsgId} from \"{Source}\" to \"{Destination}\" for {User}",
 					srcMsgId, source.Value.Folder.DisplayName,
-					destination.Value.Folder.DisplayName, context.Device.UserName);
+					destination.Value.Folder.DisplayName, context.UserName);
 				responses.Add(Response("3", dstMsgId));
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException)

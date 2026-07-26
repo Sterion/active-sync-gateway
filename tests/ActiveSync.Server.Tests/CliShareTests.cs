@@ -55,8 +55,10 @@ public sealed class CliShareTests : IDisposable
 			.UseSqlite($"Data Source={_dbPath}")
 			.Options;
 		using SqliteSyncDbContext db = new(options);
-		return db.SharedCalendarGrants.AsNoTracking().ToList();
+		return db.SharedCalendarGrants.AsNoTracking().Include(g => g.User).ToList();
 	}
+
+	private static string GrantLogin(SharedCalendarGrant grant) => grant.User.Login;
 
 	[Fact]
 	public void ShareAdd_List_Remove_RoundTrips()
@@ -66,7 +68,7 @@ public sealed class CliShareTests : IDisposable
 		CommandAppResult add = tester.Run("share", "add", "alice@x", "/cal/family/");
 		Assert.Equal(0, add.ExitCode);
 		SharedCalendarGrant grant = Assert.Single(Grants());
-		Assert.Equal("alice@x", grant.UserName);
+		Assert.Equal("alice@x", GrantLogin(grant));
 		Assert.Equal("/cal/family/", grant.CollectionHref);
 		Assert.False(grant.ReadOnly);
 

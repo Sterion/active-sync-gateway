@@ -35,7 +35,7 @@ public class BackendCredentialsRedactionTests
 	public void ToString_DoesNotLeakPassword_WhenNestedInConnectionContext()
 	{
 		BackendConnectionContext context = new(
-			new BackendCredentials("alice", Secret), null, [], []);
+			new BackendCredentials("alice", Secret), 1, null, [], []);
 		Assert.DoesNotContain(Secret, context.ToString());
 	}
 }

@@ -86,19 +86,19 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 
 	// ---------- Device partnerships, login/session gates, policy & wipe ----------
 
-	public Task<bool> IsLoginBlockedAsync(string userName, string? deviceId, CancellationToken ct)
-		=> _devices.IsLoginBlockedAsync(userName, deviceId, ct);
+	public Task<bool> IsLoginBlockedAsync(int userId, string? deviceId, CancellationToken ct)
+		=> _devices.IsLoginBlockedAsync(userId, deviceId, ct);
 
-	public Task<DateTime?> GetSessionsValidAfterAsync(string userName, CancellationToken ct)
-		=> _devices.GetSessionsValidAfterAsync(userName, ct);
+	public Task<DateTime?> GetSessionsValidAfterAsync(int userId, CancellationToken ct)
+		=> _devices.GetSessionsValidAfterAsync(userId, ct);
 
-	public Task RevokeSessionsBeforeAsync(string userName, DateTime whenUtc, CancellationToken ct)
-		=> _devices.RevokeSessionsBeforeAsync(userName, whenUtc, ct);
+	public Task RevokeSessionsBeforeAsync(int userId, DateTime whenUtc, CancellationToken ct)
+		=> _devices.RevokeSessionsBeforeAsync(userId, whenUtc, ct);
 
 	public Task<Device> GetOrCreateDeviceAsync(
-		string userName, string deviceId, string deviceType, CancellationToken ct,
+		int userId, string deviceId, string deviceType, CancellationToken ct,
 		string? protocolVersion = null)
-		=> _devices.GetOrCreateDeviceAsync(userName, deviceId, deviceType, ct, protocolVersion);
+		=> _devices.GetOrCreateDeviceAsync(userId, deviceId, deviceType, ct, protocolVersion);
 
 	public Task SaveDeviceInfoAsync(Device device, string deviceInfoJson, CancellationToken ct)
 		=> _devices.SaveDeviceInfoAsync(device, deviceInfoJson, ct);
@@ -115,14 +115,14 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 	// ---------- Folder registry & hierarchy sync ----------
 
 	public Task<List<UserFolder>> RefreshFolderRegistryAsync(
-		string userName, IReadOnlyList<BackendFolder> backendFolders, CancellationToken ct)
-		=> _folders.RefreshFolderRegistryAsync(userName, backendFolders, ct);
+		int userId, IReadOnlyList<BackendFolder> backendFolders, CancellationToken ct)
+		=> _folders.RefreshFolderRegistryAsync(userId, backendFolders, ct);
 
-	public Task<UserFolder?> GetFolderByServerIdAsync(string userName, string serverId, CancellationToken ct)
-		=> _folders.GetFolderByServerIdAsync(userName, serverId, ct);
+	public Task<UserFolder?> GetFolderByServerIdAsync(int userId, string serverId, CancellationToken ct)
+		=> _folders.GetFolderByServerIdAsync(userId, serverId, ct);
 
-	public Task<List<UserFolder>> GetFoldersAsync(string userName, CancellationToken ct)
-		=> _folders.GetFoldersAsync(userName, ct);
+	public Task<List<UserFolder>> GetFoldersAsync(int userId, CancellationToken ct)
+		=> _folders.GetFoldersAsync(userId, ct);
 
 	public Task<FolderHierarchyDiff> ComputeFolderDiffAsync(
 		Device device, IReadOnlyList<UserFolder> registry, CancellationToken ct, bool initial = false)
@@ -238,29 +238,29 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 	}
 
 	/// <summary>The user's out-of-office row, or null when never set.</summary>
-	public Task<OofSetting?> GetOofAsync(string userName, CancellationToken ct)
+	public Task<OofSetting?> GetOofAsync(int userId, CancellationToken ct)
 	{
-		return db.OofSettings.FirstOrDefaultAsync(o => o.UserName == userName, ct);
+		return db.OofSettings.FirstOrDefaultAsync(o => o.UserId == userId, ct);
 	}
 
 	/// <summary>
 	///   Upserts the out-of-office row (tracked update or insert). <see cref="OofSetting" /> carries
 	///   no concurrency token, so this only guards the INSERT race (A3): two concurrent first-time
 	///   writers (e.g. the phone's Settings→Oof racing an `eas` CLI edit) can both read no row and
-	///   both insert, tripping the unique index on <see cref="OofSetting.UserName" />. Mirrors the
+	///   both insert, tripping the unique index on <see cref="OofSetting.UserId" />. Mirrors the
 	///   same catch-and-re-read-as-update idiom <c>DeviceStore.GetOrCreateDeviceAsync</c> already
 	///   uses for the identical shape of race.
 	/// </summary>
 	public async Task<OofSetting> SaveOofAsync(
-		string userName, int state, DateTime? startUtc, DateTime? endUtc,
+		int userId, int state, DateTime? startUtc, DateTime? endUtc,
 		string message, string bodyType, string? previousActiveScript, CancellationToken ct)
 	{
-		OofSetting? row = await db.OofSettings.FirstOrDefaultAsync(o => o.UserName == userName, ct)
+		OofSetting? row = await db.OofSettings.FirstOrDefaultAsync(o => o.UserId == userId, ct)
 			.ConfigureAwait(false);
 		bool inserting = row is null;
 		if (row is null)
 		{
-			row = new OofSetting { UserName = userName };
+			row = new OofSetting { UserId = userId };
 			// DbSet.Add false positive for VSTHRD103 — see GetOrCreateDeviceAsync.
 #pragma warning disable VSTHRD103
 			db.OofSettings.Add(row);
@@ -281,7 +281,7 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 			// unique violation on what was already an update, which cannot happen against a
 			// single-column unique index) keeps its diagnostic intact.
 			db.Entry(row).State = EntityState.Detached;
-			row = await db.OofSettings.FirstAsync(o => o.UserName == userName, ct).ConfigureAwait(false);
+			row = await db.OofSettings.FirstAsync(o => o.UserId == userId, ct).ConfigureAwait(false);
 			ApplyOofFields(row, state, startUtc, endUtc, message, bodyType, previousActiveScript);
 			await db.SaveChangesAsync(ct).ConfigureAwait(false);
 		}

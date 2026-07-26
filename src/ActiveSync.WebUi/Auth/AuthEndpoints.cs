@@ -42,20 +42,22 @@ internal static class AuthEndpoints
 		api.MapPost("login", (LoginRequest request, HttpContext http,
 				IOptionsMonitor<ActiveSyncOptions> options, UserResolver resolver,
 				IBackendSessionFactory sessionFactory, AuthThrottle throttle,
-				SyncStateService state, ILoggerFactory loggerFactory, CancellationToken ct) =>
+				SyncStateService state, UserProvisioner provisioner,
+				ILoggerFactory loggerFactory, CancellationToken ct) =>
 			LoginAsync(request, http, admin, options, resolver, sessionFactory, throttle, state,
-				loggerFactory.CreateLogger("ActiveSync.WebUi.Auth"), ct))
+				provisioner, loggerFactory.CreateLogger("ActiveSync.WebUi.Auth"), ct))
 			.AllowAnonymous();
 
 		// Anonymous so sign-out always works — e.g. a non-admin cookie stuck on /admin.
-		api.MapPost("logout", async (HttpContext http, SyncStateService state, CancellationToken ct) =>
+		api.MapPost("logout", async (HttpContext http, SyncStateService state, UserStore users, CancellationToken ct) =>
 		{
 			// Deleting the browser's cookie is only half of it: the ticket is self-contained and
 			// stays cryptographically valid until it expires, so a copy taken beforehand would
 			// keep working. Record a server-side cut-off for every session of this login that
 			// started before now — checked on the next revalidation.
-			if (http.User.Identity?.Name is { Length: > 0 } login)
-				await state.RevokeSessionsBeforeAsync(login, DateTime.UtcNow, ct);
+			if (http.User.Identity?.Name is { Length: > 0 } login &&
+			    await users.FindUserIdAsync(login, ct) is { } userId)
+				await state.RevokeSessionsBeforeAsync(userId, DateTime.UtcNow, ct);
 			await http.SignOutAsync(WebUiAuth.Scheme);
 			return Results.Ok();
 		}).AllowAnonymous();
@@ -76,7 +78,7 @@ internal static class AuthEndpoints
 		LoginRequest request, HttpContext http, bool admin,
 		IOptionsMonitor<ActiveSyncOptions> options, UserResolver resolver,
 		IBackendSessionFactory sessionFactory, AuthThrottle throttle,
-		SyncStateService state, ILogger logger, CancellationToken ct)
+		SyncStateService state, UserProvisioner provisioner, ILogger logger, CancellationToken ct)
 	{
 		// OIDC mode: the local login form does not exist — sign in via the identity provider.
 		if (IsOidcConfigured(options.CurrentValue.WebUi))
@@ -134,9 +136,15 @@ internal static class AuthEndpoints
 			return Results.Unauthorized();
 		}
 
+		// Identity is total past the auth boundary: mint/find the user row before anything
+		// user-scoped runs (the block check is keyed by UserId).
+		int? userId = await provisioner.EnsureUserAsync(request.Username, ct);
+		if (userId is null)
+			return Results.Unauthorized();
+
 		// A disabled account or a user-level login block refuses the web exactly like EAS (403
 		// after valid auth; the CLI remains the un-lockable escape hatch).
-		if (account.Options.Enabled == false || await state.IsLoginBlockedAsync(request.Username, null, ct))
+		if (account.Options.Enabled == false || await state.IsLoginBlockedAsync(userId.Value, null, ct))
 			return Results.StatusCode(StatusCodes.Status403Forbidden);
 
 		bool isAdmin = account.Options.Admin == true;

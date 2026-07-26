@@ -50,7 +50,7 @@ public class EncryptionKeyLoaderTests
 		Assert.NotNull(key);
 		Assert.Equal(32, key.Length);
 		using LocalContentProtector protector = LocalContentProtector.CreateProtected(key);
-		Assert.Equal("data", protector.Unprotect(protector.Protect("data", "u", "notes"), "u", "notes"));
+		Assert.Equal("data", protector.Unprotect(protector.Protect("data", 1, "notes"), 1, "notes"));
 	}
 
 	[Fact]

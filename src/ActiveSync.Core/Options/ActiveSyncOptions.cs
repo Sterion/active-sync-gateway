@@ -404,24 +404,23 @@ public sealed class ActiveSyncOptions
 	public Dictionary<string, UserOptions>? Users { get; set; }
 
 	/// <summary>
-	///   Allowlist switch: when true, only logins declared in <see cref="Users" /> may
-	///   authenticate — anyone else gets 401 without a backend probe. An empty entry is a
-	///   valid grant (nothing overridden, access allowed).
-	/// </summary>
-	public bool RequireDeclaredUsers { get; set; }
-
-	/// <summary>
-	///   Create a database account row for a pass-through login the first time it clears its
-	///   MailStore probe over EAS, so the user becomes visible and manageable — listed in
-	///   `eas users`/the admin UI, blockable, and able to sign in to the self-service portal
-	///   (validated against the same backend). The row carries no gateway password, so auth is
-	///   unchanged (still a backend probe). ON by default so every user that actually syncs shows
-	///   up as a first-class account instead of appearing only as device/session state that leads
-	///   nowhere — set false to keep pass-through logins ephemeral (nothing is persisted).
-	///   Naturally inert under <see cref="RequireDeclaredUsers" /> — that rejects undeclared
-	///   logins before they authenticate, so nothing is ever provisioned. Deleting an auto-created
-	///   row is not permanent while this stays on: the user's next sync re-creates it (block them,
-	///   or turn this off, to make removal stick).
+	///   Whether an UNDECLARED login may exist at all — the key kept its name across the schema
+	///   reinit but its meaning is sharper now (it also absorbed the deleted
+	///   <c>RequireDeclaredUsers</c>):
+	///   <para>
+	///     <c>true</c> (default): a login that authenticates always gets a user row on first
+	///     successful sign-in — a fresh immutable <c>UserId</c> plus an auto-provisioned
+	///     declaration — so it is listed in `eas users`/the admin UI, blockable, and can sign in
+	///     to the self-service portal. Auth itself is unchanged (still a backend probe). Removing
+	///     an auto-created declaration is not permanent while this stays on: the user's next
+	///     sync re-creates it (block or disable them, or turn this off, to make removal stick).
+	///   </para>
+	///   <para>
+	///     <c>false</c>: an undeclared login is REFUSED before any backend probe (the allowlist
+	///     the old <c>RequireDeclaredUsers</c> was) — undeclared credentials never reach the mail
+	///     server. Declared logins (config or database; an empty entry is a valid grant) still
+	///     authenticate and still get their identity row on first sign-in.
+	///   </para>
 	/// </summary>
 	public bool AutoProvisionUsers { get; set; } = true;
 

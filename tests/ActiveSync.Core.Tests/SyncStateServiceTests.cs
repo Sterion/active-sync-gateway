@@ -31,10 +31,27 @@ public sealed class SyncStateServiceTests : IDisposable
 		_connection.Dispose();
 	}
 
+	/// <summary>Get-or-create the identity row for a login (rows are keyed by UserId now).</summary>
+	private async Task<int> UserAsync(string login)
+	{
+		string normalized = login.ToLowerInvariant();
+		User? user = await _db.Users.FirstOrDefaultAsync(u => u.Login == normalized);
+		if (user is null)
+		{
+			user = new User { Login = normalized, UpdatedUtc = DateTime.UtcNow };
+#pragma warning disable VSTHRD103
+			_db.Users.Add(user);
+#pragma warning restore VSTHRD103
+			await _db.SaveChangesAsync();
+		}
+
+		return user.UserId;
+	}
+
 	[Fact]
 	public async Task SyncKeyLifecycle_InitialCurrentReplayInvalid()
 	{
-		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@x"), "DEV1", "Phone", CancellationToken.None);
 
 		// Initial (key 0)
 		(SyncKeyValidation validation, CollectionState? state) =
@@ -79,7 +96,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// with no replay generation, so A's next same-key attempt validates as Current and re-delivers
 		// already-sent items (the F12 bug, made reachable across collections). Client-controlled
 		// collection order makes this reachable.
-		Device device = await _service.GetOrCreateDeviceAsync("u@a1x", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a1x"), "DEV1", "Phone", CancellationToken.None);
 
 		// Seed collection A at SyncKey 2 with a live previous (SyncKey-1) generation, directly.
 		await using (SqliteSyncDbContext seed = StateTestSupport.NewContext(_connection))
@@ -115,7 +132,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// round's own commit. ValidateSyncKeyAsync used to SaveChanges the wipe immediately, so a key 0
 		// whose round never commits (or a key 0 processed before a sibling that then flushes)
 		// destroyed the collection's committed generation with no undo.
-		Device device = await _service.GetOrCreateDeviceAsync("u@a11", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a11"), "DEV1", "Phone", CancellationToken.None);
 
 		await using (SqliteSyncDbContext seed = StateTestSupport.NewContext(_connection))
 		{
@@ -146,7 +163,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// On an unknown key the method used to return a detached, never-added CollectionState
 		// whose type gave no hint it was inert; callers could mistake it for real state. Invalid
 		// must return a null state (A17).
-		Device device = await _service.GetOrCreateDeviceAsync("u@a17", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a17"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? seed) = await _service.ValidateSyncKeyAsync(device, "5", "0", CancellationToken.None);
 		await _service.CommitCollectionStateAsync(seed!, [], 0, SyncKeyValidation.Initial, CancellationToken.None);
 
@@ -159,7 +176,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task AppliedAdds_SurviveReplayRollback_AndClearOnNextCommit()
 	{
-		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@x"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? state) = await _service.ValidateSyncKeyAsync(device, "7", "0", CancellationToken.None);
 		Assert.NotNull(state);
 		await _service.CommitCollectionStateAsync(state, [], 0, SyncKeyValidation.Initial, CancellationToken.None);
@@ -193,7 +210,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task AppliedChanges_SurviveReplayRollback_AndClearOnNextCommit()
 	{
-		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@x"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? state) = await _service.ValidateSyncKeyAsync(device, "9", "0", CancellationToken.None);
 		Assert.NotNull(state);
 		await _service.CommitCollectionStateAsync(state,
@@ -233,7 +250,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// EF's real interception point is SaveChangesAsync(bool, ct) — an execution-strategy retry
 		// or any caller using it bypassed stamping when only the 0/1-arg forms were overridden,
 		// writing a CollectionState without a fresh token and defeating lost-update detection (A5).
-		Device device = await _service.GetOrCreateDeviceAsync("u@a5", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a5"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? state) = await _service.ValidateSyncKeyAsync(device, "1", "0", CancellationToken.None);
 		Assert.NotNull(state);
 		Guid before = state.ConcurrencyToken;
@@ -252,16 +269,16 @@ public sealed class SyncStateServiceTests : IDisposable
 			new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
 			new BackendFolder("imap:Sent", "Sent", null, 5, "Email")
 		};
-		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@x", folders, CancellationToken.None);
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"), folders, CancellationToken.None);
 		Assert.Equal(2, registry.Count);
 		string inboxId = registry.Single(f => f.BackendKey == "imap:INBOX").ServerId;
 
 		// Second refresh keeps the same ServerId
-		registry = await _service.RefreshFolderRegistryAsync("u@x", folders, CancellationToken.None);
+		registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"), folders, CancellationToken.None);
 		Assert.Equal(inboxId, registry.Single(f => f.BackendKey == "imap:INBOX").ServerId);
 
 		// A folder disappearing from the backend is soft-deleted
-		registry = await _service.RefreshFolderRegistryAsync("u@x", [folders[0]], CancellationToken.None);
+		registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"), [folders[0]], CancellationToken.None);
 		Assert.Single(registry);
 		Assert.Equal("imap:INBOX", registry[0].BackendKey);
 	}
@@ -275,13 +292,13 @@ public sealed class SyncStateServiceTests : IDisposable
 		FaultInjectingInterceptor faults = new();
 		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
 		SyncStateService service = new(db);
-		Device device = await service.GetOrCreateDeviceAsync("u@a1", "DEV1", "Phone", CancellationToken.None);
+		Device device = await service.GetOrCreateDeviceAsync(await UserAsync("u@a1"), "DEV1", "Phone", CancellationToken.None);
 
 		device.FolderSyncKey = 99; // tracked, unsaved — belongs to the same context
 
 		faults.ThrowOnNextSave(new DbUpdateException("dup",
 			new SqliteException("UNIQUE constraint failed", 19, 2067)));
-		await service.RefreshFolderRegistryAsync("u@a1",
+		await service.RefreshFolderRegistryAsync(await UserAsync("u@a1"),
 			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email")], CancellationToken.None);
 
 		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
@@ -299,21 +316,21 @@ public sealed class SyncStateServiceTests : IDisposable
 			new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
 			new BackendFolder("imap:Old", "Old", null, 12, "Email")
 		];
-		await _service.RefreshFolderRegistryAsync("u@a35s", both, CancellationToken.None);
+		await _service.RefreshFolderRegistryAsync(await UserAsync("u@a35s"), both, CancellationToken.None);
 
 		// "Old" disappears → soft-deleted with a stamp.
-		await _service.RefreshFolderRegistryAsync("u@a35s", [both[0]], CancellationToken.None);
+		await _service.RefreshFolderRegistryAsync(await UserAsync("u@a35s"), [both[0]], CancellationToken.None);
 		UserFolder Row() => _db.UserFolders.AsNoTracking().Single(f => f.BackendKey == "imap:Old");
 		DateTime? firstStamp = Row().DeletedUtc;
 		Assert.True(Row().Deleted);
 		Assert.NotNull(firstStamp);
 
 		// Still gone on the next refresh → the original stamp is kept, not bumped.
-		await _service.RefreshFolderRegistryAsync("u@a35s", [both[0]], CancellationToken.None);
+		await _service.RefreshFolderRegistryAsync(await UserAsync("u@a35s"), [both[0]], CancellationToken.None);
 		Assert.Equal(firstStamp, Row().DeletedUtc);
 
 		// Reappears → un-deleted and the retention clock is cleared.
-		await _service.RefreshFolderRegistryAsync("u@a35s", both, CancellationToken.None);
+		await _service.RefreshFolderRegistryAsync(await UserAsync("u@a35s"), both, CancellationToken.None);
 		Assert.False(Row().Deleted);
 		Assert.Null(Row().DeletedUtc);
 	}
@@ -321,9 +338,9 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task FolderDiff_ReportsAddsUpdatesDeletes()
 	{
-		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@x"), "DEV1", "Phone", CancellationToken.None);
 		List<BackendFolder> folders = new() { new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email") };
-		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@x", folders, CancellationToken.None);
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"), folders, CancellationToken.None);
 
 		FolderHierarchyDiff diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
 		Assert.Single(diff.Adds);
@@ -336,7 +353,7 @@ public sealed class SyncStateServiceTests : IDisposable
 
 		// Rename → update
 		folders = [new BackendFolder("imap:INBOX", "Postboks", null, 2, "Email")];
-		registry = await _service.RefreshFolderRegistryAsync("u@x", folders, CancellationToken.None);
+		registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"), folders, CancellationToken.None);
 		diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
 		Assert.Single(diff.Updates);
 	}
@@ -348,14 +365,14 @@ public sealed class SyncStateServiceTests : IDisposable
 		// token on Device both wrote N+1 (a lost update, both clients told N+1); the racing
 		// DeviceFolder RemoveRange/Add batches could also 500 on the unique index. The second
 		// writer off the stale generation must be rejected, not silently applied (A6).
-		Device device = await _service.GetOrCreateDeviceAsync("u@a6", "DEV1", "Phone", CancellationToken.None);
-		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@a6",
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a6"), "DEV1", "Phone", CancellationToken.None);
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a6"),
 			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email")], CancellationToken.None);
 
 		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
 		SyncStateService service2 = new(db2);
-		Device device2 = await db2.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.UserName == "u@a6");
-		List<UserFolder> registry2 = await service2.GetFoldersAsync("u@a6", CancellationToken.None);
+		Device device2 = await db2.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.User.Login == "u@a6");
+		List<UserFolder> registry2 = await service2.GetFoldersAsync(await UserAsync("u@a6"), CancellationToken.None);
 
 		int firstKey = await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
 		Assert.Equal(1, firstKey);
@@ -369,16 +386,16 @@ public sealed class SyncStateServiceTests : IDisposable
 	{
 		// ComputeFolderDiffAsync loads every DeviceFolder purely to compare against the registry;
 		// tracking them is pure overhead on the request-scoped context (A19).
-		Device device = await _service.GetOrCreateDeviceAsync("u@a19", "DEV1", "Phone", CancellationToken.None);
-		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@a19",
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a19"), "DEV1", "Phone", CancellationToken.None);
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a19"),
 			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
 			 new BackendFolder("imap:Sent", "Sent", null, 5, "Email")], CancellationToken.None);
 		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
 
 		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
 		SyncStateService service2 = new(db2);
-		Device device2 = await db2.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.UserName == "u@a19");
-		List<UserFolder> registry2 = await service2.GetFoldersAsync("u@a19", CancellationToken.None);
+		Device device2 = await db2.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.User.Login == "u@a19");
+		List<UserFolder> registry2 = await service2.GetFoldersAsync(await UserAsync("u@a19"), CancellationToken.None);
 
 		await service2.ComputeFolderDiffAsync(device2, registry2, CancellationToken.None);
 
@@ -391,12 +408,12 @@ public sealed class SyncStateServiceTests : IDisposable
 		// A folder whose EAS Type changes (e.g. IMAP folder gaining \Sent, 12 -> 5) but keeps its
 		// name and parent was never issued an Update, so the client rendered it in the wrong class
 		// forever (A8).
-		Device device = await _service.GetOrCreateDeviceAsync("u@a8", "DEV1", "Phone", CancellationToken.None);
-		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@a8",
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a8"), "DEV1", "Phone", CancellationToken.None);
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a8"),
 			[new BackendFolder("imap:Archive", "Archive", null, 12, "Email")], CancellationToken.None);
 		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
 
-		registry = await _service.RefreshFolderRegistryAsync("u@a8",
+		registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a8"),
 			[new BackendFolder("imap:Archive", "Archive", null, 5, "Email")], CancellationToken.None);
 		FolderHierarchyDiff diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
 
@@ -411,8 +428,8 @@ public sealed class SyncStateServiceTests : IDisposable
 		// The commit reconciled by deleting the whole hierarchy and reinserting it, so one
 		// renamed folder churned every row's primary key. A commit that changes nothing must
 		// leave the existing rows untouched (A7).
-		Device device = await _service.GetOrCreateDeviceAsync("u@a7", "DEV1", "Phone", CancellationToken.None);
-		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@a7",
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a7"), "DEV1", "Phone", CancellationToken.None);
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a7"),
 			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
 			 new BackendFolder("imap:Sent", "Sent", null, 5, "Email")], CancellationToken.None);
 		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
@@ -434,7 +451,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task CommitCollectionState_ConcurrentWrite_LosesNoUpdate_ThrowsOnStale()
 	{
-		Device device = await _service.GetOrCreateDeviceAsync("u@x", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@x"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? seed) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
 		Assert.NotNull(seed);
 		await _service.CommitCollectionStateAsync(seed, new Dictionary<string, string> { ["a"] = "1" }, 0,
@@ -477,7 +494,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// After a concurrency failure the entity kept its failed values and stayed Modified, so a
 		// later SaveChangesAsync on the same request retried the doomed UPDATE from an unrelated
 		// call site. The catch must reload it back to Unchanged (A18).
-		Device device = await _service.GetOrCreateDeviceAsync("u@a18", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a18"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? seed) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
 		Assert.NotNull(seed);
 		await _service.CommitCollectionStateAsync(seed, new Dictionary<string, string> { ["a"] = "1" }, 0,
@@ -485,7 +502,7 @@ public sealed class SyncStateServiceTests : IDisposable
 
 		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
 		SyncStateService service2 = new(db2);
-		Device device2 = await db2.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.UserName == "u@a18");
+		Device device2 = await db2.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.User.Login == "u@a18");
 		(_, CollectionState? stateB) = await service2.ValidateSyncKeyAsync(device2, "c", "1", CancellationToken.None);
 		(_, CollectionState? stateA) = await _service.ValidateSyncKeyAsync(device, "c", "1", CancellationToken.None);
 		Assert.NotNull(stateA);
@@ -513,7 +530,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		FaultInjectingInterceptor faults = new();
 		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
 		SyncStateService service = new(db);
-		Device device = await service.GetOrCreateDeviceAsync("u@a22", "DEV1", "Phone", CancellationToken.None);
+		Device device = await service.GetOrCreateDeviceAsync(await UserAsync("u@a22"), "DEV1", "Phone", CancellationToken.None);
 		device.PendingAccountWipe = true;
 		await db.SaveChangesAsync(CancellationToken.None);
 
@@ -523,7 +540,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		await service.CompleteAccountWipeAsync(device, CancellationToken.None); // must not throw
 
 		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
-		Device saved = await verify.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.UserName == "u@a22");
+		Device saved = await verify.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.User.Login == "u@a22");
 		Assert.False(saved.PendingAccountWipe);
 	}
 
@@ -538,7 +555,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		FaultInjectingInterceptor faults = new();
 		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
 		SyncStateService service = new(db);
-		Device device = await service.GetOrCreateDeviceAsync("u@a6", "DEV1", "Phone", CancellationToken.None);
+		Device device = await service.GetOrCreateDeviceAsync(await UserAsync("u@a6"), "DEV1", "Phone", CancellationToken.None);
 		device.PendingAccountWipe = true;
 		await db.SaveChangesAsync(CancellationToken.None);
 
@@ -548,7 +565,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		await service.CompleteAccountWipeAsync(device, CancellationToken.None); // must not throw
 
 		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
-		Device saved = await verify.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.UserName == "u@a6");
+		Device saved = await verify.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.User.Login == "u@a6");
 		Assert.False(saved.PendingAccountWipe);
 	}
 
@@ -563,9 +580,10 @@ public sealed class SyncStateServiceTests : IDisposable
 		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
 		SyncStateService service = new(db);
 
+		int a9UserId = await UserAsync("u@a9");
 		faults.ThrowOnNextSave(new DbUpdateException("disk full", new Exception("SQLITE_FULL")));
 		await Assert.ThrowsAsync<DbUpdateException>(() =>
-			service.GetOrCreateDeviceAsync("u@a9", "DEV1", "Phone", CancellationToken.None));
+			service.GetOrCreateDeviceAsync(a9UserId, "DEV1", "Phone", CancellationToken.None));
 	}
 
 	[Fact]
@@ -578,10 +596,10 @@ public sealed class SyncStateServiceTests : IDisposable
 		TestDbContextFactory factory = new(_connection);
 		SyncStateService service = new(_db, factory);
 
-		List<UserFolder> registry = await service.RefreshFolderRegistryAsync("u@a10",
+		List<UserFolder> registry = await service.RefreshFolderRegistryAsync(await UserAsync("u@a10"),
 			[new BackendFolder("carddav:/ab/", "Contacts", null, 9, "Contacts")], CancellationToken.None);
 		UserFolder folder = registry[0];
-		Device device = await service.GetOrCreateDeviceAsync("u@a10", "DEV1", "Phone", CancellationToken.None);
+		Device device = await service.GetOrCreateDeviceAsync(await UserAsync("u@a10"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? state) =
 			await service.ValidateSyncKeyAsync(device, folder.ServerId, "0", CancellationToken.None);
 		Assert.NotNull(state);
@@ -604,7 +622,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// mailbox, stored twice (current + previous) and rewritten every round. It is now gzipped:
 		// the persisted bytes must be a fraction of the plaintext and carry no plaintext ServerId,
 		// while the in-memory round trip stays exact (A4).
-		Device device = await _service.GetOrCreateDeviceAsync("u@a4", "DEV1", "Phone", CancellationToken.None);
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a4"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? state) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
 		Assert.NotNull(state);
 		await _service.CommitCollectionStateAsync(state, [], 0, SyncKeyValidation.Initial, CancellationToken.None);
@@ -647,7 +665,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		SaveCountingInterceptor counter = new();
 		CountingDbContextFactory factory = new(_connection, counter);
 		SyncStateService service = new(_db, factory);
-		List<UserFolder> registry = await service.RefreshFolderRegistryAsync("u@a3",
+		List<UserFolder> registry = await service.RefreshFolderRegistryAsync(await UserAsync("u@a3"),
 			[new BackendFolder("carddav:/ab/", "Contacts", null, 9, "Contacts")], CancellationToken.None);
 		UserFolder folder = registry[0];
 
@@ -680,7 +698,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task DavItemMap_RoundTripsHrefs()
 	{
-		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync("u@x",
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"),
 			[new BackendFolder("carddav:/ab/", "Contacts", null, 9, "Contacts")], CancellationToken.None);
 		UserFolder folder = registry[0];
 
@@ -706,7 +724,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		FaultInjectingInterceptor faults = new();
 		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
 		SyncStateService service = new(db);
-		List<UserFolder> registry = await service.RefreshFolderRegistryAsync("u@a2",
+		List<UserFolder> registry = await service.RefreshFolderRegistryAsync(await UserAsync("u@a2"),
 			[new BackendFolder("carddav:/ab/", "Contacts", null, 9, "Contacts")], CancellationToken.None);
 		UserFolder folder = registry[0];
 
@@ -735,25 +753,25 @@ public sealed class SyncStateServiceTests : IDisposable
 		// and COMMITS a genuine competing row (via a separate context over the same connection)
 		// right as our own save fires, so the violation and the recovery's re-read are both real,
 		// not simulated.
+		int a3UserId = await UserAsync("u@a3");
 		ConcurrentWriteInterceptor race = new(() =>
 		{
 			using SqliteSyncDbContext racer = StateTestSupport.NewContext(_connection);
-			racer.OofSettings.Add(new OofSetting { UserName = "u@a3", State = 0, Message = "racer" });
+			racer.OofSettings.Add(new OofSetting { UserId = a3UserId, State = 0, Message = "racer" });
 			racer.SaveChanges();
 		});
 		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, race);
 		SyncStateService service = new(db);
 
-		OofSetting saved = await service.SaveOofAsync(
-			"u@a3", 1, DateTime.UtcNow, DateTime.UtcNow.AddDays(1),
+		OofSetting saved = await service.SaveOofAsync(a3UserId, 1, DateTime.UtcNow, DateTime.UtcNow.AddDays(1),
 			"back tomorrow", "Text", null, CancellationToken.None); // must not throw
 
-		Assert.Equal("u@a3", saved.UserName);
+		Assert.Equal(a3UserId, saved.UserId);
 		Assert.Equal(1, saved.State);
 
 		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
 		List<OofSetting> rows = await verify.OofSettings.AsNoTracking()
-			.Where(o => o.UserName == "u@a3").ToListAsync();
+			.Where(o => o.UserId == a3UserId).ToListAsync();
 		Assert.Single(rows); // no duplicate row surviving from our own failed insert attempt
 		Assert.Equal(1, rows[0].State);
 		Assert.Equal("back tomorrow", rows[0].Message);

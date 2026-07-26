@@ -43,7 +43,7 @@ public sealed class GetItemEstimateHandler(
 			}
 
 			(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
-				context.Session, context.Device.UserName, collectionId, ct);
+				context.Session, context.UserId, collectionId, ct);
 			if (resolved is null)
 			{
 				responses.Add(Response("2", null));

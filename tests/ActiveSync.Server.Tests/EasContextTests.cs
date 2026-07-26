@@ -28,8 +28,16 @@ public sealed class EasContextTests : IDisposable
 			.UseSqlite(_connection).Options;
 		_db = new SqliteSyncDbContext(options);
 		_db.Database.EnsureCreated();
+		User user = new() { Login = "u@example.test", UpdatedUtc = DateTime.UtcNow };
+#pragma warning disable VSTHRD103
+		_db.Users.Add(user);
+#pragma warning restore VSTHRD103
+		_db.SaveChanges();
+		_userId = user.UserId;
 		_state = new SyncStateService(_db);
 	}
+
+	private readonly int _userId;
 
 	public void Dispose()
 	{
@@ -40,7 +48,7 @@ public sealed class EasContextTests : IDisposable
 	private async Task<EasContext> ContextForAsync(HttpContext http)
 	{
 		Device device = await _state.GetOrCreateDeviceAsync(
-			"u@example.test", "TESTDEVICE01", "TestClient", CancellationToken.None);
+			_userId, "TESTDEVICE01", "TestClient", CancellationToken.None);
 		return new EasContext
 		{
 			Http = http,

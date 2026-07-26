@@ -48,7 +48,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		BackendSessionFactory factory = NewFactory(provider, sessionIdleMinutes: -1); // everything is "idle"
 
 		// The active request gets its session and keeps using it.
-		IBackendSession held = await factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None);
+		IBackendSession held = await factory.GetSessionAsync(Creds, 1, "dev-1", CancellationToken.None);
 		FakeResource resource = provider.LastResource!;
 
 		// The idle sweep runs concurrently with the still-open request.
@@ -86,10 +86,10 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		CountingContextFactory counting = new(_connection);
 		BackendSessionFactory factory = NewFactory(provider, dbFactory: counting);
 
-		await factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None);
+		await factory.GetSessionAsync(Creds, 1, "dev-1", CancellationToken.None);
 		int afterBuild = counting.Created;
-		await factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None); // cache hit
-		await factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None); // cache hit
+		await factory.GetSessionAsync(Creds, 1, "dev-1", CancellationToken.None); // cache hit
+		await factory.GetSessionAsync(Creds, 1, "dev-1", CancellationToken.None); // cache hit
 
 		Assert.Equal(afterBuild, counting.Created); // no further DB reads for the cache hits
 	}
@@ -160,7 +160,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		BackendSessionFactory factory = NewFactory(provider);
 
 		await Assert.ThrowsAsync<InvalidOperationException>(() =>
-			factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None));
+			factory.GetSessionAsync(Creds, 1, "dev-1", CancellationToken.None));
 
 		InvokeEvictIdleSessions(factory);
 
@@ -180,7 +180,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		FlakyProvider provider = new();
 		BackendSessionFactory factory = NewFactory(provider);
 
-		IBackendSession session = await factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None);
+		IBackendSession session = await factory.GetSessionAsync(Creds, 1, "dev-1", CancellationToken.None);
 
 		Assert.NotNull(session);
 		Assert.Equal(2, provider.AttemptCount); // one faulted attempt, then one that succeeded
@@ -199,7 +199,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		string key = $"{Creds.UserName}\ndev-1";
 
 		await Assert.ThrowsAsync<InvalidOperationException>(() =>
-			factory.GetSessionAsync(Creds, "dev-1", CancellationToken.None));
+			factory.GetSessionAsync(Creds, 1, "dev-1", CancellationToken.None));
 		Assert.True(SessionsContainsKey(factory, key)); // the faulted slot is still cached
 
 		InvokeEvictIdleSessions(factory);
