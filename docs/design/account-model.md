@@ -86,6 +86,7 @@ Recorded so a fresh session executes rather than re-litigates.
 | 15 | **Every account-linked table gets a real FK to `AccountId` with cascade delete**, and `SentCommandToken` gets the FK to `Device` it is missing today. |
 | 16 | **Deleting an account must not silently destroy content.** The DB cascades; the application counts what would be lost and demands confirmation naming it. |
 | 17 | **Config-declared accounts get rows at startup** (identity from the row, values from config). |
+| 18 | **`AccountsStamp` + `SettingsStamp` merge into one `DataChanges` table**, keyed by area string, **one row per watched area**. A stamp belongs to a consumer's aggregate, not to a table — so `AccountBackendRoles` bumps `"accounts"` rather than getting its own. |
 
 > **The shape is still settling.** Decisions 1–9 have been through a full round of review; 10–17 are
 > newer and the owner expects them to move. Treat the *direction* as agreed and the field-level detail
@@ -497,6 +498,55 @@ the surrogate key, and it is the supported path for every account configuration 
 
 ---
 
+## Cross-cutting schema change: one `DataChanges` table
+
+*Not account-specific — recorded here because the reinit is a single event. See the note at the end
+of this section about where it really belongs.*
+
+`AccountsStamp` and `SettingsStamp` are the same idiom twice: a single well-known row (`Id = 1`) whose
+`Guid Version` is bumped in the same `SaveChanges` as the mutation, point-read by each replica to
+notice changes cheaply. Replace both with one table:
+
+```
+DataChanges
+  Id          int identity   // PK
+  Key         string         // UNIQUE — "accounts", "settings", …
+  Version     Guid           // bumped in the same SaveChanges as the mutation
+  UpdatedUtc  DateTime
+```
+
+**One row per watched area — never one row total.** This is the way to get it wrong: a single shared
+version would make an account write invalidate the settings snapshot and vice versa, so every
+consumer reloads on every unrelated change. Distinct rows keep the invalidation scoped exactly as it
+is today, and on PostgreSQL they are distinct row locks (SQLite serialises writes regardless, so
+nothing changes there).
+
+**Key it by string, not by a magic id.** `Key = "accounts"` reads better than "the code knows Id 2 is
+accounts", it matches the `GlobalSetting.Key` idiom already in the codebase, and — the real payoff —
+**adding a watched area becomes an inserted row rather than a new table and a migration.**
+
+**`AccountBackendRoles` does not get its own stamp.** It is part of the accounts aggregate, and
+`AccountResolver` rebuilds the entire snapshot on any bump, so a write there bumps `"accounts"` like
+any other account mutation. The rule to write down: **a stamp belongs to a *consumer's aggregate*,
+not to a table.** Getting this backwards produces one stamp per table and a resolver that reloads
+several times for one logical change.
+
+**Keep the existing first-use race handling.** Both stores today do "read the row; if absent, add it",
+which two replicas can execute concurrently. With `Key` unique, the loser catches the unique violation
+and re-reads — the same pattern `DeviceStore`, `DavItemMap` and `GatewayCertificateStore` already use.
+
+Areas worth having from the start: `"accounts"`, `"settings"`. A candidate the shared table makes
+cheap later: shared-calendar grants, which today are picked up only on session recycle because giving
+them a stamp would have meant another table.
+
+> **Scope note.** This document is called *account-model* but now also specifies foreign keys and
+> cascade rules on non-account tables, a delete guard, and this stamp consolidation. It has outgrown
+> its name. The cleaner shape is a single `db-restructure.md` with the account model as its largest
+> chapter — worth doing before implementation starts, so nobody reads "account-model" and assumes the
+> non-account parts are out of scope.
+
+---
+
 ## What this deliberately does NOT do
 
 State this plainly so nobody "fixes" it later believing it an oversight.
@@ -597,7 +647,12 @@ No resolver changes yet: prove the columns persist, seal and round-trip.
 **Assert the two credential chains stay separate** — the gateway `Password` is verified locally and
 must never be reachable by anything that builds a backend connection.
 
-**3a. Foreign keys and cascades.** Convert every account-linked soft link to a real FK with cascade
+**3a. `DataChanges`.** Replace `AccountsStamp` and `SettingsStamp` with the shared table; route
+`GlobalSettingStore` and `AccountStore` (including `AccountBackendRoles` writes) through it. **Test
+that the areas stay independent** — an account write must not move the `"settings"` version, or every
+consumer reloads on every unrelated change.
+
+**3b. Foreign keys and cascades.** Convert every account-linked soft link to a real FK with cascade
 (see "Real foreign keys and cascade delete"), including the `SentCommandToken` → `Device` FK that is
 missing today and `LoginBlock`'s `DeviceKey`. **Test that deleting an account removes exactly its
 own rows and nothing else's**, and that deleting a device no longer orphans `SentCommandToken` rows.
