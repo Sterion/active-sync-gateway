@@ -1,0 +1,340 @@
+# Target database schema — after the restructure
+
+> **This is a projection, not a record.** It applies the decisions in
+> [`db-restructure.md`](db-restructure.md) to the schema in [`current-db.md`](current-db.md) to show
+> what the database should look like when the work lands. **None of it exists yet.** Where this
+> disagrees with `db-restructure.md`, that document wins — it holds the reasoning; this one only
+> renders the result.
+>
+> Anything marked **ⓘ inferred** was *not* explicitly decided and is my best reading. Those are the
+> lines most likely to change when someone implements this.
+
+**Still 18 tables.** Two stamps merge into one, one table is added, one is renamed and normalised:
+
+| Change | Today | Target |
+|---|---|---|
+| Renamed + normalised | `AccountEntries` (login + one JSON blob) | **`Users`** (login + 9 typed columns) |
+| **New** | — | **`UserBackendRoles`** (per-role credentials as columns) |
+| Merged | `AccountsStamps` + `SettingsStamps` | **`DataChanges`** (one row per watched area) |
+| Re-keyed | 8 tables carrying `UserName` string | FK to `Users.UserId`, cascade |
+| FK added | `SentCommandToken.DeviceKey` (no FK) | real FK → `Device`, cascade |
+| Narrowed | `LoginBlock` (nullable `DeviceId` string) | per-device only, non-nullable FK |
+| Unchanged | `DeviceFolder`, `CollectionState`, `DavItem`, `GlobalSetting`, `LogEntry`, `ServerCertificate`, `DataProtectionKeys` | — |
+
+---
+
+## Reading the link graph
+
+The inversion from today: **soft links become real foreign keys.** Today three relationships are
+declared FKs and everything else is a string matched by value; in the target, every per-user and
+per-device relationship is a constraint the database enforces.
+
+```
+Users ──< UserBackendRoles          (UserId, cascade)          ← new
+      ──< Device ──< DeviceFolder     (DeviceKey, cascade)
+      │         ──< CollectionState   (DeviceKey, cascade)
+      │         ──< SentCommandToken  (DeviceKey, cascade)     ← FK added
+      │         ──< LoginBlock        (DeviceKey, cascade)     ← was a string pair
+      ──< UserFolder ──< DavItem      (UserFolderKey, cascade)
+      ──< LocalItem                   (UserId, cascade)
+      ──< SharedCalendarGrant         (UserId, cascade)
+      ──< OofSetting                  (UserId, cascade)
+      ──< WebSessionRevocation        (UserId, cascade)
+```
+
+**Deleting a `Users` row removes everything above it.** That is the point, and it is why the
+application must count content before issuing the delete (`db-restructure.md` § *Deleting a user must
+not silently destroy data*).
+
+**Five tables remain global** — no user scoping at all: `DataChanges`, `GlobalSetting`, `LogEntry`,
+`ServerCertificate`, `DataProtectionKeys`.
+
+**The one surviving soft link is deliberate:** `CollectionState.CollectionId`,
+`SentCommandToken.CollectionId` and `DeviceFolder.ServerId` still hold `UserFolder.Id` **as a string**,
+because `ServerId` is the EAS wire identifier and is a string by protocol. `db-restructure.md` does
+not propose changing this. ⓘ **inferred** — it is worth a second look during implementation, since it
+is the last place where a rename or re-id could silently mis-scope rows, but converting it would
+change every ServerId the clients hold.
+
+**Concurrency tokens** stay on `Device`, `CollectionState`, `LocalItem`, `ServerCertificate`.
+`OofSetting` still has none — finding `A3` (open, review item 20) is not part of this restructure.
+
+---
+
+# Users and access
+
+## `Users`  *(was `AccountEntries`)*
+
+| Column | Type | Key / index | Purpose |
+|---|---|---|---|
+| `UserId` | int identity | **PK** | **THE identity.** Immutable, never reused — every per-user table FKs to it. `AUTOINCREMENT` on SQLite, identity on Postgres, so ids are never recycled |
+| `Login` | string | **unique**, case-folded | The identity string the phone sends. **Mutable** — except while the user is config-declared, when rename is refused |
+| `Password` | string? | | **Device → gateway.** `pbkdf2$…` or plaintext. Verified locally; never sent to a backend |
+| `DefaultBackendLogin` | string? | | **Gateway → backends.** Default user name for every role. Unset ⇒ the gateway login |
+| `DefaultBackendPassword` | string? | | Default secret for every role, `enc:v1:` sealed. Unset ⇒ the presented EAS password (pass-through) |
+| `MailAddress` | string? | | From rewriting, Settings, meeting replies. Null ⇒ the login if it contains `@`. *Was inside the JSON blob* |
+| `Admin` | bool? | | Grants `/admin` access |
+| `Enabled` | bool? | | `false` = disabled; every login refused 403 after valid credentials. **Owns whole-user blocking** now that `LoginBlock` is device-only |
+| `OidcSubject` | string? | ⓘ index? | IdP `sub` this user is bound to. ⓘ **inferred**: worth a unique index — two users bound to one subject is a takeover vector — but not stated |
+| `AutoProvisioned` | bool? | | Provenance marker for gateway-created rows |
+| `UpdatedUtc` | DateTime | | ⓘ **inferred** — `AccountEntries` has it and nothing says to drop it |
+
+**What it is:** the registry of every user, whatever their origin — config-declared, DB-declared or
+auto-provisioned on first successful auth. Past the auth boundary a row always exists, which is what
+makes `UserId` safe to assume everywhere.
+
+**Where used:** the resolver (renamed from `AccountResolver`) merges these with config into the
+snapshot; the store writes them; `eas user`/`/admin/api/users` edit them; auth reads `Password`,
+`Enabled` and `OidcSubject`.
+
+**Links:** parent of everything in the graph above. No outbound links.
+
+**Gone from here:** the `Json` column. Its scalars are the columns above; its per-role `Backends`
+dictionary is the table below.
+
+## `UserBackendRoles`  *(new)*
+
+| Column | Type | Key / index | Purpose |
+|---|---|---|---|
+| `Id` | int identity | **PK** | |
+| `UserId` | int | **unique (UserId, Role)**, **FK → `Users`, cascade** | Owning user |
+| `Role` | string | ↑ | `MailStore`, `MailSubmit`, `Calendar`, `Tasks`, `Contacts`, `Notes`, `Oof` |
+| `Enabled` | bool? | | `false` = turn this role off (content roles fall back to `local`, Oof off). Invalid on the two mail roles |
+| `Provider` | string? | | Serve this role with a different provider than the global assignment |
+| `UserName` | string? | | Backend login for this role. Unset ⇒ `Users.DefaultBackendLogin`, then the global section, then pass-through |
+| `Password` | string? | | Backend secret, `enc:v1:` sealed. Same fallback chain |
+| `SettingsJson` | string? | | **The one surviving blob** — provider-defined keys, see below |
+
+**What it is:** one row per (user, role) override. Only rows that actually deviate need to exist —
+a user with no overrides has none, and resolution falls straight through to the user defaults and
+then the global role section.
+
+**Where used:** credential and settings resolution when building a backend session.
+
+**Links:** → `Users` (**FK, cascade**). ⓘ **inferred**: `Role` stored as a string rather than an int
+enum, matching how role names already appear in config keys and the CLI; an int would be denser but
+unreadable in the table.
+
+## `LoginBlock`
+
+| Column | Type | Key / index | Purpose |
+|---|---|---|---|
+| `Id` | int identity | **PK** | |
+| `DeviceKey` | int | **unique**, **FK → `Device`, cascade** | The blocked device. **Non-nullable** — the whole-user case moved to `Users.Enabled` |
+| `CreatedUtc` | DateTime | | |
+
+**What it is:** an operator cut-off for **one device**, enforced after successful authentication with
+a 403. Also written automatically when an account-only wipe is acknowledged.
+
+**Where used:** the EAS and Autodiscover endpoints post-auth; `eas block`/`unblock` (now
+device-scoped); `CompleteAccountWipeAsync`.
+
+**Links:** → `Device` (**FK, cascade**), and through it to `Users`.
+
+> ⚠️ **This differs from `db-restructure.md`, deliberately — please rule on it.** That document's FK
+> table says `LoginBlock` gets **both** a `UserId` FK and a `DeviceKey` FK. But a device already
+> belongs to exactly one user, so `UserId` here would be derivable — and the same document's own rule
+> says *"do not add a `UserId` to a table that already reaches a user through a FK, or the two paths
+> can disagree and there is no constraint that would catch it."* By that rule `LoginBlock` should
+> carry `DeviceKey` alone, which is what is shown above. The counter-argument is query convenience
+> ("all blocks for this user" becomes a join) — real, but the rule exists precisely because
+> convenience columns drift.
+
+## `SharedCalendarGrant`
+
+| Column | Type | Key / index | Purpose |
+|---|---|---|---|
+| `Id` | int identity | **PK** | |
+| `UserId` | int | **unique (UserId, CollectionHref)**, **FK → `Users`, cascade** | Grantee |
+| `CollectionHref` | string | ↑ | The extra CalDAV collection href |
+| `ReadOnly` | bool | | Enforced gateway-side via silent revert |
+| `CreatedUtc` | DateTime | | |
+
+**What it is:** `eas share` — one extra CalDAV collection exposed to one user as an additional
+calendar folder. Unions with the config `SharedCollections` list; DB wins per href.
+
+**Where used:** the share admin service; the session factory loads grants once per session build, so
+changes apply on session recycle.
+
+**Links:** → `Users` (**FK, cascade**). The href is matched leniently against DAV collections, not
+against any local table.
+
+## `WebSessionRevocation`
+
+| Column | Type | Key / index | Purpose |
+|---|---|---|---|
+| `Id` | int identity | **PK** | |
+| `UserId` | int | **unique**, **FK → `Users`, cascade** | One row per user |
+| `ValidAfterUtc` | DateTime | | Any web session *started* before this is refused at next revalidation |
+
+**What it is:** the server-side half of web logout — the auth cookie is a self-contained ticket, so
+this row is what actually invalidates copies of it. Rewritten, never appended.
+
+**Where used:** the WebUi session-validation hook.
+
+**Links:** → `Users` (**FK, cascade**).
+
+## `OofSetting`
+
+| Column | Type | Key / index | Purpose |
+|---|---|---|---|
+| `Id` | int identity | **PK** | |
+| `UserId` | int | **unique**, **FK → `Users`, cascade** | Owner |
+| `State` | int | | 0 = disabled, 1 = enabled, 2 = scheduled |
+| `StartUtc` / `EndUtc` | DateTime? | | Scheduled window |
+| `Message` | string | | Reply body — deliberately plaintext |
+| `BodyType` | string | | "Text" or "HTML" |
+| `PreviousActiveScript` | string? | | Sieve script active before the gateway took over |
+| `UpdatedUtc` | DateTime | | |
+
+**What it is:** the source of truth for Settings→Oof Get. The sieve script on the mail server is
+derived output, never parsed back.
+
+**Links:** → `Users` (**FK, cascade**). Still **not** concurrency-token stamped — finding `A3`.
+
+---
+
+# Sync state
+
+## `Device`
+
+Unchanged except for identity: `UserName` string → **`UserId` FK, cascade**; unique index becomes
+**(`UserId`, `DeviceId`)**. Everything else — `DeviceType`, `PolicyKey`, `PolicyDocHash`,
+`RecoveryPasswordProtected`, `PendingAccountWipe`, `LastProtocolVersion`, `FolderSyncKey`,
+`DeviceInfoJson`, `PingParamsJson`, `LastSyncRequestJson`, `CreatedUtc`, `LastSeenUtc`,
+`ConcurrencyToken` — is as [`current-db.md`](current-db.md) describes.
+
+**Links:** → `Users` (**FK, cascade**); ← `DeviceFolder`, `CollectionState`, `SentCommandToken`,
+`LoginBlock` (all **FK, cascade**).
+
+## `UserFolder`
+
+`UserName` string → **`UserId` FK, cascade**; unique index becomes **(`UserId`, `BackendKey`)**.
+Columns otherwise unchanged (`BackendKey`, `DisplayName`, `ParentBackendKey`, `Type`, `EasClass`,
+`Deleted`, `DeletedUtc`), including the computed `ServerId => Id.ToString()`.
+
+**Links:** → `Users` (**FK, cascade**); ← `DavItem` (**FK, cascade**); self-link
+`ParentBackendKey` → `BackendKey` (still soft); ← the three tables holding `Id` as a string.
+
+## `DeviceFolder`, `CollectionState`, `DavItem` — unchanged
+
+Already correctly keyed through `DeviceKey` / `UserFolderKey`, so the restructure does not touch them.
+They reach a user transitively and **must not gain a `UserId` column**.
+
+## `SentCommandToken`
+
+Columns unchanged (`DeviceKey`, `CollectionId`, `SyncKeyAtClaim`, `Key`, `CreatedUtc`, `Completed`)
+and the unique index stays **(`DeviceKey`, `CollectionId`, `SyncKeyAtClaim`, `Key`)**. The change is
+that `DeviceKey` becomes a **real FK to `Device` with cascade**, closing today's orphan-on-device-delete
+gap.
+
+---
+
+# Local user data
+
+## `LocalItem`
+
+| Column | Type | Key / index | Purpose |
+|---|---|---|---|
+| `Id` | int identity | **PK** | Item key / revision anchor |
+| `UserId` | int | index (UserId, Collection) — not unique, **FK → `Users`, cascade** | Owner |
+| `Collection` | string | ↑ | `contacts`, `calendar`, `notes` |
+| `Uid` | string | | Item UID |
+| `Content` | string | | **AES-256-GCM ciphertext**, `"v1:" + base64`. **AAD now binds `UserId`, not the login** |
+| `Version` | int | | Monotonic per-item revision |
+| `ItemDateUtc` | DateTime? | | Event start for EAS filter windows; deliberately plaintext |
+| `LastModifiedUtc` | DateTime | | |
+| `ConcurrencyToken` | Guid | concurrency token | |
+
+**The AAD change is the single most consequential line in this document.** Binding to `UserId`
+instead of the login is what makes a rename survivable — and getting it wrong is only discovered when
+data will not decrypt. `db-restructure.md` suggests a versioned, length-prefixed framing
+(`"v2" ‖ LE64(userId) ‖ LE32(len) ‖ collection`) to keep `K2`'s injectivity without relying on
+control-character rejection.
+
+**This is the table that makes deletion dangerous** — it is real user content, existing nowhere else
+in a local-stores deployment, and it cascades.
+
+---
+
+# Settings & operations
+
+## `DataChanges`  *(replaces `AccountsStamps` + `SettingsStamps`)*
+
+| Column | Type | Key / index | Purpose |
+|---|---|---|---|
+| `Id` | int identity | **PK** | |
+| `Key` | string | **unique** | Watched area: `"users"`, `"settings"` |
+| `Version` | Guid | | Bumped in the same `SaveChanges` as the mutation |
+| `UpdatedUtc` | DateTime | | ⓘ **inferred** — mirrors `GlobalSetting` |
+
+**What it is:** the change signal each replica point-reads (~1 s) to notice edits without re-reading
+everything. **One row per watched area, never one row total** — a shared version would make a user
+write invalidate the settings snapshot and vice versa.
+
+**A stamp belongs to a consumer's aggregate, not to a table:** `UserBackendRoles` writes bump
+`"users"`, because the resolver rebuilds the whole snapshot anyway.
+
+**Where used:** the resolver's refresh gate (`"users"`); the settings refresher (`"settings"`).
+
+**Links:** none — a bare signal. Adding a watched area later is an inserted row, not a migration.
+
+## `GlobalSetting`, `LogEntry`, `ServerCertificate`, `DataProtectionKeys` — unchanged
+
+As [`current-db.md`](current-db.md) describes. Two notes:
+
+- **`LogEntry.User` stays a login string, not a `UserId`.** ⓘ **inferred** — not stated in
+  `db-restructure.md`. Rationale: a log line is an audit record of what was true at the time, so it
+  should not silently change meaning when someone renames a login, and it must survive the user row
+  being deleted (which an FK with cascade would prevent). Carrying `UserId` *as well*, for joining,
+  would be reasonable.
+- `ServerCertificate` keeps its explicit `Id = 1` and its concurrency token.
+
+---
+
+# Inside the serialized columns
+
+Far less is serialized than today — the `AccountOptions` blob is gone entirely.
+
+## `UserBackendRoles.SettingsJson` → `Dictionary<string, string?>`
+
+The **only** remaining user-related blob. Flat provider-defined configuration keys overlaid on the
+global role section. Kept serialized on purpose: the keys are declared at runtime by
+`IBackendProvider.DescribeConfiguration` → `BackendConfigField`, and the host deliberately never knows
+a plugin provider's option shape.
+
+Two semantics must survive resolution across all five levels:
+
+- **List replacement** — setting any element (`X:0`) REPLACES the whole inherited list `X`.
+- **Null clears** — a null value removes the inherited key rather than falling through.
+
+## Unchanged from today
+
+| Column | Contents |
+|---|---|
+| `Device.DeviceInfoJson` | `Dictionary<string,string>` — the client's Settings→DeviceInformation `Set`, no fixed schema |
+| `Device.PingParamsJson` | `{ HeartbeatSeconds, FolderIds[] }` |
+| `Device.LastSyncRequestJson` | `{ WaitSeconds?, GlobalWindowSize, Collections[{ CollectionId, GetChanges, WindowSize? }] }` |
+| `CollectionState.SnapshotCompressed` / `PreviousSnapshotCompressed` | gzipped `{ itemServerId → revision }` |
+| `CollectionState.LastClientAddsJson` | `{ ClientId → { ItemKey?, Revision? } }` |
+| `CollectionState.LastClientChangesJson` | `{ ServerId (or ServerId\nInstanceId) → { ItemKey?, Revision? } }`; null `Revision` = removed |
+| `CollectionState.OptionsJson` | `{ FilterType, BodyType, TruncationSize?, MimeSupport, Conflict }` |
+| `LocalItem.Content` | AES-GCM ciphertext — **AAD changes to bind `UserId`** |
+| `ServerCertificate.PfxProtected` | sealed base64 PKCS#12 |
+| `DataProtectionKeys.Xml` | sealed key XML |
+
+---
+
+## What to check when this is implemented
+
+The lines most likely to have drifted from this projection:
+
+1. **Everything marked ⓘ** — `UpdatedUtc` on `Users`, the `OidcSubject` index, `Role` as string,
+   `LogEntry.User`, `DataChanges.UpdatedUtc`.
+2. **`LoginBlock`'s shape** — see the ruling requested above; `db-restructure.md` and this document
+   currently differ.
+3. **Whether `CollectionId`-as-string survived** — kept here because `ServerId` is an EAS wire value,
+   but it is the last soft link that could mis-scope rows.
+4. **The AAD framing** — the exact byte layout is a suggestion in `db-restructure.md`, not a decision.
+5. **Whether any table gained a convenience `UserId`** it should not have. The rule is: if it already
+   reaches a user through a FK, it does not get one.
