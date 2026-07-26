@@ -23,7 +23,7 @@ public static class StartupSummary
 	/// <param name="roles">The global role assignments; null omits the backend lines.</param>
 	/// <param name="registry">Provider registry describing each role; null omits the backend lines.</param>
 	/// <param name="mergedUsers">
-	///   The merged config ⊕ database user view (<see cref="AccountResolver.MergedUsers" />);
+	///   The merged config ⊕ database user view (<see cref="UserResolver.MergedUsers" />);
 	///   null falls back to config-only (hosts without a reachable database).
 	/// </param>
 	/// <param name="httpsSummary">
@@ -35,7 +35,7 @@ public static class StartupSummary
 		ILogger logger, ActiveSyncOptions options,
 		BackendRolesConfig? roles = null,
 		BackendProviderRegistry? registry = null,
-		IReadOnlyDictionary<string, MergedAccount>? mergedUsers = null,
+		IReadOnlyDictionary<string, MergedUser>? mergedUsers = null,
 		string? httpsSummary = null)
 	{
 		string version = Assembly.GetExecutingAssembly()
@@ -48,10 +48,10 @@ public static class StartupSummary
 		string copyright = Assembly.GetExecutingAssembly()
 			.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright ?? "";
 
-		IReadOnlyDictionary<string, MergedAccount> users = mergedUsers
+		IReadOnlyDictionary<string, MergedUser> users = mergedUsers
 			?? options.Users?.ToDictionary(
-				kv => kv.Key, kv => new MergedAccount(kv.Value, false, false), StringComparer.OrdinalIgnoreCase)
-			?? new Dictionary<string, MergedAccount>();
+				kv => kv.Key, kv => new MergedUser(kv.Value, false, false), StringComparer.OrdinalIgnoreCase)
+			?? new Dictionary<string, MergedUser>();
 
 		logger.LogInformation("========================================================");
 		logger.LogInformation("ActiveSync gateway v{Version} — EAS 16.1 → mail/DAV backends", version);
@@ -74,7 +74,7 @@ public static class StartupSummary
 				"({ConfigCount} config, {DbCount} database){Restricted}",
 				users.Count, users.Count == 1 ? "y" : "ies", users.Count - fromDb, fromDb,
 				options.RequireDeclaredUsers ? " (declared users only)" : "");
-			foreach ((string login, MergedAccount account) in
+			foreach ((string login, MergedUser account) in
 			         users.OrderBy(u => u.Key, StringComparer.OrdinalIgnoreCase))
 				logger.LogInformation("User:     {Login}  {Details}", login, DescribeUser(account));
 			int plaintextCount = users.Values.Count(u =>
@@ -159,9 +159,9 @@ public static class StartupSummary
 	///   One-line, full-detail description of a declared user — origin, mail address and every
 	///   overridden role. Passwords never render; only a masked marker with their format.
 	/// </summary>
-	internal static string DescribeUser(MergedAccount account)
+	internal static string DescribeUser(MergedUser account)
 	{
-		AccountOptions o = account.Options;
+		UserOptions o = account.Options;
 		List<string> parts =
 		[
 			account.FromDatabase

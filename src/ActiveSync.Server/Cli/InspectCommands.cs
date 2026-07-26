@@ -73,12 +73,12 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 		IServiceProvider services, SyncDbContext db, Settings settings, CancellationToken cancellationToken)
 	{
 		// Declared side: config overlay ⊕ database rows (the former `eas user list`).
-		AccountStore store = services.GetRequiredService<AccountStore>();
+		UserStore store = services.GetRequiredService<UserStore>();
 		ActiveSyncOptions options = services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value;
-		List<(string UserName, AccountOptions Options, DateTime UpdatedUtc, bool Valid)> dbEntries =
+		List<(string UserName, UserOptions Options, DateTime UpdatedUtc, bool Valid)> dbEntries =
 			await store.ListAsync(cancellationToken);
-		Dictionary<string, AccountOptions> configUsers =
-			options.Users ?? new Dictionary<string, AccountOptions>(StringComparer.OrdinalIgnoreCase);
+		Dictionary<string, UserOptions> configUsers =
+			options.Users ?? new Dictionary<string, UserOptions>(StringComparer.OrdinalIgnoreCase);
 
 		// State side: usage aggregates grouped by login (the former `eas users`).
 		var deviceStats = await db.Devices
@@ -114,8 +114,8 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 		// O(users) point-reads instead of O(users × rows) repeated FirstOrDefault/Any/Count scans (tens
 		// of millions of comparisons on a large fleet). Case-insensitive keys also line up state rows
 		// recorded under a casing that differs from the login — the old ordinal `==` scans missed those.
-		Dictionary<string, (AccountOptions Options, bool Valid)> dbByUser = new(StringComparer.OrdinalIgnoreCase);
-		foreach ((string userName, AccountOptions options_, DateTime _, bool valid) in dbEntries)
+		Dictionary<string, (UserOptions Options, bool Valid)> dbByUser = new(StringComparer.OrdinalIgnoreCase);
+		foreach ((string userName, UserOptions options_, DateTime _, bool valid) in dbEntries)
 			dbByUser.TryAdd(userName, (options_, valid));
 		Dictionary<string, (int Count, DateTime LastSeen)> devicesByUser = deviceStats
 			.GroupBy(s => s.User, StringComparer.OrdinalIgnoreCase)
@@ -135,9 +135,9 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 		foreach (string user in users)
 		{
 			// Declared attributes — null when the login only has state (a pass-through user).
-			bool inDb = dbByUser.TryGetValue(user, out (AccountOptions Options, bool Valid) dbEntry);
+			bool inDb = dbByUser.TryGetValue(user, out (UserOptions Options, bool Valid) dbEntry);
 			bool inConfig = configUsers.ContainsKey(user);
-			AccountOptions? declared = inDb ? dbEntry.Options : inConfig ? configUsers[user] : null;
+			UserOptions? declared = inDb ? dbEntry.Options : inConfig ? configUsers[user] : null;
 			// B15: a row whose JSON does not parse is surfaced FLAGGED, not omitted, so the
 			// operator can see (and fix) the login the auth path is silently ignoring.
 			string origin = declared is null

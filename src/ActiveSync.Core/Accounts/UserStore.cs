@@ -7,14 +7,14 @@ using Microsoft.Extensions.Logging;
 namespace ActiveSync.Core.Accounts;
 
 /// <summary>
-///   CRUD over database-declared account entries (<see cref="AccountEntry" /> rows holding a
-///   serialized <see cref="AccountOptions" />). Every mutation bumps the single
+///   CRUD over database-declared account entries (<see cref="User" /> rows holding a
+///   serialized <see cref="UserOptions" />). Every mutation bumps the single
 ///   <see cref="AccountsStamp" /> row IN THE SAME SaveChanges, so each running gateway
 ///   notices changes with one primary-key point-read. Registered as a singleton.
 /// </summary>
-public sealed class AccountStore(ISyncDbContextFactory contextFactory)
+public sealed class UserStore(ISyncDbContextFactory contextFactory)
 {
-	/// <summary>Serialization shape for AccountEntry.Json (camelCase, nulls omitted).</summary>
+	/// <summary>Serialization shape for User.Json (camelCase, nulls omitted).</summary>
 	public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
 	{
 		DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
@@ -23,7 +23,7 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 	/// <summary>
 	///   Canonical (case-folded) form of a login. Logins are case-insensitive everywhere in memory
 	///   (the <see cref="LoadAllAsync" /> map uses <see cref="StringComparer.OrdinalIgnoreCase" />),
-	///   so <see cref="AccountEntry.UserName" /> is STORED in this form (B1/B8): the raw unique index
+	///   so <see cref="User.UserName" /> is STORED in this form (B1/B8): the raw unique index
 	///   then enforces case-folded uniqueness on its own — two BINARY-distinct rows like `Phone1` and
 	///   `phone1` can no longer both exist — and every lookup is an exact index seek rather than a
 	///   non-sargable `LOWER()` scan.
@@ -44,15 +44,15 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 	///   whose Json no longer deserializes is skipped with a warning — one bad row must
 	///   never take authentication down.
 	/// </summary>
-	public async Task<Dictionary<string, AccountOptions>> LoadAllAsync(ILogger? logger, CancellationToken ct)
+	public async Task<Dictionary<string, UserOptions>> LoadAllAsync(ILogger? logger, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
-		List<AccountEntry> entries = await db.AccountEntries.AsNoTracking()
+		List<User> entries = await db.Users.AsNoTracking()
 			.ToListAsync(ct).ConfigureAwait(false);
 
-		Dictionary<string, AccountOptions> result = new(StringComparer.OrdinalIgnoreCase);
-		foreach (AccountEntry entry in entries)
-			if (TryDeserialize(entry, logger, out AccountOptions options))
+		Dictionary<string, UserOptions> result = new(StringComparer.OrdinalIgnoreCase);
+		foreach (User entry in entries)
+			if (TryDeserialize(entry, logger, out UserOptions options))
 			{
 				// B1: the store writes UserName case-folded so this can't happen through the app, but a
 				// pre-fix pair, a restored dump or an out-of-band write can still leave two BINARY-distinct
@@ -68,32 +68,32 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 		return result;
 	}
 
-	public async Task<AccountOptions?> GetAsync(string login, CancellationToken ct)
+	public async Task<UserOptions?> GetAsync(string login, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
 		// B8: UserName is stored case-folded (see NormalizeLogin), so an exact match on the normalized
 		// login is an index seek AND sees every casing — the old `a.UserName.ToLower() == login.ToLower()`
 		// was a non-sargable full scan that still couldn't distinguish a case-variant pair.
 		string normalized = NormalizeLogin(login);
-		AccountEntry? entry = await db.AccountEntries.AsNoTracking()
+		User? entry = await db.Users.AsNoTracking()
 			.FirstOrDefaultAsync(a => a.UserName == normalized, ct).ConfigureAwait(false);
 		// B15: tolerate an unparseable row like LoadAllAsync does — `eas user show` must never
 		// hard-fail with JsonException (it is one of the tools for finding the bad row).
-		return entry is not null && TryDeserialize(entry, null, out AccountOptions options) ? options : null;
+		return entry is not null && TryDeserialize(entry, null, out UserOptions options) ? options : null;
 	}
 
-	public async Task<List<(string UserName, AccountOptions Options, DateTime UpdatedUtc, bool Valid)>> ListAsync(
+	public async Task<List<(string UserName, UserOptions Options, DateTime UpdatedUtc, bool Valid)>> ListAsync(
 		CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
-		List<AccountEntry> entries = await db.AccountEntries.AsNoTracking()
+		List<User> entries = await db.Users.AsNoTracking()
 			.OrderBy(a => a.UserName).ToListAsync(ct).ConfigureAwait(false);
-		List<(string, AccountOptions, DateTime, bool)> result = [];
-		foreach (AccountEntry entry in entries)
+		List<(string, UserOptions, DateTime, bool)> result = [];
+		foreach (User entry in entries)
 		{
 			// B15: surface a bad row FLAGGED rather than omitting it or throwing — `eas users`
 			// and the admin list must still render, marking the row the operator has to fix.
-			bool valid = TryDeserialize(entry, null, out AccountOptions options);
+			bool valid = TryDeserialize(entry, null, out UserOptions options);
 			result.Add((entry.UserName, options, entry.UpdatedUtc, valid));
 		}
 
@@ -102,32 +102,32 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 
 	/// <summary>
 	///   Deserializes one row's JSON, tolerating a malformed value: on failure it logs (when a
-	///   logger is supplied), yields an empty <see cref="AccountOptions" /> and returns false.
+	///   logger is supplied), yields an empty <see cref="UserOptions" /> and returns false.
 	///   Shared by every read path so one corrupt row can never take a surface down (B15).
 	/// </summary>
-	private static bool TryDeserialize(AccountEntry entry, ILogger? logger, out AccountOptions options)
+	private static bool TryDeserialize(User entry, ILogger? logger, out UserOptions options)
 	{
 		try
 		{
-			options = JsonSerializer.Deserialize<AccountOptions>(entry.Json, JsonOptions) ?? new AccountOptions();
+			options = JsonSerializer.Deserialize<UserOptions>(entry.Json, JsonOptions) ?? new UserOptions();
 			return true;
 		}
 		catch (Exception ex) when (ex is JsonException or NotSupportedException)
 		{
 			logger?.LogWarning(ex,
 				"Database account entry for {User} does not parse — treating it as invalid", entry.UserName);
-			options = new AccountOptions();
+			options = new UserOptions();
 			return false;
 		}
 	}
 
-	public async Task UpsertAsync(string login, AccountOptions options, CancellationToken ct)
+	public async Task UpsertAsync(string login, UserOptions options, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
 		// B8: match on the case-folded login so `eas user set Phone1` updates the existing `phone1`
 		// row instead of inserting a second, colliding one (index seek, sees every casing).
 		string normalized = NormalizeLogin(login);
-		AccountEntry? entry = await db.AccountEntries
+		User? entry = await db.Users
 			.FirstOrDefaultAsync(a => a.UserName == normalized, ct).ConfigureAwait(false);
 		string json = JsonSerializer.Serialize(options, JsonOptions);
 		if (entry is null)
@@ -136,7 +136,7 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 			// DbSet.Add is synchronous and local (no I/O) — AddAsync exists only to support
 			// async value generators (e.g. HiLo/Cosmos), which this project doesn't use.
 #pragma warning disable VSTHRD103
-			db.AccountEntries.Add(new AccountEntry { UserName = normalized, Json = json, UpdatedUtc = DateTime.UtcNow });
+			db.Users.Add(new User { UserName = normalized, Json = json, UpdatedUtc = DateTime.UtcNow });
 #pragma warning restore VSTHRD103
 		}
 		else
@@ -154,11 +154,11 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 		await using SyncDbContext db = contextFactory.CreateDbContext();
 		// B8: exact match on the case-folded login (index seek, sees every casing).
 		string normalized = NormalizeLogin(login);
-		AccountEntry? entry = await db.AccountEntries
+		User? entry = await db.Users
 			.FirstOrDefaultAsync(a => a.UserName == normalized, ct).ConfigureAwait(false);
 		if (entry is null)
 			return false;
-		db.AccountEntries.Remove(entry);
+		db.Users.Remove(entry);
 		await BumpStampAsync(db, ct).ConfigureAwait(false);
 		await db.SaveChangesAsync(ct).ConfigureAwait(false);
 		return true;
@@ -173,9 +173,9 @@ public sealed class AccountStore(ISyncDbContextFactory contextFactory)
 	public async Task UpgradeLegacyRowsAsync(ILogger logger, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
-		List<AccountEntry> entries = await db.AccountEntries.ToListAsync(ct).ConfigureAwait(false);
+		List<User> entries = await db.Users.ToListAsync(ct).ConfigureAwait(false);
 		int upgraded = 0;
-		foreach (AccountEntry entry in entries)
+		foreach (User entry in entries)
 		{
 			string? converted = LegacyAccountJson.TryConvert(entry.Json, out string? error, logger);
 			if (error is not null)

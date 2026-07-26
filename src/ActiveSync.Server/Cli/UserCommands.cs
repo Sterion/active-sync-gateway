@@ -26,7 +26,7 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 	protected sealed override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, TSettings settings, CancellationToken cancellationToken)
 	{
-		AccountStore store = services.GetRequiredService<AccountStore>();
+		UserStore store = services.GetRequiredService<UserStore>();
 		ActiveSyncOptions options = services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value;
 		Roles = services.GetRequiredService<BackendRolesConfig>();
 		Registry = services.GetRequiredService<BackendProviderRegistry>();
@@ -34,22 +34,22 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 	}
 
 	protected abstract Task<int> RunAsync(
-		AccountStore store, ActiveSyncOptions options, TSettings settings, CancellationToken cancellationToken);
+		UserStore store, ActiveSyncOptions options, TSettings settings, CancellationToken cancellationToken);
 
-	protected static AccountOptions Clone(AccountOptions source) => AccountEditing.Clone(source);
+	protected static UserOptions Clone(UserOptions source) => UserEditing.Clone(source);
 
 	/// <summary>DB entry, else a copy of the config entry, else a fresh one.</summary>
-	protected static Task<AccountOptions> LoadStartingEntryAsync(
-		AccountStore store, ActiveSyncOptions options, string login, CancellationToken ct)
+	protected static Task<UserOptions> LoadStartingEntryAsync(
+		UserStore store, ActiveSyncOptions options, string login, CancellationToken ct)
 	{
-		return AccountEditing.LoadStartingEntryAsync(store, options, login, ct);
+		return UserEditing.LoadStartingEntryAsync(store, options, login, ct);
 	}
 
 	/// <summary>Validates, saves and reports; refuses invalid entries with config-grade messages.</summary>
 	protected async Task<int> ValidateAndSaveAsync(
-		AccountStore store, ActiveSyncOptions options, string login, AccountOptions entry, CancellationToken ct)
+		UserStore store, ActiveSyncOptions options, string login, UserOptions entry, CancellationToken ct)
 	{
-		List<string> failures = AccountResolver.ValidateEntry(options, Roles, Registry, login, entry);
+		List<string> failures = UserResolver.ValidateEntry(options, Roles, Registry, login, entry);
 		if (failures.Count > 0)
 		{
 			await Console.Error.WriteLineAsync("The entry would be invalid — nothing was saved:");
@@ -59,7 +59,7 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 		}
 
 		await store.UpsertAsync(login, entry, ct);
-		Terminal.WriteLine($"{login}  {StartupSummary.DescribeUser(new MergedAccount(entry, true, AccountEditing.FindConfigUser(options, login) is not null))}");
+		Terminal.WriteLine($"{login}  {StartupSummary.DescribeUser(new MergedUser(entry, true, UserEditing.FindConfigUser(options, login) is not null))}");
 		Terminal.WriteLine(PickupNote(options));
 		return 0;
 	}
@@ -84,19 +84,19 @@ internal sealed class UserShowCommand(IAnsiConsole terminal) : UserCommandBase<U
 	}
 
 	protected override async Task<int> RunAsync(
-		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
-		AccountOptions? fromDb = await store.GetAsync(settings.Login, cancellationToken);
-		AccountOptions? fromConfig = AccountEditing.FindConfigUser(options, settings.Login);
+		UserOptions? fromDb = await store.GetAsync(settings.Login, cancellationToken);
+		UserOptions? fromConfig = UserEditing.FindConfigUser(options, settings.Login);
 		if (fromDb is null && fromConfig is null)
 		{
 			await Console.Error.WriteLineAsync($"No declared user '{settings.Login}' (config or database).");
 			return 1;
 		}
 
-		MergedAccount effective = fromDb is not null
-			? new MergedAccount(fromDb, true, fromConfig is not null)
-			: new MergedAccount(fromConfig!, false, false);
+		MergedUser effective = fromDb is not null
+			? new MergedUser(fromDb, true, fromConfig is not null)
+			: new MergedUser(fromConfig!, false, false);
 		Terminal.WriteLine($"{settings.Login}  {StartupSummary.DescribeUser(effective)}");
 		if (effective is { FromDatabase: true, ShadowsConfig: true })
 			Terminal.WriteLine(
@@ -116,7 +116,7 @@ internal sealed class UserAddCommand(IAnsiConsole terminal) : UserCommandBase<Us
 	}
 
 	protected override async Task<int> RunAsync(
-		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
 		if (await store.GetAsync(settings.Login, cancellationToken) is not null)
 		{
@@ -127,9 +127,9 @@ internal sealed class UserAddCommand(IAnsiConsole terminal) : UserCommandBase<Us
 
 		// A brand-new entry is an empty overlay (an allowlist grant); when a config entry
 		// exists it is copied so the database version starts as an exact replacement.
-		AccountOptions entry = options.Users?.GetValueOrDefault(settings.Login) is { } fromConfig
+		UserOptions entry = options.Users?.GetValueOrDefault(settings.Login) is { } fromConfig
 			? Clone(fromConfig)
-			: new AccountOptions();
+			: new UserOptions();
 		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 	}
 }
@@ -143,7 +143,7 @@ internal sealed class UserRemoveCommand(IAnsiConsole terminal) : UserCommandBase
 	}
 
 	protected override async Task<int> RunAsync(
-		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
 		if (!await store.DeleteAsync(settings.Login, cancellationToken))
 		{
@@ -169,9 +169,9 @@ internal sealed class UserDisableCommand(IAnsiConsole terminal) : UserCommandBas
 	}
 
 	protected override async Task<int> RunAsync(
-		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
-		AccountOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+		UserOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
 		entry.Enabled = false;
 		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 	}
@@ -187,10 +187,10 @@ internal sealed class UserEnableCommand(IAnsiConsole terminal) : UserCommandBase
 	}
 
 	protected override async Task<int> RunAsync(
-		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
 		// Enabled is the default, so re-enabling clears the flag rather than storing an explicit true.
-		AccountOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+		UserOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
 		entry.Enabled = null;
 		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 	}
@@ -212,13 +212,13 @@ internal sealed class UserSetCommand(IAnsiConsole terminal) : UserCommandBase<Us
 	}
 
 	protected override async Task<int> RunAsync(
-		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
-		AccountFieldPaths.FieldPath? field = AccountFieldPaths.Find(settings.Key);
+		UserFieldPaths.FieldPath? field = UserFieldPaths.Find(settings.Key);
 		if (field is null)
 		{
 			await Console.Error.WriteLineAsync(
-				$"Unknown field '{settings.Key}'. Valid fields: {string.Join(", ", AccountFieldPaths.Keys)}");
+				$"Unknown field '{settings.Key}'. Valid fields: {string.Join(", ", UserFieldPaths.Keys)}");
 			return 1;
 		}
 
@@ -230,29 +230,29 @@ internal sealed class UserSetCommand(IAnsiConsole terminal) : UserCommandBase<Us
 				return 1;
 			value = prepared;
 		}
-		else if (!AccountFieldPaths.TryParseValue(field, settings.Value, out value, out string? parseError))
+		else if (!UserFieldPaths.TryParseValue(field, settings.Value, out value, out string? parseError))
 		{
 			await Console.Error.WriteLineAsync(parseError);
 			return 1;
 		}
 
-		AccountOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+		UserOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
 		field.Set(entry, value);
 		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 	}
 
 	/// <summary>
-	///   Password keys on argv, via the shared <see cref="AccountSecretPolicy" /> (same rules
+	///   Password keys on argv, via the shared <see cref="UserSecretPolicy" /> (same rules
 	///   as the web API): an already-prepared value (pbkdf2$/enc:v1:) is stored as-is; plaintext
 	///   is hashed (gateway Password) or sealed (backend passwords) with a shell-history
 	///   warning — the stdin commands ('user password'/'user secret') keep secrets out of argv.
 	/// </summary>
 	private static async Task<string?> PrepareSecretAsync(
-		AccountFieldPaths.FieldPath field, string raw, ActiveSyncOptions options)
+		UserFieldPaths.FieldPath field, string raw, ActiveSyncOptions options)
 	{
-		AccountSecretPolicy.SecretResult result = field.IsGatewayPassword
-			? AccountSecretPolicy.PrepareGatewayPassword(raw)
-			: AccountSecretPolicy.PrepareBackendPassword(raw, options.Encryption, field.Key);
+		UserSecretPolicy.SecretResult result = field.IsGatewayPassword
+			? UserSecretPolicy.PrepareGatewayPassword(raw)
+			: UserSecretPolicy.PrepareBackendPassword(raw, options.Encryption, field.Key);
 		if (result.Error is not null)
 		{
 			await Console.Error.WriteLineAsync(result.Error);
@@ -261,13 +261,13 @@ internal sealed class UserSetCommand(IAnsiConsole terminal) : UserCommandBase<Us
 
 		string? warning = result.Plaintext switch
 		{
-			AccountSecretPolicy.PlaintextDisposition.Hashed =>
+			UserSecretPolicy.PlaintextDisposition.Hashed =>
 				"Warning: plaintext password on the command line (visible in shell history/ps) — " +
 				"prefer: echo -n '...' | eas user password <login>. Stored as a pbkdf2$ hash.",
-			AccountSecretPolicy.PlaintextDisposition.Sealed =>
+			UserSecretPolicy.PlaintextDisposition.Sealed =>
 				"Warning: plaintext password on the command line (visible in shell history/ps) — " +
 				$"prefer: echo -n '...' | eas user secret <login> {field.Key}. Stored sealed (enc:v1:).",
-			AccountSecretPolicy.PlaintextDisposition.StoredPlaintext =>
+			UserSecretPolicy.PlaintextDisposition.StoredPlaintext =>
 				"Warning: no Encryption key configured — the backend password is stored in PLAINTEXT. " +
 				$"Prefer: echo -n '...' | eas user secret <login> {field.Key}",
 			_ => null
@@ -290,17 +290,17 @@ internal sealed class UserUnsetCommand(IAnsiConsole terminal) : UserCommandBase<
 	}
 
 	protected override async Task<int> RunAsync(
-		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
-		AccountFieldPaths.FieldPath? field = AccountFieldPaths.Find(settings.Key);
+		UserFieldPaths.FieldPath? field = UserFieldPaths.Find(settings.Key);
 		if (field is null)
 		{
 			await Console.Error.WriteLineAsync(
-				$"Unknown field '{settings.Key}'. Valid fields: {string.Join(", ", AccountFieldPaths.Keys)}");
+				$"Unknown field '{settings.Key}'. Valid fields: {string.Join(", ", UserFieldPaths.Keys)}");
 			return 1;
 		}
 
-		AccountOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+		UserOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
 		field.Set(entry, null);
 		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 	}
@@ -316,7 +316,7 @@ internal sealed class UserPasswordCommand(IAnsiConsole terminal)
 	}
 
 	protected override async Task<int> RunAsync(
-		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
 		string password = (await Console.In.ReadToEndAsync(cancellationToken)).TrimEnd('\r', '\n');
 		if (password.Length == 0)
@@ -326,14 +326,14 @@ internal sealed class UserPasswordCommand(IAnsiConsole terminal)
 		}
 
 		// C6: through the shared policy (strength floor + empty/sealed rejection), not a direct hash.
-		AccountSecretPolicy.SecretResult prepared = AccountSecretPolicy.PrepareGatewayPassword(password);
+		UserSecretPolicy.SecretResult prepared = UserSecretPolicy.PrepareGatewayPassword(password);
 		if (prepared.Error is not null)
 		{
 			await Console.Error.WriteLineAsync(prepared.Error);
 			return 1;
 		}
 
-		AccountOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+		UserOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
 		entry.Password = prepared.Value;
 		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 	}
@@ -353,14 +353,14 @@ internal sealed class UserSecretCommand(IAnsiConsole terminal)
 	}
 
 	protected override async Task<int> RunAsync(
-		AccountStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
-		AccountFieldPaths.FieldPath? field = AccountFieldPaths.Find(settings.Key);
+		UserFieldPaths.FieldPath? field = UserFieldPaths.Find(settings.Key);
 		if (field is null || !field.IsSecret || field.IsGatewayPassword)
 		{
 			await Console.Error.WriteLineAsync(
 				$"'{settings.Key}' is not a backend password field. " +
-				$"Valid: {string.Join(", ", AccountFieldPaths.BackendSecretKeys)}");
+				$"Valid: {string.Join(", ", UserFieldPaths.BackendSecretKeys)}");
 			return 1;
 		}
 
@@ -385,7 +385,7 @@ internal sealed class UserSecretCommand(IAnsiConsole terminal)
 			}
 
 			string sealedValue = SecretValue.Seal(secret, key);
-			AccountOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+			UserOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
 			field.Set(entry, sealedValue);
 			return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 		}

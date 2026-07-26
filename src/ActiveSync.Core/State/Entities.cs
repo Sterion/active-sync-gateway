@@ -259,11 +259,11 @@ public class SharedCalendarGrant
 
 /// <summary>
 ///   A database-declared user account entry: <see cref="Json" /> holds the serialized
-///   ActiveSync.Core.Options.AccountOptions shape, secrets stored exactly as config would
+///   ActiveSync.Core.Options.UserOptions shape, secrets stored exactly as config would
 ///   hold them (pbkdf2$/plaintext/enc:v1:). A row REPLACES the whole config entry for the
 ///   same login; deleting it falls back to config.
 /// </summary>
-public class AccountEntry
+public class User
 {
 	public int Id { get; set; }
 	public required string UserName { get; set; }

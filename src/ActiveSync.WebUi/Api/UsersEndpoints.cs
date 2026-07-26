@@ -15,9 +15,9 @@ namespace ActiveSync.WebUi.Api;
 /// <summary>
 ///   Declared-user management — the web face of `eas user`. Reads come from the resolver's
 ///   merged view (config ⊕ database, with provenance); writes go through the exact CLI
-///   pipeline: clone-shadowed-config start (<see cref="AccountEditing" />), the shared secret
-///   policy (<see cref="AccountSecretPolicy" />), config-grade validation
-///   (<see cref="AccountResolver.ValidateEntry" />) and <see cref="AccountStore" />. Stored
+///   pipeline: clone-shadowed-config start (<see cref="UserEditing" />), the shared secret
+///   policy (<see cref="UserSecretPolicy" />), config-grade validation
+///   (<see cref="UserResolver.ValidateEntry" />) and <see cref="UserStore" />. Stored
 ///   passwords NEVER leave the server — DTOs carry set/unset flags; updates use a sentinel
 ///   (null = keep the stored value, "" = clear, anything else = set).
 /// </summary>
@@ -41,7 +41,7 @@ internal static class UsersEndpoints
 
 	internal static void Map(RouteGroupBuilder api)
 	{
-		api.MapGet("users", async (AccountResolver resolver, CancellationToken ct) =>
+		api.MapGet("users", async (UserResolver resolver, CancellationToken ct) =>
 		{
 			await resolver.EnsureFreshAsync(false, ct);
 			List<UserDto> users = resolver.MergedUsers
@@ -51,17 +51,17 @@ internal static class UsersEndpoints
 			return Results.Ok(users);
 		});
 
-		api.MapGet("users/{login}", async (string login, AccountResolver resolver, CancellationToken ct) =>
+		api.MapGet("users/{login}", async (string login, UserResolver resolver, CancellationToken ct) =>
 		{
 			await resolver.EnsureFreshAsync(false, ct);
-			return resolver.MergedUsers.TryGetValue(login, out MergedAccount? account)
+			return resolver.MergedUsers.TryGetValue(login, out MergedUser? account)
 				? Results.Ok(ToDto(login, account))
 				: Results.NotFound();
 		});
 
 		api.MapPut("users/{login}", async (
-			string login, UserUpdateRequest request, ClaimsPrincipal principal, AccountStore store,
-			AccountResolver resolver, BackendRolesConfig roles, BackendProviderRegistry registry,
+			string login, UserUpdateRequest request, ClaimsPrincipal principal, UserStore store,
+			UserResolver resolver, BackendRolesConfig roles, BackendProviderRegistry registry,
 			IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
 		{
 			ActiveSyncOptions current = options.CurrentValue;
@@ -70,9 +70,9 @@ internal static class UsersEndpoints
 				return conflict;
 			// Password sentinels merge against the entry a CLI edit would start from (the DB
 			// row, else a clone of the config entry) so "keep" preserves the stored secret.
-			AccountOptions starting = await AccountEditing.LoadStartingEntryAsync(store, current, login, ct);
+			UserOptions starting = await UserEditing.LoadStartingEntryAsync(store, current, login, ct);
 
-			AccountOptions entry = new()
+			UserOptions entry = new()
 			{
 				MailAddress = string.IsNullOrWhiteSpace(request.MailAddress) ? null : request.MailAddress.Trim(),
 				Admin = request.Admin == true ? true : null,
@@ -81,7 +81,7 @@ internal static class UsersEndpoints
 			};
 
 			string? gatewayPassword = MergeSecret(request.Password, starting.Password,
-				raw => AccountSecretPolicy.PrepareGatewayPassword(raw), out string? passwordError);
+				raw => UserSecretPolicy.PrepareGatewayPassword(raw), out string? passwordError);
 			if (passwordError is not null)
 				return EndpointHelpers.BadRequest(passwordError);
 			entry.Password = gatewayPassword;
@@ -96,7 +96,7 @@ internal static class UsersEndpoints
 						.Value;
 					string? storedRolePassword = startingRole?.Password;
 					string? rolePassword = MergeSecret(role.Password, storedRolePassword,
-						raw => AccountSecretPolicy.PrepareBackendPassword(
+						raw => UserSecretPolicy.PrepareBackendPassword(
 							raw, current.Encryption, $"Backends:{roleName}:Password"),
 						out string? roleError);
 					if (roleError is not null)
@@ -120,7 +120,7 @@ internal static class UsersEndpoints
 					entry.Backends = null;
 			}
 
-			List<string> failures = AccountResolver.ValidateEntry(current, roles, registry, login, entry);
+			List<string> failures = UserResolver.ValidateEntry(current, roles, registry, login, entry);
 			if (failures.Count > 0)
 				return EndpointHelpers.BadRequest(string.Join(Environment.NewLine, failures));
 
@@ -128,19 +128,19 @@ internal static class UsersEndpoints
 			await resolver.EnsureFreshAsync(true, ct);
 			return Results.Ok(new
 			{
-				user = ToDto(login, new MergedAccount(entry, true, AccountEditing.FindConfigUser(current, login) is not null)),
+				user = ToDto(login, new MergedUser(entry, true, UserEditing.FindConfigUser(current, login) is not null)),
 				warning = SelfEditWarning(principal, login, request.Admin == true, request.Enabled != false)
 			});
 		});
 
 		api.MapDelete("users/{login}", async (
-			string login, AccountStore store, AccountResolver resolver,
+			string login, UserStore store, UserResolver resolver,
 			IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
 		{
 			// Deleting the row can drop the last admin flag outright when no config entry sits
 			// beneath it — the account itself goes away.
 			ActiveSyncOptions configured = options.CurrentValue;
-			bool staysAdmin = configured.Users?.TryGetValue(login, out AccountOptions? fallback) == true &&
+			bool staysAdmin = configured.Users?.TryGetValue(login, out UserOptions? fallback) == true &&
 			                  fallback!.Admin == true && fallback.Enabled != false;
 			if (await LastAdminProblemAsync(resolver, login, staysAdmin, ct) is { } conflict)
 				return conflict;
@@ -153,19 +153,19 @@ internal static class UsersEndpoints
 			{
 				login,
 				// The config entry (if any) is active again — the row only ever shadowed it.
-				configFallback = AccountEditing.FindConfigUser(options.CurrentValue, login) is not null
+				configFallback = UserEditing.FindConfigUser(options.CurrentValue, login) is not null
 			});
 		});
 
 		// Quick disable/enable (parallel to devices block/unblock) — flips the account master
 		// switch without a full-replacement PUT, so it can't clobber other fields.
-		api.MapPost("users/{login}/disable", (string login, ClaimsPrincipal principal, AccountStore store,
-				AccountResolver resolver, BackendRolesConfig roles, BackendProviderRegistry registry,
+		api.MapPost("users/{login}/disable", (string login, ClaimsPrincipal principal, UserStore store,
+				UserResolver resolver, BackendRolesConfig roles, BackendProviderRegistry registry,
 				IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
 			SetEnabledAsync(login, false, principal, store, resolver, roles, registry, options, ct));
 
-		api.MapPost("users/{login}/enable", (string login, ClaimsPrincipal principal, AccountStore store,
-				AccountResolver resolver, BackendRolesConfig roles, BackendProviderRegistry registry,
+		api.MapPost("users/{login}/enable", (string login, ClaimsPrincipal principal, UserStore store,
+				UserResolver resolver, BackendRolesConfig roles, BackendProviderRegistry registry,
 				IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
 			SetEnabledAsync(login, true, principal, store, resolver, roles, registry, options, ct));
 	}
@@ -177,7 +177,7 @@ internal static class UsersEndpoints
 	///   into from a form with no warning.
 	/// </summary>
 	private static async Task<IResult?> LastAdminProblemAsync(
-		AccountResolver resolver, string login, bool staysAdmin, CancellationToken ct)
+		UserResolver resolver, string login, bool staysAdmin, CancellationToken ct)
 	{
 		if (staysAdmin)
 			return null;
@@ -212,23 +212,23 @@ internal static class UsersEndpoints
 
 	/// <summary>Loads the entry a CLI edit would start from, flips its Enabled flag, validates and saves.</summary>
 	private static async Task<IResult> SetEnabledAsync(
-		string login, bool enable, ClaimsPrincipal principal, AccountStore store, AccountResolver resolver,
+		string login, bool enable, ClaimsPrincipal principal, UserStore store, UserResolver resolver,
 		BackendRolesConfig roles, BackendProviderRegistry registry,
 		IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct)
 	{
 		ActiveSyncOptions current = options.CurrentValue;
-		AccountOptions entry = await AccountEditing.LoadStartingEntryAsync(store, current, login, ct);
+		UserOptions entry = await UserEditing.LoadStartingEntryAsync(store, current, login, ct);
 		if (await LastAdminProblemAsync(resolver, login, enable && entry.Admin == true, ct) is { } conflict)
 			return conflict;
 		entry.Enabled = enable ? null : false;
-		List<string> failures = AccountResolver.ValidateEntry(current, roles, registry, login, entry);
+		List<string> failures = UserResolver.ValidateEntry(current, roles, registry, login, entry);
 		if (failures.Count > 0)
 			return EndpointHelpers.BadRequest(string.Join(Environment.NewLine, failures));
 		await store.UpsertAsync(login, entry, ct);
 		await resolver.EnsureFreshAsync(true, ct);
 		return Results.Ok(new
 		{
-			user = ToDto(login, new MergedAccount(entry, true, AccountEditing.FindConfigUser(current, login) is not null)),
+			user = ToDto(login, new MergedUser(entry, true, UserEditing.FindConfigUser(current, login) is not null)),
 			warning = SelfEditWarning(principal, login, entry.Admin == true, enable)
 		});
 	}
@@ -236,21 +236,21 @@ internal static class UsersEndpoints
 	/// <summary>null = keep the stored value, "" = clear, anything else = run the secret policy.</summary>
 	private static string? MergeSecret(
 		string? requested, string? stored,
-		Func<string, AccountSecretPolicy.SecretResult> prepare, out string? error)
+		Func<string, UserSecretPolicy.SecretResult> prepare, out string? error)
 	{
 		error = null;
 		if (requested is null)
 			return stored;
 		if (requested.Length == 0)
 			return null;
-		AccountSecretPolicy.SecretResult result = prepare(requested);
+		UserSecretPolicy.SecretResult result = prepare(requested);
 		error = result.Error;
 		return result.Value;
 	}
 
-	private static UserDto ToDto(string login, MergedAccount account)
+	private static UserDto ToDto(string login, MergedUser account)
 	{
-		AccountOptions o = account.Options;
+		UserOptions o = account.Options;
 		Dictionary<string, RoleDto>? backends = o.Backends is { Count: > 0 }
 			? o.Backends.ToDictionary(
 				b => b.Key,

@@ -21,7 +21,7 @@ public sealed class WebLoginThrottleTests
 		// "occasional typo"). Every failure bumps the IP-wide counter; only a success that ALSO
 		// clears it keeps alice reachable.
 		await using WebUiHost host = await WebUiHost.StartAsync(
-			WebUiHost.Users(("alice", new AccountOptions())),
+			WebUiHost.Users(("alice", new UserOptions())),
 			new Dictionary<string, string?>
 			{
 				["ActiveSync:Auth:MaxFailures"] = "2",

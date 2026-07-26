@@ -29,7 +29,7 @@ public partial class Program
 		ILogger StartupLogger,
 		X509Certificate2? Certificate,
 		TlsCertificateSource TlsSource,
-		AccountResolver Resolver);
+		UserResolver Resolver);
 
 	/// <summary>
 	///   The gateway web host — the `serve` command. Args flow into configuration, so
@@ -276,8 +276,8 @@ public partial class Program
 		builder.Services.AddSingleton<ReadinessProbe>();
 		builder.Services.AddScoped<SyncStateService>();
 		builder.Services.AddScoped<FolderService>();
-		builder.Services.AddSingleton<AccountStore>();
-		builder.Services.AddSingleton<AccountResolver>();
+		builder.Services.AddSingleton<UserStore>();
+		builder.Services.AddSingleton<UserResolver>();
 		builder.Services.AddAdministrationServices();
 		builder.Services.AddSingleton<PassThroughProvisioner>();
 		builder.Services.AddSingleton<GlobalSettingStore>();
@@ -334,7 +334,7 @@ public partial class Program
 
 		// One-time upgrade of pre-role-model account rows (imap/calDav/... JSON shapes) —
 		// without it the deserializer would silently DROP those overrides.
-		await app.Services.GetRequiredService<AccountStore>()
+		await app.Services.GetRequiredService<UserStore>()
 			.UpgradeLegacyRowsAsync(startupLogger, CancellationToken.None);
 
 		// Refresh the live database settings view now the schema exists (the build-time load
@@ -356,7 +356,7 @@ public partial class Program
 				.LoadForServingAsync(startupLogger, CancellationToken.None);
 
 		// Load database-declared users into the resolver before the first request.
-		AccountResolver resolver = app.Services.GetRequiredService<AccountResolver>();
+		UserResolver resolver = app.Services.GetRequiredService<UserResolver>();
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
 		return new ServerInitResult(startupLogger, serverCertificate, tlsSource, resolver);

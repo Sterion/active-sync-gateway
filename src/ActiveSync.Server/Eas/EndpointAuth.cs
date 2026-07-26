@@ -223,7 +223,7 @@ internal static class EndpointAuth
 	///   credentials can observe it — the caller writes the 403 so each endpoint keeps its own body.
 	/// </summary>
 	public static async Task<LoginRefusal> CheckLoginRefusalAsync(
-		AccountResolver resolver, SyncStateService state, string userName, string? deviceId, CancellationToken ct)
+		UserResolver resolver, SyncStateService state, string userName, string? deviceId, CancellationToken ct)
 	{
 		if (resolver.IsLoginDisabled(userName))
 			return LoginRefusal.Disabled;
@@ -251,7 +251,7 @@ internal static class EndpointAuth
 		AuthOptions authOptions,
 		AuthThrottle throttle,
 		IBackendSessionFactory sessionFactory,
-		AccountResolver resolver,
+		UserResolver resolver,
 		SyncStateService state,
 		string? blockDeviceId,
 		ILogger logger,

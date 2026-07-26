@@ -13,18 +13,18 @@ namespace ActiveSync.WebUi.Tests;
 /// </summary>
 public sealed class LastAdminTests
 {
-	private static Dictionary<string, AccountOptions> OneAdmin()
+	private static Dictionary<string, UserOptions> OneAdmin()
 	{
 		return WebUiHost.Users(
-			("alice", new AccountOptions { Admin = true }),
-			("bob", new AccountOptions()));
+			("alice", new UserOptions { Admin = true }),
+			("bob", new UserOptions()));
 	}
 
-	private static Dictionary<string, AccountOptions> TwoAdmins()
+	private static Dictionary<string, UserOptions> TwoAdmins()
 	{
 		return WebUiHost.Users(
-			("alice", new AccountOptions { Admin = true }),
-			("carol", new AccountOptions { Admin = true }));
+			("alice", new UserOptions { Admin = true }),
+			("carol", new UserOptions { Admin = true }));
 	}
 
 	[Fact]
@@ -58,9 +58,9 @@ public sealed class LastAdminTests
 		// config entry underneath — so the account, and the last admin flag with it, would
 		// disappear. (A row shadowing an admin config entry is fine: the entry takes over.)
 		await using WebUiHost host = await WebUiHost.StartAsync(
-			WebUiHost.Users(("bob", new AccountOptions())));
-		AccountStore store = new(host.Factory);
-		await store.UpsertAsync("dave", new AccountOptions { Admin = true }, CancellationToken.None);
+			WebUiHost.Users(("bob", new UserOptions())));
+		UserStore store = new(host.Factory);
+		await store.UpsertAsync("dave", new UserOptions { Admin = true }, CancellationToken.None);
 
 		using HttpClient client = await host.SignInAsync("dave", admin: true);
 		HttpResponseMessage response = await client.DeleteAsync("/admin/api/users/dave");
@@ -71,9 +71,9 @@ public sealed class LastAdminTests
 	public async Task DeletingARowThatShadowsAnAdminConfigEntry_IsAllowed()
 	{
 		await using WebUiHost host = await WebUiHost.StartAsync(
-			WebUiHost.Users(("alice", new AccountOptions { Admin = true })));
-		AccountStore store = new(host.Factory);
-		await store.UpsertAsync("alice", new AccountOptions { Admin = true }, CancellationToken.None);
+			WebUiHost.Users(("alice", new UserOptions { Admin = true })));
+		UserStore store = new(host.Factory);
+		await store.UpsertAsync("alice", new UserOptions { Admin = true }, CancellationToken.None);
 
 		using HttpClient client = await host.SignInAsync("alice", admin: true);
 		HttpResponseMessage response = await client.DeleteAsync("/admin/api/users/alice");

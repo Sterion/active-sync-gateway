@@ -58,7 +58,7 @@ internal sealed class WebUiHost : IAsyncDisposable
 	///   <paramref name="settings" /> is merged into the configuration (role assignments etc.).
 	/// </summary>
 	internal static async Task<WebUiHost> StartAsync(
-		Dictionary<string, AccountOptions> users, Dictionary<string, string?>? settings = null)
+		Dictionary<string, UserOptions> users, Dictionary<string, string?>? settings = null)
 	{
 		SqliteConnection connection = new("Data Source=:memory:");
 		await connection.OpenAsync();
@@ -97,14 +97,14 @@ internal sealed class WebUiHost : IAsyncDisposable
 		builder.Services.AddSingleton<IOptions<ActiveSyncOptions>>(Options.Create(options));
 		builder.Services.AddSingleton<IOptionsMonitor<ActiveSyncOptions>>(new StaticOptionsMonitor(options));
 		builder.Services.AddSingleton<ISyncDbContextFactory>(factory);
-		builder.Services.AddSingleton(new AccountStore(factory));
+		builder.Services.AddSingleton(new UserStore(factory));
 		builder.Services.AddAdministrationServices();
 		builder.Services.AddSingleton(registry);
 		builder.Services.AddSingleton(rolesProvider);
 		builder.Services.AddSingleton(rolesProvider.Current);
-		builder.Services.AddSingleton(provider => new AccountResolver(
+		builder.Services.AddSingleton(provider => new UserResolver(
 			provider.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>(),
-			rolesProvider, registry, provider.GetRequiredService<AccountStore>()));
+			rolesProvider, registry, provider.GetRequiredService<UserStore>()));
 		builder.Services.AddSingleton(TimeProvider.System);
 		builder.Services.AddSingleton<AuthThrottle>();
 		builder.Services.AddSingleton(new GlobalSettingStore(factory));
@@ -162,8 +162,8 @@ internal sealed class WebUiHost : IAsyncDisposable
 		_connection.Dispose();
 	}
 
-	internal static Dictionary<string, AccountOptions> Users(
-		params (string Login, AccountOptions Options)[] users)
+	internal static Dictionary<string, UserOptions> Users(
+		params (string Login, UserOptions Options)[] users)
 	{
 		return users.ToDictionary(u => u.Login, u => u.Options, StringComparer.OrdinalIgnoreCase);
 	}

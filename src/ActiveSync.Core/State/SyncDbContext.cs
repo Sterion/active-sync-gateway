@@ -19,7 +19,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	public DbSet<DavItem> DavItems => Set<DavItem>();
 	public DbSet<LocalItem> LocalItems => Set<LocalItem>();
 	public DbSet<LoginBlock> LoginBlocks => Set<LoginBlock>();
-	public DbSet<AccountEntry> AccountEntries => Set<AccountEntry>();
+	public DbSet<User> Users => Set<User>();
 	public DbSet<AccountsStamp> AccountsStamps => Set<AccountsStamp>();
 	public DbSet<GlobalSetting> GlobalSettings => Set<GlobalSetting>();
 	public DbSet<SettingsStamp> SettingsStamps => Set<SettingsStamp>();
@@ -76,8 +76,14 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 		modelBuilder.Entity<LoginBlock>(e =>
 			e.HasIndex(b => new { b.UserName, b.DeviceId }).IsUnique());
 
-		modelBuilder.Entity<AccountEntry>(e =>
-			e.HasIndex(a => a.UserName).IsUnique());
+		modelBuilder.Entity<User>(e =>
+		{
+			// Transitional pin: the CLR type is renamed ahead of the schema reinit (item 2 of
+			// docs/design/db-restructure.md); the physical table keeps its historical name until
+			// the migration chain is regenerated. Drop this together with the old migrations.
+			e.ToTable("AccountEntries");
+			e.HasIndex(a => a.UserName).IsUnique();
+		});
 
 		// Deliberately no identity column: the CLI writes Id=1 explicitly so the stamp
 		// stays a single well-known row on both providers.

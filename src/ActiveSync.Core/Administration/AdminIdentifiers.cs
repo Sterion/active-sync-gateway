@@ -18,7 +18,7 @@ public static class AdminIdentifiers
 		if (string.IsNullOrWhiteSpace(login))
 			return "user is required";
 		List<string> failures = [];
-		AccountResolver.ValidateLogin(login.Trim(), failures);
+		UserResolver.ValidateLogin(login.Trim(), failures);
 		return failures.Count > 0
 			? "user must not contain ':' or control characters"
 			: null;

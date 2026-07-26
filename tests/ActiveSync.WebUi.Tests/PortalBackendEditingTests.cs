@@ -25,9 +25,9 @@ public sealed class PortalBackendEditingTests
 		["ActiveSync:Backends:Tasks:BaseUrl"] = "https://dav.example.com"
 	};
 
-	private static Dictionary<string, AccountOptions> OneUser()
+	private static Dictionary<string, UserOptions> OneUser()
 	{
-		return WebUiHost.Users(("bob", new AccountOptions { MailAddress = "bob@example.com" }));
+		return WebUiHost.Users(("bob", new UserOptions { MailAddress = "bob@example.com" }));
 	}
 
 	[Fact]
@@ -46,8 +46,8 @@ public sealed class PortalBackendEditingTests
 		Assert.Contains("BaseUrl", body.GetProperty("error").GetString(), StringComparison.Ordinal);
 
 		// And nothing was stored: the next read still shows no override for the role.
-		AccountStore store = new(host.Factory);
-		AccountOptions? stored = await store.GetAsync("bob", CancellationToken.None);
+		UserStore store = new(host.Factory);
+		UserOptions? stored = await store.GetAsync("bob", CancellationToken.None);
 		Assert.Null(stored?.Backends?.GetValueOrDefault("Calendar")?.Settings);
 	}
 
@@ -98,8 +98,8 @@ public sealed class PortalBackendEditingTests
 		});
 
 		Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-		AccountStore store = new(host.Factory);
-		AccountOptions? stored = await store.GetAsync("bob", CancellationToken.None);
+		UserStore store = new(host.Factory);
+		UserOptions? stored = await store.GetAsync("bob", CancellationToken.None);
 		BackendRoleOverride role = stored!.Backends!["Calendar"];
 		Assert.Equal("bob.dav", role.UserName);
 		Assert.Equal("Off", role.Settings!["CalendarAttachments"]);
@@ -112,8 +112,8 @@ public sealed class PortalBackendEditingTests
 		// no longer accepted from the portal, a portal save must PRESERVE the ones an admin put
 		// on the account rather than dropping them.
 		await using WebUiHost host = await WebUiHost.StartAsync(OneUser(), CalDavRole);
-		AccountStore store = new(host.Factory);
-		await store.UpsertAsync("bob", new AccountOptions
+		UserStore store = new(host.Factory);
+		await store.UpsertAsync("bob", new UserOptions
 		{
 			MailAddress = "bob@example.com",
 			Backends = new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase)
@@ -135,7 +135,7 @@ public sealed class PortalBackendEditingTests
 		});
 		Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-		AccountOptions? stored = await store.GetAsync("bob", CancellationToken.None);
+		UserOptions? stored = await store.GetAsync("bob", CancellationToken.None);
 		Dictionary<string, string?> settings = stored!.Backends!["Calendar"].Settings!;
 		Assert.Equal("/dav/bob/", settings["HomeSetPath"]);
 		Assert.Equal("Off", settings["CalendarAttachments"]);
@@ -164,7 +164,7 @@ public sealed class PortalBackendEditingTests
 		// The restriction is on the PORTAL, not on the schema: the admin backends editor must
 		// keep rendering the connection fields.
 		await using WebUiHost host = await WebUiHost.StartAsync(
-			WebUiHost.Users(("alice", new AccountOptions { Admin = true })), CalDavRole);
+			WebUiHost.Users(("alice", new UserOptions { Admin = true })), CalDavRole);
 		using HttpClient client = await host.SignInAsync("alice", admin: true);
 
 		JsonElement providers = await host.ReadJsonAsync(await client.GetAsync("/admin/api/backends/providers"));

@@ -50,8 +50,8 @@ public class DbAccountTests(GatewayFixture gateway)
 	{
 		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
 			new Dictionary<string, string?> { ["ActiveSync:Auth:UsersRefreshSeconds"] = "0" });
-		AccountStore store = factory.Services.GetRequiredService<AccountStore>();
-		await store.UpsertAsync("dbphone@gw.local", new AccountOptions
+		UserStore store = factory.Services.GetRequiredService<UserStore>();
+		await store.UpsertAsync("dbphone@gw.local", new UserOptions
 		{
 			Password = GatewayPasswordHasher.Hash(GatewayPassword),
 			MailAddress = TestBackend.User1,
@@ -86,8 +86,8 @@ public class DbAccountTests(GatewayFixture gateway)
 		await AssertUnauthorizedAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
 
 		// An empty database entry is a pure allowlist grant — auth probes IMAP as usual.
-		AccountStore store = factory.Services.GetRequiredService<AccountStore>();
-		await store.UpsertAsync(TestBackend.User1, new AccountOptions(), CancellationToken.None);
+		UserStore store = factory.Services.GetRequiredService<UserStore>();
+		await store.UpsertAsync(TestBackend.User1, new UserOptions(), CancellationToken.None);
 
 		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
 		await AssertUnauthorizedAsync(CreateClient(factory, TestBackend.User2, TestBackend.Password));
@@ -102,7 +102,7 @@ public class DbAccountTests(GatewayFixture gateway)
 				["ActiveSync:AutoProvisionUsers"] = "true",
 				["ActiveSync:Auth:UsersRefreshSeconds"] = "0",
 			});
-		AccountStore store = factory.Services.GetRequiredService<AccountStore>();
+		UserStore store = factory.Services.GetRequiredService<UserStore>();
 
 		// Pure pass-through to begin with: no declared row for this login.
 		Assert.Null(await store.GetAsync(TestBackend.User1, CancellationToken.None));
@@ -110,7 +110,7 @@ public class DbAccountTests(GatewayFixture gateway)
 		// A normal pass-through sync (credentials verified against the backend) provisions the user.
 		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
 
-		AccountOptions? row = await store.GetAsync(TestBackend.User1, CancellationToken.None);
+		UserOptions? row = await store.GetAsync(TestBackend.User1, CancellationToken.None);
 		Assert.NotNull(row);
 		Assert.True(row!.AutoProvisioned);
 		Assert.Null(row.Password); // no gateway password — auth still probes the backend
@@ -130,7 +130,7 @@ public class DbAccountTests(GatewayFixture gateway)
 				["ActiveSync:AutoProvisionUsers"] = "false",
 				["ActiveSync:Auth:UsersRefreshSeconds"] = "0",
 			});
-		AccountStore store = factory.Services.GetRequiredService<AccountStore>();
+		UserStore store = factory.Services.GetRequiredService<UserStore>();
 
 		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
 
@@ -142,20 +142,20 @@ public class DbAccountTests(GatewayFixture gateway)
 	{
 		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
 			new Dictionary<string, string?> { ["ActiveSync:Auth:UsersRefreshSeconds"] = "0" });
-		AccountStore store = factory.Services.GetRequiredService<AccountStore>();
+		UserStore store = factory.Services.GetRequiredService<UserStore>();
 
 		// An enabled (empty) declared account syncs normally.
-		await store.UpsertAsync(TestBackend.User1, new AccountOptions(), CancellationToken.None);
+		await store.UpsertAsync(TestBackend.User1, new UserOptions(), CancellationToken.None);
 		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
 
 		// Disable it: valid credentials now get 403 (not 401 — auth still succeeds) on every device.
-		await store.UpsertAsync(TestBackend.User1, new AccountOptions { Enabled = false }, CancellationToken.None);
+		await store.UpsertAsync(TestBackend.User1, new UserOptions { Enabled = false }, CancellationToken.None);
 		using HttpResponseMessage refused = await CreateClient(factory, TestBackend.User1, TestBackend.Password)
 			.PostRawAsync("FolderSync", null);
 		Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
 
 		// Re-enabling restores access on the next request (no restart).
-		await store.UpsertAsync(TestBackend.User1, new AccountOptions(), CancellationToken.None);
+		await store.UpsertAsync(TestBackend.User1, new UserOptions(), CancellationToken.None);
 		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
 	}
 
@@ -167,21 +167,21 @@ public class DbAccountTests(GatewayFixture gateway)
 		// Autodiscover kept handing the same account a service document.
 		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
 			new Dictionary<string, string?> { ["ActiveSync:Auth:UsersRefreshSeconds"] = "0" });
-		AccountStore store = factory.Services.GetRequiredService<AccountStore>();
+		UserStore store = factory.Services.GetRequiredService<UserStore>();
 		using HttpClient http = factory.CreateClient(
 			new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
-		await store.UpsertAsync(TestBackend.User1, new AccountOptions(), CancellationToken.None);
+		await store.UpsertAsync(TestBackend.User1, new UserOptions(), CancellationToken.None);
 		using (HttpResponseMessage enabled = await http.SendAsync(AutodiscoverRequest()))
 			Assert.Equal(HttpStatusCode.OK, enabled.StatusCode);
 
 		await store.UpsertAsync(
-			TestBackend.User1, new AccountOptions { Enabled = false }, CancellationToken.None);
+			TestBackend.User1, new UserOptions { Enabled = false }, CancellationToken.None);
 		using (HttpResponseMessage disabled = await http.SendAsync(AutodiscoverRequest()))
 			Assert.Equal(HttpStatusCode.Forbidden, disabled.StatusCode);
 
 		// Re-enabling restores it on the next request, like the EAS path.
-		await store.UpsertAsync(TestBackend.User1, new AccountOptions(), CancellationToken.None);
+		await store.UpsertAsync(TestBackend.User1, new UserOptions(), CancellationToken.None);
 		using (HttpResponseMessage restored = await http.SendAsync(AutodiscoverRequest()))
 			Assert.Equal(HttpStatusCode.OK, restored.StatusCode);
 	}
@@ -209,9 +209,9 @@ public class DbAccountTests(GatewayFixture gateway)
 	{
 		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
 			new Dictionary<string, string?> { ["ActiveSync:Auth:UsersRefreshSeconds"] = "0" });
-		AccountStore store = factory.Services.GetRequiredService<AccountStore>();
+		UserStore store = factory.Services.GetRequiredService<UserStore>();
 
-		AccountOptions entry = new()
+		UserOptions entry = new()
 		{
 			Password = GatewayPasswordHasher.Hash("first-password"),
 			Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { UserName = TestBackend.User1, Password = TestBackend.Password } },

@@ -9,7 +9,7 @@ namespace ActiveSync.Core.Accounts;
 ///   THE identity: DB row scoping, change-notifier keys, encryption AAD and session/watcher
 ///   cache keys are all derived from it — per-backend user names never leak into those.
 /// </summary>
-public sealed record ResolvedAccount(
+public sealed record ResolvedUser(
 	string GatewayLogin,
 	string? MailAddress,
 	bool MailAddressIsExplicit,

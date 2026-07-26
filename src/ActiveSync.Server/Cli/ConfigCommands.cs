@@ -228,8 +228,8 @@ internal sealed class ConfigSetCommand(IAnsiConsole terminal) : SettingsCommandB
 		{
 			EncryptionOptions encryption =
 				fileConfig.GetSection("ActiveSync:Encryption").Get<EncryptionOptions>() ?? new EncryptionOptions();
-			AccountSecretPolicy.SecretResult prepared =
-				AccountSecretPolicy.PrepareCatalogueSecret(settings.Value, encryption, definition.Key);
+			UserSecretPolicy.SecretResult prepared =
+				UserSecretPolicy.PrepareCatalogueSecret(settings.Value, encryption, definition.Key);
 			if (prepared.Error is not null)
 			{
 				await Console.Error.WriteLineAsync(prepared.Error);

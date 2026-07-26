@@ -3,7 +3,7 @@ namespace ActiveSync.Core.Settings;
 /// <summary>
 ///   The shared "should I poll the change stamp now?" interval gate used by BOTH change-stamp
 ///   refreshers — <see cref="SettingsRefresher" /> (global settings) and
-///   <see cref="ActiveSync.Core.Accounts.AccountResolver" /> (declared accounts). They previously
+///   <see cref="ActiveSync.Core.Accounts.UserResolver" /> (declared accounts). They previously
 ///   inlined the same logic with subtly different rules (one guarded a negative cadence with a
 ///   "have I loaded yet" flag, the other did not), and a negative cadence PERMANENTLY disabled live
 ///   refresh — including the pickup of an operator setting it back to positive, so recovery needed a

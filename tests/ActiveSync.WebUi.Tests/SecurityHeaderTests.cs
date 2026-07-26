@@ -19,7 +19,7 @@ public sealed class SecurityHeaderTests
 	public async Task UiResponses_CarryTheFullDirectiveSet(string path)
 	{
 		await using WebUiHost host = await WebUiHost.StartAsync(
-			WebUiHost.Users(("alice", new AccountOptions { Admin = true })));
+			WebUiHost.Users(("alice", new UserOptions { Admin = true })));
 		using HttpClient client = host.Anonymous();
 
 		HttpResponseMessage response = await client.GetAsync(path);

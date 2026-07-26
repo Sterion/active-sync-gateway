@@ -9,7 +9,7 @@ public class StartupSummaryRedactionTests
 	[Fact]
 	public void DescribeUser_NeverRendersPasswordValues()
 	{
-		AccountOptions options = new()
+		UserOptions options = new()
 		{
 			Password = "plain-gw-secret",
 			MailAddress = "alice@example.com",
@@ -30,7 +30,7 @@ public class StartupSummaryRedactionTests
 			},
 		};
 
-		string line = StartupSummary.DescribeUser(new MergedAccount(options, true, true));
+		string line = StartupSummary.DescribeUser(new MergedUser(options, true, true));
 
 		Assert.DoesNotContain("plain-gw-secret", line);
 		Assert.DoesNotContain("sealedvalue", line);
@@ -51,7 +51,7 @@ public class StartupSummaryRedactionTests
 	{
 		// E15: the per-role Settings loop printed every setting verbatim; only Password was masked,
 		// so an ApiKey/Token in a role override leaked in full into the banner (and the DB log sink).
-		AccountOptions options = new()
+		UserOptions options = new()
 		{
 			Backends = new Dictionary<string, BackendRoleOverride>
 			{
@@ -68,7 +68,7 @@ public class StartupSummaryRedactionTests
 			},
 		};
 
-		string line = StartupSummary.DescribeUser(new MergedAccount(options, false, false));
+		string line = StartupSummary.DescribeUser(new MergedUser(options, false, false));
 
 		Assert.DoesNotContain("banner-api-secret", line);
 		Assert.DoesNotContain("banner-token-secret", line);
@@ -83,13 +83,13 @@ public class StartupSummaryRedactionTests
 	{
 		string hashed = ActiveSync.Core.Security.GatewayPasswordHasher.Hash("secret1");
 		string withHash = StartupSummary.DescribeUser(
-			new MergedAccount(new AccountOptions { Password = hashed }, false, false));
+			new MergedUser(new UserOptions { Password = hashed }, false, false));
 		Assert.DoesNotContain("secret1", withHash);
 		Assert.DoesNotContain(hashed[10..30], withHash);
 		Assert.Contains("password=***(pbkdf2)", withHash);
 		Assert.Contains("[config]", withHash);
 
-		string grant = StartupSummary.DescribeUser(new MergedAccount(new AccountOptions(), true, false));
+		string grant = StartupSummary.DescribeUser(new MergedUser(new UserOptions(), true, false));
 		Assert.Contains("[db]", grant);
 		Assert.Contains("allowlist grant", grant);
 	}

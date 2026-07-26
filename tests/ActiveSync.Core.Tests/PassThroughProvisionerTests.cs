@@ -20,7 +20,7 @@ public sealed class PassThroughProvisionerTests : IDisposable
 {
 	private readonly SqliteConnection _connection;
 	private readonly TestContextFactory _factory;
-	private readonly AccountStore _store;
+	private readonly UserStore _store;
 
 	public PassThroughProvisionerTests()
 	{
@@ -29,7 +29,7 @@ public sealed class PassThroughProvisionerTests : IDisposable
 		_factory = new TestContextFactory(_connection);
 		using SyncDbContext db = _factory.CreateDbContext();
 		db.Database.EnsureCreated();
-		_store = new AccountStore(_factory);
+		_store = new UserStore(_factory);
 	}
 
 	public void Dispose() => _connection.Dispose();
@@ -42,7 +42,7 @@ public sealed class PassThroughProvisionerTests : IDisposable
 		new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!)
 	], NullLogger<BackendProviderRegistry>.Instance);
 
-	private (PassThroughProvisioner Provisioner, AccountResolver Resolver) Build(ActiveSyncOptions options)
+	private (PassThroughProvisioner Provisioner, UserResolver Resolver) Build(ActiveSyncOptions options)
 	{
 		IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection(
 			new Dictionary<string, string?>
@@ -55,7 +55,7 @@ public sealed class PassThroughProvisionerTests : IDisposable
 			}).Build();
 		BackendRolesProvider rolesProvider = new(config);
 		BackendProviderRegistry registry = Registry();
-		AccountResolver resolver = new(TestOptionsMonitor.Of(options), rolesProvider, registry, _store);
+		UserResolver resolver = new(TestOptionsMonitor.Of(options), rolesProvider, registry, _store);
 		PassThroughProvisioner provisioner = new(
 			resolver, _store, registry, TestOptionsMonitor.Of(options),
 			NullLogger<PassThroughProvisioner>.Instance);
@@ -72,12 +72,12 @@ public sealed class PassThroughProvisionerTests : IDisposable
 	[Fact]
 	public async Task Enabled_UndeclaredLogin_CreatesAutoMarkedRow()
 	{
-		(PassThroughProvisioner provisioner, AccountResolver resolver) = Build(Options(autoProvision: true));
+		(PassThroughProvisioner provisioner, UserResolver resolver) = Build(Options(autoProvision: true));
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
 		await provisioner.ProvisionIfEnabledAsync("phone@dnfl.dk", CancellationToken.None);
 
-		AccountOptions? row = await _store.GetAsync("phone@dnfl.dk", CancellationToken.None);
+		UserOptions? row = await _store.GetAsync("phone@dnfl.dk", CancellationToken.None);
 		Assert.NotNull(row);
 		Assert.True(row!.AutoProvisioned);
 		Assert.Null(row.Password);          // no gateway password: auth still probes the backend
@@ -89,7 +89,7 @@ public sealed class PassThroughProvisionerTests : IDisposable
 	[Fact]
 	public async Task Disabled_DoesNothing()
 	{
-		(PassThroughProvisioner provisioner, AccountResolver resolver) = Build(Options(autoProvision: false));
+		(PassThroughProvisioner provisioner, UserResolver resolver) = Build(Options(autoProvision: false));
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
 		await provisioner.ProvisionIfEnabledAsync("phone@dnfl.dk", CancellationToken.None);
@@ -101,11 +101,11 @@ public sealed class PassThroughProvisionerTests : IDisposable
 	public async Task AlreadyDeclaredInConfig_IsNotProvisioned()
 	{
 		ActiveSyncOptions options = Options(autoProvision: true);
-		options.Users = new Dictionary<string, AccountOptions>(StringComparer.OrdinalIgnoreCase)
+		options.Users = new Dictionary<string, UserOptions>(StringComparer.OrdinalIgnoreCase)
 		{
 			["phone@dnfl.dk"] = new() { MailAddress = "phone@dnfl.dk" },
 		};
-		(PassThroughProvisioner provisioner, AccountResolver resolver) = Build(options);
+		(PassThroughProvisioner provisioner, UserResolver resolver) = Build(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
 		await provisioner.ProvisionIfEnabledAsync("phone@dnfl.dk", CancellationToken.None);
@@ -117,14 +117,14 @@ public sealed class PassThroughProvisionerTests : IDisposable
 	[Fact]
 	public async Task Repeat_IsIdempotent_AndCaseInsensitive()
 	{
-		(PassThroughProvisioner provisioner, AccountResolver resolver) = Build(Options(autoProvision: true));
+		(PassThroughProvisioner provisioner, UserResolver resolver) = Build(Options(autoProvision: true));
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
 		await provisioner.ProvisionIfEnabledAsync("Phone@dnfl.dk", CancellationToken.None);
 		await provisioner.ProvisionIfEnabledAsync("phone@dnfl.dk", CancellationToken.None);
 		await provisioner.ProvisionIfEnabledAsync("PHONE@DNFL.DK", CancellationToken.None);
 
-		List<(string UserName, AccountOptions Options, DateTime UpdatedUtc, bool Valid)> rows =
+		List<(string UserName, UserOptions Options, DateTime UpdatedUtc, bool Valid)> rows =
 			await _store.ListAsync(CancellationToken.None);
 		Assert.Single(rows);
 	}

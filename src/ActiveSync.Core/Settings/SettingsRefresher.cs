@@ -8,7 +8,7 @@ namespace ActiveSync.Core.Settings;
 ///   Polls the <see cref="ActiveSync.Core.State.SettingsStamp" /> and, when it moves, reloads the
 ///   global settings into the <see cref="DbSettingsConfigurationProvider" /> — which fires the
 ///   configuration reload token so <c>IOptionsMonitor</c> recomputes. Mirrors
-///   <see cref="ActiveSync.Core.Accounts.AccountResolver" />'s change-stamp poll: at most one
+///   <see cref="ActiveSync.Core.Accounts.UserResolver" />'s change-stamp poll: at most one
 ///   primary-key point-read every <see cref="AuthOptions.UsersRefreshSeconds" />; failures keep the
 ///   current snapshot (settings never go down with the database). Registered as a singleton and
 ///   driven by a background service; multi-pod safe (each replica polls its own stamp).

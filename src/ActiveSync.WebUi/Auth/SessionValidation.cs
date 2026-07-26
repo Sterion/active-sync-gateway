@@ -71,7 +71,7 @@ internal static class SessionValidation
 	///   session must be terminated. Pure — the I/O lives in <see cref="ValidateAsync" />.
 	/// </summary>
 	internal static ClaimsPrincipal? Rebuild(
-		ClaimsPrincipal principal, MergedAccount? account, bool blocked, DateTimeOffset now,
+		ClaimsPrincipal principal, MergedUser? account, bool blocked, DateTimeOffset now,
 		DateTime? sessionsValidAfterUtc = null)
 	{
 		string? login = principal.Identity?.Name;
@@ -123,12 +123,12 @@ internal static class SessionValidation
 			.CreateLogger("ActiveSync.WebUi.Session");
 		CancellationToken ct = context.HttpContext.RequestAborted;
 
-		MergedAccount? account;
+		MergedUser? account;
 		bool blocked;
 		DateTime? validAfter;
 		try
 		{
-			AccountResolver resolver = services.GetRequiredService<AccountResolver>();
+			UserResolver resolver = services.GetRequiredService<UserResolver>();
 			await resolver.EnsureFreshAsync(false, ct);
 			resolver.MergedUsers.TryGetValue(login, out account);
 			SyncStateService state = services.GetRequiredService<SyncStateService>();

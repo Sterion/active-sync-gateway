@@ -33,7 +33,7 @@ public sealed class BackendRoleOverride
 	///   list "X". A null value CLEARS the inherited global key it addresses: the global
 	///   subtree that key names is removed and nothing is written back, so the effective
 	///   setting falls to the provider option-class default (matching the CLI/web field
-	///   paths, where null = clear — see AccountFieldPaths). Other inherited keys are untouched.
+	///   paths, where null = clear — see UserFieldPaths). Other inherited keys are untouched.
 	/// </summary>
 	public Dictionary<string, string?>? Settings { get; set; }
 }
@@ -44,7 +44,7 @@ public sealed class BackendRoleOverride
 ///   when <see cref="ActiveSyncOptions.RequireDeclaredUsers" /> is set). Undeclared
 ///   logins are pure pass-through.
 /// </summary>
-public sealed class AccountOptions
+public sealed class UserOptions
 {
 	/// <summary>
 	///   Optional gateway password override — decouples the phone's password from the mail

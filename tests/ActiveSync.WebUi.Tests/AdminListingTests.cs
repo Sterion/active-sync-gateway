@@ -50,7 +50,7 @@ public sealed class AdminListingTests
 	private static async Task<WebUiHost> AdminHostAsync()
 	{
 		return await WebUiHost.StartAsync(
-			WebUiHost.Users(("alice", new AccountOptions { Admin = true })));
+			WebUiHost.Users(("alice", new UserOptions { Admin = true })));
 	}
 
 	[Fact]

@@ -20,19 +20,19 @@ public sealed class AdministrationTests
 	[Fact]
 	public void AdminFieldPath_SetsAndClearsTheFlag()
 	{
-		AccountFieldPaths.FieldPath? field = AccountFieldPaths.Find("Admin");
+		UserFieldPaths.FieldPath? field = UserFieldPaths.Find("Admin");
 		Assert.NotNull(field);
 		Assert.False(field.IsSecret);
-		Assert.True(AccountFieldPaths.TryParseValue(field, "true", out object? value, out _));
+		Assert.True(UserFieldPaths.TryParseValue(field, "true", out object? value, out _));
 
-		AccountOptions account = new();
+		UserOptions account = new();
 		field.Set(account, value);
 		Assert.True(account.Admin);
 
 		field.Set(account, null);
 		Assert.Null(account.Admin);
 
-		Assert.False(AccountFieldPaths.TryParseValue(field, "maybe", out _, out string? error));
+		Assert.False(UserFieldPaths.TryParseValue(field, "maybe", out _, out string? error));
 		Assert.Contains("not a valid", error);
 	}
 
@@ -42,19 +42,19 @@ public sealed class AdministrationTests
 	[Fact]
 	public void FieldPath_MarksOnlyTheGatewayPasswordAsGatewayPassword()
 	{
-		AccountFieldPaths.FieldPath gateway = AccountFieldPaths.Find("Password")!;
+		UserFieldPaths.FieldPath gateway = UserFieldPaths.Find("Password")!;
 		Assert.True(gateway.IsSecret);
 		Assert.True(gateway.IsGatewayPassword);
 
-		foreach (string backendKey in AccountFieldPaths.BackendSecretKeys)
+		foreach (string backendKey in UserFieldPaths.BackendSecretKeys)
 		{
-			AccountFieldPaths.FieldPath backend = AccountFieldPaths.Find(backendKey)!;
+			UserFieldPaths.FieldPath backend = UserFieldPaths.Find(backendKey)!;
 			Assert.True(backend.IsSecret);
 			Assert.False(backend.IsGatewayPassword);
 		}
 
 		// A non-secret field is neither.
-		AccountFieldPaths.FieldPath mail = AccountFieldPaths.Find("MailAddress")!;
+		UserFieldPaths.FieldPath mail = UserFieldPaths.Find("MailAddress")!;
 		Assert.False(mail.IsSecret);
 		Assert.False(mail.IsGatewayPassword);
 	}
@@ -62,18 +62,18 @@ public sealed class AdministrationTests
 	[Fact]
 	public void AdminFlag_JsonRoundTrip_AndLegacyRowsDeserializeAsUnset()
 	{
-		AccountOptions account = new() { Admin = true, MailAddress = "a@x" };
-		string json = JsonSerializer.Serialize(account, AccountStore.JsonOptions);
-		AccountOptions restored = JsonSerializer.Deserialize<AccountOptions>(json, AccountStore.JsonOptions)!;
+		UserOptions account = new() { Admin = true, MailAddress = "a@x" };
+		string json = JsonSerializer.Serialize(account, UserStore.JsonOptions);
+		UserOptions restored = JsonSerializer.Deserialize<UserOptions>(json, UserStore.JsonOptions)!;
 		Assert.True(restored.Admin);
 
 		// A row written before the flag existed (no "admin" property) deserializes as unset.
-		AccountOptions legacy = JsonSerializer.Deserialize<AccountOptions>(
-			"""{"mailAddress":"b@x"}""", AccountStore.JsonOptions)!;
+		UserOptions legacy = JsonSerializer.Deserialize<UserOptions>(
+			"""{"mailAddress":"b@x"}""", UserStore.JsonOptions)!;
 		Assert.Null(legacy.Admin);
 
 		// Unset stays absent on the wire (WhenWritingNull) — old binaries never see the key.
-		Assert.DoesNotContain("admin", JsonSerializer.Serialize(new AccountOptions(), AccountStore.JsonOptions));
+		Assert.DoesNotContain("admin", JsonSerializer.Serialize(new UserOptions(), UserStore.JsonOptions));
 	}
 
 	[Theory]
@@ -103,19 +103,19 @@ public sealed class AdministrationTests
 	public void SecretPolicy_GatewayPassword_HashesPlaintext_PassesHash_RejectsSealed()
 	{
 		// Behaviour change (C6): plaintext gateway passwords now have a strength floor, so this
-		// sample is >= AccountSecretPolicy.MinGatewayPasswordLength (it was "hunter2", now rejected).
-		AccountSecretPolicy.SecretResult hashed = AccountSecretPolicy.PrepareGatewayPassword("hunter2-strong");
+		// sample is >= UserSecretPolicy.MinGatewayPasswordLength (it was "hunter2", now rejected).
+		UserSecretPolicy.SecretResult hashed = UserSecretPolicy.PrepareGatewayPassword("hunter2-strong");
 		Assert.Null(hashed.Error);
 		Assert.True(GatewayPasswordHasher.IsHashed(hashed.Value!));
-		Assert.Equal(AccountSecretPolicy.PlaintextDisposition.Hashed, hashed.Plaintext);
+		Assert.Equal(UserSecretPolicy.PlaintextDisposition.Hashed, hashed.Plaintext);
 
 		string preHashed = GatewayPasswordHasher.Hash("s3cret");
-		AccountSecretPolicy.SecretResult passThrough = AccountSecretPolicy.PrepareGatewayPassword(preHashed);
+		UserSecretPolicy.SecretResult passThrough = UserSecretPolicy.PrepareGatewayPassword(preHashed);
 		Assert.Equal(preHashed, passThrough.Value);
-		Assert.Equal(AccountSecretPolicy.PlaintextDisposition.None, passThrough.Plaintext);
+		Assert.Equal(UserSecretPolicy.PlaintextDisposition.None, passThrough.Plaintext);
 
-		Assert.NotNull(AccountSecretPolicy.PrepareGatewayPassword("pbkdf2$broken").Error);
-		Assert.NotNull(AccountSecretPolicy.PrepareGatewayPassword("enc:v1:AAAA").Error);
+		Assert.NotNull(UserSecretPolicy.PrepareGatewayPassword("pbkdf2$broken").Error);
+		Assert.NotNull(UserSecretPolicy.PrepareGatewayPassword("enc:v1:AAAA").Error);
 	}
 
 	[Fact]
@@ -124,8 +124,8 @@ public sealed class AdministrationTests
 		// C6: the shared gateway-password policy now imposes a minimum length, so every write
 		// surface — CLI 'user password', the admin API, and the self-service portal that used to
 		// call GatewayPasswordHasher.Hash directly — rejects a trivially weak password identically.
-		Assert.NotNull(AccountSecretPolicy.PrepareGatewayPassword("short").Error); // below the floor
-		Assert.Null(AccountSecretPolicy.PrepareGatewayPassword("a-strong-passphrase").Error);
+		Assert.NotNull(UserSecretPolicy.PrepareGatewayPassword("short").Error); // below the floor
+		Assert.Null(UserSecretPolicy.PrepareGatewayPassword("a-strong-passphrase").Error);
 	}
 
 	[Fact]
@@ -137,7 +137,7 @@ public sealed class AdministrationTests
 		// sending an empty Basic-auth password got in. The policy must refuse it outright.
 		foreach (string blank in new[] { "", "   ", "\t" })
 		{
-			AccountSecretPolicy.SecretResult result = AccountSecretPolicy.PrepareGatewayPassword(blank);
+			UserSecretPolicy.SecretResult result = UserSecretPolicy.PrepareGatewayPassword(blank);
 			Assert.NotNull(result.Error);
 			Assert.Null(result.Value);
 		}
@@ -147,24 +147,24 @@ public sealed class AdministrationTests
 	public void SecretPolicy_BackendPassword_SealsWithKey_PlainWithout_RejectsHash()
 	{
 		EncryptionOptions withKey = new() { Key = KeyBase64 };
-		AccountSecretPolicy.SecretResult sealedResult =
-			AccountSecretPolicy.PrepareBackendPassword("imap-pw", withKey, "Backends:MailStore:Password");
+		UserSecretPolicy.SecretResult sealedResult =
+			UserSecretPolicy.PrepareBackendPassword("imap-pw", withKey, "Backends:MailStore:Password");
 		Assert.Null(sealedResult.Error);
 		Assert.True(SecretValue.IsSealed(sealedResult.Value!));
-		Assert.Equal(AccountSecretPolicy.PlaintextDisposition.Sealed, sealedResult.Plaintext);
+		Assert.Equal(UserSecretPolicy.PlaintextDisposition.Sealed, sealedResult.Plaintext);
 
 		// An already-sealed value passes through untouched.
-		AccountSecretPolicy.SecretResult resealed =
-			AccountSecretPolicy.PrepareBackendPassword(sealedResult.Value!, withKey, "Backends:MailStore:Password");
+		UserSecretPolicy.SecretResult resealed =
+			UserSecretPolicy.PrepareBackendPassword(sealedResult.Value!, withKey, "Backends:MailStore:Password");
 		Assert.Equal(sealedResult.Value, resealed.Value);
 
 		EncryptionOptions withoutKey = new() { AllowPlaintext = true };
-		AccountSecretPolicy.SecretResult plain =
-			AccountSecretPolicy.PrepareBackendPassword("imap-pw", withoutKey, "Backends:MailStore:Password");
+		UserSecretPolicy.SecretResult plain =
+			UserSecretPolicy.PrepareBackendPassword("imap-pw", withoutKey, "Backends:MailStore:Password");
 		Assert.Equal("imap-pw", plain.Value);
-		Assert.Equal(AccountSecretPolicy.PlaintextDisposition.StoredPlaintext, plain.Plaintext);
+		Assert.Equal(UserSecretPolicy.PlaintextDisposition.StoredPlaintext, plain.Plaintext);
 
-		AccountSecretPolicy.SecretResult hash = AccountSecretPolicy.PrepareBackendPassword(
+		UserSecretPolicy.SecretResult hash = UserSecretPolicy.PrepareBackendPassword(
 			GatewayPasswordHasher.Hash("x"), withKey, "Backends:MailStore:Password");
 		Assert.NotNull(hash.Error);
 		Assert.Contains("backend password", hash.Error);
@@ -177,11 +177,11 @@ public sealed class AdministrationTests
 		// swallowed — TryLoadKey's error was discarded and null was read as "no key", so the
 		// backend password was silently written in plaintext under a broken encryption config.
 		EncryptionOptions broken = new() { Key = "some-key", KeyFile = "/nonexistent/key" };
-		AccountSecretPolicy.SecretResult result =
-			AccountSecretPolicy.PrepareBackendPassword("imap-pw", broken, "Backends:MailStore:Password");
+		UserSecretPolicy.SecretResult result =
+			UserSecretPolicy.PrepareBackendPassword("imap-pw", broken, "Backends:MailStore:Password");
 		Assert.NotNull(result.Error);
 		Assert.Null(result.Value);
-		Assert.NotEqual(AccountSecretPolicy.PlaintextDisposition.StoredPlaintext, result.Plaintext);
+		Assert.NotEqual(UserSecretPolicy.PlaintextDisposition.StoredPlaintext, result.Plaintext);
 	}
 
 	[Fact]

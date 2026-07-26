@@ -11,12 +11,12 @@ namespace ActiveSync.Core.Tests;
 /// </summary>
 public sealed class LegacyAccountJsonTests
 {
-	private static AccountOptions Convert(string json)
+	private static UserOptions Convert(string json)
 	{
 		string? converted = LegacyAccountJson.TryConvert(json, out string? error);
 		Assert.Null(error);
 		Assert.NotNull(converted);
-		return JsonSerializer.Deserialize<AccountOptions>(converted, AccountStore.JsonOptions)!;
+		return JsonSerializer.Deserialize<UserOptions>(converted, UserStore.JsonOptions)!;
 	}
 
 	[Fact]
@@ -39,7 +39,7 @@ public sealed class LegacyAccountJsonTests
 	[Fact]
 	public void ImapAndSmtp_BecomeMailRoles_WithSettings()
 	{
-		AccountOptions converted = Convert("""
+		UserOptions converted = Convert("""
 			{"password":"pbkdf2$x","mailAddress":"a@x",
 			 "imap":{"userName":"iu","password":"ip","host":"h","port":1143,"useSsl":false,"pathSeparator":"/"},
 			 "smtp":{"port":2525,"forceFrom":true}}
@@ -62,7 +62,7 @@ public sealed class LegacyAccountJsonTests
 	[Fact]
 	public void SelfContainedCalDav_SwitchesProvider_AndDuplicatesToTasks()
 	{
-		AccountOptions converted = Convert("""
+		UserOptions converted = Convert("""
 			{"calDav":{"baseUrl":"https://dav.x","userName":"du",
 			           "sharedCollections":["/a/","/b/|ro"]}}
 			""");
@@ -82,7 +82,7 @@ public sealed class LegacyAccountJsonTests
 	[Fact]
 	public void CredentialOnlyCalDav_DoesNotForceTheProvider()
 	{
-		AccountOptions converted = Convert("""{"calDav":{"userName":"du","password":"dp"}}""");
+		UserOptions converted = Convert("""{"calDav":{"userName":"du","password":"dp"}}""");
 		BackendRoleOverride calendar = converted.Backends!["Calendar"];
 		Assert.Null(calendar.Provider); // follows the global Calendar assignment
 		Assert.Equal("du", calendar.UserName);
@@ -95,7 +95,7 @@ public sealed class LegacyAccountJsonTests
 		// B13: the old converter was a field whitelist (Password + MailAddress + Backends), so it
 		// silently DROPPED Admin/Enabled/AutoProvisioned/OidcSubject — a disabled row came back
 		// ENABLED after the in-place upgrade, with no log line.
-		AccountOptions converted = Convert("""
+		UserOptions converted = Convert("""
 			{"enabled":false,"admin":true,"autoProvisioned":true,"oidcSubject":"sub-123",
 			 "imap":{"host":"h"}}
 			""");
@@ -109,7 +109,7 @@ public sealed class LegacyAccountJsonTests
 	[Fact]
 	public void DisabledSections_AndSieveOptIn_MapToTheNewSwitches()
 	{
-		AccountOptions converted = Convert("""
+		UserOptions converted = Convert("""
 			{"calDav":{"enabled":false,"userName":"ignored"},
 			 "sieve":{"enabled":true,"host":"sieve.x"}}
 			""");
@@ -131,7 +131,7 @@ public sealed class LegacyAccountJsonTests
 		// upgrade unable to log in at all. The upgrade must not opt a user into an Oof override it
 		// cannot authenticate. (A userName key is included so the section converts to a non-null
 		// override at all — enabled:true alone, with nothing else, already converts to nothing.)
-		AccountOptions converted = Convert("""{"sieve":{"enabled":true,"userName":"sieve-user"}}""");
+		UserOptions converted = Convert("""{"sieve":{"enabled":true,"userName":"sieve-user"}}""");
 		Assert.False(converted.Backends?.ContainsKey("Oof") ?? false);
 	}
 }

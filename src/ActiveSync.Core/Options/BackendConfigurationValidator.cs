@@ -40,7 +40,7 @@ public sealed class BackendConfigurationValidator(
 			// Pass the key only if it loads — key problems are already reported by the
 			// options validator, and any enc: values are then flagged as unresolvable.
 			byte[]? key = EncryptionKeyLoader.TryLoadKey(options.Value.Encryption, out string? _);
-			AccountResolver.ValidateUsers(options.Value, roles, registry, key, failures);
+			UserResolver.ValidateUsers(options.Value, roles, registry, key, failures);
 			if (key is not null)
 				CryptographicOperations.ZeroMemory(key);
 		}

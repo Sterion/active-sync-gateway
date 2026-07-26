@@ -6,7 +6,7 @@ namespace ActiveSync.Core.Accounts;
 
 /// <summary>
 ///   Converts pre-role-model account rows (top-level imap/smtp/calDav/cardDav/sieve JSON
-///   sections) to the role-keyed <see cref="AccountOptions" /> shape. Mandatory before the
+///   sections) to the role-keyed <see cref="UserOptions" /> shape. Mandatory before the
 ///   snapshot ever deserializes such a row: System.Text.Json silently ignores unknown
 ///   members, so an unconverted row would DROP its overrides — a user's credential override
 ///   silently falling back to pass-through is an authentication hazard.
@@ -16,7 +16,7 @@ public static class LegacyAccountJson
 	private static readonly string[] LegacySections = ["imap", "smtp", "calDav", "cardDav", "sieve"];
 
 	/// <summary>
-	///   Root properties the upgrade understands: the <see cref="AccountOptions" /> members (which
+	///   Root properties the upgrade understands: the <see cref="UserOptions" /> members (which
 	///   are carried over verbatim) plus the legacy backend sections (which become role overrides).
 	///   Anything else is a value that would be dropped, so it is logged rather than lost silently.
 	/// </summary>
@@ -51,15 +51,15 @@ public static class LegacyAccountJson
 			    !LegacySections.Any(section => TryGetCaseInsensitive(root, section, out _)))
 				return null;
 
-			// B13: deserialize the root into AccountOptions FIRST so every settable member
+			// B13: deserialize the root into UserOptions FIRST so every settable member
 			// (Password, MailAddress, Admin, Enabled, AutoProvisioned, OidcSubject) carries over —
 			// System.Text.Json ignores the unknown legacy sections. The old whitelist reconstructed
 			// only three of them, so a disabled row came back enabled after the in-place upgrade.
-			AccountOptions converted;
+			UserOptions converted;
 			try
 			{
-				converted = JsonSerializer.Deserialize<AccountOptions>(json, AccountStore.JsonOptions)
-					?? new AccountOptions();
+				converted = JsonSerializer.Deserialize<UserOptions>(json, UserStore.JsonOptions)
+					?? new UserOptions();
 			}
 			catch (Exception ex) when (ex is JsonException or NotSupportedException)
 			{
@@ -141,7 +141,7 @@ public static class LegacyAccountJson
 
 			if (converted.Backends.Count == 0)
 				converted.Backends = null;
-			return JsonSerializer.Serialize(converted, AccountStore.JsonOptions);
+			return JsonSerializer.Serialize(converted, UserStore.JsonOptions);
 		}
 	}
 

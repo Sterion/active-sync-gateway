@@ -43,7 +43,7 @@ internal static class StateEndpoints
 		});
 
 		api.MapGet("summary", async (
-			DeviceAdminService devices, LogQueryService logs, AccountResolver resolver, CancellationToken ct) =>
+			DeviceAdminService devices, LogQueryService logs, UserResolver resolver, CancellationToken ct) =>
 		{
 			await resolver.EnsureFreshAsync(false, ct);
 			DateTime hourAgo = DateTime.UtcNow.AddHours(-1);

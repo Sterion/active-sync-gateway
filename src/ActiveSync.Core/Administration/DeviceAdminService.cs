@@ -8,7 +8,7 @@ namespace ActiveSync.Core.Administration;
 ///   `eas block`/`unblock`, `eas device wipe`, `eas purge`, and the web Devices page). Both
 ///   surfaces used to hand-roll the same EF against <see cref="Device" />, <see cref="LoginBlock" />
 ///   and the cascade tables — the S3/C18 defect. Presentation (paging clamps, confirmation echoes,
-///   the disabled-account flag from <c>AccountResolver</c>) stays with the caller; the DB work and
+///   the disabled-account flag from <c>UserResolver</c>) stays with the caller; the DB work and
 ///   its block-cross-join live here.
 /// </summary>
 public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory)

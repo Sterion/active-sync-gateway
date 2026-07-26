@@ -13,9 +13,9 @@ namespace ActiveSync.WebUi.Tests;
 /// </summary>
 public sealed class AccountSettingsRedactionTests
 {
-	private static Dictionary<string, AccountOptions> AliceWithSecretSetting()
+	private static Dictionary<string, UserOptions> AliceWithSecretSetting()
 	{
-		return WebUiHost.Users(("alice", new AccountOptions
+		return WebUiHost.Users(("alice", new UserOptions
 		{
 			Admin = true,
 			Backends = new Dictionary<string, BackendRoleOverride>
@@ -76,7 +76,7 @@ public sealed class AccountSettingsRedactionTests
 		});
 		Assert.True(put.IsSuccessStatusCode, $"PUT failed: {put.StatusCode}");
 
-		AccountOptions? stored = await new AccountStore(host.Factory).GetAsync("alice", CancellationToken.None);
+		UserOptions? stored = await new UserStore(host.Factory).GetAsync("alice", CancellationToken.None);
 		Assert.Equal("account-api-secret", stored!.Backends!["Calendar"].Settings!["ApiKey"]);
 	}
 

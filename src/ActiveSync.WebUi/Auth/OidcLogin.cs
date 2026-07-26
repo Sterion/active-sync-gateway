@@ -35,8 +35,8 @@ internal static class OidcLogin
 	/// </param>
 	internal static async Task<Verdict> EvaluateAsync(
 		ClaimsPrincipal ticket, WebUiOidcOptions oidc,
-		IReadOnlyDictionary<string, MergedAccount> mergedUsers,
-		Func<string, AccountOptions, Task<IReadOnlyList<string>>> provisionAsync,
+		IReadOnlyDictionary<string, MergedUser> mergedUsers,
+		Func<string, UserOptions, Task<IReadOnlyList<string>>> provisionAsync,
 		Func<string, string, Task>? bindSubjectAsync = null)
 	{
 		string? login = ticket.FindFirst(oidc.LoginClaim)?.Value?.Trim();
@@ -45,7 +45,7 @@ internal static class OidcLogin
 
 		bool claimAdmin = HasAdminClaim(ticket, oidc);
 		string? subject = ticket.FindFirst(SubjectClaim)?.Value?.Trim();
-		if (mergedUsers.TryGetValue(login, out MergedAccount? account))
+		if (mergedUsers.TryGetValue(login, out MergedUser? account))
 		{
 			if (account.Options.Enabled == false)
 				return new Verdict(false, login, false, false, "the account is disabled");
@@ -88,7 +88,7 @@ internal static class OidcLogin
 			return new Verdict(false, login, false, false,
 				"the login is not a declared account (enable Oidc:AutoProvision or add the user)");
 
-		AccountOptions entry = new()
+		UserOptions entry = new()
 		{
 			MailAddress = ticket.FindFirst("email")?.Value is { Length: > 0 } email ? email : null,
 			OidcSubject = string.IsNullOrEmpty(subject) ? null : subject

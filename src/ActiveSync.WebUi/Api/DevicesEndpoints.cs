@@ -29,7 +29,7 @@ internal static class DevicesEndpoints
 	internal static void Map(RouteGroupBuilder api)
 	{
 		api.MapGet("devices", async (
-			string? user, int? limit, int? offset, DeviceAdminService devices, AccountResolver resolver,
+			string? user, int? limit, int? offset, DeviceAdminService devices, UserResolver resolver,
 			CancellationToken ct) =>
 		{
 			await resolver.EnsureFreshAsync(false, ct);
@@ -51,7 +51,7 @@ internal static class DevicesEndpoints
 		});
 
 		api.MapPost("devices/block", async (
-			BlockRequest request, DeviceAdminService devices, AccountResolver resolver, CancellationToken ct) =>
+			BlockRequest request, DeviceAdminService devices, UserResolver resolver, CancellationToken ct) =>
 		{
 			// A block is stored text matched against the login a device presents, so it has to
 			// meet the same rules as a declared login — ':' cannot survive Basic auth and a

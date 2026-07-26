@@ -11,7 +11,7 @@ namespace ActiveSync.Core.Administration;
 ///   role passwords are stored sealed (enc:v1:) when the encryption master key exists, sealed
 ///   values pass through, and pbkdf2$ hashes are rejected (a backend cannot verify a hash).
 /// </summary>
-internal static class AccountSecretPolicy
+internal static class UserSecretPolicy
 {
 	/// <summary>
 	///   Minimum length for a plaintext gateway password, enforced by every write surface (CLI,

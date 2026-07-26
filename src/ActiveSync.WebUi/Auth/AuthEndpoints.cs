@@ -40,7 +40,7 @@ internal static class AuthEndpoints
 		}).AllowAnonymous();
 
 		api.MapPost("login", (LoginRequest request, HttpContext http,
-				IOptionsMonitor<ActiveSyncOptions> options, AccountResolver resolver,
+				IOptionsMonitor<ActiveSyncOptions> options, UserResolver resolver,
 				IBackendSessionFactory sessionFactory, AuthThrottle throttle,
 				SyncStateService state, ILoggerFactory loggerFactory, CancellationToken ct) =>
 			LoginAsync(request, http, admin, options, resolver, sessionFactory, throttle, state,
@@ -74,7 +74,7 @@ internal static class AuthEndpoints
 
 	private static async Task<IResult> LoginAsync(
 		LoginRequest request, HttpContext http, bool admin,
-		IOptionsMonitor<ActiveSyncOptions> options, AccountResolver resolver,
+		IOptionsMonitor<ActiveSyncOptions> options, UserResolver resolver,
 		IBackendSessionFactory sessionFactory, AuthThrottle throttle,
 		SyncStateService state, ILogger logger, CancellationToken ct)
 	{
@@ -98,7 +98,7 @@ internal static class AuthEndpoints
 		await resolver.EnsureFreshAsync(false, ct);
 		// Only declared accounts (config or database) may use the web interfaces. The response
 		// is indistinguishable from a wrong password so logins cannot be enumerated.
-		if (!resolver.MergedUsers.TryGetValue(request.Username, out MergedAccount? account))
+		if (!resolver.MergedUsers.TryGetValue(request.Username, out MergedUser? account))
 		{
 			throttle.RecordFailure(userKey);
 			throttle.RecordFailure(addressKey);

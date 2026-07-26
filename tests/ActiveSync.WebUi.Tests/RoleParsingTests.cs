@@ -16,8 +16,8 @@ public sealed class RoleParsingTests
 	private static async Task<WebUiHost> HostAsync()
 	{
 		return await WebUiHost.StartAsync(WebUiHost.Users(
-			("alice", new AccountOptions { Admin = true }),
-			("bob", new AccountOptions())));
+			("alice", new UserOptions { Admin = true }),
+			("bob", new UserOptions())));
 	}
 
 	[Fact]

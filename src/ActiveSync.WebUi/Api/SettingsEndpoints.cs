@@ -83,12 +83,12 @@ internal static class SettingsEndpoints
 			// Catalogue-level secrets (the OIDC client secret, the TLS certificate password) are
 			// sealed at rest when the master key exists; open-ended backend keys stay raw (their
 			// providers read them verbatim — the synthetic Secret flag only masks display). Shared
-			// with `eas config set` via AccountSecretPolicy so both surfaces seal identically (B5).
+			// with `eas config set` via UserSecretPolicy so both surfaces seal identically (B5).
 			string value = request.Value;
 			if (definition.Secret && SettingKeys.IsCatalogueKey(definition.Key))
 			{
-				AccountSecretPolicy.SecretResult prepared =
-					AccountSecretPolicy.PrepareCatalogueSecret(value, options.Value.Encryption, definition.Key);
+				UserSecretPolicy.SecretResult prepared =
+					UserSecretPolicy.PrepareCatalogueSecret(value, options.Value.Encryption, definition.Key);
 				if (prepared.Error is not null)
 					return EndpointHelpers.BadRequest(prepared.Error);
 				value = prepared.Value!;

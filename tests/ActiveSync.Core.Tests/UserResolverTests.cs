@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Core.Tests;
 
-public class AccountResolverTests
+public class UserResolverTests
 {
 	private static Dictionary<string, string?> BaseConfig()
 	{
@@ -68,9 +68,9 @@ public class AccountResolverTests
 		return roles;
 	}
 
-	private static AccountResolver Resolver(ActiveSyncOptions options, Dictionary<string, string?> config)
+	private static UserResolver Resolver(ActiveSyncOptions options, Dictionary<string, string?> config)
 	{
-		return new AccountResolver(
+		return new UserResolver(
 			TestOptionsMonitor.Of(options), RolesProvider(config), Registry());
 	}
 
@@ -82,7 +82,7 @@ public class AccountResolverTests
 		// B28 (item 37): OrderedRoles used to sort+ToList on EVERY read, so each access allocated a
 		// fresh list with a different identity. Cache it: repeated reads return the SAME instance
 		// (and the order — enum order, MailStore first — is unchanged).
-		ResolvedAccount account = new(
+		ResolvedUser account = new(
 			"u@x", "u@x", false,
 			new Dictionary<BackendRole, ResolvedRole>
 			{
@@ -105,10 +105,10 @@ public class AccountResolverTests
 		Dictionary<string, string?> config = BaseConfig();
 		config["ActiveSync:Backends:Calendar:Provider"] = "caldav";
 		config["ActiveSync:Backends:Calendar:BaseUrl"] = "https://dav.global";
-		AccountResolver resolver = Resolver(HostOptions(), config);
+		UserResolver resolver = Resolver(HostOptions(), config);
 
 		BackendCredentials presented = new("user1@example.com", "pass");
-		ResolvedAccount account = resolver.Resolve(presented);
+		ResolvedUser account = resolver.Resolve(presented);
 		Assert.Equal("user1@example.com", account.GatewayLogin);
 		Assert.Equal("user1@example.com", account.MailAddress); // login contains '@'
 		Assert.False(account.MailAddressIsExplicit);
@@ -131,11 +131,11 @@ public class AccountResolverTests
 	public void DeclaredEmptyEntry_BehavesLikePassThrough()
 	{
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions> { ["user1@example.com"] = new() };
-		AccountResolver resolver = Resolver(options, BaseConfig());
+		options.Users = new Dictionary<string, UserOptions> { ["user1@example.com"] = new() };
+		UserResolver resolver = Resolver(options, BaseConfig());
 
 		BackendCredentials presented = new("user1@example.com", "pass");
-		ResolvedAccount account = resolver.Resolve(presented);
+		ResolvedUser account = resolver.Resolve(presented);
 		Assert.Equal(presented, account.Roles[BackendRole.MailStore].Credentials);
 		Assert.Equal(presented, account.Roles[BackendRole.MailSubmit].Credentials);
 		Assert.Equal("imap.global", account.Roles[BackendRole.MailStore].Settings.Bind<ImapOptions>().Host);
@@ -148,7 +148,7 @@ public class AccountResolverTests
 	public void SettingOverrides_Win_UnsetKeysInherit()
 	{
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["u"] = new()
 			{
@@ -168,7 +168,7 @@ public class AccountResolverTests
 			}
 		};
 
-		ResolvedAccount account = Resolver(options, BaseConfig())
+		ResolvedUser account = Resolver(options, BaseConfig())
 			.Resolve(new BackendCredentials("u", "presented-pw"));
 		ImapOptions imap = account.Roles[BackendRole.MailStore].Settings.Bind<ImapOptions>();
 		Assert.Equal("imap.other", imap.Host);  // overridden
@@ -192,7 +192,7 @@ public class AccountResolverTests
 		config["ActiveSync:Backends:Calendar:Provider"] = "caldav";
 		config["ActiveSync:Backends:Calendar:BaseUrl"] = "https://dav.global";
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			// Only the mail user name differs; every password inherits the presented one.
 			["phone"] = new()
@@ -202,7 +202,7 @@ public class AccountResolverTests
 			}
 		};
 
-		ResolvedAccount account = Resolver(options, config).Resolve(new BackendCredentials("phone", "P"));
+		ResolvedUser account = Resolver(options, config).Resolve(new BackendCredentials("phone", "P"));
 		BackendCredentials mail = account.Roles[BackendRole.MailStore].Credentials;
 		Assert.Equal(new BackendCredentials("mailbox@example.com", "P"), mail);
 		Assert.Equal(mail, account.Roles[BackendRole.MailSubmit].Credentials); // submit ← effective mail
@@ -216,7 +216,7 @@ public class AccountResolverTests
 		config["ActiveSync:Backends:Calendar:Provider"] = "caldav";
 		config["ActiveSync:Backends:Calendar:BaseUrl"] = "https://dav.global";
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["phone"] = new()
 			{
@@ -225,7 +225,7 @@ public class AccountResolverTests
 			}
 		};
 
-		ResolvedAccount account = Resolver(options, config).Resolve(new BackendCredentials("phone", "mail-pw"));
+		ResolvedUser account = Resolver(options, config).Resolve(new BackendCredentials("phone", "mail-pw"));
 		Assert.Equal("mail-pw", account.Roles[BackendRole.MailStore].Credentials.Password);
 		Assert.Equal("mail-pw", account.Roles[BackendRole.MailSubmit].Credentials.Password);
 		Assert.Equal("mail-pw", account.Roles[BackendRole.Calendar].Credentials.Password);
@@ -240,7 +240,7 @@ public class AccountResolverTests
 		config["ActiveSync:Backends:Calendar:SharedCollections:0"] = "/cal/global/";
 		config["ActiveSync:Backends:Calendar:SharedCollections:1"] = "/cal/other/|ro";
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["inherits"] = new(),
 			["replaces"] = new()
@@ -254,7 +254,7 @@ public class AccountResolverTests
 				}
 			}
 		};
-		AccountResolver resolver = Resolver(options, config);
+		UserResolver resolver = Resolver(options, config);
 		BackendCredentials presented = new("x", "P");
 
 		DavServerOptions inherited = resolver.Resolve(presented with { UserName = "inherits" })
@@ -276,7 +276,7 @@ public class AccountResolverTests
 		config["ActiveSync:Backends:Calendar:BaseUrl"] = "https://dav.global";
 		config["ActiveSync:Backends:Calendar:HomeSetPath"] = "/{user}/";
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["inherits"] = new(),
 			["disables"] = new()
@@ -297,7 +297,7 @@ public class AccountResolverTests
 				}
 			}
 		};
-		AccountResolver resolver = Resolver(options, config);
+		UserResolver resolver = Resolver(options, config);
 		BackendCredentials presented = new("x", "P");
 
 		ResolvedRole inherits = resolver.Resolve(presented with { UserName = "inherits" })
@@ -328,7 +328,7 @@ public class AccountResolverTests
 		Dictionary<string, string?> config = BaseConfig();
 		config["ActiveSync:Backends:MailStore:PathSeparator"] = "/";
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["inherits"] = new(),
 			["clears"] = new()
@@ -342,7 +342,7 @@ public class AccountResolverTests
 				},
 			},
 		};
-		AccountResolver resolver = Resolver(options, config);
+		UserResolver resolver = Resolver(options, config);
 		BackendCredentials presented = new("x", "P");
 
 		// The inheriting user keeps the global separator; the clearing user drops it (back to the
@@ -361,12 +361,12 @@ public class AccountResolverTests
 	public void MailAddress_IsExplicitFlag_AndNeverChangesMailUserName()
 	{
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["phone"] = new() { MailAddress = "real@example.com" }
 		};
 
-		ResolvedAccount account = Resolver(options, BaseConfig()).Resolve(new BackendCredentials("phone", "P"));
+		ResolvedUser account = Resolver(options, BaseConfig()).Resolve(new BackendCredentials("phone", "P"));
 		Assert.Equal("real@example.com", account.MailAddress);
 		Assert.True(account.MailAddressIsExplicit);
 		// login, NOT the mail address
@@ -380,7 +380,7 @@ public class AccountResolverTests
 		Array.Fill(key, (byte)9);
 		ActiveSyncOptions options = HostOptions();
 		options.Encryption = new EncryptionOptions { Key = Convert.ToBase64String(key) };
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["u"] = new()
 			{
@@ -388,7 +388,7 @@ public class AccountResolverTests
 					{ ["MailStore"] = new() { Password = SecretValue.Seal("real-mail-pw", key) } }
 			}
 		};
-		AccountResolver resolver = Resolver(options, BaseConfig());
+		UserResolver resolver = Resolver(options, BaseConfig());
 
 		Assert.Equal("real-mail-pw", resolver.Resolve(new BackendCredentials("u", "ignored"))
 			.Roles[BackendRole.MailStore].Credentials.Password);
@@ -402,7 +402,7 @@ public class AccountResolverTests
 	public void VerifyLocally_PrecedenceMatrix()
 	{
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["hashed"] = new() { Password = GatewayPasswordHasher.Hash("gw-secret") },
 			["plain"] = new() { Password = "gw-plain" },
@@ -424,7 +424,7 @@ public class AccountResolverTests
 					{ ["MailStore"] = new() { UserName = "other" } }
 			}
 		};
-		AccountResolver resolver = Resolver(options, BaseConfig());
+		UserResolver resolver = Resolver(options, BaseConfig());
 
 		Assert.True(resolver.VerifyLocally("hashed", "gw-secret"));
 		Assert.False(resolver.VerifyLocally("hashed", "wrong"));
@@ -444,8 +444,8 @@ public class AccountResolverTests
 	{
 		ActiveSyncOptions options = HostOptions();
 		options.RequireDeclaredUsers = true;
-		options.Users = new Dictionary<string, AccountOptions> { ["allowed"] = new() };
-		AccountResolver resolver = Resolver(options, BaseConfig());
+		options.Users = new Dictionary<string, UserOptions> { ["allowed"] = new() };
+		UserResolver resolver = Resolver(options, BaseConfig());
 
 		Assert.False(resolver.VerifyLocally("stranger", "any"));   // definitive local reject
 		Assert.Null(resolver.VerifyLocally("allowed", "any"));     // empty entry → normal probe
@@ -459,7 +459,7 @@ public class AccountResolverTests
 		Dictionary<string, string?> config = BaseConfig();
 		config.Remove("ActiveSync:Backends:MailStore:Host");
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["bad\nlogin"] = new()
 			{
@@ -475,7 +475,7 @@ public class AccountResolverTests
 		};
 
 		List<string> failures = new();
-		AccountResolver.ValidateUsers(options, Roles(config), Registry(), null, failures);
+		UserResolver.ValidateUsers(options, Roles(config), Registry(), null, failures);
 		string joined = string.Join(";", failures);
 		Assert.Contains("control characters", joined);
 		Assert.Contains("Host is required", joined);
@@ -491,7 +491,7 @@ public class AccountResolverTests
 		Dictionary<string, string?> config = BaseConfig();
 		config.Remove("ActiveSync:Backends:MailStore:Host"); // global MailStore now invalid for all
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["alice@x"] = new(),
 			["bob@x"] = new(),
@@ -499,7 +499,7 @@ public class AccountResolverTests
 		};
 
 		List<string> failures = new();
-		AccountResolver.ValidateUsers(options, Roles(config), Registry(), null, failures);
+		UserResolver.ValidateUsers(options, Roles(config), Registry(), null, failures);
 
 		// One "Host is required" per user proves the memo replays the shared verdict rather than
 		// swallowing it after the first cache hit.
@@ -510,7 +510,7 @@ public class AccountResolverTests
 	public void ValidateUsers_UnknownRole_AndUnknownProvider_AreReported()
 	{
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["u"] = new()
 			{
@@ -523,7 +523,7 @@ public class AccountResolverTests
 		};
 
 		List<string> failures = new();
-		AccountResolver.ValidateUsers(options, Roles(BaseConfig()), Registry(), null, failures);
+		UserResolver.ValidateUsers(options, Roles(BaseConfig()), Registry(), null, failures);
 		string joined = string.Join(";", failures);
 		Assert.Contains("Frisbee", joined);
 		Assert.Contains("jmap", joined);
@@ -536,16 +536,16 @@ public class AccountResolverTests
 		// failed the equality check → inheritGlobal false → the role dropped the inherited
 		// host/port/TLS, and registry.GetFor(" imap") threw an unrelated "unknown provider".
 		ActiveSyncOptions options = HostOptions();
-		AccountOptions entry = new()
+		UserOptions entry = new()
 		{
 			Backends = new Dictionary<string, BackendRoleOverride>
 				{ ["MailStore"] = new() { Provider = " imap" } },
 		};
 
-		List<string> failures = AccountResolver.ValidateEntry(options, Roles(BaseConfig()), Registry(), "u", entry);
+		List<string> failures = UserResolver.ValidateEntry(options, Roles(BaseConfig()), Registry(), "u", entry);
 		Assert.Empty(failures); // trimmed → known provider AND inherits the global host
 
-		options.Users = new Dictionary<string, AccountOptions> { ["u"] = entry };
+		options.Users = new Dictionary<string, UserOptions> { ["u"] = entry };
 		ResolvedRole mailStore = Resolver(options, BaseConfig())
 			.Resolve(new BackendCredentials("u", "P")).Roles[BackendRole.MailStore];
 		Assert.Equal("imap", mailStore.ProviderName);
@@ -560,7 +560,7 @@ public class AccountResolverTests
 		// resolver ctor for a CONFIG user (host won't start) and misdiagnosing as "provider
 		// 'local' does not support MailStore". Mirror the Oof handling with a clear message.
 		ActiveSyncOptions options = HostOptions();
-		AccountOptions entry = new()
+		UserOptions entry = new()
 		{
 			Backends = new Dictionary<string, BackendRoleOverride>
 			{
@@ -568,7 +568,7 @@ public class AccountResolverTests
 			},
 		};
 
-		List<string> failures = AccountResolver.ValidateEntry(
+		List<string> failures = UserResolver.ValidateEntry(
 			options, Roles(new Dictionary<string, string?>()), Registry(), "u", entry);
 		string joined = string.Join(";", failures);
 		Assert.Contains("no global MailStore role is configured", joined);
@@ -579,10 +579,10 @@ public class AccountResolverTests
 	public void ValidateUsers_MalformedGatewayPasswordHash_IsReported()
 	{
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions> { ["u"] = new() { Password = "pbkdf2$broken" } };
+		options.Users = new Dictionary<string, UserOptions> { ["u"] = new() { Password = "pbkdf2$broken" } };
 
 		List<string> failures = new();
-		AccountResolver.ValidateUsers(options, Roles(BaseConfig()), Registry(), null, failures);
+		UserResolver.ValidateUsers(options, Roles(BaseConfig()), Registry(), null, failures);
 		Assert.Contains("not a valid pbkdf2$ value", string.Join(";", failures));
 	}
 
@@ -591,7 +591,7 @@ public class AccountResolverTests
 	{
 		byte[] key = new byte[32];
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["u"] = new()
 			{
@@ -601,7 +601,7 @@ public class AccountResolverTests
 		};
 
 		List<string> failures = new();
-		AccountResolver.ValidateUsers(options, Roles(BaseConfig()), Registry(), null, failures);
+		UserResolver.ValidateUsers(options, Roles(BaseConfig()), Registry(), null, failures);
 		Assert.Contains("sealed (enc:v1:) but no ActiveSync:Encryption key", string.Join(";", failures));
 	}
 
@@ -635,14 +635,14 @@ public class AccountResolverTests
 		BackendRolesProvider rolesProvider = new(root, Registry());
 		ActiveSyncOptions options = HostOptions();
 		// The config user has an Oof override that inherits the global sieve provider — valid now.
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["u"] = new()
 			{
 				Backends = new Dictionary<string, BackendRoleOverride> { ["Oof"] = new() },
 			},
 		};
-		AccountResolver resolver = new(TestOptionsMonitor.Of(options), rolesProvider, Registry());
+		UserResolver resolver = new(TestOptionsMonitor.Of(options), rolesProvider, Registry());
 		Assert.Contains("u", resolver.MergedUsers.Keys);
 
 		// Remove the global Oof role live (role-valid — Oof is optional). The config user's Oof
@@ -665,13 +665,13 @@ public class AccountResolverTests
 		// rejects a sealed gateway password. Reported regardless of whether a key is present.
 		byte[] key = new byte[32];
 		ActiveSyncOptions options = HostOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["u"] = new() { Password = SecretValue.Seal("pw", key) }
 		};
 
 		List<string> failures = new();
-		AccountResolver.ValidateUsers(options, Roles(BaseConfig()), Registry(), key, failures);
+		UserResolver.ValidateUsers(options, Roles(BaseConfig()), Registry(), key, failures);
 		Assert.Contains("gateway Password", string.Join(";", failures));
 	}
 }

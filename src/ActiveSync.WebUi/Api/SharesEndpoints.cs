@@ -35,7 +35,7 @@ internal static class SharesEndpoints
 		});
 
 		api.MapPost("shares", async (
-			ShareRequest request, ShareAdminService shares, AccountResolver resolver, CancellationToken ct) =>
+			ShareRequest request, ShareAdminService shares, UserResolver resolver, CancellationToken ct) =>
 		{
 			if (AdminIdentifiers.LoginProblem(request.User) is { } loginError)
 				return EndpointHelpers.BadRequest(loginError);

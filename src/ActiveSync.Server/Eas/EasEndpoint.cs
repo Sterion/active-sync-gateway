@@ -71,7 +71,7 @@ public static class EasEndpoint
 		IOptionsMonitor<ActiveSyncOptions> options,
 		BackendRolesProvider rolesProvider,
 		PassThroughProvisioner provisioner,
-		AccountResolver accountResolver,
+		UserResolver userResolver,
 		ILoggerFactory loggerFactory)
 	{
 		ILogger logger = loggerFactory.CreateLogger("ActiveSync.Endpoint");
@@ -172,7 +172,7 @@ public static class EasEndpoint
 		// Autodiscover prologue uses (EndpointAuth.CheckLoginRefusalAsync — the E14 drift point).
 		// 403, not 401 — a challenge would loop the client through credential prompts.
 		LoginRefusal refusal = await EndpointAuth.CheckLoginRefusalAsync(
-			accountResolver, state, credentials.UserName, parameters.DeviceId, ct);
+			userResolver, state, credentials.UserName, parameters.DeviceId, ct);
 		if (refusal != LoginRefusal.None)
 		{
 			logger.LogWarning("Refused {State} EAS login {User} ({DeviceId})",

@@ -160,8 +160,8 @@ public static class WebUiServiceCollectionExtensions
 		IServiceProvider services = context.HttpContext.RequestServices;
 		ActiveSyncOptions current = services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>().CurrentValue;
 		WebUiOidcOptions oidc = current.WebUi.Oidc!;
-		AccountResolver resolver = services.GetRequiredService<AccountResolver>();
-		AccountStore store = services.GetRequiredService<AccountStore>();
+		UserResolver resolver = services.GetRequiredService<UserResolver>();
+		UserStore store = services.GetRequiredService<UserStore>();
 		ILogger logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("ActiveSync.WebUi.Oidc");
 		CancellationToken ct = context.HttpContext.RequestAborted;
 		await resolver.EnsureFreshAsync(false, ct);
@@ -170,7 +170,7 @@ public static class WebUiServiceCollectionExtensions
 			context.Principal ?? new ClaimsPrincipal(), oidc, resolver.MergedUsers,
 			async (login, entry) =>
 			{
-				List<string> failures = AccountResolver.ValidateEntry(current, resolver.Roles,
+				List<string> failures = UserResolver.ValidateEntry(current, resolver.Roles,
 					services.GetRequiredService<BackendProviderRegistry>(), login, entry);
 				if (failures.Count > 0)
 					return failures;
@@ -182,7 +182,7 @@ public static class WebUiServiceCollectionExtensions
 			{
 				// Trust on first use: bind the database row to this IdP subject so a later
 				// ticket that merely claims the same login name cannot take the account over.
-				AccountOptions? existing = await store.GetAsync(login, ct);
+				UserOptions? existing = await store.GetAsync(login, ct);
 				if (existing is null || !string.IsNullOrEmpty(existing.OidcSubject))
 					return;
 				existing.OidcSubject = subject;

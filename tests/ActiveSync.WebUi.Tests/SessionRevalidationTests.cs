@@ -44,7 +44,7 @@ public sealed class SessionRevalidationTests : IDisposable
 
 	/// <summary>Signs a principal the way the login endpoint does, then runs the cookie's validation hook.</summary>
 	private async Task<CookieValidatePrincipalContext> ValidateAsync(
-		Dictionary<string, AccountOptions>? users, string login, bool admin,
+		Dictionary<string, UserOptions>? users, string login, bool admin,
 		bool blocked = false, DateTime? revokedAtUtc = null,
 		params (string Type, string Value)[] extraClaims)
 	{
@@ -63,14 +63,14 @@ public sealed class SessionRevalidationTests : IDisposable
 		builder.Services.AddSingleton<IOptionsMonitor<ActiveSyncOptions>>(
 			new StaticOptionsMonitor(options));
 		builder.Services.AddSingleton<ISyncDbContextFactory>(factory);
-		builder.Services.AddSingleton(new AccountStore(factory));
-		builder.Services.AddSingleton(provider => new AccountResolver(
+		builder.Services.AddSingleton(new UserStore(factory));
+		builder.Services.AddSingleton(provider => new UserResolver(
 			provider.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>(),
 			new BackendRolesProvider(new ConfigurationBuilder().Build()),
 			new BackendProviderRegistry(
 				[new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!)],
 				NullLogger<BackendProviderRegistry>.Instance),
-			provider.GetRequiredService<AccountStore>()));
+			provider.GetRequiredService<UserStore>()));
 		builder.Services.AddScoped<SyncDbContext>(_ => factory.CreateDbContext());
 		builder.Services.AddScoped<SyncStateService>();
 		builder.AddWebUi();
@@ -97,7 +97,7 @@ public sealed class SessionRevalidationTests : IDisposable
 		using IServiceScope scope = services.CreateScope();
 		// Built up front so a resolver fault surfaces as a test failure rather than being
 		// swallowed by the hook's deliberate fail-open.
-		await scope.ServiceProvider.GetRequiredService<AccountResolver>()
+		await scope.ServiceProvider.GetRequiredService<UserResolver>()
 			.EnsureFreshAsync(false, CancellationToken.None);
 		DefaultHttpContext http = new() { RequestServices = scope.ServiceProvider };
 		List<Claim> claims = [new Claim(ClaimTypes.Name, login)];
@@ -118,7 +118,7 @@ public sealed class SessionRevalidationTests : IDisposable
 		return context;
 	}
 
-	private static Dictionary<string, AccountOptions> Users(params (string Login, AccountOptions Options)[] users)
+	private static Dictionary<string, UserOptions> Users(params (string Login, UserOptions Options)[] users)
 	{
 		return users.ToDictionary(u => u.Login, u => u.Options, StringComparer.OrdinalIgnoreCase);
 	}
@@ -127,7 +127,7 @@ public sealed class SessionRevalidationTests : IDisposable
 	public async Task DisabledAccount_LosesItsLiveSession()
 	{
 		CookieValidatePrincipalContext context = await ValidateAsync(
-			Users(("alice", new AccountOptions { Admin = true, Enabled = false })), "alice", admin: true);
+			Users(("alice", new UserOptions { Admin = true, Enabled = false })), "alice", admin: true);
 		Assert.Null(context.Principal);
 	}
 
@@ -135,7 +135,7 @@ public sealed class SessionRevalidationTests : IDisposable
 	public async Task BlockedLogin_LosesItsLiveSession()
 	{
 		CookieValidatePrincipalContext context = await ValidateAsync(
-			Users(("alice", new AccountOptions { Admin = true })), "alice", admin: true, blocked: true);
+			Users(("alice", new UserOptions { Admin = true })), "alice", admin: true, blocked: true);
 		Assert.Null(context.Principal);
 	}
 
@@ -143,7 +143,7 @@ public sealed class SessionRevalidationTests : IDisposable
 	public async Task DeletedAccount_LosesItsLiveSession()
 	{
 		CookieValidatePrincipalContext context = await ValidateAsync(
-			Users(("bob", new AccountOptions())), "alice", admin: false);
+			Users(("bob", new UserOptions())), "alice", admin: false);
 		Assert.Null(context.Principal);
 	}
 
@@ -151,7 +151,7 @@ public sealed class SessionRevalidationTests : IDisposable
 	public async Task RevokedAdmin_KeepsTheSession_ButLosesTheAdminClaim()
 	{
 		CookieValidatePrincipalContext context = await ValidateAsync(
-			Users(("alice", new AccountOptions { Admin = false })), "alice", admin: true);
+			Users(("alice", new UserOptions { Admin = false })), "alice", admin: true);
 		Assert.NotNull(context.Principal);
 		Assert.False(context.Principal!.HasClaim(WebUiAuth.AdminClaim, "true"));
 		Assert.Equal("alice", context.Principal.Identity?.Name);
@@ -162,7 +162,7 @@ public sealed class SessionRevalidationTests : IDisposable
 	public async Task HealthyAdmin_KeepsEverything()
 	{
 		CookieValidatePrincipalContext context = await ValidateAsync(
-			Users(("alice", new AccountOptions { Admin = true })), "alice", admin: true);
+			Users(("alice", new UserOptions { Admin = true })), "alice", admin: true);
 		Assert.NotNull(context.Principal);
 		Assert.True(context.Principal!.HasClaim(WebUiAuth.AdminClaim, "true"));
 	}
@@ -174,7 +174,7 @@ public sealed class SessionRevalidationTests : IDisposable
 		// passes through untouched — that is what keeps this off the per-request hot path.
 		string stamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
 		CookieValidatePrincipalContext context = await ValidateAsync(
-			Users(("alice", new AccountOptions { Admin = true, Enabled = false })), "alice", admin: true,
+			Users(("alice", new UserOptions { Admin = true, Enabled = false })), "alice", admin: true,
 			blocked: false, revokedAtUtc: null, (SessionValidation.ValidatedAtClaim, stamp));
 		Assert.NotNull(context.Principal);
 		Assert.False(context.ShouldRenew);
@@ -183,7 +183,7 @@ public sealed class SessionRevalidationTests : IDisposable
 		string stale = DateTimeOffset.UtcNow.Add(-SessionValidation.Interval)
 			.AddSeconds(-1).ToUnixTimeSeconds().ToString();
 		CookieValidatePrincipalContext expired = await ValidateAsync(
-			Users(("alice", new AccountOptions { Admin = true, Enabled = false })), "alice", admin: true,
+			Users(("alice", new UserOptions { Admin = true, Enabled = false })), "alice", admin: true,
 			blocked: false, revokedAtUtc: null, (SessionValidation.ValidatedAtClaim, stale));
 		Assert.Null(expired.Principal);
 	}
@@ -195,7 +195,7 @@ public sealed class SessionRevalidationTests : IDisposable
 		// deliberately never enter the session — re-deriving from the flag alone would strip
 		// every OIDC admin within a minute of signing in.
 		CookieValidatePrincipalContext context = await ValidateAsync(
-			Users(("alice", new AccountOptions())), "alice", admin: true, blocked: false,
+			Users(("alice", new UserOptions())), "alice", admin: true, blocked: false,
 			revokedAtUtc: null,
 			(SessionValidation.AdminSourceClaim, SessionValidation.OidcAdminSource));
 		Assert.NotNull(context.Principal);
@@ -212,14 +212,14 @@ public sealed class SessionRevalidationTests : IDisposable
 		// cut-off. The account itself is untouched here — this is purely the logout half.
 		DateTimeOffset started = DateTimeOffset.UtcNow.AddMinutes(-10);
 		CookieValidatePrincipalContext revoked = await ValidateAsync(
-			Users(("alice", new AccountOptions { Admin = true })), "alice", admin: true,
+			Users(("alice", new UserOptions { Admin = true })), "alice", admin: true,
 			blocked: false, revokedAtUtc: DateTime.UtcNow.AddMinutes(-5),
 			(SessionValidation.SessionStartClaim, started.ToUnixTimeSeconds().ToString()));
 		Assert.Null(revoked.Principal);
 
 		// A session started AFTER the cut-off — signing back in — is unaffected.
 		CookieValidatePrincipalContext fresh = await ValidateAsync(
-			Users(("alice", new AccountOptions { Admin = true })), "alice", admin: true,
+			Users(("alice", new UserOptions { Admin = true })), "alice", admin: true,
 			blocked: false, revokedAtUtc: DateTime.UtcNow.AddMinutes(-5),
 			(SessionValidation.SessionStartClaim, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()));
 		Assert.NotNull(fresh.Principal);
@@ -232,7 +232,7 @@ public sealed class SessionRevalidationTests : IDisposable
 		// stop biting the moment the session was renewed.
 		string started = DateTimeOffset.UtcNow.AddMinutes(-10).ToUnixTimeSeconds().ToString();
 		CookieValidatePrincipalContext context = await ValidateAsync(
-			Users(("alice", new AccountOptions { Admin = true })), "alice", admin: true,
+			Users(("alice", new UserOptions { Admin = true })), "alice", admin: true,
 			blocked: false, revokedAtUtc: null, (SessionValidation.SessionStartClaim, started));
 		Assert.Equal(started, context.Principal?.FindFirst(SessionValidation.SessionStartClaim)?.Value);
 	}

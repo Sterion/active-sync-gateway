@@ -31,15 +31,15 @@ public sealed class OidcLoginTests
 		};
 	}
 
-	private static Dictionary<string, MergedAccount> Users(params (string Login, bool Admin)[] users)
+	private static Dictionary<string, MergedUser> Users(params (string Login, bool Admin)[] users)
 	{
 		return users.ToDictionary(
 			u => u.Login,
-			u => new MergedAccount(new AccountOptions { Admin = u.Admin ? true : null }, true, false),
+			u => new MergedUser(new UserOptions { Admin = u.Admin ? true : null }, true, false),
 			StringComparer.OrdinalIgnoreCase);
 	}
 
-	private static Func<string, AccountOptions, Task<IReadOnlyList<string>>> NoProvision()
+	private static Func<string, UserOptions, Task<IReadOnlyList<string>>> NoProvision()
 	{
 		return (_, _) => throw new InvalidOperationException("provisioning must not be attempted");
 	}
@@ -56,9 +56,9 @@ public sealed class OidcLoginTests
 	[Fact]
 	public async Task DisabledAccount_IsRejected_EvenWithValidClaims()
 	{
-		Dictionary<string, MergedAccount> users = new(StringComparer.OrdinalIgnoreCase)
+		Dictionary<string, MergedUser> users = new(StringComparer.OrdinalIgnoreCase)
 		{
-			["alice"] = new MergedAccount(new AccountOptions { Admin = true, Enabled = false }, true, false),
+			["alice"] = new MergedUser(new UserOptions { Admin = true, Enabled = false }, true, false),
 		};
 
 		OidcLogin.Verdict verdict = await OidcLogin.EvaluateAsync(
@@ -70,7 +70,7 @@ public sealed class OidcLoginTests
 	[Fact]
 	public async Task DeclaredAccount_SignsIn_AdminFromFlagOrClaim()
 	{
-		Dictionary<string, MergedAccount> users = Users(("alice", true), ("bob", false));
+		Dictionary<string, MergedUser> users = Users(("alice", true), ("bob", false));
 
 		// The account flag grants admin without any claim.
 		OidcLogin.Verdict alice = await OidcLogin.EvaluateAsync(
@@ -128,8 +128,8 @@ public sealed class OidcLoginTests
 	[Fact]
 	public async Task AutoProvision_CreatesTheAccountOnce_AdminOnlyFromClaim()
 	{
-		List<(string Login, AccountOptions Entry)> provisioned = [];
-		Func<string, AccountOptions, Task<IReadOnlyList<string>>> provision = (login, entry) =>
+		List<(string Login, UserOptions Entry)> provisioned = [];
+		Func<string, UserOptions, Task<IReadOnlyList<string>>> provision = (login, entry) =>
 		{
 			provisioned.Add((login, entry));
 			return Task.FromResult<IReadOnlyList<string>>([]);
@@ -141,7 +141,7 @@ public sealed class OidcLoginTests
 			Oidc(autoProvision: true, adminClaim: "groups", adminClaimValue: "eas-admin"),
 			Users(), provision);
 		Assert.True(verdict is { Allowed: true, Provisioned: true, IsAdmin: true });
-		(string login, AccountOptions entry) = Assert.Single(provisioned);
+		(string login, UserOptions entry) = Assert.Single(provisioned);
 		Assert.Equal("newbie", login);
 		Assert.Equal("newbie@example.com", entry.MailAddress);
 
@@ -153,7 +153,7 @@ public sealed class OidcLoginTests
 		Assert.True(plain is { Allowed: true, Provisioned: true, IsAdmin: false });
 
 		// A login the account rules reject (':' would corrupt Basic auth) is refused, not stored.
-		Func<string, AccountOptions, Task<IReadOnlyList<string>>> reject = (_, _) =>
+		Func<string, UserOptions, Task<IReadOnlyList<string>>> reject = (_, _) =>
 			Task.FromResult<IReadOnlyList<string>>(["login must not contain ':'"]);
 		OidcLogin.Verdict invalid = await OidcLogin.EvaluateAsync(
 			Ticket(("preferred_username", "bad:login")), Oidc(autoProvision: true), Users(), reject);
@@ -166,10 +166,10 @@ public sealed class OidcLoginTests
 	{
 		// preferred_username is user-mutable at several common IdPs (Keycloak self-service), so
 		// a login match alone must not sign anyone into an account — including its Admin flag.
-		Dictionary<string, MergedAccount> users = new(StringComparer.OrdinalIgnoreCase)
+		Dictionary<string, MergedUser> users = new(StringComparer.OrdinalIgnoreCase)
 		{
-			["alice"] = new MergedAccount(
-				new AccountOptions { Admin = true, OidcSubject = "sub-alice" }, true, false)
+			["alice"] = new MergedUser(
+				new UserOptions { Admin = true, OidcSubject = "sub-alice" }, true, false)
 		};
 
 		OidcLogin.Verdict impostor = await OidcLogin.EvaluateAsync(
@@ -193,7 +193,7 @@ public sealed class OidcLoginTests
 	[Fact]
 	public async Task UnboundDatabaseAccount_RecordsTheSubject_OnFirstSignIn()
 	{
-		Dictionary<string, MergedAccount> users = Users(("alice", false));
+		Dictionary<string, MergedUser> users = Users(("alice", false));
 		List<(string Login, string Subject)> bound = [];
 
 		OidcLogin.Verdict verdict = await OidcLogin.EvaluateAsync(
@@ -209,9 +209,9 @@ public sealed class OidcLoginTests
 
 		// A config-declared account is never written to — that would mint a database row
 		// shadowing the configuration entry. It simply stays unbound.
-		Dictionary<string, MergedAccount> configUsers = new(StringComparer.OrdinalIgnoreCase)
+		Dictionary<string, MergedUser> configUsers = new(StringComparer.OrdinalIgnoreCase)
 		{
-			["carol"] = new MergedAccount(new AccountOptions(), false, false)
+			["carol"] = new MergedUser(new UserOptions(), false, false)
 		};
 		bound.Clear();
 		OidcLogin.Verdict config = await OidcLogin.EvaluateAsync(
@@ -235,9 +235,9 @@ public sealed class OidcLoginTests
 		// directory user who renames themselves onto the admin's login would inherit admin. The
 		// account may still sign in (as a plain user), but the admin bit must be withheld until the
 		// operator binds a subject.
-		Dictionary<string, MergedAccount> configAdmin = new(StringComparer.OrdinalIgnoreCase)
+		Dictionary<string, MergedUser> configAdmin = new(StringComparer.OrdinalIgnoreCase)
 		{
-			["root"] = new MergedAccount(new AccountOptions { Admin = true }, false, false)
+			["root"] = new MergedUser(new UserOptions { Admin = true }, false, false)
 		};
 		OidcLogin.Verdict unbound = await OidcLogin.EvaluateAsync(
 			Ticket(("preferred_username", "root"), ("sub", "sub-anyone")),
@@ -247,10 +247,10 @@ public sealed class OidcLoginTests
 
 		// Once the operator binds the subject in config, the admin flag is honored again — the
 		// subject-match check now guarantees it really is the bound identity.
-		Dictionary<string, MergedAccount> boundConfigAdmin = new(StringComparer.OrdinalIgnoreCase)
+		Dictionary<string, MergedUser> boundConfigAdmin = new(StringComparer.OrdinalIgnoreCase)
 		{
-			["root"] = new MergedAccount(
-				new AccountOptions { Admin = true, OidcSubject = "sub-root" }, false, false)
+			["root"] = new MergedUser(
+				new UserOptions { Admin = true, OidcSubject = "sub-root" }, false, false)
 		};
 		OidcLogin.Verdict bound = await OidcLogin.EvaluateAsync(
 			Ticket(("preferred_username", "root"), ("sub", "sub-root")),
@@ -261,7 +261,7 @@ public sealed class OidcLoginTests
 	[Fact]
 	public async Task AutoProvisionedAccount_IsBoundToTheSubject_Immediately()
 	{
-		List<(string Login, AccountOptions Entry)> provisioned = [];
+		List<(string Login, UserOptions Entry)> provisioned = [];
 		OidcLogin.Verdict verdict = await OidcLogin.EvaluateAsync(
 			Ticket(("preferred_username", "newbie"), ("sub", "sub-newbie")),
 			Oidc(autoProvision: true), Users(),

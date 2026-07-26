@@ -17,9 +17,9 @@ namespace ActiveSync.WebUi.Tests;
 /// </summary>
 public sealed class HostControlledSettingsTests
 {
-	private static Dictionary<string, AccountOptions> OneAdmin()
+	private static Dictionary<string, UserOptions> OneAdmin()
 	{
-		return WebUiHost.Users(("root", new AccountOptions { MailAddress = "root@example.com", Admin = true }));
+		return WebUiHost.Users(("root", new UserOptions { MailAddress = "root@example.com", Admin = true }));
 	}
 
 	[Theory]

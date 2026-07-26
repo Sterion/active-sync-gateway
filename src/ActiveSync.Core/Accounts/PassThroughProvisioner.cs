@@ -10,8 +10,8 @@ namespace ActiveSync.Core.Accounts;
 /// <summary>
 ///   Just-in-time provisioning of pass-through users. When
 ///   <see cref="ActiveSyncOptions.AutoProvisionUsers" /> is on, the first time an undeclared
-///   login clears its MailStore probe the gateway writes a bare <see cref="AccountEntry" /> row
-///   for it (no gateway password, <see cref="AccountOptions.AutoProvisioned" /> set), so the user
+///   login clears its MailStore probe the gateway writes a bare <see cref="User" /> row
+///   for it (no gateway password, <see cref="UserOptions.AutoProvisioned" /> set), so the user
 ///   turns into a first-class identity: visible in `eas users`/the admin UI, blockable, and
 ///   able to use the self-service portal (which only lets DECLARED accounts in, then verifies the
 ///   password against the same backend). The row is a pure overlay with nothing overridden, so it
@@ -21,8 +21,8 @@ namespace ActiveSync.Core.Accounts;
 ///   sync that already authenticated.
 /// </summary>
 public sealed class PassThroughProvisioner(
-	AccountResolver resolver,
-	AccountStore store,
+	UserResolver resolver,
+	UserStore store,
 	BackendProviderRegistry registry,
 	IOptionsMonitor<ActiveSyncOptions> options,
 	ILogger<PassThroughProvisioner> logger)
@@ -45,12 +45,12 @@ public sealed class PassThroughProvisioner(
 		if (resolver.MergedUsers.ContainsKey(login))
 			return;
 
-		AccountOptions entry = new() { AutoProvisioned = true };
+		UserOptions entry = new() { AutoProvisioned = true };
 
 		// Same config-grade validation every account write faces. An empty overlay only fails on a
 		// malformed login (':'/control characters — which Basic auth cannot deliver anyway); skip
 		// and warn rather than persist a row the resolver would later reject.
-		List<string> failures = AccountResolver.ValidateEntry(
+		List<string> failures = UserResolver.ValidateEntry(
 			options.CurrentValue, resolver.Roles, registry, login, entry);
 		if (failures.Count > 0)
 		{

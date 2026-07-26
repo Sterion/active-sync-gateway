@@ -54,7 +54,7 @@ internal static class CliServices
 			return null;
 		}
 
-		services.AddSingleton<ActiveSync.Core.Accounts.AccountStore>();
+		services.AddSingleton<ActiveSync.Core.Accounts.UserStore>();
 		ActiveSync.Core.Administration.AdministrationServiceCollectionExtensions.AddAdministrationServices(services);
 		ServiceProvider provider = services.BuildServiceProvider();
 

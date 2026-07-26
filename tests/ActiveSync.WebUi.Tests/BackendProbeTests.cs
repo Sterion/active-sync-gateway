@@ -31,7 +31,7 @@ public sealed class BackendProbeTests
 	private static async Task<WebUiHost> AdminHostAsync()
 	{
 		return await WebUiHost.StartAsync(
-			WebUiHost.Users(("alice", new AccountOptions { Admin = true })), CalDavRole);
+			WebUiHost.Users(("alice", new UserOptions { Admin = true })), CalDavRole);
 	}
 
 	[Fact]

@@ -15,11 +15,11 @@ namespace ActiveSync.Core.Accounts;
 /// <summary>
 ///   One entry of the merged (config ⊕ database) user view, for banners and the CLI.
 ///   <paramref name="Invalid" /> marks a database row that failed validation: it is kept in the view
-///   (so operators see it, and <see cref="AccountResolver.IsLoginDisabled" /> still honours its
-///   <see cref="AccountOptions.Enabled" />) but the login is refused (fail-closed) until corrected.
+///   (so operators see it, and <see cref="UserResolver.IsLoginDisabled" /> still honours its
+///   <see cref="UserOptions.Enabled" />) but the login is refused (fail-closed) until corrected.
 /// </summary>
-public sealed record MergedAccount(
-	AccountOptions Options, bool FromDatabase, bool ShadowsConfig, bool Invalid = false);
+public sealed record MergedUser(
+	UserOptions Options, bool FromDatabase, bool ShadowsConfig, bool Invalid = false);
 
 /// <summary>
 ///   Maps a gateway login to its effective backend roles and credentials. Pass-through is
@@ -27,18 +27,18 @@ public sealed record MergedAccount(
 ///   credentials everywhere. A declared entry is a pure overlay — only the role fields it
 ///   sets differ, and unset passwords inherit the presented EAS password per role. Entries
 ///   come from config (<see cref="ActiveSyncOptions.Users" />, restart to change) and the
-///   database (<see cref="AccountStore" />, a row REPLACES the whole config entry for that
+///   database (<see cref="UserStore" />, a row REPLACES the whole config entry for that
 ///   login). The compiled snapshot is immutable and swapped atomically; database changes
 ///   are noticed via the AccountsStamp point-read at most every
 ///   <see cref="AuthOptions.UsersRefreshSeconds" />. Registered as a singleton.
 /// </summary>
-public sealed class AccountResolver
+public sealed class UserResolver
 {
 	private readonly IOptionsMonitor<ActiveSyncOptions> _options;
 	private readonly BackendRolesProvider _rolesProvider;
 	private readonly BackendProviderRegistry _registry;
-	private readonly AccountStore? _store;
-	private readonly ILogger<AccountResolver>? _logger;
+	private readonly UserStore? _store;
+	private readonly ILogger<UserResolver>? _logger;
 	private readonly SemaphoreSlim _refreshGate = new(1, 1);
 	private readonly Settings.ChangeStampRefreshGate _gate = new();
 	// B4: serializes the BUILD-AND-SWAP of _snapshot between the two independent writers —
@@ -65,18 +65,18 @@ public sealed class AccountResolver
 	// OUTSIDE that gate — OnRolesChanged runs on the config-reload thread — so it must be volatile to
 	// avoid compiling a rebuild against a stale reference (B23).
 	private Guid? _lastStamp;
-	private volatile Dictionary<string, AccountOptions>? _lastDbUsers;
+	private volatile Dictionary<string, UserOptions>? _lastDbUsers;
 	private volatile bool _refreshErrorLogged;
 
 	/// <summary>Raised after the snapshot was rebuilt from a database change (caches should reset).</summary>
 	public event Action? SnapshotChanged;
 
-	public AccountResolver(
+	public UserResolver(
 		IOptionsMonitor<ActiveSyncOptions> options,
 		BackendRolesProvider rolesProvider,
 		BackendProviderRegistry registry,
-		AccountStore? store = null,
-		ILogger<AccountResolver>? logger = null)
+		UserStore? store = null,
+		ILogger<UserResolver>? logger = null)
 	{
 		_options = options;
 		_rolesProvider = rolesProvider;
@@ -102,17 +102,17 @@ public sealed class AccountResolver
 	public long SnapshotVersion => Interlocked.Read(ref _snapshotVersion);
 
 	/// <summary>The merged, effective user view (database entries replacing config ones).</summary>
-	public IReadOnlyDictionary<string, MergedAccount> MergedUsers => _snapshot.Users;
+	public IReadOnlyDictionary<string, MergedUser> MergedUsers => _snapshot.Users;
 
 	/// <summary>
 	///   True when <paramref name="login" /> is a declared account explicitly disabled
-	///   (<see cref="AccountOptions.Enabled" /> == false) — a persistent refusal of every login,
+	///   (<see cref="UserOptions.Enabled" /> == false) — a persistent refusal of every login,
 	///   enforced at the endpoint like a user-level block. Reads the current in-memory snapshot, so
 	///   it is cheap on the auth path; an undeclared/pass-through login has no row and is never
 	///   "disabled" (block it instead). Case-insensitive, matching config/database key semantics.
 	/// </summary>
 	public bool IsLoginDisabled(string login) =>
-		_snapshot.Users.TryGetValue(login, out MergedAccount? account) && account.Options.Enabled == false;
+		_snapshot.Users.TryGetValue(login, out MergedUser? account) && account.Options.Enabled == false;
 
 	/// <summary>
 	///   Reloads database accounts when the change stamp moved. Cost when idle: one
@@ -135,7 +135,7 @@ public sealed class AccountResolver
 			Guid? stamp = await _store.ReadStampAsync(ct).ConfigureAwait(false);
 			if (stamp != _lastStamp)
 			{
-				Dictionary<string, AccountOptions>? dbUsers = stamp is null
+				Dictionary<string, UserOptions>? dbUsers = stamp is null
 					? null
 					: await _store.LoadAllAsync(_logger, ct).ConfigureAwait(false);
 				Snapshot built;
@@ -221,7 +221,7 @@ public sealed class AccountResolver
 	/// </summary>
 	public bool? VerifyLocally(string login, string presented)
 	{
-		AccountTemplate? template = _snapshot.Templates?.GetValueOrDefault(login);
+		UserTemplate? template = _snapshot.Templates?.GetValueOrDefault(login);
 		if (template is null)
 			return _options.CurrentValue.RequireDeclaredUsers ? false : null;
 		// B3: an invalid stored row fails closed — it never authenticates and never falls through to
@@ -236,17 +236,17 @@ public sealed class AccountResolver
 	}
 
 	/// <summary>Effective account for the presented credentials; never null.</summary>
-	public ResolvedAccount Resolve(BackendCredentials presented)
+	public ResolvedUser Resolve(BackendCredentials presented)
 	{
 		string login = presented.UserName;
-		AccountTemplate? template = _snapshot.Templates?.GetValueOrDefault(login);
+		UserTemplate? template = _snapshot.Templates?.GetValueOrDefault(login);
 		if (template is null)
 		{
 			// Pass-through: same credentials everywhere, the global role sections verbatim.
 			Dictionary<BackendRole, ResolvedRole> passThrough = new();
 			foreach ((BackendRole role, RoleAssignment assignment) in _rolesProvider.Current.Assignments)
 				passThrough[role] = new ResolvedRole(role, assignment.ProviderName, assignment.Settings, presented);
-			return new ResolvedAccount(
+			return new ResolvedUser(
 				login, login.Contains('@') ? login : null, false, passThrough);
 		}
 
@@ -269,7 +269,7 @@ public sealed class AccountResolver
 				role == BackendRole.MailStore
 					? new BackendCredentials(mailUser, mailPassword)
 					: new BackendCredentials(roleTemplate.UserName ?? mailUser, roleTemplate.Password ?? mailPassword));
-		return new ResolvedAccount(
+		return new ResolvedUser(
 			login,
 			template.MailAddress ?? (login.Contains('@') ? login : null),
 			template.MailAddress is not null,
@@ -284,7 +284,7 @@ public sealed class AccountResolver
 		if (options.Users is null)
 			return;
 		ValidationMemo memo = new();
-		foreach ((string login, AccountOptions account) in options.Users)
+		foreach ((string login, UserOptions account) in options.Users)
 		{
 			ValidateLogin(login, failures);
 			BuildOne(roles, registry, login, account, encryptionKey, failures, memo);
@@ -297,7 +297,7 @@ public sealed class AccountResolver
 	/// </summary>
 	public static List<string> ValidateEntry(
 		ActiveSyncOptions options, BackendRolesConfig roles, BackendProviderRegistry registry,
-		string login, AccountOptions entry)
+		string login, UserOptions entry)
 	{
 		byte[]? key = EncryptionKeyLoader.TryLoadKey(options.Encryption, out string? keyError);
 		List<string> failures = new();
@@ -318,10 +318,10 @@ public sealed class AccountResolver
 	/// </summary>
 	private static Snapshot BuildSnapshot(
 		ActiveSyncOptions options, BackendRolesConfig roles, BackendProviderRegistry registry,
-		Dictionary<string, AccountOptions>? dbUsers, ILogger? logger)
+		Dictionary<string, UserOptions>? dbUsers, ILogger? logger)
 	{
-		Dictionary<string, AccountTemplate> templates = new(StringComparer.OrdinalIgnoreCase);
-		Dictionary<string, MergedAccount> merged = new(StringComparer.OrdinalIgnoreCase);
+		Dictionary<string, UserTemplate> templates = new(StringComparer.OrdinalIgnoreCase);
+		Dictionary<string, MergedUser> merged = new(StringComparer.OrdinalIgnoreCase);
 		bool needKey = options.Users is { Count: > 0 } || dbUsers is { Count: > 0 };
 		byte[]? key = null;
 		if (needKey)
@@ -340,11 +340,11 @@ public sealed class AccountResolver
 			if (options.Users is { Count: > 0 })
 			{
 				List<string> failures = new();
-				foreach ((string login, AccountOptions account) in options.Users)
+				foreach ((string login, UserOptions account) in options.Users)
 				{
 					ValidateLogin(login, failures);
 					templates[login] = BuildOne(roles, registry, login, account, key, failures, memo);
-					merged[login] = new MergedAccount(account, false, false);
+					merged[login] = new MergedUser(account, false, false);
 				}
 
 				// Startup validation already rejected these; this guards direct construction in tests.
@@ -354,11 +354,11 @@ public sealed class AccountResolver
 
 			if (dbUsers is { Count: > 0 })
 			{
-				foreach ((string login, AccountOptions account) in dbUsers)
+				foreach ((string login, UserOptions account) in dbUsers)
 				{
 					List<string> failures = new();
 					ValidateLogin(login, failures);
-					AccountTemplate template = BuildOne(roles, registry, login, account, key, failures, memo);
+					UserTemplate template = BuildOne(roles, registry, login, account, key, failures, memo);
 					bool shadows = merged.ContainsKey(login);
 					if (failures.Count > 0)
 					{
@@ -373,14 +373,14 @@ public sealed class AccountResolver
 						logger?.LogWarning(
 							"Refusing invalid database account entry for {User} (fail-closed) until corrected: {Failures}",
 							login, string.Join("; ", failures));
-						templates[login] = new AccountTemplate(
+						templates[login] = new UserTemplate(
 							null, null, new Dictionary<BackendRole, RoleTemplate>(), Invalid: true);
-						merged[login] = new MergedAccount(account, true, shadows, Invalid: true);
+						merged[login] = new MergedUser(account, true, shadows, Invalid: true);
 						continue;
 					}
 
 					templates[login] = template;
-					merged[login] = new MergedAccount(account, true, shadows);
+					merged[login] = new MergedUser(account, true, shadows);
 				}
 			}
 		}
@@ -394,9 +394,9 @@ public sealed class AccountResolver
 	}
 
 	/// <summary>Merges one entry against the global role assignments, collecting validation failures.</summary>
-	private static AccountTemplate BuildOne(
+	private static UserTemplate BuildOne(
 		BackendRolesConfig roles, BackendProviderRegistry registry, string login,
-		AccountOptions account, byte[]? encryptionKey, List<string> failures, ValidationMemo memo)
+		UserOptions account, byte[]? encryptionKey, List<string> failures, ValidationMemo memo)
 	{
 		if (account.Password is not null &&
 		    GatewayPasswordHasher.IsHashed(account.Password) &&
@@ -501,7 +501,7 @@ public sealed class AccountResolver
 				failures.Add($"ActiveSync:Users:{login}:Backends:{role}: {outcome.GetForError}");
 		}
 
-		return new AccountTemplate(
+		return new UserTemplate(
 			string.IsNullOrWhiteSpace(account.Password) ? null : account.Password,
 			string.IsNullOrWhiteSpace(account.MailAddress) ? null : account.MailAddress.Trim(),
 			templates);
@@ -683,7 +683,7 @@ public sealed class AccountResolver
 	private sealed record RoleTemplate(
 		BackendRole Role, string ProviderName, ProviderSettings Settings, string? UserName, string? Password);
 
-	private sealed record AccountTemplate(
+	private sealed record UserTemplate(
 		string? GatewayPassword,
 		string? MailAddress,
 		IReadOnlyDictionary<BackendRole, RoleTemplate> Roles,
@@ -691,6 +691,6 @@ public sealed class AccountResolver
 
 	/// <summary>Immutable compiled view, swapped atomically on database changes.</summary>
 	private sealed record Snapshot(
-		Dictionary<string, AccountTemplate>? Templates,
-		IReadOnlyDictionary<string, MergedAccount> Users);
+		Dictionary<string, UserTemplate>? Templates,
+		IReadOnlyDictionary<string, MergedUser> Users);
 }

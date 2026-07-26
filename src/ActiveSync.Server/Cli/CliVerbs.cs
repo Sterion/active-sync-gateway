@@ -86,8 +86,8 @@ internal static class CliVerbs
 		services.AddLocalContentProtection();
 		services.AddSingleton<ActiveSync.Backends.Local.LocalChangeNotifier>();
 		services.AddBackendProviders();
-		services.AddSingleton<AccountStore>();
-		services.AddSingleton<AccountResolver>();
+		services.AddSingleton<UserStore>();
+		services.AddSingleton<UserResolver>();
 		await using ServiceProvider provider = services.BuildServiceProvider();
 
 		// The role sections + declared users get the same post-build validation serve runs.
@@ -102,14 +102,14 @@ internal static class CliVerbs
 			return 1;
 		}
 
-		AccountResolver resolver = provider.GetRequiredService<AccountResolver>();
-		IReadOnlyDictionary<string, MergedAccount>? merged = null;
+		UserResolver resolver = provider.GetRequiredService<UserResolver>();
+		IReadOnlyDictionary<string, MergedUser>? merged = null;
 		string? databaseNote = null;
 		try
 		{
 			// Probe first so an unreachable/unmigrated database lands in the catch (the
 			// resolver's refresh would swallow it and silently show config-only).
-			await provider.GetRequiredService<AccountStore>().ReadStampAsync(CancellationToken.None);
+			await provider.GetRequiredService<UserStore>().ReadStampAsync(CancellationToken.None);
 			await resolver.EnsureFreshAsync(true, CancellationToken.None);
 			merged = resolver.MergedUsers;
 		}
@@ -205,7 +205,7 @@ internal static class CliVerbs
 
 		// C6: through the shared gateway-password policy so the emitted hash honours the same
 		// strength floor as `eas user password` and the web surfaces.
-		AccountSecretPolicy.SecretResult prepared = AccountSecretPolicy.PrepareGatewayPassword(password);
+		UserSecretPolicy.SecretResult prepared = UserSecretPolicy.PrepareGatewayPassword(password);
 		if (prepared.Error is not null)
 		{
 			await Console.Error.WriteLineAsync(prepared.Error);

@@ -3,7 +3,7 @@ using ActiveSync.Core.Settings;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   B11 — the shared change-stamp poll gate (used by both SettingsRefresher and AccountResolver).
+///   B11 — the shared change-stamp poll gate (used by both SettingsRefresher and UserResolver).
 ///   A negative or non-finite cadence must never permanently disable refresh: it clamps to
 ///   "check on the next request" so a mistaken value is self-repairing rather than needing a restart.
 /// </summary>

@@ -18,20 +18,20 @@ namespace ActiveSync.Core.Tests;
 ///   Database-declared accounts: store CRUD + stamp, and the resolver's merged snapshot
 ///   (DB entry replaces the whole config entry; stamp-driven live refresh).
 /// </summary>
-public sealed class AccountStoreTests : IDisposable
+public sealed class UserStoreTests : IDisposable
 {
 	private readonly SqliteConnection _connection;
 	private readonly TestContextFactory _factory;
-	private readonly AccountStore _store;
+	private readonly UserStore _store;
 
-	public AccountStoreTests()
+	public UserStoreTests()
 	{
 		_connection = new SqliteConnection("Data Source=:memory:");
 		_connection.Open();
 		_factory = new TestContextFactory(_connection);
 		using SyncDbContext db = _factory.CreateDbContext();
 		db.Database.EnsureCreated();
-		_store = new AccountStore(_factory);
+		_store = new UserStore(_factory);
 	}
 
 	public void Dispose()
@@ -48,7 +48,7 @@ public sealed class AccountStoreTests : IDisposable
 		};
 	}
 
-	private AccountResolver Resolver(ActiveSyncOptions options)
+	private UserResolver Resolver(ActiveSyncOptions options)
 	{
 		IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection(
 			new Dictionary<string, string?>
@@ -67,14 +67,14 @@ public sealed class AccountStoreTests : IDisposable
 			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
 			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!)
 		], NullLogger<BackendProviderRegistry>.Instance);
-		return new AccountResolver(TestOptionsMonitor.Of(options), rolesProvider, registry, _store);
+		return new UserResolver(TestOptionsMonitor.Of(options), rolesProvider, registry, _store);
 	}
 
 	[Fact]
 	public async Task DbEntry_ReplacesWholeConfigEntry_AndFallsBackOnDelete()
 	{
 		ActiveSyncOptions options = BaseOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["phone1"] = new()
 			{
@@ -82,18 +82,18 @@ public sealed class AccountStoreTests : IDisposable
 				Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { UserName = "config-imap-user" } },
 			},
 		};
-		AccountResolver resolver = Resolver(options);
+		UserResolver resolver = Resolver(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 		Assert.Equal("config@x", resolver.Resolve(new BackendCredentials("phone1", "pw")).MailAddress);
 
 		// DB row for the same login: REPLACES the config entry wholesale — the config
 		// MailAddress must not leak through the DB entry that doesn't set one.
 		await _store.UpsertAsync("phone1",
-			new AccountOptions { Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { UserName = "db-imap-user" } } },
+			new UserOptions { Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { UserName = "db-imap-user" } } },
 			CancellationToken.None);
 		await resolver.EnsureFreshAsync(false, CancellationToken.None);
 
-		ResolvedAccount fromDb = resolver.Resolve(new BackendCredentials("phone1", "pw"));
+		ResolvedUser fromDb = resolver.Resolve(new BackendCredentials("phone1", "pw"));
 		Assert.Equal("db-imap-user", fromDb.Roles[BackendRole.MailStore].Credentials.UserName);
 		Assert.Null(fromDb.MailAddress);
 		Assert.True(resolver.MergedUsers["phone1"].FromDatabase);
@@ -102,7 +102,7 @@ public sealed class AccountStoreTests : IDisposable
 		// Deleting the row falls back to the config entry.
 		Assert.True(await _store.DeleteAsync("phone1", CancellationToken.None));
 		await resolver.EnsureFreshAsync(false, CancellationToken.None);
-		ResolvedAccount fromConfig = resolver.Resolve(new BackendCredentials("phone1", "pw"));
+		ResolvedUser fromConfig = resolver.Resolve(new BackendCredentials("phone1", "pw"));
 		Assert.Equal("config-imap-user", fromConfig.Roles[BackendRole.MailStore].Credentials.UserName);
 		Assert.Equal("config@x", fromConfig.MailAddress);
 		Assert.False(resolver.MergedUsers["phone1"].FromDatabase);
@@ -111,9 +111,9 @@ public sealed class AccountStoreTests : IDisposable
 	[Fact]
 	public async Task IsLoginDisabled_TracksTheEnabledFlag_CaseInsensitively()
 	{
-		AccountResolver resolver = Resolver(BaseOptions());
-		await _store.UpsertAsync("off", new AccountOptions { Enabled = false }, CancellationToken.None);
-		await _store.UpsertAsync("on", new AccountOptions(), CancellationToken.None);
+		UserResolver resolver = Resolver(BaseOptions());
+		await _store.UpsertAsync("off", new UserOptions { Enabled = false }, CancellationToken.None);
+		await _store.UpsertAsync("on", new UserOptions(), CancellationToken.None);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
 		Assert.True(resolver.IsLoginDisabled("off"));
@@ -125,7 +125,7 @@ public sealed class AccountStoreTests : IDisposable
 	[Fact]
 	public async Task StampChange_TriggersRefresh_AndRaisesSnapshotChanged()
 	{
-		AccountResolver resolver = Resolver(BaseOptions());
+		UserResolver resolver = Resolver(BaseOptions());
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 		int changedEvents = 0;
 		resolver.SnapshotChanged += () => changedEvents++;
@@ -135,7 +135,7 @@ public sealed class AccountStoreTests : IDisposable
 		Assert.Equal(0, changedEvents);
 
 		await _store.UpsertAsync("newuser",
-			new AccountOptions { Password = "topsecret" }, CancellationToken.None);
+			new UserOptions { Password = "topsecret" }, CancellationToken.None);
 		await resolver.EnsureFreshAsync(false, CancellationToken.None);
 
 		Assert.Equal(1, changedEvents);
@@ -150,13 +150,13 @@ public sealed class AccountStoreTests : IDisposable
 	[Fact]
 	public async Task MalformedRow_IsSkipped_OthersSurvive()
 	{
-		await _store.UpsertAsync("good", new AccountOptions { Password = "pw1" }, CancellationToken.None);
+		await _store.UpsertAsync("good", new UserOptions { Password = "pw1" }, CancellationToken.None);
 		await using (SyncDbContext db = _factory.CreateDbContext())
 		{
 			// DbSet.Add is synchronous and local (no I/O) — AddAsync exists only to support
 			// async value generators (e.g. HiLo/Cosmos), which this project doesn't use.
 #pragma warning disable VSTHRD103
-			db.AccountEntries.Add(new AccountEntry
+			db.Users.Add(new User
 			{
 				UserName = "broken", Json = "{not json", UpdatedUtc = DateTime.UtcNow,
 			});
@@ -164,7 +164,7 @@ public sealed class AccountStoreTests : IDisposable
 			await db.SaveChangesAsync();
 		}
 
-		AccountResolver resolver = Resolver(BaseOptions());
+		UserResolver resolver = Resolver(BaseOptions());
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
 		Assert.True(resolver.VerifyLocally("good", "pw1"));
@@ -176,14 +176,14 @@ public sealed class AccountStoreTests : IDisposable
 	{
 		ActiveSyncOptions options = BaseOptions();
 		options.RequireDeclaredUsers = true;
-		AccountResolver resolver = Resolver(options);
+		UserResolver resolver = Resolver(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
 		// Nothing declared anywhere yet: everything is rejected locally.
 		Assert.False(resolver.VerifyLocally("someone", "pw"));
 
 		// An empty DB entry is a pure allowlist grant — auth still probes IMAP (null).
-		await _store.UpsertAsync("someone", new AccountOptions(), CancellationToken.None);
+		await _store.UpsertAsync("someone", new UserOptions(), CancellationToken.None);
 		await resolver.EnsureFreshAsync(false, CancellationToken.None);
 		Assert.Null(resolver.VerifyLocally("someone", "pw"));
 		Assert.False(resolver.VerifyLocally("otherone", "pw"));
@@ -197,19 +197,19 @@ public sealed class AccountStoreTests : IDisposable
 		// entry stayed active; now the invalid row wins (replace semantics) and fails closed — the
 		// login is refused and surfaced as invalid until the row is corrected or removed.
 		ActiveSyncOptions options = BaseOptions();
-		options.Users = new Dictionary<string, AccountOptions>
+		options.Users = new Dictionary<string, UserOptions>
 		{
 			["phone1"] = new() { MailAddress = "config@x" },
 		};
 
 		// Out-of-range port makes the DB entry invalid.
 		await _store.UpsertAsync("phone1",
-			new AccountOptions { Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { Settings = new Dictionary<string, string?> { ["Port"] = "99999" } } } }, CancellationToken.None);
+			new UserOptions { Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { Settings = new Dictionary<string, string?> { ["Port"] = "99999" } } } }, CancellationToken.None);
 
-		AccountResolver resolver = Resolver(options);
+		UserResolver resolver = Resolver(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
-		MergedAccount merged = resolver.MergedUsers["phone1"];
+		MergedUser merged = resolver.MergedUsers["phone1"];
 		Assert.True(merged.Invalid);
 		Assert.True(merged.FromDatabase);
 		Assert.True(merged.ShadowsConfig);
@@ -227,8 +227,8 @@ public sealed class AccountStoreTests : IDisposable
 		// row) used to be SKIPPED — leaving no entry, so Resolve degraded to pass-through (presented
 		// credentials forwarded verbatim to every role) and IsLoginDisabled returned false, which
 		// UN-disabled a disabled account. It must instead honour Enabled==false and fail closed.
-		AccountResolver resolver = Resolver(BaseOptions());
-		await _store.UpsertAsync("phone1", new AccountOptions
+		UserResolver resolver = Resolver(BaseOptions());
+		await _store.UpsertAsync("phone1", new UserOptions
 		{
 			Enabled = false,
 			Backends = new Dictionary<string, BackendRoleOverride>
@@ -255,10 +255,10 @@ public sealed class AccountStoreTests : IDisposable
 		ActiveSyncOptions options = new()
 		{
 			// Ordinal comparer, exactly what ConfigurationBinder produces.
-			Users = new Dictionary<string, AccountOptions> { ["phone1"] = new() { MailAddress = "config@x" } },
+			Users = new Dictionary<string, UserOptions> { ["phone1"] = new() { MailAddress = "config@x" } },
 		};
 
-		AccountOptions starting = await AccountEditing.LoadStartingEntryAsync(
+		UserOptions starting = await UserEditing.LoadStartingEntryAsync(
 			_store, options, "PHONE1", CancellationToken.None);
 		Assert.Equal("config@x", starting.MailAddress);
 	}
@@ -269,11 +269,11 @@ public sealed class AccountStoreTests : IDisposable
 		// B15: LoadAllAsync tolerated a bad row ("one bad row must never take auth down") but
 		// GetAsync/ListAsync deserialized bare, so `eas user show`/`eas users`/the admin list
 		// hard-failed with JsonException — the very tools for finding the bad row.
-		await _store.UpsertAsync("good", new AccountOptions { MailAddress = "g@x" }, CancellationToken.None);
+		await _store.UpsertAsync("good", new UserOptions { MailAddress = "g@x" }, CancellationToken.None);
 		await using (SyncDbContext db = _factory.CreateDbContext())
 		{
 #pragma warning disable VSTHRD103
-			db.AccountEntries.Add(new AccountEntry
+			db.Users.Add(new User
 			{
 				UserName = "broken", Json = "{not json", UpdatedUtc = DateTime.UtcNow,
 			});
@@ -298,8 +298,8 @@ public sealed class AccountStoreTests : IDisposable
 		// B2: the store matched the login case-SENSITIVELY in SQL but case-INsensitively in memory,
 		// so an upsert under a different casing inserted a SECOND row; LoadAllAsync then collapsed
 		// both with a last-row-wins winner that flipped across restarts.
-		await _store.UpsertAsync("phone1", new AccountOptions { MailAddress = "first@x" }, CancellationToken.None);
-		await _store.UpsertAsync("PHONE1", new AccountOptions { MailAddress = "second@x" }, CancellationToken.None);
+		await _store.UpsertAsync("phone1", new UserOptions { MailAddress = "first@x" }, CancellationToken.None);
+		await _store.UpsertAsync("PHONE1", new UserOptions { MailAddress = "second@x" }, CancellationToken.None);
 
 		Assert.Single(await _store.ListAsync(CancellationToken.None));
 		Assert.Equal("second@x", (await _store.GetAsync("Phone1", CancellationToken.None))?.MailAddress);
@@ -313,18 +313,18 @@ public sealed class AccountStoreTests : IDisposable
 	public async Task Store_ListAndGet_RoundTrip()
 	{
 		Assert.Null(await _store.ReadStampAsync(CancellationToken.None));
-		await _store.UpsertAsync("a", new AccountOptions { MailAddress = "a@x" }, CancellationToken.None);
+		await _store.UpsertAsync("a", new UserOptions { MailAddress = "a@x" }, CancellationToken.None);
 		Guid? stamp1 = await _store.ReadStampAsync(CancellationToken.None);
 		Assert.NotNull(stamp1);
 
-		await _store.UpsertAsync("b", new AccountOptions(), CancellationToken.None);
+		await _store.UpsertAsync("b", new UserOptions(), CancellationToken.None);
 		Assert.NotEqual(stamp1, await _store.ReadStampAsync(CancellationToken.None));
 
-		AccountOptions? a = await _store.GetAsync("a", CancellationToken.None);
+		UserOptions? a = await _store.GetAsync("a", CancellationToken.None);
 		Assert.Equal("a@x", a?.MailAddress);
 		Assert.Null(await _store.GetAsync("missing", CancellationToken.None));
 
-		List<(string UserName, AccountOptions Options, DateTime UpdatedUtc, bool Valid)> all =
+		List<(string UserName, UserOptions Options, DateTime UpdatedUtc, bool Valid)> all =
 			await _store.ListAsync(CancellationToken.None);
 		Assert.Equal(["a", "b"], all.Select(e => e.UserName));
 		Assert.All(all, e => Assert.True(e.Valid));
@@ -337,10 +337,10 @@ public sealed class AccountStoreTests : IDisposable
 		// case-folded uniqueness and lookups are exact (index seek), not a non-sargable LOWER() scan
 		// that leaves the case-variant pair reachable. Round 1's fix only added LOWER() to the read
 		// predicates; it never normalized the stored value.
-		await _store.UpsertAsync("PHONE1", new AccountOptions { MailAddress = "x@x" }, CancellationToken.None);
+		await _store.UpsertAsync("PHONE1", new UserOptions { MailAddress = "x@x" }, CancellationToken.None);
 
 		await using SyncDbContext db = _factory.CreateDbContext();
-		AccountEntry row = await db.AccountEntries.AsNoTracking().SingleAsync();
+		User row = await db.Users.AsNoTracking().SingleAsync();
 		Assert.Equal("phone1", row.UserName);
 	}
 
@@ -353,8 +353,8 @@ public sealed class AccountStoreTests : IDisposable
 		await using (SyncDbContext db = _factory.CreateDbContext())
 		{
 #pragma warning disable VSTHRD103
-			db.AccountEntries.Add(new AccountEntry { UserName = "phone1", Json = "{}", UpdatedUtc = DateTime.UtcNow });
-			db.AccountEntries.Add(new AccountEntry { UserName = "Phone1", Json = "{}", UpdatedUtc = DateTime.UtcNow });
+			db.Users.Add(new User { UserName = "phone1", Json = "{}", UpdatedUtc = DateTime.UtcNow });
+			db.Users.Add(new User { UserName = "Phone1", Json = "{}", UpdatedUtc = DateTime.UtcNow });
 #pragma warning restore VSTHRD103
 			await db.SaveChangesAsync();
 		}
@@ -377,8 +377,8 @@ public sealed class AccountStoreTests : IDisposable
 		await using (SyncDbContext db = _factory.CreateDbContext())
 		{
 #pragma warning disable VSTHRD103
-			db.AccountEntries.Add(new AccountEntry { UserName = "phone1", Json = "{\"m\":\"old\"}", UpdatedUtc = older });
-			db.AccountEntries.Add(new AccountEntry { UserName = "PHONE1", Json = "{\"m\":\"new\"}", UpdatedUtc = newer });
+			db.Users.Add(new User { UserName = "phone1", Json = "{\"m\":\"old\"}", UpdatedUtc = older });
+			db.Users.Add(new User { UserName = "PHONE1", Json = "{\"m\":\"new\"}", UpdatedUtc = newer });
 #pragma warning restore VSTHRD103
 			await db.SaveChangesAsync();
 		}
@@ -404,7 +404,7 @@ public sealed class AccountStoreTests : IDisposable
 
 		await using (SyncDbContext db = _factory.CreateDbContext())
 		{
-			AccountEntry survivor = await db.AccountEntries.AsNoTracking().SingleAsync();
+			User survivor = await db.Users.AsNoTracking().SingleAsync();
 			Assert.Equal("phone1", survivor.UserName);
 			Assert.Equal("{\"m\":\"new\"}", survivor.Json);  // the newer row won
 		}
@@ -452,7 +452,7 @@ public sealed class AccountStoreTests : IDisposable
 			.Add(dbSource)
 			.Build();
 		// No registry here: this BackendRolesProvider's OWN live-edit provider validation (B14) must
-		// stay OUT of the gate — only AccountResolver's BuildSnapshot should hit the slow provider.
+		// stay OUT of the gate — only UserResolver's BuildSnapshot should hit the slow provider.
 		BackendRolesProvider rolesProvider = new(root);
 
 		// No config Users yet: the CONSTRUCTOR itself calls BuildSnapshot synchronously (with
@@ -460,11 +460,11 @@ public sealed class AccountStoreTests : IDisposable
 		// even starts the refresh — declare "u" only AFTER construction (TestOptionsMonitor.Of
 		// exposes the live, mutable ActiveSyncOptions instance, so this is picked up by the refresh).
 		ActiveSyncOptions options = new() { Encryption = new EncryptionOptions { AllowPlaintext = true } };
-		AccountResolver resolver = new(TestOptionsMonitor.Of(options), rolesProvider, registry, _store);
-		options.Users = new Dictionary<string, AccountOptions> { ["u"] = new() };
+		UserResolver resolver = new(TestOptionsMonitor.Of(options), rolesProvider, registry, _store);
+		options.Users = new Dictionary<string, UserOptions> { ["u"] = new() };
 
 		// A DB stamp move so EnsureFreshAsync actually rebuilds (rather than no-op on Store is null).
-		await _store.UpsertAsync("dbuser", new AccountOptions(), CancellationToken.None);
+		await _store.UpsertAsync("dbuser", new UserOptions(), CancellationToken.None);
 
 		// Kick off the account refresh; it captures roles v1 and then blocks INSIDE BuildSnapshot
 		// (validating the Notes role) until released.

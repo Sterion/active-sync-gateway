@@ -401,7 +401,7 @@ public sealed class ActiveSyncOptions
 	///   pass-through (EAS credentials forwarded to all backends). Note that configuration
 	///   keys are case-insensitive — two entries differing only by case merge silently.
 	/// </summary>
-	public Dictionary<string, AccountOptions>? Users { get; set; }
+	public Dictionary<string, UserOptions>? Users { get; set; }
 
 	/// <summary>
 	///   Allowlist switch: when true, only logins declared in <see cref="Users" /> may

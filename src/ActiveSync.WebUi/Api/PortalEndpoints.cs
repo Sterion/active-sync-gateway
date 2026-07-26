@@ -33,13 +33,13 @@ internal static class PortalEndpoints
 
 	internal static void Map(RouteGroupBuilder api)
 	{
-		api.MapGet("me", async (ClaimsPrincipal principal, AccountResolver resolver, CancellationToken ct) =>
+		api.MapGet("me", async (ClaimsPrincipal principal, UserResolver resolver, CancellationToken ct) =>
 		{
 			string? login = principal.Identity?.Name;
 			await resolver.EnsureFreshAsync(false, ct);
-			if (login is null || !resolver.MergedUsers.TryGetValue(login, out MergedAccount? account))
+			if (login is null || !resolver.MergedUsers.TryGetValue(login, out MergedUser? account))
 				return Results.NotFound();
-			AccountOptions o = account.Options;
+			UserOptions o = account.Options;
 			return Results.Ok(new
 			{
 				login,
@@ -76,7 +76,7 @@ internal static class PortalEndpoints
 		// calls its server "BaseUrl": for each role, who serves it and which fields that
 		// provider reads. Schemas are descriptions, never values — nothing configured leaks.
 		api.MapGet("backends/meta", (
-			ClaimsPrincipal principal, AccountResolver resolver,
+			ClaimsPrincipal principal, UserResolver resolver,
 			BackendRolesProvider rolesProvider, BackendProviderRegistry registry) =>
 		{
 			string? login = principal.Identity?.Name;
@@ -84,12 +84,12 @@ internal static class PortalEndpoints
 				return Results.Unauthorized();
 
 			BackendRolesConfig roles = rolesProvider.Current;
-			resolver.MergedUsers.TryGetValue(login, out MergedAccount? account);
+			resolver.MergedUsers.TryGetValue(login, out MergedUser? account);
 
 			Dictionary<string, object> meta = new(StringComparer.OrdinalIgnoreCase);
 			foreach (BackendRole role in Enum.GetValues<BackendRole>())
 			{
-				// The user's own provider override wins, exactly as AccountResolver resolves it.
+				// The user's own provider override wins, exactly as UserResolver resolves it.
 				string? provider = null;
 				if (account?.Options.Backends?.TryGetValue(role.ToString(), out BackendRoleOverride? own) == true)
 					provider = own.Provider;
@@ -118,7 +118,7 @@ internal static class PortalEndpoints
 
 		api.MapPut("password", async (
 			PasswordChangeRequest request, ClaimsPrincipal principal, HttpContext http,
-			AccountStore store, AccountResolver resolver, IBackendSessionFactory sessionFactory,
+			UserStore store, UserResolver resolver, IBackendSessionFactory sessionFactory,
 			AuthThrottle throttle, BackendRolesConfig roles, BackendProviderRegistry registry,
 			SyncStateService state, IOptionsMonitor<ActiveSyncOptions> options,
 			ILoggerFactory loggerFactory, CancellationToken ct) =>
@@ -161,16 +161,16 @@ internal static class PortalEndpoints
 
 			throttle.RecordSuccess(throttleKey);
 			ActiveSyncOptions current = options.CurrentValue;
-			AccountOptions entry = await AccountEditing.LoadStartingEntryAsync(store, current, login, ct);
+			UserOptions entry = await UserEditing.LoadStartingEntryAsync(store, current, login, ct);
 			// C6: go through the ONE shared gateway-password policy (strength floor, empty/sealed
 			// rejection) instead of hashing directly, so the portal cannot set a weaker password
 			// than the CLI or admin API would accept. Stored as a pbkdf2$ hash, decoupling the
 			// phone/web password from the mail backend exactly like `eas user password`.
-			AccountSecretPolicy.SecretResult prepared = AccountSecretPolicy.PrepareGatewayPassword(request.New);
+			UserSecretPolicy.SecretResult prepared = UserSecretPolicy.PrepareGatewayPassword(request.New);
 			if (prepared.Error is not null)
 				return EndpointHelpers.BadRequest(prepared.Error);
 			entry.Password = prepared.Value;
-			List<string> failures = AccountResolver.ValidateEntry(current, roles, registry, login, entry);
+			List<string> failures = UserResolver.ValidateEntry(current, roles, registry, login, entry);
 			if (failures.Count > 0)
 				return EndpointHelpers.BadRequest(string.Join(Environment.NewLine, failures));
 			await store.UpsertAsync(login, entry, ct);
@@ -187,7 +187,7 @@ internal static class PortalEndpoints
 
 		api.MapPut("backends/{roleName}", async (
 			string roleName, RoleSelfUpdate request, ClaimsPrincipal principal,
-			AccountStore store, AccountResolver resolver,
+			UserStore store, UserResolver resolver,
 			BackendRolesConfig roles, BackendProviderRegistry registry,
 			IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
 		{
@@ -198,7 +198,7 @@ internal static class PortalEndpoints
 				return roleError!;
 
 			ActiveSyncOptions current = options.CurrentValue;
-			AccountOptions entry = await AccountEditing.LoadStartingEntryAsync(store, current, login, ct);
+			UserOptions entry = await UserEditing.LoadStartingEntryAsync(store, current, login, ct);
 			entry.Backends ??= new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase);
 			if (!entry.Backends.TryGetValue(role.ToString(), out BackendRoleOverride? @override))
 				entry.Backends[role.ToString()] = @override = new BackendRoleOverride();
@@ -239,7 +239,7 @@ internal static class PortalEndpoints
 				}
 				else
 				{
-					AccountSecretPolicy.SecretResult prepared = AccountSecretPolicy.PrepareBackendPassword(
+					UserSecretPolicy.SecretResult prepared = UserSecretPolicy.PrepareBackendPassword(
 						request.Password, current.Encryption, $"Backends:{role}:Password");
 					if (prepared.Error is not null)
 						return EndpointHelpers.BadRequest(prepared.Error);
@@ -267,7 +267,7 @@ internal static class PortalEndpoints
 					entry.Backends = null;
 			}
 
-			List<string> failures = AccountResolver.ValidateEntry(current, roles, registry, login, entry);
+			List<string> failures = UserResolver.ValidateEntry(current, roles, registry, login, entry);
 			if (failures.Count > 0)
 				return EndpointHelpers.BadRequest(string.Join(Environment.NewLine, failures));
 			await store.UpsertAsync(login, entry, ct);

@@ -23,7 +23,7 @@ namespace ActiveSync.Core.Backend;
 /// </summary>
 public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDisposable
 {
-	// A8: each entry carries the AccountResolver snapshot version it was computed under, so a
+	// A8: each entry carries the UserResolver snapshot version it was computed under, so a
 	// verdict written back after a rebuild already cleared these caches (the TOCTOU) is tagged
 	// stale and ignored on read rather than trusted.
 	private readonly ConcurrentDictionary<string, (string PasswordHash, DateTime ExpiresUtc, long SnapshotVersion)> _authCache = new();
@@ -33,7 +33,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	private readonly ILogger<BackendSessionFactory> _logger;
 	private readonly IOptionsMonitor<ActiveSyncOptions> _options;
 	private readonly BackendProviderRegistry _registry;
-	private readonly AccountResolver _resolver;
+	private readonly UserResolver _resolver;
 	private readonly BackendRolesProvider _rolesProvider;
 	// K61: CompositeBackendSession is now built asynchronously (providers open their transport in
 	// CreateConnectionAsync), so the per-(user, device) cache holds a Lazy<Task<...>> — concurrent
@@ -46,7 +46,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 
 	public BackendSessionFactory(
 		IOptionsMonitor<ActiveSyncOptions> options,
-		AccountResolver resolver,
+		UserResolver resolver,
 		BackendRolesProvider rolesProvider,
 		ISyncDbContextFactory dbFactory,
 		BackendProviderRegistry registry,
@@ -126,7 +126,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// No local rule: the presented password is the mail password — the MailStore role's
 		// provider probes the user's EFFECTIVE endpoint/username, so per-user overrides
 		// apply. A provider without verification support cannot admit pass-through logins.
-		ResolvedAccount probeAccount = _resolver.Resolve(credentials);
+		ResolvedUser probeAccount = _resolver.Resolve(credentials);
 		ResolvedRole mailRole = probeAccount.Roles[BackendRole.MailStore];
 		if (_registry.GetFor(mailRole.ProviderName, BackendRole.MailStore) is not ICredentialVerifier verifier)
 		{
@@ -168,7 +168,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		BackendCredentials credentials, string deviceId, CancellationToken ct)
 	{
 		await _resolver.EnsureFreshAsync(false, ct).ConfigureAwait(false);
-		ResolvedAccount account = _resolver.Resolve(credentials);
+		ResolvedUser account = _resolver.Resolve(credentials);
 		IReadOnlyList<ResolvedRole> roles = account.OrderedRoles;
 
 		// Cache keys and rotation compares stay on the GATEWAY login/password — per-backend

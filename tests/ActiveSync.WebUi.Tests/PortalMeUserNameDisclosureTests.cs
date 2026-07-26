@@ -32,14 +32,14 @@ public sealed class PortalMeUserNameDisclosureTests
 	public async Task Me_EchoesUserName_ForARoleWithNoSelfServiceSettingsFields()
 	{
 		await using WebUiHost host = await WebUiHost.StartAsync(
-			WebUiHost.Users(("bob", new AccountOptions { MailAddress = "bob@example.com" })), ContactsRole);
+			WebUiHost.Users(("bob", new UserOptions { MailAddress = "bob@example.com" })), ContactsRole);
 
 		// carddav's Contacts role opts no field into the SETTINGS self-service surface, but bob can
 		// still PUT his own Contacts userName unconditionally (the credential surface is separate
 		// and always available) — so GET must echo back whatever is currently stored, admin-set or
 		// self-set, exactly as the PUT handler lets him overwrite it either way.
-		AccountStore store = new(host.Factory);
-		await store.UpsertAsync("bob", new AccountOptions
+		UserStore store = new(host.Factory);
+		await store.UpsertAsync("bob", new UserOptions
 		{
 			MailAddress = "bob@example.com",
 			Backends = new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase)
@@ -66,10 +66,10 @@ public sealed class PortalMeUserNameDisclosureTests
 			["ActiveSync:Backends:Calendar:BaseUrl"] = "https://dav.example.com"
 		};
 		await using WebUiHost host = await WebUiHost.StartAsync(
-			WebUiHost.Users(("bob", new AccountOptions { MailAddress = "bob@example.com" })), settings);
+			WebUiHost.Users(("bob", new UserOptions { MailAddress = "bob@example.com" })), settings);
 
-		AccountStore store = new(host.Factory);
-		await store.UpsertAsync("bob", new AccountOptions
+		UserStore store = new(host.Factory);
+		await store.UpsertAsync("bob", new UserOptions
 		{
 			MailAddress = "bob@example.com",
 			Backends = new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase)

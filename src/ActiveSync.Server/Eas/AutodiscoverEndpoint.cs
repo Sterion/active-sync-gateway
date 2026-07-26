@@ -40,7 +40,7 @@ public static class AutodiscoverEndpoint
 		HttpContext http,
 		IBackendSessionFactory sessionFactory,
 		AuthThrottle authThrottle,
-		AccountResolver resolver,
+		UserResolver resolver,
 		SyncStateService state,
 		IOptionsMonitor<ActiveSyncOptions> options,
 		BackendRolesProvider rolesProvider,
@@ -62,7 +62,7 @@ public static class AutodiscoverEndpoint
 		// An explicitly configured MailAddress is authoritative; otherwise keep the
 		// pass-through chain (address the client posted, then the login).
 		ILogger wireLogger = loggerFactory.CreateLogger(typeof(AutodiscoverEndpoint));
-		ResolvedAccount account = resolver.Resolve(credentials);
+		ResolvedUser account = resolver.Resolve(credentials);
 		string? configuredAddress = account.MailAddressIsExplicit ? account.MailAddress : null;
 		string email = configuredAddress ?? await ExtractEmailAsync(http, wireLogger, ct) ?? credentials.UserName;
 		string easUrl = BuildEasUrl(http, options.CurrentValue.Auth, options.CurrentValue.PublicUrl);

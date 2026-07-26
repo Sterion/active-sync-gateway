@@ -9,7 +9,7 @@ namespace ActiveSync.Core.Settings;
 ///   configuration path → string value). Every mutation bumps the single
 ///   <see cref="SettingsStamp" /> row IN THE SAME SaveChanges, so each running gateway notices
 ///   changes with one primary-key point-read — the same idiom as
-///   <see cref="ActiveSync.Core.Accounts.AccountStore" />. Registered as a singleton; used by the
+///   <see cref="ActiveSync.Core.Accounts.UserStore" />. Registered as a singleton; used by the
 ///   CLI (writes) and the server's <see cref="SettingsRefresher" /> (reads).
 /// </summary>
 public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)

@@ -112,7 +112,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 			}).Build();
 		BackendRolesProvider rolesProvider = new(config);
 		BackendProviderRegistry registry = new([provider], NullLogger<BackendProviderRegistry>.Instance);
-		AccountStore store = new(_dbFactory);
+		UserStore store = new(_dbFactory);
 		ActiveSyncOptions options = new()
 		{
 			Encryption = new EncryptionOptions { AllowPlaintext = true },
@@ -120,7 +120,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 			Eas = new EasOptions()
 		};
 		IOptionsMonitor<ActiveSyncOptions> monitor = TestOptionsMonitor.Of(options);
-		AccountResolver resolver = new(monitor, rolesProvider, registry, store);
+		UserResolver resolver = new(monitor, rolesProvider, registry, store);
 		BackendSessionFactory factory = new(monitor, resolver, rolesProvider, _dbFactory, registry,
 			NullLogger<BackendSessionFactory>.Instance);
 
@@ -134,7 +134,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 
 		// A concurrent `eas user` edit lands and the resolver rebuilds — bumps the snapshot
 		// version and clears the (still-empty) auth caches.
-		await store.UpsertAsync("someone-else", new AccountOptions(), CancellationToken.None);
+		await store.UpsertAsync("someone-else", new UserOptions(), CancellationToken.None);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
 		// Let the in-flight probe finish; its verdict now writes back into the cache AFTER the
@@ -218,7 +218,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public async Task DisposedFactory_UnsubscribesFromSettingsEvents()
 	{
-		// A28: the factory subscribed to BackendRolesProvider.Changed / AccountResolver.SnapshotChanged
+		// A28: the factory subscribed to BackendRolesProvider.Changed / UserResolver.SnapshotChanged
 		// but never unsubscribed. After disposal it must detach both handlers, otherwise the disposed
 		// (dead) factory stays reachable and its handlers keep firing on cleared state.
 		FakeMailProvider provider = new();
@@ -228,7 +228,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		});
 		BackendRolesProvider roles = RolesProvider();
 		BackendProviderRegistry registry = new([provider], NullLogger<BackendProviderRegistry>.Instance);
-		AccountResolver resolver = new(monitor, roles, registry);
+		UserResolver resolver = new(monitor, roles, registry);
 		BackendSessionFactory factory = new(monitor, resolver, roles, _dbFactory, registry,
 			NullLogger<BackendSessionFactory>.Instance);
 
@@ -256,7 +256,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		});
 		BackendRolesProvider roles = RolesProvider();
 		BackendProviderRegistry registry = new([provider], NullLogger<BackendProviderRegistry>.Instance);
-		AccountResolver resolver = new(monitor, roles, registry);
+		UserResolver resolver = new(monitor, roles, registry);
 		BackendSessionFactory factory = new(monitor, resolver, roles, _dbFactory, registry,
 			NullLogger<BackendSessionFactory>.Instance);
 
@@ -303,7 +303,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		BackendRolesProvider rolesProvider = roles ?? RolesProvider();
 		BackendProviderRegistry registry =
 			new([provider], NullLogger<BackendProviderRegistry>.Instance);
-		AccountResolver resolver = new(monitor, rolesProvider, registry);
+		UserResolver resolver = new(monitor, rolesProvider, registry);
 		return new BackendSessionFactory(monitor, resolver, rolesProvider, dbFactory ?? _dbFactory, registry,
 			NullLogger<BackendSessionFactory>.Instance);
 	}

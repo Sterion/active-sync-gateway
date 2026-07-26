@@ -39,7 +39,7 @@ public sealed class LogFilterTests
 	private static async Task<WebUiHost> AdminHostAsync()
 	{
 		return await WebUiHost.StartAsync(
-			WebUiHost.Users(("alice", new AccountOptions { Admin = true })));
+			WebUiHost.Users(("alice", new UserOptions { Admin = true })));
 	}
 
 	private static string[] Messages(JsonElement body)

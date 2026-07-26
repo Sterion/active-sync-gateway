@@ -5,20 +5,20 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.Core.Administration;
 
 /// <summary>
-///   Config-path access to <see cref="AccountOptions" /> fields, shared by the CLI and the
+///   Config-path access to <see cref="UserOptions" /> fields, shared by the CLI and the
 ///   web admin API. Reserved keys are fixed ("MailAddress", "Password", "Admin",
 ///   "Backends:&lt;Role&gt;:Provider|Enabled|UserName|Password"); provider settings are
 ///   free-form under "Backends:&lt;Role&gt;:Settings:&lt;Key&gt;" — the host cannot enumerate
 ///   them (each provider binds its own options), so they are accepted as-is and validated by
 ///   the role's provider on save.
 /// </summary>
-internal static class AccountFieldPaths
+internal static class UserFieldPaths
 {
 	internal sealed record FieldPath(
 		string Key,
 		Type ValueType,
 		bool IsSecret,
-		Action<AccountOptions, object?> Set)
+		Action<UserOptions, object?> Set)
 	{
 		/// <summary>
 		///   True only for the gateway login password (hashed via pbkdf2); false for the per-role
