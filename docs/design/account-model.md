@@ -81,10 +81,29 @@ Recorded so a fresh session executes rather than re-litigates.
 | 10 | **An account carries two passwords**: `Password` (device → gateway, verified locally) and `DefaultBackendPassword` (gateway → backends), plus `DefaultBackendLogin`. Different trust domains; keep the chains separate. |
 | 11 | **Unset defaults mean today's behaviour** — `DefaultBackendPassword` unset ⇒ forward the presented EAS password; `DefaultBackendLogin` unset ⇒ the gateway login. Zero-administration pass-through must survive. |
 | 12 | **Per-device credentials are deferred**, not rejected — see "What this deliberately does NOT do". |
+| 13 | **The `AccountOptions` JSON blob is normalised away.** Scalars become columns on `Accounts`; per-role `Enabled`/`Provider`/`UserName`/`Password` become columns on a new **`AccountBackendRoles`** child table. |
+| 14 | **Only `Settings` stays serialized** (`AccountBackendRoles.SettingsJson`) — its keys are provider-defined and discoverable only at runtime, which is the provider model working as intended. |
+| 15 | **Every account-linked table gets a real FK to `AccountId` with cascade delete**, and `SentCommandToken` gets the FK to `Device` it is missing today. |
+| 16 | **Deleting an account must not silently destroy content.** The DB cascades; the application counts what would be lost and demands confirmation naming it. |
+| 17 | **Config-declared accounts get rows at startup** (identity from the row, values from config). |
 
-> **The shape is still settling.** Decisions 1–9 have been through a full round of review; 10–12 are
+> **The shape is still settling.** Decisions 1–9 have been through a full round of review; 10–17 are
 > newer and the owner expects them to move. Treat the *direction* as agreed and the field-level detail
 > as provisional — but do not silently re-open 1–9 while adjusting the rest.
+
+### Open — needs a decision before Phase A completes
+
+1. **`LoginBlock.DeviceId`: non-nullable FK (recommended) or nullable?** Non-nullable removes the
+   whole-account case from `LoginBlock` and leaves `Enabled = false` owning it — one mechanism per
+   concept instead of two overlapping ones. Nullable preserves today's "block the whole user" shape.
+2. **Config identity: stable key + `Login` field (recommended), explicit numeric `Id`, or accept the
+   rename gap?** See "Config-declared accounts need rows too".
+3. **Delete guard: confirm-and-cascade (as written) or refuse-until-purged?** The latter makes
+   accidental content loss structurally impossible rather than confirmation-dependent.
+4. **Terminology: `Account` or `User`?** This document uses **Account** throughout. A rename to
+   `User`/`Users` was raised — it reads more naturally to operators and keeps `eas user` working
+   unchanged — then apparently reversed. Settle it before item 1, because it is the one decision that
+   touches every file.
 
 ---
 
@@ -181,24 +200,62 @@ Five things to get right:
 
 ### Account shape — two passwords, and explicit backend defaults
 
-```
-Account
-  AccountId              int identity   // THE identity — immutable, never reused
-  Login                  string         // unique (case-folded), MUTABLE
+**The `AccountOptions` JSON blob is gone.** Everything with a compile-time-known shape becomes a real
+column; only the genuinely runtime-discovered part stays serialized. Two tables:
 
-  Password               string?        // EAS/gateway login. pbkdf2$ (preferred) or plaintext.
-                                        // Verified LOCALLY. Never sent to a backend.
-  DefaultBackendLogin    string?        // default user name for every role
-  DefaultBackendPassword string?        // default secret for every role. enc:v1: sealed.
+### `Accounts`
 
-  MailAddress            string?
-  Admin                  bool?
-  Enabled                bool?
-  OidcSubject            string?
-  AutoProvisioned        bool?
+| Column | Type | Notes |
+|---|---|---|
+| `AccountId` | int identity | **PK.** THE identity — immutable, never reused |
+| `Login` | string | **unique, case-folded.** MUTABLE |
+| `Password` | string? | **Device → gateway.** `pbkdf2$…` (preferred) or plaintext. Verified LOCALLY, never sent anywhere |
+| `DefaultBackendLogin` | string? | **Gateway → backends**: default user name for every role |
+| `DefaultBackendPassword` | string? | Default secret for every role, `enc:v1:` sealed |
+| `MailAddress` | string? | From rewriting, Settings, meeting replies. Null ⇒ the login if it contains `@`. *(Extracted from the blob — this is why it appears nowhere in today's schema.)* |
+| `Admin` | bool? | Grants `/admin` access |
+| `Enabled` | bool? | `false` = disabled; every login refused 403 after valid credentials |
+| `OidcSubject` | string? | IdP `sub` this account is bound to |
+| `AutoProvisioned` | bool? | Provenance marker for gateway-created rows |
 
-  Backends  Dictionary<role, RoleOverride { Enabled, Provider, UserName, Password, Settings }>
-```
+### `AccountBackendRoles`
+
+One row per (account, role). Child of `Accounts`, **FK with cascade delete**.
+
+| Column | Type | Notes |
+|---|---|---|
+| `Id` | int identity | **PK** |
+| `AccountId` | int | **FK → `Accounts.AccountId`, cascade.** Unique with `Role` |
+| `Role` | string | `MailStore`, `MailSubmit`, `Calendar`, `Contacts`, `Tasks`, `Notes`, `Oof` |
+| `Enabled` | bool? | `false` = turn this role off (content roles fall back to `local`, Oof off). Invalid on the two mail roles |
+| `Provider` | string? | Serve this role with a different provider than the global assignment |
+| `UserName` | string? | Backend login for this role |
+| `Password` | string? | Backend secret for this role, `enc:v1:` sealed |
+| `SettingsJson` | string? | **The one surviving blob** — see below |
+
+**Why the line falls there.** `Enabled`/`Provider`/`UserName`/`Password` have a fixed,
+compile-time-known shape, and the credentials among them are exactly what the resolution rule spends
+its time resolving — so they earn columns, and "which accounts override MailStore?" becomes a query
+rather than a full-table deserialize. `Settings` cannot: its keys are **provider-defined and only
+discoverable at runtime** (`IBackendProvider.DescribeConfiguration` → `BackendConfigField`), and the
+host deliberately never knows a plugin provider's option shape. That is the whole point of the
+provider model, so `Settings` stays serialized — with its existing semantics intact: setting a list
+element (`X:0`) REPLACES the inherited list, and a null value CLEARS the inherited key rather than
+falling through.
+
+**Effort note, since this looks bigger than it is.** `AccountOptions` does **not** disappear — it
+remains the in-memory and config-bound shape (`ActiveSync:Accounts` binds to it through
+`IConfiguration`). Only *persistence* changes, and today the blob is confined to `AccountStore`
+(`TryDeserialize` and `UpsertAsync`); nothing else in the codebase reads into it, because it is
+opaque. So `AccountResolver`, `AccountEditing`, `AccountFieldPaths`, `AccountSecretPolicy`, the CLI,
+the admin API, the portal and the banner all keep operating on `AccountOptions` objects unchanged.
+The work is: entity + child table, a mapping in `AccountStore` each way, regenerated migration, tests.
+
+**What this buys beyond tidiness:** `WHERE Admin = true` / `WHERE Enabled = false` /
+`WHERE OidcSubject = ?` become real queries (today `AccountResolver` loads every row and deserializes
+to answer any of them); a malformed scalar becomes impossible, narrowing the corrupt-row guard
+(`B15`) to `SettingsJson` alone; and secrets become individually selectable rather than arriving
+inside a blob you must hold whole (relevant to `B5`).
 
 **An account carries two distinct credentials, and conflating them is the current model's weak
 point.** `Password` authenticates the *device to the gateway*; `DefaultBackendLogin`/
@@ -321,6 +378,62 @@ the only lock, and it is the mechanism that already exists. Setting a value in *
 lock it — level 1 beats level 2, so a permitted holder still overrides it. Anyone who wants a
 guaranteed value must remove it from the self-service surface, not hide it in a lower level.
 
+### Real foreign keys and cascade delete
+
+Today only three relationships are declared FKs (`DeviceFolder`/`CollectionState` → `Device`,
+`DavItem` → `UserFolder`); everything else is a string matched by value. See
+[`current-db.md`](current-db.md) for the full as-built graph. With `AccountId` in place, the soft
+links become real:
+
+| Table | Today | Target |
+|---|---|---|
+| `LocalItem` | `UserName` string | **`AccountId` FK, cascade** |
+| `UserFolder` | `UserName` string | **`AccountId` FK, cascade** |
+| `Device` | `UserName` string | **`AccountId` FK, cascade** |
+| `LoginBlock` | `UserName` + nullable `DeviceId` **string** | **`AccountId` FK + `DeviceKey` FK → `Device.Id`, both cascade** |
+| `SharedCalendarGrant`, `OofSetting`, `WebSessionRevocation` | `UserName` string | **`AccountId` FK, cascade** |
+| `SentCommandToken` | `DeviceKey` int, **no FK** | **real FK → `Device.Id`, cascade** — closes the orphan-on-device-delete gap |
+| `AccountBackendRole` | *(new)* | **`AccountId` FK, cascade** |
+
+**`LoginBlock.DeviceId` should become a NON-nullable FK, and that is a simplification, not a
+restriction.** Today a null `DeviceId` means "block the whole account", which duplicates
+`Enabled = false` — two mechanisms for one concept, and `AGENTS.md` already has to explain the
+difference ("the persistent-property counterpart to the ad-hoc `LoginBlock`"). Making the FK
+mandatory forces the whole-account case out of `LoginBlock` entirely, leaving one mechanism each:
+
+- **`Accounts.Enabled = false`** — the account is off. Every device, EAS and web.
+- **`LoginBlock(AccountId, DeviceKey)`** — this one device is cut off. Nothing else changes.
+
+*(This is my recommendation, not a settled decision — see Open questions.)*
+
+### Deleting an account must not silently destroy data
+
+Cascade delete is right, but it makes account deletion destructive in a way it currently is not:
+**`LocalItem` is real user content** — contacts, calendar, tasks and always notes — not sync metadata.
+Cascading it means deleting an account irreversibly deletes the user's PIM data, and for a
+local-stores deployment that data exists **nowhere else**.
+
+So the *database* cascades, and the *application* refuses to issue the delete blind:
+
+1. Before deleting, count what will go with it — `LocalItem` by collection above all, plus devices,
+   folders, shares and blocks.
+2. If anything holds real content, **require an explicit confirmation naming what is lost**:
+   "this permanently deletes 342 contacts, 89 events, 12 notes — they exist nowhere else."
+3. Sync state alone (devices, folders, collection state) is *not* worth prompting over — it rebuilds
+   on the next sync. Only content is.
+
+**The CLI is not the hard part.** The precedent already exists on both surfaces: the web API demands
+a typed confirmation echo for destructive device operations (`DevicesEndpoints.cs:85` — *"confirm
+must echo the exact device id"*), and the CLI has its own confirmation flow for the same operations.
+Reuse both. Add a `--yes`/`--force` escape for scripting, and make the *default* interactive path
+refuse rather than proceed.
+
+**A cheaper structural option worth weighing:** refuse to delete an account that still owns
+`LocalItem` rows at all, and require an explicit purge first (`eas account purge-data`, then
+`eas account remove`). That makes accidental content loss impossible rather than
+confirmation-dependent — the prompt becomes an error you cannot click through. Costs one extra step
+in the rare legitimate case.
+
 ### `AutoProvisionAccounts` — an account always exists past auth
 
 - **`true` (default)** — a login that authenticates and has no account gets one created immediately,
@@ -338,6 +451,36 @@ the property worth keeping — the refusal happens **before** the backend probe,
 never reach the mail server. That is a brute-force shield, not just policy, and today's
 `PassThroughProvisioner` runs *after* a successful probe, so the refusal must move earlier rather
 than flip a branch where provisioning currently sits.
+
+### Config-declared accounts need rows too
+
+Once every table FKs to `AccountId`, a config-declared account cannot stay config-only — sync state
+has nothing to point at. So **on startup, every account declared in `ActiveSync:Accounts` (or the
+accounts file) gets a row**: `AccountId` + `Login`, everything else null. Config keeps supplying the
+*values*; the row supplies the *identity*.
+
+That leaves one genuine problem. **Matching config to rows by login means renaming a login in config
+looks like a brand-new account** — the old row (and all its sync state, and any local content) is
+orphaned, and the user re-syncs from scratch. Three ways to handle it:
+
+- **(a) A stable config key, login as a field — recommended.** Today the config key *is* the login
+  (`Accounts:anna@example.com: {…}`). Make the key a stable handle and let `Login` be an optional
+  field defaulting to it. Renaming then means adding `Login: "anna.smith@example.com"` under the
+  unchanged key `anna@example.com` — the row is found by the key, the login changes, nothing is
+  orphaned. **Costs nothing for anyone who never renames**, because the existing config shape keeps
+  working unchanged and means exactly what it means today.
+- **(b) Require an explicit numeric `Id` in config.** Works, but pushes a surrogate key into
+  hand-edited YAML/JSON where operators must keep it unique against a database identity sequence —
+  duplicate or colliding ids corrupt the mapping, and nothing in the config file can validate it.
+- **(c) Match on login and accept the gap**, providing `eas account rename` so the supported path is
+  "rename the row first, then update config to match". Note this is **exactly today's behaviour** —
+  renaming a config login already orphans everything, which `README.md` warns about — so it is not a
+  regression, just an unfixed sharp edge.
+
+(a) is the recommendation: it solves the problem without inventing an identifier the operator has to
+manage, and it degrades to today's config shape when unused. **A rename command is worth having
+regardless** — making renames possible is the whole point of the surrogate key, and the CLI should
+expose it.
 
 ---
 
@@ -431,12 +574,20 @@ after it; (b) past the auth boundary an `AccountId` is always present — an und
 gets an account or is refused; (c) the id column is non-reusing on both providers. Update `AGENTS.md`
 and `README.md` in the same work (Invariant 1).
 
-**3. The account shape.** Add `DefaultBackendLogin` / `DefaultBackendPassword` alongside the existing
-gateway `Password`; keep the per-role `Backends` overrides. Regenerate the `Initial` pair again
-(Standing context — regenerate, do not chain). No resolver changes yet: this item only establishes
-the columns and proves they persist, seal and round-trip. **Assert the two credential chains stay
-separate** — the gateway `Password` is verified locally and must never be reachable by anything that
-builds a backend connection.
+**3. Normalise the account shape.** Extract every `AccountOptions` scalar into columns on `Accounts`
+(`Password`, `DefaultBackendLogin`, `DefaultBackendPassword`, `MailAddress`, `Admin`, `Enabled`,
+`OidcSubject`, `AutoProvisioned`); add the `AccountBackendRoles` child table with
+`Enabled`/`Provider`/`UserName`/`Password` as columns and `SettingsJson` as the one surviving blob.
+`AccountOptions` stays as the in-memory/config-bound type — only `AccountStore`'s two mapping
+directions change. Regenerate the `Initial` pair again (Standing context — regenerate, do not chain).
+No resolver changes yet: prove the columns persist, seal and round-trip.
+**Assert the two credential chains stay separate** — the gateway `Password` is verified locally and
+must never be reachable by anything that builds a backend connection.
+
+**3a. Foreign keys and cascades.** Convert every account-linked soft link to a real FK with cascade
+(see "Real foreign keys and cascade delete"), including the `SentCommandToken` → `Device` FK that is
+missing today and `LoginBlock`'s `DeviceKey`. **Test that deleting an account removes exactly its
+own rows and nothing else's**, and that deleting a device no longer orphans `SentCommandToken` rows.
 
 ### Phase B — the wiring
 
@@ -457,6 +608,9 @@ nothing set behaves exactly as it does today. Prove those before proving the ove
 account-level fields. Enforce the permission table: assert the holder cannot write
 `Enabled`/`Provider`/account-level fields or non-`SelfServiceEditable` settings keys, for every role
 and provider. That assertion is the security property of this design.
+
+**6a. Account lifecycle.** The config-declared bootstrap (rows created at startup for every declared
+account), `eas account rename`, and the delete guard that counts content before destroying it.
 
 **7. Docs + banner.** Startup banner shows the level each effective value came from. Rewrite the
 account sections of `README.md`, `docs/configuration.md`, `docs/webui.md`, `docs/cli.md`, and
