@@ -205,13 +205,17 @@ public class UserResolverTests
 		ResolvedUser account = Resolver(options, config).Resolve(new BackendCredentials("phone", "P"));
 		BackendCredentials mail = account.Roles[BackendRole.MailStore].Credentials;
 		Assert.Equal(new BackendCredentials("mailbox@example.com", "P"), mail);
-		Assert.Equal(mail, account.Roles[BackendRole.MailSubmit].Credentials); // submit ← effective mail
-		Assert.Equal(mail, account.Roles[BackendRole.Calendar].Credentials);   // DAV ← effective mail
+		// Item 5: MailStore is just another role — the other roles fall back to the user DEFAULTS
+		// (unset here, so pass-through), not to the effective MailStore pair.
+		Assert.Equal(new BackendCredentials("phone", "P"), account.Roles[BackendRole.MailSubmit].Credentials);
+		Assert.Equal(new BackendCredentials("phone", "P"), account.Roles[BackendRole.Calendar].Credentials);
 	}
 
 	[Fact]
-	public void ConfiguredMailStorePassword_OverridesPresented_ForAllInheritors()
+	public void DefaultBackendCredentials_ApplyToEveryRole_MailStoreIncluded()
 	{
+		// What replaced MailStore-as-template: ONE explicit pair, applying to every role, which
+		// keeps working when the device credential is decoupled from the mail password.
 		Dictionary<string, string?> config = BaseConfig();
 		config["ActiveSync:Backends:Calendar:Provider"] = "caldav";
 		config["ActiveSync:Backends:Calendar:BaseUrl"] = "https://dav.global";
@@ -220,15 +224,18 @@ public class UserResolverTests
 		{
 			["phone"] = new()
 			{
-				Backends = new Dictionary<string, BackendRoleOverride>
-					{ ["MailStore"] = new() { Password = "mail-pw" } }
+				Password = "phone-pw",                       // device → gateway
+				DefaultBackendLogin = "mailbox@example.com", // gateway → backends
+				DefaultBackendPassword = "mail-pw",
 			}
 		};
 
-		ResolvedUser account = Resolver(options, config).Resolve(new BackendCredentials("phone", "mail-pw"));
-		Assert.Equal("mail-pw", account.Roles[BackendRole.MailStore].Credentials.Password);
-		Assert.Equal("mail-pw", account.Roles[BackendRole.MailSubmit].Credentials.Password);
-		Assert.Equal("mail-pw", account.Roles[BackendRole.Calendar].Credentials.Password);
+		ResolvedUser account = Resolver(options, config).Resolve(new BackendCredentials("phone", "phone-pw"));
+		foreach (BackendRole role in new[] { BackendRole.MailStore, BackendRole.MailSubmit, BackendRole.Calendar })
+		{
+			Assert.Equal("mailbox@example.com", account.Roles[role].Credentials.UserName);
+			Assert.Equal("mail-pw", account.Roles[role].Credentials.Password);
+		}
 	}
 
 	[Fact]

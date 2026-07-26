@@ -37,15 +37,23 @@ public sealed record MergedUser(
 }
 
 /// <summary>
-///   Maps a gateway login to its effective backend roles and credentials. Pass-through is
-///   the baseline: undeclared logins use the global role sections with the presented
-///   credentials everywhere. A declared entry is a pure overlay — only the role fields it
-///   sets differ, and unset passwords inherit the presented EAS password per role. Entries
-///   come from config (<see cref="ActiveSyncOptions.Users" />, restart to change) and the
-///   database (<see cref="UserStore" />, a row REPLACES the whole config entry for that
-///   login). The compiled snapshot is immutable and swapped atomically; database changes
-///   are noticed via the AccountsStamp point-read at most every
-///   <see cref="AuthOptions.UsersRefreshSeconds" />. Registered as a singleton.
+///   Maps a gateway login to its effective backend roles and credentials. Pass-through is the
+///   baseline: undeclared logins use the global role sections with the presented credentials
+///   everywhere. A declaration is a pure per-field OVERLAY — only the fields it sets differ.
+///   <para>
+///     Entries come from configuration (<see cref="ActiveSyncOptions.Users" />, restart to
+///     change) and from the database (<see cref="UserStore" />, picked up live), and the two are
+///     merged PER FIELD by <see cref="UserMerge" /> — database over configuration — rather than
+///     one replacing the other. Credentials then resolve with one extra tier of scope:
+///     <c>user · role → user · default → pass-through</c>, where the terminal step forwards the
+///     presented EAS credential and the gateway login, which is what keeps the
+///     zero-administration baseline working.
+///   </para>
+///   <para>
+///     The compiled snapshot is immutable and swapped atomically; database changes are noticed
+///     via the <c>"users"</c> <see cref="State.DataChange" /> point-read at most every
+///     <see cref="AuthOptions.UsersRefreshSeconds" />. Registered as a singleton.
+///   </para>
 /// </summary>
 public sealed class UserResolver
 {
@@ -116,7 +124,7 @@ public sealed class UserResolver
 	/// </summary>
 	public long SnapshotVersion => Interlocked.Read(ref _snapshotVersion);
 
-	/// <summary>The merged, effective user view (database entries replacing config ones).</summary>
+	/// <summary>The merged, effective user view (database over config, per field).</summary>
 	public IReadOnlyDictionary<string, MergedUser> MergedUsers => _snapshot.Users;
 
 	/// <summary>
@@ -230,11 +238,20 @@ public sealed class UserResolver
 
 	/// <summary>
 	///   Local gateway-password verdict, or null when only a backend login probe can decide.
-	///   Precedence: explicit gateway Password (hash/plaintext) → configured MailStore
-	///   Password (presented must equal it) → null (probe). Undeclared logins: definitive
-	///   false when <see cref="ActiveSyncOptions.AutoProvisionUsers" /> is OFF — the refusal
-	///   lands here, BEFORE any backend probe, so undeclared logins never reach the mail
+	///   Precedence: explicit gateway Password (hash/plaintext) → a CONFIGURED MailStore backend
+	///   password (presented must equal it, timing-safe) → null (probe). Undeclared logins:
+	///   definitive false when <see cref="ActiveSyncOptions.AutoProvisionUsers" /> is OFF — the
+	///   refusal lands here, BEFORE any backend probe, so undeclared logins never reach the mail
 	///   server (a brute-force shield, not just policy); else null.
+	///   <para>
+	///     The pinned compare covers the EFFECTIVE MailStore password — the role override, or
+	///     <see cref="UserOptions.DefaultBackendPassword" /> when the role does not set one. That
+	///     generalization is load-bearing, not tidiness: whenever the gateway holds a backend
+	///     password for a user, the probe would authenticate with THAT password and therefore
+	///     accept anything the device presented. Pinning is what keeps the presented credential
+	///     meaningful. It is also why the two chains stay separate — this reads a BACKEND
+	///     credential purely to compare it, and never sends the gateway password anywhere.
+	///   </para>
 	/// </summary>
 	public bool? VerifyLocally(string login, string presented)
 	{
@@ -249,6 +266,8 @@ public sealed class UserResolver
 			return GatewayPasswordHasher.Verify(template.GatewayPassword, presented);
 		if (template.Roles.GetValueOrDefault(BackendRole.MailStore)?.Password is { } mailPassword)
 			return TimingSafeEquals(mailPassword, presented);
+		if (template.DefaultBackendPassword is { } defaultPassword)
+			return TimingSafeEquals(defaultPassword, presented);
 		return null;
 	}
 
@@ -275,17 +294,26 @@ public sealed class UserResolver
 				$"Account '{login}' has an invalid stored configuration and cannot be resolved; " +
 				"correct or remove the database row (the login is refused until then).");
 
-		// Credential inheritance: MailStore anchors on (override ?? login, override ?? presented);
-		// every other role defaults to the effective MailStore pair.
-		RoleTemplate? mailStore = template.Roles.GetValueOrDefault(BackendRole.MailStore);
-		string mailUser = mailStore?.UserName ?? login;
-		string mailPassword = mailStore?.Password ?? presented.Password;
+		// THE RESOLUTION RULE with one extra tier of SCOPE (this role vs every role) — the DB/config
+		// half of each tier was already collapsed per field by UserMerge, so what is left is:
+		//
+		//   user · role  →  user · default  →  pass-through
+		//
+		// The terminal step is what keeps zero-administration working: an unset default login is
+		// the gateway login and an unset default password is the PRESENTED EAS credential, so a
+		// user with nothing declared behaves exactly as pass-through always did.
+		//
+		// MailStore is just another role here. It used to do double duty — "the mail backend" AND
+		// "the template every other role copies from" — which only ever worked while the device
+		// credential WAS the mail password; the explicit defaults replace that implicit chain.
+		string defaultUser = template.DefaultBackendLogin ?? login;
+		string defaultPassword = template.DefaultBackendPassword ?? presented.Password;
 		Dictionary<BackendRole, ResolvedRole> roles = new();
 		foreach ((BackendRole role, RoleTemplate roleTemplate) in template.Roles)
 			roles[role] = new ResolvedRole(role, roleTemplate.ProviderName, roleTemplate.Settings,
-				role == BackendRole.MailStore
-					? new BackendCredentials(mailUser, mailPassword)
-					: new BackendCredentials(roleTemplate.UserName ?? mailUser, roleTemplate.Password ?? mailPassword));
+				new BackendCredentials(
+					roleTemplate.UserName ?? defaultUser,
+					roleTemplate.Password ?? defaultPassword));
 		return new ResolvedUser(
 			login,
 			template.MailAddress ?? (login.Contains('@') ? login : null),
@@ -533,10 +561,19 @@ public sealed class UserResolver
 				failures.Add($"ActiveSync:Users:{login}:Backends:{role}: {outcome.GetForError}");
 		}
 
+		// The user-default backend secret is unsealed exactly like a per-role one (B5 residency
+		// note applies equally); the gateway Password deliberately is NOT — it is a local
+		// verifier, and B18 flags a sealed value there as a configuration error.
+		string? defaultBackendPassword = ResolveSecret(
+			account.DefaultBackendPassword, encryptionKey, $"{login}:DefaultBackendPassword", failures);
+
 		return new UserTemplate(
 			string.IsNullOrWhiteSpace(account.Password) ? null : account.Password,
 			string.IsNullOrWhiteSpace(account.MailAddress) ? null : account.MailAddress.Trim(),
-			templates);
+			templates,
+			Invalid: false,
+			string.IsNullOrWhiteSpace(account.DefaultBackendLogin) ? null : account.DefaultBackendLogin.Trim(),
+			defaultBackendPassword);
 	}
 
 	/// <summary>
@@ -715,11 +752,20 @@ public sealed class UserResolver
 	private sealed record RoleTemplate(
 		BackendRole Role, string ProviderName, ProviderSettings Settings, string? UserName, string? Password);
 
+	/// <summary>
+	///   One compiled user. <see cref="GatewayPassword" /> is the DEVICE → GATEWAY credential
+	///   (verified locally, never sent anywhere); <see cref="DefaultBackendLogin" /> /
+	///   <see cref="DefaultBackendPassword" /> are the GATEWAY → BACKENDS defaults every role
+	///   falls back to. Two trust domains, kept as separate members so neither can be mistaken
+	///   for the other at a call site.
+	/// </summary>
 	private sealed record UserTemplate(
 		string? GatewayPassword,
 		string? MailAddress,
 		IReadOnlyDictionary<BackendRole, RoleTemplate> Roles,
-		bool Invalid = false);
+		bool Invalid = false,
+		string? DefaultBackendLogin = null,
+		string? DefaultBackendPassword = null);
 
 	/// <summary>Immutable compiled view, swapped atomically on database changes.</summary>
 	private sealed record Snapshot(
