@@ -95,14 +95,28 @@ public sealed class SharedCalendarTests(GatewayFixture gateway)
 	private static async Task InsertGrantAsync(
 		string dbPath, string userName, string collectionHref, bool readOnly)
 	{
-		// Exactly what `eas share add` writes.
+		// Exactly what `eas share add` writes. Grants FK to the immutable UserId, so the login is
+		// resolved through Users (stored case-folded) — and minted first when the user has not
+		// synced yet, which is what `eas share add` does too.
+		string login = userName.ToLowerInvariant();
 		await using SqliteConnection connection = new($"Data Source={dbPath}");
 		await connection.OpenAsync();
+
+		await using (SqliteCommand ensureUser = connection.CreateCommand())
+		{
+			ensureUser.CommandText =
+				"INSERT INTO Users (Login, Declared, UpdatedUtc) SELECT $user, 0, $created " +
+				"WHERE NOT EXISTS (SELECT 1 FROM Users WHERE Login = $user)";
+			ensureUser.Parameters.AddWithValue("$user", login);
+			ensureUser.Parameters.AddWithValue("$created", DateTime.UtcNow);
+			await ensureUser.ExecuteNonQueryAsync();
+		}
+
 		await using SqliteCommand command = connection.CreateCommand();
 		command.CommandText =
-			"INSERT INTO SharedCalendarGrants (UserName, CollectionHref, ReadOnly, CreatedUtc) " +
-			"VALUES ($user, $href, $ro, $created)";
-		command.Parameters.AddWithValue("$user", userName);
+			"INSERT INTO SharedCalendarGrants (UserId, CollectionHref, ReadOnly, CreatedUtc) " +
+			"SELECT UserId, $href, $ro, $created FROM Users WHERE Login = $user";
+		command.Parameters.AddWithValue("$user", login);
 		command.Parameters.AddWithValue("$href", collectionHref);
 		command.Parameters.AddWithValue("$ro", readOnly ? 1 : 0);
 		command.Parameters.AddWithValue("$created", DateTime.UtcNow);

@@ -121,9 +121,12 @@ public class DbAccountTests(GatewayFixture gateway)
 	}
 
 	[BackendFact]
-	public async Task AutoProvisionUsers_Off_LeavesPassThroughUnpersisted()
+	public async Task AutoProvisionUsers_Off_RefusesUndeclared_EvenWithValidBackendCredentials()
 	{
-		// Auto-provisioning is on by default, so this leg turns it OFF explicitly.
+		// The flag kept its name but sharpened its meaning (it absorbed the deleted
+		// RequireDeclaredUsers): OFF is allowlist mode, so an UNDECLARED login is refused — and
+		// refused BEFORE any backend probe, so undeclared credentials never reach the mail
+		// server. Previously the same flag only decided whether to persist a row.
 		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
 			new Dictionary<string, string?>
 			{
@@ -132,9 +135,16 @@ public class DbAccountTests(GatewayFixture gateway)
 			});
 		UserStore store = factory.Services.GetRequiredService<UserStore>();
 
-		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
+		// The credentials are GENUINE — the backend would accept them. The gateway still says no,
+		// because the login is not declared.
+		await AssertUnauthorizedAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
 
+		// ...and nothing was persisted for it.
 		Assert.Null(await store.GetAsync(TestBackend.User1, CancellationToken.None));
+
+		// A declared user still works — the allowlist admits, it does not lock everyone out.
+		await store.UpsertAsync(TestBackend.User1, new UserOptions(), CancellationToken.None);
+		await AssertSyncsInboxAsync(CreateClient(factory, TestBackend.User1, TestBackend.Password));
 	}
 
 	[BackendFact]

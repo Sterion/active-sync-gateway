@@ -63,11 +63,13 @@ public sealed class GatewayFixture : IAsyncLifetime
 	/// <summary>
 	///   Raw ADO read of LocalItems.Content behind <see cref="LocalStoresFactory" /> —
 	///   deliberately bypasses the EF/store layer so at-rest assertions see exactly the
-	///   stored bytes, on whichever provider the suite runs against.
+	///   stored bytes, on whichever provider the suite runs against. Rows are keyed by the
+	///   immutable UserId, so the login is resolved through Users (stored case-folded).
 	/// </summary>
 	public List<string> ReadLocalItemContents(string userName, string collection)
 	{
 		List<string> rows = new();
+		string login = userName.ToLowerInvariant();
 		if (_localStoresIsPostgres)
 		{
 			PostgresConnectionUri.TryConvert(_localStoresConnectionString, out string keywordForm, out _);
@@ -75,8 +77,10 @@ public sealed class GatewayFixture : IAsyncLifetime
 			connection.Open();
 			using NpgsqlCommand command = connection.CreateCommand();
 			command.CommandText =
-				"SELECT \"Content\" FROM \"LocalItems\" WHERE \"UserName\" = @user AND \"Collection\" = @collection";
-			command.Parameters.AddWithValue("user", userName);
+				"SELECT i.\"Content\" FROM \"LocalItems\" i " +
+				"JOIN \"Users\" u ON u.\"UserId\" = i.\"UserId\" " +
+				"WHERE u.\"Login\" = @user AND i.\"Collection\" = @collection";
+			command.Parameters.AddWithValue("user", login);
 			command.Parameters.AddWithValue("collection", collection);
 			using NpgsqlDataReader reader = command.ExecuteReader();
 			while (reader.Read())
@@ -90,8 +94,9 @@ public sealed class GatewayFixture : IAsyncLifetime
 		sqlite.Open();
 		using SqliteCommand sqliteCommand = sqlite.CreateCommand();
 		sqliteCommand.CommandText =
-			"SELECT Content FROM LocalItems WHERE UserName = $user AND Collection = $collection";
-		sqliteCommand.Parameters.AddWithValue("$user", userName);
+			"SELECT i.Content FROM LocalItems i JOIN Users u ON u.UserId = i.UserId " +
+			"WHERE u.Login = $user AND i.Collection = $collection";
+		sqliteCommand.Parameters.AddWithValue("$user", login);
 		sqliteCommand.Parameters.AddWithValue("$collection", collection);
 		using SqliteDataReader sqliteReader = sqliteCommand.ExecuteReader();
 		while (sqliteReader.Read())
