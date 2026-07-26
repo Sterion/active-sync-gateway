@@ -417,6 +417,114 @@ database so sessions survive restarts and validate on every replica.
 
 ---
 
+---
+
+# Inside the serialized columns
+
+Several columns hold serialized objects rather than scalars, so the schema above understates what is
+actually stored. **This is where most of the account model lives today** — `AccountEntry.Json` is one
+opaque blob containing everything the restructure wants to normalise.
+
+## `AccountEntries.Json` → `AccountOptions`
+
+`src/ActiveSync.Core/Options/AccountOptions.cs`. Serialized with `System.Text.Json`. Secrets are held
+exactly as configuration would hold them — `pbkdf2$…`, `enc:v1:…`, or plaintext.
+
+| Property | Type | Purpose |
+|---|---|---|
+| `Password` | string? | **Gateway password** — decouples the phone's password from the mail backend. `pbkdf2$…` (preferred) or plaintext. Verified locally |
+| `MailAddress` | string? | The user's mail address, for From rewriting, Settings and meeting replies. Null ⇒ the gateway login if it contains `@`. **This is where `MailAddress` lives today — it is not a column** |
+| `Admin` | bool? | Grants `/admin` access |
+| `Enabled` | bool? | `false` = account DISABLED — every login refused with 403 after valid credentials. The persistent counterpart to an ad-hoc `LoginBlock` |
+| `AutoProvisioned` | bool? | Set on rows the gateway created itself on a pass-through login's first sync. Provenance marker only; behaves like a hand-added empty entry |
+| `OidcSubject` | string? | The IdP `sub` this account is bound to. Recorded on first OIDC sign-in of a DB account (TOFU); on a config account only when the operator writes it |
+| `Backends` | Dictionary&lt;string, BackendRoleOverride&gt; | Per-role overrides, keyed by role name (`MailStore`, `Calendar`, `Oof`, …) |
+
+### `BackendRoleOverride` (the values of `Backends`)
+
+| Property | Type | Purpose |
+|---|---|---|
+| `Enabled` | bool? | `false` = turn this role off for the user (content roles fall back to `local`, Oof off). Invalid on MailStore/MailSubmit |
+| `Provider` | string? | Serve this role with a different provider than the global assignment |
+| `UserName` | string? | Backend login. Defaults to the effective MailStore user name (the gateway login for MailStore itself) |
+| `Password` | string? | Backend password, plaintext or `enc:v1:` sealed. Defaults to the effective MailStore password |
+| `Settings` | Dictionary&lt;string, string?&gt; | Flat config keys overlaid on the global role section — but only when the effective provider matches the global assignment. Setting any list element (`X:0`) REPLACES the whole global list `X`; a **null value CLEARS** the inherited key rather than falling through |
+
+> **The two rules that are invisible in the schema and matter most to the restructure:** an unset role
+> password inherits the **presented EAS password**, and every non-MailStore role's credentials default
+> to the **effective MailStore pair**. There is no "default backend credential" field — it is this
+> implicit chain, which is exactly what `DefaultBackendLogin`/`DefaultBackendPassword` would replace.
+
+## `Devices.DeviceInfoJson` → `Dictionary<string, string>`
+
+The EAS Settings→DeviceInformation `Set` element, flattened to element-name → value (`Model`, `IMEI`,
+`FriendlyName`, `OS`, `OSLanguage`, `PhoneNumber`, `MobileOperator`, `UserAgent`, …). **Not a fixed
+schema** — whatever the client sent. Written by `SettingsHandler` and `ProvisionHandler`.
+
+## `Devices.PingParamsJson` → `PingParams`
+
+| Property | Type | Purpose |
+|---|---|---|
+| `HeartbeatSeconds` | int | Heartbeat the client last requested |
+| `FolderIds` | List&lt;string&gt; | Collection ids being monitored |
+
+Replayed when a bare Ping arrives with no parameters.
+
+## `Devices.LastSyncRequestJson` → `CachedSyncRequest`
+
+| Property | Type | Purpose |
+|---|---|---|
+| `WaitSeconds` | int? | Wait/HeartbeatInterval from the last full request |
+| `GlobalWindowSize` | int | Request-level window size |
+| `Collections` | List&lt;CachedSyncCollection&gt; | Per-collection replay shape |
+
+`CachedSyncCollection` = `{ CollectionId: string, GetChanges: bool, WindowSize: int? }`.
+
+Replayed to rebuild synthetic `<Collection>` elements for an empty Sync request. Client `Commands`
+are **never** cached — one-shot by design.
+
+## `CollectionStates.SnapshotCompressed` / `PreviousSnapshotCompressed` → gzipped `Dictionary<string, string>`
+
+`{ itemServerId → revision }`. Gzipped because it holds every item ever sent (2–3 MB uncompressed on
+a large mailbox). Read and written **only** through `SnapshotCodec`. Revision format is
+backend-specific — IMAP flags string (`"101"`, plus `|kw1,kw2` when keyworded), DAV ETag, JMAP
+content hash.
+
+## `CollectionStates.LastClientAddsJson` → `Dictionary<string, AppliedClientAdd>`
+
+Key = the client's `ClientId`. Value = `{ ItemKey: string?, Revision: string? }`.
+
+Lets a replayed Add reuse the already-created item instead of duplicating it.
+
+## `CollectionStates.LastClientChangesJson` → `Dictionary<string, AppliedClientChange>`
+
+Key = item `ServerId`, or `ServerId + '\n' + InstanceId` for an occurrence cancel. Value =
+`{ ItemKey: string?, Revision: string? }`; a **null `Revision` marks a Change that removed the item**
+(16.x draft submitted and deleted via `email2:Send`).
+
+Lets a replayed Change acknowledge the edit instead of re-applying it — which would re-mail iMIP
+updates to attendees.
+
+## `CollectionStates.OptionsJson` → `SyncCollectionOptions`
+
+| Property | Type | Default | Purpose |
+|---|---|---|---|
+| `FilterType` | int | 0 | EAS filter window |
+| `BodyType` | int | 2 | Body preference type |
+| `TruncationSize` | long? | 200 KB | Body truncation |
+| `MimeSupport` | int | 0 | Parsed and persisted but **never re-consulted** — dead state (finding `F7`) |
+| `Conflict` | int | 1 | 0 = client wins; anything else (incl. absent) = server wins |
+
+## Non-JSON opaque columns
+
+| Column | Contents |
+|---|---|
+| `LocalItems.Content` | `"v1:" + base64` of AES-256-GCM ciphertext. AAD = `userName + "\n" + collection`. Plaintext underneath is **vCard** (contacts), **iCalendar VEVENT** (calendar), **iCalendar VJOURNAL** (notes) |
+| `ServerCertificates.PfxProtected` | Base64 PKCS#12, sealed with the master key (AAD `_gateway`/`tls`) |
+| `DataProtectionKeys.Xml` | ASP.NET DataProtection key XML, sealed with the master key when one is configured |
+
+---
+
 ## Notes for the restructure
 
 Things this schema does that the redesign changes or must account for:
@@ -427,9 +535,13 @@ Things this schema does that the redesign changes or must account for:
    identity ripples through `CollectionState`, `SentCommandToken` and `DeviceFolder` as *string*
    comparisons, which no constraint protects.
 3. **`SentCommandToken.DeviceKey` has no FK**, so it does not cascade with its device.
-4. **`AccountEntry.Json` is opaque.** Per-role overrides, credentials and settings all live inside one
-   serialized `AccountOptions` blob, so nothing about an account is queryable or per-field resolvable
-   at the database level today.
+4. **`AccountEntry.Json` is opaque, and it holds more than it looks.** Per-role overrides,
+   credentials, `MailAddress`, `Admin`, `Enabled`, `OidcSubject` and the whole per-role `Settings`
+   dictionary all live inside one serialized `AccountOptions` blob (see "Inside the serialized
+   columns"). Nothing about a user is queryable or per-field resolvable at the database level today —
+   any change means read-blob, deserialize, mutate, re-serialize, write-blob. **Normalising this is
+   the single biggest piece of the restructure**, and it is what per-field resolution actually
+   requires.
 5. **Only four tables carry concurrency tokens** — `Device`, `CollectionState`, `LocalItem`,
    `ServerCertificate`. `OofSetting` notably does not (finding `A3`).
 6. **Three single-row tables** (`AccountsStamp`, `SettingsStamp`, `ServerCertificate`) use an
