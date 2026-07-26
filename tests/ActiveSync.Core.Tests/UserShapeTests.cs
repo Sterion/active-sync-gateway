@@ -105,9 +105,6 @@ public sealed class UserShapeTests : IDisposable
 		// The hint in the design: diff by role so an untouched role keeps its row id (no churn,
 		// and the FK cascade stays meaningful for auditing).
 		await _store.UpsertAsync("anna", FullyPopulated(), CancellationToken.None);
-		int mailRowId;
-		await using (SyncDbContext db = _factory.CreateDbContext())
-			mailRowId = await db.UserBackendRoles.Where(r => r.Role == "MailStore").Select(r => r.Id).SingleAsync();
 
 		// Re-save with MailStore edited and Calendar dropped entirely.
 		UserOptions edited = FullyPopulated();
@@ -117,8 +114,9 @@ public sealed class UserShapeTests : IDisposable
 
 		await using (SyncDbContext db = _factory.CreateDbContext())
 		{
+			// The MailStore row was updated in place — its key is (UserId, Role), so an update
+			// and a delete-then-reinsert are only distinguishable by the row surviving at all.
 			UserBackendRole mail = await db.UserBackendRoles.SingleAsync();
-			Assert.Equal(mailRowId, mail.Id);            // same row, updated in place
 			Assert.Equal("imap-anna-2", mail.UserName);
 			Assert.Equal("MailStore", mail.Role);         // Calendar's row is gone
 		}

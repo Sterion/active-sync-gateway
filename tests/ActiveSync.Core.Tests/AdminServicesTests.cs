@@ -1,5 +1,6 @@
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Administration;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -50,10 +51,12 @@ public sealed class AdminServicesTests : IDisposable
 	// ---- DeviceAdminService ----
 
 	[Fact]
-	public async Task ListDevices_ResolvesUserAndDeviceBlocks_AndPages()
+	public async Task ListDevices_ResolvesDeviceBlocksAndDisabledUsers_AndPages()
 	{
 		int alice = await UserAsync("alice");
 		int carol = await UserAsync("carol");
+		await new UserStore(_factory).UpsertAsync(
+			"carol", new UserOptions { Enabled = false }, CancellationToken.None);
 		await SeedAsync(db =>
 		{
 			for (int i = 0; i < 3; i++)
@@ -67,9 +70,14 @@ public sealed class AdminServicesTests : IDisposable
 				UserId = carol, DeviceId = "d0", DeviceType = "T",
 				CreatedUtc = DateTime.UtcNow, LastSeenUtc = DateTime.UtcNow
 			});
-			db.LoginBlocks.Add(new LoginBlock { UserId = alice, DeviceId = "d1", CreatedUtc = DateTime.UtcNow });
-			db.LoginBlocks.Add(new LoginBlock { UserId = carol, DeviceId = null, CreatedUtc = DateTime.UtcNow });
 		});
+		// Blocks are per-device now and FK to the device ROW, so they are seeded after the
+		// devices have ids. carol is turned off with the USER switch instead (Enabled=false).
+		await SeedAsync(db => db.LoginBlocks.Add(new LoginBlock
+		{
+			DeviceKey = db.Devices.Single(d => d.UserId == alice && d.DeviceId == "d1").Id,
+			CreatedUtc = DateTime.UtcNow,
+		}));
 		DeviceAdminService service = new(_factory, new UserStore(_factory));
 
 		DeviceAdminService.DevicePage all = await service.ListAsync(null, 0, null, CancellationToken.None);
@@ -78,11 +86,11 @@ public sealed class AdminServicesTests : IDisposable
 
 		DeviceAdminService.DeviceListing aliceD1 = all.Devices.Single(l => l.Login == "alice" && l.Device.DeviceId == "d1");
 		Assert.True(aliceD1.Blocked);
-		Assert.False(aliceD1.UserBlocked); // device-scoped block only
+		Assert.False(aliceD1.UserDisabled); // the device is blocked, the user is not disabled
 
 		DeviceAdminService.DeviceListing carolListing = all.Devices.Single(l => l.Login == "carol");
-		Assert.True(carolListing.Blocked);
-		Assert.True(carolListing.UserBlocked); // user-level block
+		Assert.False(carolListing.Blocked);     // no DEVICE block
+		Assert.True(carolListing.UserDisabled); // the user itself is off
 
 		// Filter + page: alice has 3, take 2 from offset 1.
 		DeviceAdminService.DevicePage page = await service.ListAsync("alice", 1, 2, CancellationToken.None);
@@ -91,19 +99,50 @@ public sealed class AdminServicesTests : IDisposable
 	}
 
 	[Fact]
-	public async Task Block_IsIdempotent_AndUnblockReportsRemaining()
+	public async Task Block_IsDeviceScopedOnly_Idempotent_AndUnblockReportsRemaining()
 	{
+		// Decision 19: a block names a DEVICE. A bare user is refused here, in the seam both the
+		// CLI and the admin API share, so neither can write a shape the schema no longer has.
+		int alice = await UserAsync("alice");
+		await SeedAsync(db =>
+		{
+			db.Devices.Add(new Device
+			{
+				UserId = alice, DeviceId = "phone", DeviceType = "T",
+				CreatedUtc = DateTime.UtcNow, LastSeenUtc = DateTime.UtcNow,
+			});
+			db.Devices.Add(new Device
+			{
+				UserId = alice, DeviceId = "tablet", DeviceType = "T",
+				CreatedUtc = DateTime.UtcNow, LastSeenUtc = DateTime.UtcNow,
+			});
+		});
 		DeviceAdminService service = new(_factory, new UserStore(_factory));
-		Assert.True(await service.BlockAsync("alice", null, CancellationToken.None));
-		Assert.False(await service.BlockAsync("alice", null, CancellationToken.None)); // already blocked
-		Assert.True(await service.BlockAsync("alice", "phone", CancellationToken.None));
 
-		DeviceAdminService.UnblockResult removed = await service.UnblockAsync("alice", "phone", CancellationToken.None);
-		Assert.True(removed.Removed);
-		Assert.Equal(1, removed.RemainingForUser); // the user-level block remains
+		Assert.Equal(DeviceAdminService.BlockOutcome.DeviceRequired,
+			await service.BlockAsync("alice", null, CancellationToken.None));
+		Assert.Equal(DeviceAdminService.BlockOutcome.UnknownDevice,
+			await service.BlockAsync("alice", "never-synced", CancellationToken.None));
 
-		DeviceAdminService.UnblockResult missing = await service.UnblockAsync("alice", "ghost", CancellationToken.None);
-		Assert.False(missing.Removed);
+		Assert.Equal(DeviceAdminService.BlockOutcome.Applied,
+			await service.BlockAsync("alice", "phone", CancellationToken.None));
+		Assert.Equal(DeviceAdminService.BlockOutcome.Unchanged,
+			await service.BlockAsync("alice", "phone", CancellationToken.None)); // idempotent
+		Assert.Equal(DeviceAdminService.BlockOutcome.Applied,
+			await service.BlockAsync("alice", "tablet", CancellationToken.None));
+
+		(DeviceAdminService.BlockOutcome removed, int remaining) =
+			await service.UnblockAsync("alice", "phone", CancellationToken.None);
+		Assert.Equal(DeviceAdminService.BlockOutcome.Applied, removed);
+		Assert.Equal(1, remaining); // the tablet block remains
+
+		(DeviceAdminService.BlockOutcome missing, int _) =
+			await service.UnblockAsync("alice", "ghost", CancellationToken.None);
+		Assert.Equal(DeviceAdminService.BlockOutcome.Unchanged, missing);
+
+		(DeviceAdminService.BlockOutcome bare, int _) =
+			await service.UnblockAsync("alice", null, CancellationToken.None);
+		Assert.Equal(DeviceAdminService.BlockOutcome.DeviceRequired, bare);
 	}
 
 	[Fact]
@@ -137,8 +176,12 @@ public sealed class AdminServicesTests : IDisposable
 				UserId = alicePurge, DeviceId = "phone", DeviceType = "T",
 				CreatedUtc = DateTime.UtcNow, LastSeenUtc = DateTime.UtcNow
 			});
-			db.LoginBlocks.Add(new LoginBlock { UserId = alicePurge, DeviceId = null, CreatedUtc = DateTime.UtcNow });
 		});
+		await SeedAsync(db => db.LoginBlocks.Add(new LoginBlock
+		{
+			DeviceKey = db.Devices.Single(d => d.UserId == alicePurge).Id,
+			CreatedUtc = DateTime.UtcNow,
+		}));
 		DeviceAdminService service = new(_factory, new UserStore(_factory));
 
 		IReadOnlyList<DeviceAdminService.PurgeCount> counts = await service.PurgeAsync("alice", null, CancellationToken.None);

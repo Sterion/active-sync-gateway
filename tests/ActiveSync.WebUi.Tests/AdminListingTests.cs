@@ -114,11 +114,11 @@ public sealed class AdminListingTests
 		await SeedDevicesAsync(host.Factory, 3);
 		await using (SyncDbContext db = host.Factory.CreateDbContext())
 		{
+			int aliceId = await UserIdAsync(host.Factory, "alice");
+			Device blockedDevice = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+				.SingleAsync(db.Devices, d => d.UserId == aliceId && d.DeviceId == "device0001", CancellationToken.None);
 #pragma warning disable VSTHRD103
-			db.LoginBlocks.Add(new LoginBlock
-			{
-				UserId = await UserIdAsync(host.Factory, "alice"), DeviceId = "device0001", CreatedUtc = DateTime.UtcNow
-			});
+			db.LoginBlocks.Add(new LoginBlock { DeviceKey = blockedDevice.Id, CreatedUtc = DateTime.UtcNow });
 #pragma warning restore VSTHRD103
 			await db.SaveChangesAsync(CancellationToken.None);
 		}
@@ -136,26 +136,21 @@ public sealed class AdminListingTests
 	}
 
 	[Fact]
-	public async Task Devices_UserLevelBlock_CoversEveryDeviceOfThatUser()
+	public async Task Devices_ReportDisabledUsers_SeparatelyFromDeviceBlocks()
 	{
-		// Blocked on a DIFFERENT login than the one signing in — a user-level block also refuses
-		// the web session of the account it names.
-		await using WebUiHost host = await AdminHostAsync();
+		// Two distinct mechanisms (decision 19): disabling the USER covers every device without
+		// any LoginBlock row existing, and is reported as its own flag rather than as a block.
+		await using WebUiHost host = await WebUiHost.StartAsync(WebUiHost.Users(
+			("alice", new UserOptions { Admin = true }),
+			("carol", new UserOptions { Enabled = false })));
 		await SeedDevicesAsync(host.Factory, 3, user: "carol");
-		await using (SyncDbContext db = host.Factory.CreateDbContext())
-		{
-#pragma warning disable VSTHRD103
-			db.LoginBlocks.Add(new LoginBlock { UserId = await UserIdAsync(host.Factory, "carol"), CreatedUtc = DateTime.UtcNow });
-#pragma warning restore VSTHRD103
-			await db.SaveChangesAsync(CancellationToken.None);
-		}
 
 		using HttpClient client = await host.SignInAsync("alice", admin: true);
 		JsonElement body = await host.ReadJsonAsync(await client.GetAsync("/admin/api/devices"));
 		Assert.All(body.GetProperty("entries").EnumerateArray(), device =>
 		{
-			Assert.True(device.GetProperty("blocked").GetBoolean());
-			Assert.True(device.GetProperty("userBlocked").GetBoolean());
+			Assert.False(device.GetProperty("blocked").GetBoolean());     // no device block
+			Assert.True(device.GetProperty("userDisabled").GetBoolean()); // the user is disabled
 		});
 	}
 }

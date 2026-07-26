@@ -48,6 +48,9 @@ public sealed class AdminIdentifierValidationTests
 	{
 		await using WebUiHost host = await AdminHostAsync();
 		using HttpClient client = await host.SignInAsync("alice", admin: true);
+		// A block FKs to a real partnership, so both users need a device to block.
+		await SeedDeviceAsync(host, "typo", "phone1");
+		await SeedDeviceAsync(host, "alice", "phone1");
 
 		JsonElement unknown = await host.ReadJsonAsync(await client.PostAsJsonAsync(
 			"/admin/api/devices/block", new { user = "typo", deviceId = "phone1" }));
@@ -56,6 +59,36 @@ public sealed class AdminIdentifierValidationTests
 		JsonElement known = await host.ReadJsonAsync(await client.PostAsJsonAsync(
 			"/admin/api/devices/block", new { user = "alice", deviceId = "phone1" }));
 		Assert.True(known.GetProperty("knownUser").GetBoolean());
+	}
+
+	[Fact]
+	public async Task Block_WithoutADevice_IsRefused_PointingAtDisablingTheUser()
+	{
+		// The admin API must enforce device-scoping exactly like the CLI — both go through
+		// DeviceAdminService, which is where decision 19 lives.
+		await using WebUiHost host = await AdminHostAsync();
+		using HttpClient client = await host.SignInAsync("alice", admin: true);
+
+		HttpResponseMessage response = await client.PostAsJsonAsync(
+			"/admin/api/devices/block", new { user = "alice" });
+
+		Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+		Assert.Contains("deviceId is required", await response.Content.ReadAsStringAsync());
+	}
+
+	private static async Task SeedDeviceAsync(WebUiHost host, string login, string deviceId)
+	{
+		(int userId, _) = await new ActiveSync.Core.Accounts.UserStore(host.Factory)
+			.GetOrCreateUserAsync(login, null, CancellationToken.None);
+		await using SyncDbContext db = host.Factory.CreateDbContext();
+#pragma warning disable VSTHRD103
+		db.Devices.Add(new Device
+		{
+			UserId = userId, DeviceId = deviceId, DeviceType = "Test",
+			CreatedUtc = DateTime.UtcNow, LastSeenUtc = DateTime.UtcNow,
+		});
+#pragma warning restore VSTHRD103
+		await db.SaveChangesAsync(CancellationToken.None);
 	}
 
 	[Theory]

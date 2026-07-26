@@ -16,12 +16,35 @@ namespace ActiveSync.Core.Administration;
 /// </summary>
 public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, UserStore users)
 {
-	/// <summary>A device paired with its owner's login and block state — user-level and effective.</summary>
-	public sealed record DeviceListing(Device Device, string Login, bool Blocked, bool UserBlocked);
+	/// <summary>
+	///   A device paired with its owner's login, whether the DEVICE is blocked, and whether the
+	///   USER is disabled. The two are distinct mechanisms now (db-restructure decision 19): a
+	///   block cuts off this device, <c>User.Enabled = false</c> turns the user off everywhere.
+	/// </summary>
+	public sealed record DeviceListing(Device Device, string Login, bool Blocked, bool UserDisabled);
 
 	public sealed record DevicePage(int Total, IReadOnlyList<DeviceListing> Devices);
 
 	public sealed record UnblockResult(bool Removed, int RemainingForUser);
+
+	/// <summary>Why a block/unblock could not be applied — the caller phrases the message.</summary>
+	public enum BlockOutcome
+	{
+		/// <summary>The block was created (or removed).</summary>
+		Applied,
+
+		/// <summary>Nothing to do: already blocked, or no such block to remove.</summary>
+		Unchanged,
+
+		/// <summary>
+		///   No device id was supplied. Blocks are per-device only — disabling the whole user is
+		///   <c>eas user disable</c> / the Users page, a different mechanism on purpose.
+		/// </summary>
+		DeviceRequired,
+
+		/// <summary>That (user, device) partnership does not exist, so there is nothing to block.</summary>
+		UnknownDevice,
+	}
 
 	public sealed record PurgeCount(string Table, int Count);
 
@@ -36,11 +59,8 @@ public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, Use
 	public async Task<DevicePage> ListAsync(string? user, int skip, int? take, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
-		List<LoginBlock> blocks = await db.LoginBlocks.AsNoTracking().ToListAsync(ct).ConfigureAwait(false);
-		HashSet<int> userBlocks = new(
-			blocks.Where(b => b.DeviceId is null).Select(b => b.UserId));
-		HashSet<(int UserId, string Device)> deviceBlocks = new(
-			blocks.Where(b => b.DeviceId is not null).Select(b => (b.UserId, b.DeviceId!)));
+		HashSet<int> blockedDevices = (await db.LoginBlocks.AsNoTracking()
+			.Select(b => b.DeviceKey).ToListAsync(ct).ConfigureAwait(false)).ToHashSet();
 
 		string? normalized = user is null ? null : UserStore.NormalizeLogin(user);
 		IQueryable<Device> query = db.Devices.AsNoTracking().Include(d => d.User)
@@ -53,64 +73,79 @@ public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, Use
 
 		List<DeviceListing> listings = devices
 			.Select(d => new DeviceListing(
-				d,
-				d.User.Login,
-				userBlocks.Contains(d.UserId) || deviceBlocks.Contains((d.UserId, d.DeviceId)),
-				userBlocks.Contains(d.UserId)))
+				d, d.User.Login, blockedDevices.Contains(d.Id), d.User.Enabled == false))
 			.ToList();
 		return new DevicePage(total, listings);
 	}
 
-	/// <summary>Block a login (device-scoped when <paramref name="deviceId" /> is set); returns false when already blocked.</summary>
-	public async Task<bool> BlockAsync(string user, string? deviceId, CancellationToken ct)
+	/// <summary>
+	///   Blocks ONE DEVICE. Device-scoped is the only shape there is (decision 19): a bare user
+	///   is refused with <see cref="BlockOutcome.DeviceRequired" /> rather than silently doing
+	///   something subtly different from <c>eas user disable</c>. Enforced HERE, in the seam both
+	///   the CLI and the admin API share, so neither surface can write a shape the schema no
+	///   longer has.
+	/// </summary>
+	public async Task<BlockOutcome> BlockAsync(string user, string? deviceId, CancellationToken ct)
 	{
-		// A block may target a user that never synced — mint the identity row so the FK holds
-		// (blocking pre-emptively is a supported operator move).
-		(int userId, _) = await users.GetOrCreateUserAsync(user, null, ct).ConfigureAwait(false);
+		if (string.IsNullOrWhiteSpace(deviceId))
+			return BlockOutcome.DeviceRequired;
+		int? userId = await users.FindUserIdAsync(user, ct).ConfigureAwait(false);
+		if (userId is null)
+			return BlockOutcome.UnknownDevice;
+
 		await using SyncDbContext db = contextFactory.CreateDbContext();
-		LoginBlock? existing = await db.LoginBlocks
-			.FirstOrDefaultAsync(b => b.UserId == userId && b.DeviceId == deviceId, ct).ConfigureAwait(false);
-		if (existing is not null)
-			return false;
+		Device? device = await db.Devices
+			.FirstOrDefaultAsync(d => d.UserId == userId && d.DeviceId == deviceId, ct).ConfigureAwait(false);
+		if (device is null)
+			return BlockOutcome.UnknownDevice;
+		if (await db.LoginBlocks.AnyAsync(b => b.DeviceKey == device.Id, ct).ConfigureAwait(false))
+			return BlockOutcome.Unchanged;
+
 		// DbSet.Add is synchronous and local (no I/O).
 #pragma warning disable VSTHRD103
-		db.LoginBlocks.Add(new LoginBlock
-		{
-			UserId = userId,
-			DeviceId = deviceId,
-			CreatedUtc = DateTime.UtcNow,
-		});
+		db.LoginBlocks.Add(new LoginBlock { DeviceKey = device.Id, CreatedUtc = DateTime.UtcNow });
 #pragma warning restore VSTHRD103
 		await db.SaveChangesAsync(ct).ConfigureAwait(false);
-		return true;
+		return BlockOutcome.Applied;
 	}
 
-	/// <summary>The <see cref="LoginBlock" /> for this exact (user, device) scope, or null.</summary>
+	/// <summary>The <see cref="LoginBlock" /> on this (user, device) partnership, or null.</summary>
 	public async Task<LoginBlock?> FindBlockAsync(string? user, string? deviceId, CancellationToken ct)
 	{
-		int? userId = user is null ? null : await users.FindUserIdAsync(user, ct).ConfigureAwait(false);
+		if (user is null || string.IsNullOrWhiteSpace(deviceId))
+			return null;
+		int? userId = await users.FindUserIdAsync(user, ct).ConfigureAwait(false);
 		if (userId is null)
 			return null;
 		await using SyncDbContext db = contextFactory.CreateDbContext();
 		return await db.LoginBlocks.AsNoTracking()
-			.FirstOrDefaultAsync(b => b.UserId == userId && b.DeviceId == deviceId, ct).ConfigureAwait(false);
+			.FirstOrDefaultAsync(b => b.Device.UserId == userId && b.Device.DeviceId == deviceId, ct)
+			.ConfigureAwait(false);
 	}
 
-	/// <summary>Remove a block; reports whether one existed and how many blocks remain for the user.</summary>
-	public async Task<UnblockResult> UnblockAsync(string? user, string? deviceId, CancellationToken ct)
+	/// <summary>Removes a device block; reports whether one existed and how many remain for the user.</summary>
+	public async Task<(BlockOutcome Outcome, int RemainingForUser)> UnblockAsync(
+		string? user, string? deviceId, CancellationToken ct)
 	{
+		if (string.IsNullOrWhiteSpace(deviceId))
+			return (BlockOutcome.DeviceRequired, 0);
 		int? userId = user is null ? null : await users.FindUserIdAsync(user, ct).ConfigureAwait(false);
 		if (userId is null)
-			return new UnblockResult(false, 0);
+			return (BlockOutcome.UnknownDevice, 0);
+
 		await using SyncDbContext db = contextFactory.CreateDbContext();
 		LoginBlock? existing = await db.LoginBlocks
-			.FirstOrDefaultAsync(b => b.UserId == userId && b.DeviceId == deviceId, ct).ConfigureAwait(false);
-		if (existing is null)
-			return new UnblockResult(false, await db.LoginBlocks.CountAsync(b => b.UserId == userId, ct).ConfigureAwait(false));
-		db.LoginBlocks.Remove(existing);
-		await db.SaveChangesAsync(ct).ConfigureAwait(false);
-		int remaining = await db.LoginBlocks.CountAsync(b => b.UserId == userId, ct).ConfigureAwait(false);
-		return new UnblockResult(true, remaining);
+			.FirstOrDefaultAsync(b => b.Device.UserId == userId && b.Device.DeviceId == deviceId, ct)
+			.ConfigureAwait(false);
+		if (existing is not null)
+		{
+			db.LoginBlocks.Remove(existing);
+			await db.SaveChangesAsync(ct).ConfigureAwait(false);
+		}
+
+		int remaining = await db.LoginBlocks
+			.CountAsync(b => b.Device.UserId == userId, ct).ConfigureAwait(false);
+		return (existing is null ? BlockOutcome.Unchanged : BlockOutcome.Applied, remaining);
 	}
 
 	/// <summary>
@@ -164,10 +199,11 @@ public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, Use
 			int deviceFolders = await db.DeviceFolders.CountAsync(f => f.Device.UserId == userId, ct).ConfigureAwait(false);
 			int collections = await db.CollectionStates.CountAsync(c => c.Device.UserId == userId, ct).ConfigureAwait(false);
 			int davItems = await db.DavItems.CountAsync(i => i.Folder.UserId == userId, ct).ConfigureAwait(false);
+			// Blocks hang off the device, so they are counted BEFORE the device delete cascades them.
+			int blocks = await db.LoginBlocks.CountAsync(b => b.Device.UserId == userId, ct).ConfigureAwait(false);
 			int devices = await db.Devices.Where(d => d.UserId == userId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
 			int folders = await db.UserFolders.Where(f => f.UserId == userId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
 			int items = await db.LocalItems.Where(i => i.UserId == userId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-			int blocks = await db.LoginBlocks.Where(b => b.UserId == userId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
 			return
 			[
 				new PurgeCount("Devices", devices), new PurgeCount("DeviceFolders", deviceFolders),
@@ -181,10 +217,10 @@ public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, Use
 			.CountAsync(f => f.Device.UserId == userId && f.Device.DeviceId == deviceId, ct).ConfigureAwait(false);
 		int devCollections = await db.CollectionStates
 			.CountAsync(c => c.Device.UserId == userId && c.Device.DeviceId == deviceId, ct).ConfigureAwait(false);
+		int devBlocks = await db.LoginBlocks
+			.CountAsync(b => b.Device.UserId == userId && b.Device.DeviceId == deviceId, ct).ConfigureAwait(false);
 		int devDevices = await db.Devices
 			.Where(d => d.UserId == userId && d.DeviceId == deviceId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-		int devBlocks = await db.LoginBlocks
-			.Where(b => b.UserId == userId && b.DeviceId == deviceId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
 		return
 		[
 			new PurgeCount("Devices", devDevices), new PurgeCount("DeviceFolders", devDeviceFolders),

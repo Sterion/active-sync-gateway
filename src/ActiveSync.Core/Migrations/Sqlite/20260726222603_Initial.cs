@@ -42,15 +42,13 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "GlobalSettings",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
                     Key = table.Column<string>(type: "TEXT", nullable: false),
                     Value = table.Column<string>(type: "TEXT", nullable: false),
                     UpdatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_GlobalSettings", x => x.Id);
+                    table.PrimaryKey("PK_GlobalSettings", x => x.Key);
                 });
 
             migrationBuilder.CreateTable(
@@ -70,24 +68,6 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_LogEntries", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "SentCommandTokens",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    DeviceKey = table.Column<int>(type: "INTEGER", nullable: false),
-                    CollectionId = table.Column<string>(type: "TEXT", nullable: false),
-                    SyncKeyAtClaim = table.Column<int>(type: "INTEGER", nullable: false),
-                    Key = table.Column<string>(type: "TEXT", nullable: false),
-                    CreatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    Completed = table.Column<bool>(type: "INTEGER", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_SentCommandTokens", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -187,32 +167,9 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 });
 
             migrationBuilder.CreateTable(
-                name: "LoginBlocks",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<int>(type: "INTEGER", nullable: false),
-                    DeviceId = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_LoginBlocks", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_LoginBlocks_Users_UserId",
-                        column: x => x.UserId,
-                        principalTable: "Users",
-                        principalColumn: "UserId",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "OofSettings",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
                     UserId = table.Column<int>(type: "INTEGER", nullable: false),
                     State = table.Column<int>(type: "INTEGER", nullable: false),
                     StartUtc = table.Column<DateTime>(type: "TEXT", nullable: true),
@@ -224,7 +181,7 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_OofSettings", x => x.Id);
+                    table.PrimaryKey("PK_OofSettings", x => x.UserId);
                     table.ForeignKey(
                         name: "FK_OofSettings_Users_UserId",
                         column: x => x.UserId,
@@ -237,8 +194,6 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "SharedCalendarGrants",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
                     UserId = table.Column<int>(type: "INTEGER", nullable: false),
                     CollectionHref = table.Column<string>(type: "TEXT", nullable: false),
                     ReadOnly = table.Column<bool>(type: "INTEGER", nullable: false),
@@ -246,7 +201,7 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_SharedCalendarGrants", x => x.Id);
+                    table.PrimaryKey("PK_SharedCalendarGrants", x => new { x.UserId, x.CollectionHref });
                     table.ForeignKey(
                         name: "FK_SharedCalendarGrants_Users_UserId",
                         column: x => x.UserId,
@@ -259,8 +214,6 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "UserBackendRoles",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
                     UserId = table.Column<int>(type: "INTEGER", nullable: false),
                     Role = table.Column<string>(type: "TEXT", nullable: false),
                     Enabled = table.Column<bool>(type: "INTEGER", nullable: true),
@@ -271,7 +224,7 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_UserBackendRoles", x => x.Id);
+                    table.PrimaryKey("PK_UserBackendRoles", x => new { x.UserId, x.Role });
                     table.ForeignKey(
                         name: "FK_UserBackendRoles_Users_UserId",
                         column: x => x.UserId,
@@ -310,14 +263,12 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "WebSessionRevocations",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
                     UserId = table.Column<int>(type: "INTEGER", nullable: false),
                     ValidAfterUtc = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_WebSessionRevocations", x => x.Id);
+                    table.PrimaryKey("PK_WebSessionRevocations", x => x.UserId);
                     table.ForeignKey(
                         name: "FK_WebSessionRevocations_Users_UserId",
                         column: x => x.UserId,
@@ -330,8 +281,6 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "CollectionStates",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
                     DeviceKey = table.Column<int>(type: "INTEGER", nullable: false),
                     CollectionId = table.Column<string>(type: "TEXT", nullable: false),
                     SyncKey = table.Column<int>(type: "INTEGER", nullable: false),
@@ -346,7 +295,7 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_CollectionStates", x => x.Id);
+                    table.PrimaryKey("PK_CollectionStates", x => new { x.DeviceKey, x.CollectionId });
                     table.ForeignKey(
                         name: "FK_CollectionStates_Devices_DeviceKey",
                         column: x => x.DeviceKey,
@@ -359,8 +308,6 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "DeviceFolders",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
                     DeviceKey = table.Column<int>(type: "INTEGER", nullable: false),
                     ServerId = table.Column<string>(type: "TEXT", nullable: false),
                     DisplayName = table.Column<string>(type: "TEXT", nullable: false),
@@ -369,9 +316,51 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_DeviceFolders", x => x.Id);
+                    table.PrimaryKey("PK_DeviceFolders", x => new { x.DeviceKey, x.ServerId });
                     table.ForeignKey(
                         name: "FK_DeviceFolders_Devices_DeviceKey",
+                        column: x => x.DeviceKey,
+                        principalTable: "Devices",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "LoginBlocks",
+                columns: table => new
+                {
+                    DeviceKey = table.Column<int>(type: "INTEGER", nullable: false),
+                    CreatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_LoginBlocks", x => x.DeviceKey);
+                    table.ForeignKey(
+                        name: "FK_LoginBlocks_Devices_DeviceKey",
+                        column: x => x.DeviceKey,
+                        principalTable: "Devices",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "SentCommandTokens",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    DeviceKey = table.Column<int>(type: "INTEGER", nullable: false),
+                    CollectionId = table.Column<string>(type: "TEXT", nullable: false),
+                    SyncKeyAtClaim = table.Column<int>(type: "INTEGER", nullable: false),
+                    Key = table.Column<string>(type: "TEXT", nullable: false),
+                    CreatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    Completed = table.Column<bool>(type: "INTEGER", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_SentCommandTokens", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_SentCommandTokens_Devices_DeviceKey",
                         column: x => x.DeviceKey,
                         principalTable: "Devices",
                         principalColumn: "Id",
@@ -399,33 +388,15 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 });
 
             migrationBuilder.CreateIndex(
-                name: "IX_CollectionStates_DeviceKey_CollectionId",
-                table: "CollectionStates",
-                columns: new[] { "DeviceKey", "CollectionId" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
                 name: "IX_DavItems_UserFolderKey_Href",
                 table: "DavItems",
                 columns: new[] { "UserFolderKey", "Href" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_DeviceFolders_DeviceKey_ServerId",
-                table: "DeviceFolders",
-                columns: new[] { "DeviceKey", "ServerId" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
                 name: "IX_Devices_UserId_DeviceId",
                 table: "Devices",
                 columns: new[] { "UserId", "DeviceId" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_GlobalSettings_Key",
-                table: "GlobalSettings",
-                column: "Key",
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -439,33 +410,9 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 column: "TimestampUtc");
 
             migrationBuilder.CreateIndex(
-                name: "IX_LoginBlocks_UserId_DeviceId",
-                table: "LoginBlocks",
-                columns: new[] { "UserId", "DeviceId" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_OofSettings_UserId",
-                table: "OofSettings",
-                column: "UserId",
-                unique: true);
-
-            migrationBuilder.CreateIndex(
                 name: "IX_SentCommandTokens_DeviceKey_CollectionId_SyncKeyAtClaim_Key",
                 table: "SentCommandTokens",
                 columns: new[] { "DeviceKey", "CollectionId", "SyncKeyAtClaim", "Key" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_SharedCalendarGrants_UserId_CollectionHref",
-                table: "SharedCalendarGrants",
-                columns: new[] { "UserId", "CollectionHref" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_UserBackendRoles_UserId_Role",
-                table: "UserBackendRoles",
-                columns: new[] { "UserId", "Role" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -484,12 +431,6 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "IX_Users_OidcSubject",
                 table: "Users",
                 column: "OidcSubject",
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_WebSessionRevocations_UserId",
-                table: "WebSessionRevocations",
-                column: "UserId",
                 unique: true);
         }
 

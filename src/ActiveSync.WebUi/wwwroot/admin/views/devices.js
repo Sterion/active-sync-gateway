@@ -37,13 +37,13 @@ export async function render(container) {
 				: null),
 		h('div', { class: 'notice' },
 			'Wipe = the 16.1 account-only directive (removes the account from the device, never a ',
-			'factory reset). Purge = delete the gateway-side sync state. Block = 403 on login.'));
+			'factory reset). Purge = delete the gateway-side sync state. Block = 403 for THIS device; '
+			+ 'to refuse a user everywhere, disable them on the Users page.'));
 }
 
 function status(d) {
 	const badges = [];
 	if (d.userDisabled) badges.push(h('span', { class: 'badge danger' }, 'user disabled'));
-	else if (d.userBlocked) badges.push(h('span', { class: 'badge danger' }, 'user blocked'));
 	else if (d.blocked) badges.push(h('span', { class: 'badge danger' }, 'blocked'));
 	if (d.pendingAccountWipe) badges.push(h('span', { class: 'badge warn' }, 'wipe pending'));
 	if (badges.length === 0) badges.push(h('span', { class: 'badge ok' }, 'active'));
@@ -54,7 +54,7 @@ function actions(d, container) {
 	const blockButton = h('button', {
 		onclick: async () => {
 			try {
-				await api(`/admin/api/devices/${d.blocked && !d.userBlocked ? 'unblock' : 'block'}`,
+				await api(`/admin/api/devices/${d.blocked ? 'unblock' : 'block'}`,
 					{ body: { user: d.user, deviceId: d.deviceId } });
 				toast(d.blocked ? 'Unblocked.' : 'Blocked — logins now answer 403.', 'ok');
 				refresh(container);
@@ -62,7 +62,7 @@ function actions(d, container) {
 				toast(e.body?.error ?? 'Block change failed.', 'error');
 			}
 		},
-	}, d.blocked && !d.userBlocked ? 'Unblock' : 'Block');
+	}, d.blocked ? 'Unblock' : 'Block');
 
 	const wipeButton = h('button', {
 		class: 'danger',

@@ -98,7 +98,8 @@ public class UserFolder
 /// <summary>Folder hierarchy as last acknowledged by a device (for FolderSync diffs).</summary>
 public class DeviceFolder
 {
-	public int Id { get; set; }
+	// PK is (DeviceKey, ServerId) — the unique index that already identified the row. The
+	// surrogate Id was never looked up (one identity per row).
 	public int DeviceKey { get; set; }
 	public Device Device { get; set; } = null!;
 	public required string ServerId { get; set; }
@@ -110,7 +111,7 @@ public class DeviceFolder
 /// <summary>Per-device, per-collection sync state with one generation of replay history.</summary>
 public class CollectionState
 {
-	public int Id { get; set; }
+	// PK is (DeviceKey, CollectionId) — see DeviceFolder.
 	public int DeviceKey { get; set; }
 	public Device Device { get; set; } = null!;
 	public required string CollectionId { get; set; }
@@ -166,8 +167,18 @@ public class CollectionState
 /// </summary>
 public class SentCommandToken
 {
+	/// <summary>
+	///   Deliberately KEEPS its surrogate key despite having a natural one: that key is four
+	///   columns wide including a variable-length string, and this is the hot write path (a claim
+	///   is inserted before every irreversible send). The unique index still enforces the natural
+	///   key; promoting it would be the highest churn and the smallest payoff of any table here.
+	/// </summary>
 	public int Id { get; set; }
+
+	/// <summary>Owning device — a real FK with cascade, so a deleted device leaves no orphans.</summary>
 	public int DeviceKey { get; set; }
+
+	public Device Device { get; set; } = null!;
 	public required string CollectionId { get; set; }
 	public int SyncKeyAtClaim { get; set; }
 
@@ -229,18 +240,28 @@ public class LocalItem
 }
 
 /// <summary>
-///   An operator-imposed login block, enforced after successful authentication (403). A null
-///   <see cref="DeviceId" /> blocks the whole user; otherwise only that device is refused.
+///   An operator cut-off for ONE DEVICE, enforced after successful authentication (403). Also
+///   written automatically when an account-only wipe is acknowledged, so stolen credentials stay
+///   dead after the account is removed from the device.
+///   <para>
+///     Per-device only, by design. A nullable device used to mean "block the whole user", which
+///     duplicated <see cref="User.Enabled" /> — two mechanisms for one concept, which the
+///     documentation then had to keep explaining apart. Now there is exactly one of each:
+///     <c>Users.Enabled = false</c> turns the USER off everywhere; a <see cref="LoginBlock" />
+///     cuts off THIS DEVICE and nothing else.
+///   </para>
+///   <para>
+///     It carries no <c>UserId</c> either: a device belongs to exactly one user, so the column
+///     would be derivable — and derivable columns can go stale with nothing to catch it. "All
+///     blocks for this user" is a join either way.
+///   </para>
 /// </summary>
 public class LoginBlock
 {
-	public int Id { get; set; }
+	/// <summary>The blocked device — the primary key AND the FK (one block per device, enforced).</summary>
+	public int DeviceKey { get; set; }
 
-	/// <summary>The blocked user (FK, cascade).</summary>
-	public int UserId { get; set; }
-
-	public User User { get; set; } = null!;
-	public string? DeviceId { get; set; }
+	public Device Device { get; set; } = null!;
 	public DateTime CreatedUtc { get; set; }
 }
 
@@ -254,9 +275,11 @@ public class LoginBlock
 /// </summary>
 public class WebSessionRevocation
 {
-	public int Id { get; set; }
-
-	/// <summary>The owning user (FK, cascade). One row per user.</summary>
+	/// <summary>
+	///   The owning user — the primary key AND the FK. One row per user is now enforced by
+	///   identity rather than by a unique index sitting beside an unused surrogate, which is
+	///   what keeps the revocation a REWRITE (never an append).
+	/// </summary>
 	public int UserId { get; set; }
 
 	public DateTime ValidAfterUtc { get; set; }
@@ -269,7 +292,7 @@ public class WebSessionRevocation
 /// </summary>
 public class SharedCalendarGrant
 {
-	public int Id { get; set; }
+	// PK is (UserId, CollectionHref) — the unique index that already identified the row.
 
 	/// <summary>The grantee (FK, cascade).</summary>
 	public int UserId { get; set; }
@@ -361,9 +384,9 @@ public class User
 /// </summary>
 public class UserBackendRole
 {
-	public int Id { get; set; }
+	// PK is (UserId, Role) — one override row per role, enforced by identity.
 
-	/// <summary>Owning user (FK, cascade). Unique with <see cref="Role" />.</summary>
+	/// <summary>Owning user (FK, cascade).</summary>
 	public int UserId { get; set; }
 
 	public User User { get; set; } = null!;
@@ -432,7 +455,7 @@ public static class DataChangeAreas
 /// </summary>
 public class GlobalSetting
 {
-	public int Id { get; set; }
+	/// <summary>The full configuration path — the primary key (one identity per row).</summary>
 	public required string Key { get; set; }
 	public required string Value { get; set; }
 	public DateTime UpdatedUtc { get; set; }
@@ -499,9 +522,7 @@ public class DataProtectionKeyEntry
 /// </summary>
 public class OofSetting
 {
-	public int Id { get; set; }
-
-	/// <summary>The owning user (FK, cascade). One row per user.</summary>
+	/// <summary>The owning user — the primary key AND the FK. One Oof row per user, enforced.</summary>
 	public int UserId { get; set; }
 
 	/// <summary>0 = disabled, 1 = enabled, 2 = scheduled (EAS OofState values).</summary>

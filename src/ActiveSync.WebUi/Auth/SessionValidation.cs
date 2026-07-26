@@ -134,7 +134,9 @@ internal static class SessionValidation
 			SyncStateService state = services.GetRequiredService<SyncStateService>();
 			UserStore users = services.GetRequiredService<UserStore>();
 			int? userId = string.IsNullOrEmpty(login) ? null : await users.FindUserIdAsync(login, ct);
-			blocked = userId is { } blockId && await state.IsLoginBlockedAsync(blockId, null, ct);
+			// Blocks are per-device and a web session has no device, so the session-terminating
+			// switch is the user being disabled (checked in Rebuild) or a revocation cut-off.
+			blocked = false;
 			validAfter = userId is { } revokeId
 				? await state.GetSessionsValidAfterAsync(revokeId, ct)
 				: null;

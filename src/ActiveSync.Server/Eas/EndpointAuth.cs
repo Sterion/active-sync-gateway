@@ -216,11 +216,13 @@ internal static class EndpointAuth
 
 	/// <summary>
 	///   The disabled/blocked decision shared by both authenticated endpoints — the single point the
-	///   E14 drift proved must not be copy-pasted. An account disabled via <c>eas user disable</c>
-	///   refuses every device; operator blocks (<c>eas block/unblock</c>) are the ad-hoc/device-scoped
-	///   variant. A null <paramref name="deviceId" /> matches only user-level blocks (Autodiscover
-	///   carries no device id). Decision only, evaluated after authentication so only holders of valid
-	///   credentials can observe it — the caller writes the 403 so each endpoint keeps its own body.
+	///   E14 drift proved must not be copy-pasted. The two mechanisms are distinct by design: a user
+	///   disabled via <c>eas user disable</c> is refused on EVERY device and on the web, while an
+	///   operator block (<c>eas block/unblock</c>) cuts off exactly ONE device. A null
+	///   <paramref name="deviceId" /> (Autodiscover carries none) therefore has no block to match —
+	///   only the disabled check applies. Decision only, evaluated after authentication so only
+	///   holders of valid credentials can observe it — the caller writes the 403 so each endpoint
+	///   keeps its own body.
 	/// </summary>
 	public static async Task<LoginRefusal> CheckLoginRefusalAsync(
 		UserResolver resolver, SyncStateService state, string userName, int userId, string? deviceId,
@@ -228,7 +230,7 @@ internal static class EndpointAuth
 	{
 		if (resolver.IsLoginDisabled(userName))
 			return LoginRefusal.Disabled;
-		if (await state.IsLoginBlockedAsync(userId, deviceId, ct))
+		if (await state.IsDeviceBlockedAsync(userId, deviceId, ct))
 			return LoginRefusal.Blocked;
 		return LoginRefusal.None;
 	}

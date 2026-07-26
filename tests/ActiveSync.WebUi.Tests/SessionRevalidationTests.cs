@@ -78,17 +78,6 @@ public sealed class SessionRevalidationTests : IDisposable
 		using ServiceProvider services = builder.Services.BuildServiceProvider();
 		(int loginUserId, _) = await new ActiveSync.Core.Accounts.UserStore(factory)
 			.GetOrCreateUserAsync(login, null, CancellationToken.None);
-		if (blocked)
-		{
-			await using SyncDbContext db = factory.CreateDbContext();
-			// DbSet.Add is synchronous and local (no I/O); AddAsync exists only for async value
-			// generators, which this model does not use.
-#pragma warning disable VSTHRD103
-			db.LoginBlocks.Add(new LoginBlock { UserId = loginUserId, CreatedUtc = DateTime.UtcNow });
-#pragma warning restore VSTHRD103
-			await db.SaveChangesAsync(CancellationToken.None);
-		}
-
 		if (revokedAtUtc is { } revoked)
 		{
 			await using SyncDbContext db = factory.CreateDbContext();
@@ -133,13 +122,9 @@ public sealed class SessionRevalidationTests : IDisposable
 		Assert.Null(context.Principal);
 	}
 
-	[Fact]
-	public async Task BlockedLogin_LosesItsLiveSession()
-	{
-		CookieValidatePrincipalContext context = await ValidateAsync(
-			Users(("alice", new UserOptions { Admin = true })), "alice", admin: true, blocked: true);
-		Assert.Null(context.Principal);
-	}
+	// (The user-level-block case is gone with decision 19: blocks are per-device and a web
+	// session has no device, so the web-facing switch is the account being DISABLED — covered by
+	// DisabledAccount_LosesItsLiveSession above.)
 
 	[Fact]
 	public async Task DeletedAccount_LosesItsLiveSession()

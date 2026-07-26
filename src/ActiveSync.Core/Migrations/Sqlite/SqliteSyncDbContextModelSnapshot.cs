@@ -19,20 +19,15 @@ namespace ActiveSync.Core.Migrations.Sqlite
 
             modelBuilder.Entity("ActiveSync.Core.State.CollectionState", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
+                    b.Property<int>("DeviceKey")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("CollectionId")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("ConcurrencyToken")
                         .IsConcurrencyToken()
                         .HasColumnType("TEXT");
-
-                    b.Property<int>("DeviceKey")
-                        .HasColumnType("INTEGER");
 
                     b.Property<int>("FilterType")
                         .HasColumnType("INTEGER");
@@ -58,10 +53,7 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.Property<DateTime>("UpdatedUtc")
                         .HasColumnType("TEXT");
 
-                    b.HasKey("Id");
-
-                    b.HasIndex("DeviceKey", "CollectionId")
-                        .IsUnique();
+                    b.HasKey("DeviceKey", "CollectionId");
 
                     b.ToTable("CollectionStates");
                 });
@@ -184,12 +176,11 @@ namespace ActiveSync.Core.Migrations.Sqlite
 
             modelBuilder.Entity("ActiveSync.Core.State.DeviceFolder", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
                     b.Property<int>("DeviceKey")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("ServerId")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("DisplayName")
                         .IsRequired()
@@ -198,29 +189,17 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.Property<string>("ParentServerId")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ServerId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<int>("Type")
                         .HasColumnType("INTEGER");
 
-                    b.HasKey("Id");
-
-                    b.HasIndex("DeviceKey", "ServerId")
-                        .IsUnique();
+                    b.HasKey("DeviceKey", "ServerId");
 
                     b.ToTable("DeviceFolders");
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.GlobalSetting", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("Key")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedUtc")
@@ -230,10 +209,7 @@ namespace ActiveSync.Core.Migrations.Sqlite
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.HasKey("Id");
-
-                    b.HasIndex("Key")
-                        .IsUnique();
+                    b.HasKey("Key");
 
                     b.ToTable("GlobalSettings");
                 });
@@ -317,31 +293,20 @@ namespace ActiveSync.Core.Migrations.Sqlite
 
             modelBuilder.Entity("ActiveSync.Core.State.LoginBlock", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
+                    b.Property<int>("DeviceKey")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("DeviceId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "DeviceId")
-                        .IsUnique();
+                    b.HasKey("DeviceKey");
 
                     b.ToTable("LoginBlocks");
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.OofSetting", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
+                    b.Property<int>("UserId")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("BodyType")
@@ -367,13 +332,7 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.Property<DateTime>("UpdatedUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("UserId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId")
-                        .IsUnique();
+                    b.HasKey("UserId");
 
                     b.ToTable("OofSettings");
                 });
@@ -435,12 +394,10 @@ namespace ActiveSync.Core.Migrations.Sqlite
 
             modelBuilder.Entity("ActiveSync.Core.State.SharedCalendarGrant", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
+                    b.Property<int>("UserId")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("CollectionHref")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedUtc")
@@ -449,13 +406,7 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.Property<bool>("ReadOnly")
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("UserId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "CollectionHref")
-                        .IsUnique();
+                    b.HasKey("UserId", "CollectionHref");
 
                     b.ToTable("SharedCalendarGrants");
                 });
@@ -513,9 +464,11 @@ namespace ActiveSync.Core.Migrations.Sqlite
 
             modelBuilder.Entity("ActiveSync.Core.State.UserBackendRole", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
+                    b.Property<int>("UserId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("Role")
+                        .HasColumnType("TEXT");
 
                     b.Property<bool?>("Enabled")
                         .HasColumnType("INTEGER");
@@ -526,23 +479,13 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.Property<string>("Provider")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Role")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("SettingsJson")
                         .HasColumnType("TEXT");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("INTEGER");
 
                     b.Property<string>("UserName")
                         .HasColumnType("TEXT");
 
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "Role")
-                        .IsUnique();
+                    b.HasKey("UserId", "Role");
 
                     b.ToTable("UserBackendRoles");
                 });
@@ -590,20 +533,13 @@ namespace ActiveSync.Core.Migrations.Sqlite
 
             modelBuilder.Entity("ActiveSync.Core.State.WebSessionRevocation", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
                     b.Property<int>("UserId")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("ValidAfterUtc")
                         .HasColumnType("TEXT");
 
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId")
-                        .IsUnique();
+                    b.HasKey("UserId");
 
                     b.ToTable("WebSessionRevocations");
                 });
@@ -665,13 +601,13 @@ namespace ActiveSync.Core.Migrations.Sqlite
 
             modelBuilder.Entity("ActiveSync.Core.State.LoginBlock", b =>
                 {
-                    b.HasOne("ActiveSync.Core.State.User", "User")
+                    b.HasOne("ActiveSync.Core.State.Device", "Device")
                         .WithMany()
-                        .HasForeignKey("UserId")
+                        .HasForeignKey("DeviceKey")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("User");
+                    b.Navigation("Device");
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.OofSetting", b =>
@@ -681,6 +617,17 @@ namespace ActiveSync.Core.Migrations.Sqlite
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.SentCommandToken", b =>
+                {
+                    b.HasOne("ActiveSync.Core.State.Device", "Device")
+                        .WithMany()
+                        .HasForeignKey("DeviceKey")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Device");
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.SharedCalendarGrant", b =>

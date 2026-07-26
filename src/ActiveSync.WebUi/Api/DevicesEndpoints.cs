@@ -18,7 +18,7 @@ internal static class DevicesEndpoints
 {
 	internal sealed record DeviceDto(
 		string User, string DeviceId, string DeviceType, DateTime CreatedUtc, DateTime LastSeenUtc,
-		string? LastProtocolVersion, bool PendingAccountWipe, bool Blocked, bool UserBlocked, bool UserDisabled);
+		string? LastProtocolVersion, bool PendingAccountWipe, bool Blocked, bool UserDisabled);
 
 	internal sealed record BlockRequest(string? User, string? DeviceId);
 
@@ -45,37 +45,52 @@ internal static class DevicesEndpoints
 					listing.Login, listing.Device.DeviceId, listing.Device.DeviceType,
 					listing.Device.CreatedUtc, listing.Device.LastSeenUtc,
 					listing.Device.LastProtocolVersion, listing.Device.PendingAccountWipe,
-					listing.Blocked, listing.UserBlocked,
-					resolver.IsLoginDisabled(listing.Login))).ToList()
+					listing.Blocked,
+					// Two distinct states, reported distinctly: this DEVICE is blocked, or the USER
+					// is disabled (which covers every device and the web). The old "user-level
+					// block" third state is gone — see db-restructure decision 19.
+					listing.UserDisabled || resolver.IsLoginDisabled(listing.Login))).ToList()
 			});
 		});
 
 		api.MapPost("devices/block", async (
 			BlockRequest request, DeviceAdminService devices, UserResolver resolver, CancellationToken ct) =>
 		{
-			// A block is stored text matched against the login a device presents, so it has to
-			// meet the same rules as a declared login — ':' cannot survive Basic auth and a
-			// control character corrupts the session key separator, so either would persist as
-			// a row that can never apply.
 			if (AdminIdentifiers.LoginProblem(request.User) is { } loginError)
 				return EndpointHelpers.BadRequest(loginError);
 			string user = request.User!.Trim();
 			// Blocking a login that is NOT declared is legitimate and deliberately allowed:
 			// pass-through authentication means most users have no entry. The flag lets the UI
-			// warn about a typo without the gateway refusing a valid pre-emptive block.
+			// warn about a typo without the gateway refusing a valid block.
 			await resolver.EnsureFreshAsync(false, ct);
 			bool knownUser = resolver.MergedUsers.ContainsKey(user);
 
-			await devices.BlockAsync(user, request.DeviceId, ct);
-			return Results.Ok(new { user, request.DeviceId, blocked = true, knownUser });
+			// Blocks are DEVICE-scoped (decision 19). The shared service decides — the API and
+			// the CLI must not drift on what a bare user means (the endpoint summary used to
+			// promise "user-level when deviceId is omitted"; that shape no longer exists).
+			DeviceAdminService.BlockOutcome outcome = await devices.BlockAsync(user, request.DeviceId, ct);
+			return outcome switch
+			{
+				DeviceAdminService.BlockOutcome.DeviceRequired => EndpointHelpers.BadRequest(
+					"deviceId is required — blocks are per-device; disable the whole user instead " +
+					"(PUT /admin/api/users/{login} with enabled=false)"),
+				DeviceAdminService.BlockOutcome.UnknownDevice => Results.NotFound(),
+				_ => Results.Ok(new { user, request.DeviceId, blocked = true, knownUser }),
+			};
 		});
 
 		api.MapPost("devices/unblock", async (BlockRequest request, DeviceAdminService devices, CancellationToken ct) =>
 		{
-			DeviceAdminService.UnblockResult result = await devices.UnblockAsync(request.User, request.DeviceId, ct);
-			return result.Removed
-				? Results.Ok(new { request.User, request.DeviceId, blocked = false })
-				: Results.NotFound();
+			(DeviceAdminService.BlockOutcome outcome, int _) =
+				await devices.UnblockAsync(request.User, request.DeviceId, ct);
+			return outcome switch
+			{
+				DeviceAdminService.BlockOutcome.DeviceRequired => EndpointHelpers.BadRequest(
+					"deviceId is required — blocks are per-device; re-enable the whole user instead " +
+					"(PUT /admin/api/users/{login} with enabled=true)"),
+				DeviceAdminService.BlockOutcome.Applied => Results.Ok(new { request.User, request.DeviceId, blocked = false }),
+				_ => Results.NotFound(),
+			};
 		});
 
 		api.MapPost("devices/wipe", async (WipeRequest request, DeviceAdminService devices, CancellationToken ct) =>

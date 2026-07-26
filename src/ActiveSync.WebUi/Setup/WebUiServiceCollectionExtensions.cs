@@ -193,17 +193,12 @@ public static class WebUiServiceCollectionExtensions
 					login);
 			});
 
-		// A user-level login block disables OIDC sign-in exactly like the local form.
-		int? verdictUserId = verdict.Allowed
-			? await services.GetRequiredService<ActiveSync.Core.Accounts.UserStore>()
-				.FindUserIdAsync(verdict.Login!, ct)
-			: null;
-		bool blocked = verdictUserId is { } blockUserId && await services.GetRequiredService<SyncStateService>()
-			.IsLoginBlockedAsync(blockUserId, null, ct);
-		if (!verdict.Allowed || blocked)
+		// Blocks are per-device now, and an OIDC sign-in carries no device — the switch that
+		// refuses a web sign-in is the user being disabled, which OidcLogin's verdict covers.
+		if (!verdict.Allowed)
 		{
 			logger.LogWarning("OIDC sign-in rejected for {Login}: {Reason}",
-				verdict.Login ?? "(no login claim)", blocked ? "login is blocked" : verdict.Reason);
+				verdict.Login ?? "(no login claim)", verdict.Reason);
 			context.Response.Redirect($"{TargetPortal(context.Properties)}#sso-denied");
 			context.HandleResponse();
 			return;

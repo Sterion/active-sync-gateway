@@ -54,19 +54,27 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 				.OnDelete(DeleteBehavior.Cascade);
 		});
 
+		// One identity per row: the natural key IS the primary key (the surrogate Id these two
+		// carried was never looked up). No index is added — the PK replaces the unique one.
 		modelBuilder.Entity<DeviceFolder>(e =>
-			e.HasIndex(f => new { f.DeviceKey, f.ServerId }).IsUnique());
+			e.HasKey(f => new { f.DeviceKey, f.ServerId }));
 
 		modelBuilder.Entity<CollectionState>(e =>
 		{
-			e.HasIndex(c => new { c.DeviceKey, c.CollectionId }).IsUnique();
+			e.HasKey(c => new { c.DeviceKey, c.CollectionId });
 			e.Property(c => c.ConcurrencyToken).IsConcurrencyToken();
 		});
 
 		// F2: one claim per (device, collection, attempt, key); the unique index is what makes a
 		// concurrent double-claim race safe (the loser's insert fails and re-reads the winner).
+		// This table KEEPS its surrogate key (see SentCommandToken) but gains the FK it lacked, so
+		// deleting a device no longer orphans its claims.
 		modelBuilder.Entity<SentCommandToken>(e =>
-			e.HasIndex(t => new { t.DeviceKey, t.CollectionId, t.SyncKeyAtClaim, t.Key }).IsUnique());
+		{
+			e.HasIndex(t => new { t.DeviceKey, t.CollectionId, t.SyncKeyAtClaim, t.Key }).IsUnique();
+			e.HasOne(t => t.Device).WithMany().HasForeignKey(t => t.DeviceKey)
+				.OnDelete(DeleteBehavior.Cascade);
+		});
 
 		modelBuilder.Entity<DavItem>(e =>
 			e.HasIndex(i => new { i.UserFolderKey, i.Href }).IsUnique());
@@ -79,10 +87,12 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 			e.Property(i => i.ConcurrencyToken).IsConcurrencyToken();
 		});
 
+		// Per-device only: the device IS the identity, so "one block per device" is a constraint.
+		// No UserId — a device already reaches its user through this FK.
 		modelBuilder.Entity<LoginBlock>(e =>
 		{
-			e.HasIndex(b => new { b.UserId, b.DeviceId }).IsUnique();
-			e.HasOne(b => b.User).WithMany().HasForeignKey(b => b.UserId)
+			e.HasKey(b => b.DeviceKey);
+			e.HasOne(b => b.Device).WithMany().HasForeignKey(b => b.DeviceKey)
 				.OnDelete(DeleteBehavior.Cascade);
 		});
 
@@ -97,13 +107,12 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 				.OnDelete(DeleteBehavior.Cascade);
 		});
 
-		// One override row per (user, role); the unique index is what makes the store's
-		// diff-by-role upsert safe against a concurrent writer.
+		// One override row per (user, role) — enforced by identity.
 		modelBuilder.Entity<UserBackendRole>(e =>
-			e.HasIndex(r => new { r.UserId, r.Role }).IsUnique());
+			e.HasKey(r => new { r.UserId, r.Role }));
 
-		modelBuilder.Entity<GlobalSetting>(e =>
-			e.HasIndex(s => s.Key).IsUnique());
+		// The configuration path IS the identity (one identity per row).
+		modelBuilder.Entity<GlobalSetting>(e => e.HasKey(s => s.Key));
 
 		// The area string IS the identity — one row per watched area. No surrogate id, so the
 		// "one row per area" rule is a constraint rather than a convention, and the primary-key
@@ -124,24 +133,29 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 			e.Property(c => c.ConcurrencyToken).IsConcurrencyToken();
 		});
 
+		// One Oof row per user — enforced by identity rather than a unique index beside an
+		// unused surrogate.
 		modelBuilder.Entity<OofSetting>(e =>
 		{
-			e.HasIndex(o => o.UserId).IsUnique();
+			e.HasKey(o => o.UserId);
+			e.Property(o => o.UserId).ValueGeneratedNever();
 			e.HasOne<User>().WithMany().HasForeignKey(o => o.UserId)
 				.OnDelete(DeleteBehavior.Cascade);
 		});
 
 		modelBuilder.Entity<SharedCalendarGrant>(e =>
 		{
-			e.HasIndex(g => new { g.UserId, g.CollectionHref }).IsUnique();
+			e.HasKey(g => new { g.UserId, g.CollectionHref });
 			e.HasOne(g => g.User).WithMany().HasForeignKey(g => g.UserId)
 				.OnDelete(DeleteBehavior.Cascade);
 		});
 
-		// One row per user; the unique index is what keeps the revocation a rewrite.
+		// One row per user — enforced by identity, which is what keeps the revocation a REWRITE
+		// (never an append; an appended row would leave the older, weaker cut-off in play).
 		modelBuilder.Entity<WebSessionRevocation>(e =>
 		{
-			e.HasIndex(r => r.UserId).IsUnique();
+			e.HasKey(r => r.UserId);
+			e.Property(r => r.UserId).ValueGeneratedNever();
 			e.HasOne<User>().WithMany().HasForeignKey(r => r.UserId)
 				.OnDelete(DeleteBehavior.Cascade);
 		});

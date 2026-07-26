@@ -86,8 +86,8 @@ public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? db
 
 	// ---------- Device partnerships, login/session gates, policy & wipe ----------
 
-	public Task<bool> IsLoginBlockedAsync(int userId, string? deviceId, CancellationToken ct)
-		=> _devices.IsLoginBlockedAsync(userId, deviceId, ct);
+	public Task<bool> IsDeviceBlockedAsync(int userId, string? deviceId, CancellationToken ct)
+		=> _devices.IsDeviceBlockedAsync(userId, deviceId, ct);
 
 	public Task<DateTime?> GetSessionsValidAfterAsync(int userId, CancellationToken ct)
 		=> _devices.GetSessionsValidAfterAsync(userId, ct);

@@ -144,7 +144,9 @@ internal static class AuthEndpoints
 
 		// A disabled account or a user-level login block refuses the web exactly like EAS (403
 		// after valid auth; the CLI remains the un-lockable escape hatch).
-		if (account.Options.Enabled == false || await state.IsLoginBlockedAsync(userId.Value, null, ct))
+		// A device block cannot refuse a WEB session (there is no device here) — the web-facing
+		// switch is the user being disabled.
+		if (account.Options.Enabled == false)
 			return Results.StatusCode(StatusCodes.Status403Forbidden);
 
 		bool isAdmin = account.Options.Admin == true;

@@ -175,26 +175,27 @@ public sealed class CliInspectTests : IDisposable
 	}
 
 	[Fact]
-	public void Users_ShowsBlockAgainstTheDeviceLogin()
+	public void Users_ReportsBlockedDeviceCount_AgainstTheOwningLogin()
 	{
-		// Post-restructure both the device and the block FK to the SAME UserId (Login is stored
-		// case-folded, one row per user), so the old case-variant mismatch is unconstructable by
-		// schema. This pins the joined view: a user-level block shows against the device's login.
+		// Blocks hang off the DEVICE now, so the users view reports how many of a user's devices
+		// are cut off — distinct from the user itself being disabled.
 		using (SqliteSyncDbContext seed = new(new DbContextOptionsBuilder<SqliteSyncDbContext>()
 			       .UseSqlite($"Data Source={_dbPath}").Options))
 		{
 			User caseUser = new() { Login = "caseuser@x", UpdatedUtc = DateTime.UtcNow };
 			seed.Users.Add(caseUser);
 			seed.SaveChanges();
-			seed.Devices.Add(new Device
+			Device device = new()
 			{
 				UserId = caseUser.UserId, DeviceId = "DEVCASE01", DeviceType = "iPhone",
 				CreatedUtc = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc),
 				LastSeenUtc = new DateTime(2026, 7, 16, 0, 0, 0, DateTimeKind.Utc),
-			});
+			};
+			seed.Devices.Add(device);
+			seed.SaveChanges();
 			seed.LoginBlocks.Add(new LoginBlock
 			{
-				UserId = caseUser.UserId, DeviceId = null,
+				DeviceKey = device.Id,
 				CreatedUtc = new DateTime(2026, 7, 16, 0, 0, 0, DateTimeKind.Utc),
 			});
 			seed.SaveChanges();
@@ -204,7 +205,7 @@ public sealed class CliInspectTests : IDisposable
 		Assert.Equal(0, exitCode);
 
 		string row = output.Split('\n').Single(line => line.Contains("caseuser@x"));
-		Assert.Contains("yes", row); // blocked
+		Assert.Contains("device(s)", row); // one device blocked
 	}
 
 	[Fact]
@@ -257,29 +258,47 @@ public sealed class CliInspectTests : IDisposable
 	}
 
 	[Fact]
-	public void Block_Unblock_UserLevel_RoundTrips()
+	public void Block_Unblock_Device_RoundTrips()
 	{
-		(int blockExit, _, _, string blockOutput) = Run("block", "user1@x");
+		(int blockExit, _, _, string blockOutput) = Run("block", "user1@x", "DEVAAA111");
 		Assert.Equal(0, blockExit);
-		Assert.Contains("Blocked user 'user1@x'", blockOutput);
-
-		(_, _, _, string usersOutput) = Run("users");
-		Assert.Contains("yes", usersOutput);
+		Assert.Contains("Blocked device 'DEVAAA111'", blockOutput);
 
 		(_, _, _, string devicesOutput) = Run("devices", "user1@x");
-		Assert.Contains("user", devicesOutput);
+		Assert.Contains("yes", devicesOutput);
 
-		(int againExit, _, _, string againOutput) = Run("block", "user1@x");
+		(int againExit, _, _, string againOutput) = Run("block", "user1@x", "DEVAAA111");
 		Assert.Equal(0, againExit);
 		Assert.Contains("Already blocked", againOutput);
 
-		(int unblockExit, _, _, string unblockOutput) = Run("unblock", "user1@x");
+		(int unblockExit, _, _, string unblockOutput) = Run("unblock", "user1@x", "DEVAAA111");
 		Assert.Equal(0, unblockExit);
-		Assert.Contains("Unblocked user 'user1@x'", unblockOutput);
+		Assert.Contains("Unblocked device 'DEVAAA111'", unblockOutput);
 
-		(int noneExit, _, _, string noneOutput) = Run("unblock", "user1@x");
+		(int noneExit, _, _, string noneOutput) = Run("unblock", "user1@x", "DEVAAA111");
 		Assert.Equal(0, noneExit);
 		Assert.Contains("nothing to remove", noneOutput);
+	}
+
+	[Fact]
+	public void Block_WithoutADevice_IsRefused_PointingAtUserDisable()
+	{
+		// Decision 19: `eas block <user>` and `eas user disable <user>` must not both write the
+		// same state — that would recreate, in the CLI, the two-mechanisms-one-concept problem
+		// the schema removed. The bare form fails with a pointer instead.
+		(int exitCode, _, string stderr, _) = Run("block", "user1@x");
+		Assert.Equal(1, exitCode);
+		Assert.Contains("device id is required", stderr, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("eas user disable user1@x", stderr);
+	}
+
+	[Fact]
+	public void Block_OfADeviceThatNeverSynced_IsRefused()
+	{
+		// A block FKs to a real partnership, so there is nothing to block until the device syncs.
+		(int exitCode, _, string stderr, _) = Run("block", "user1@x", "NEVERSYNCED");
+		Assert.Equal(1, exitCode);
+		Assert.Contains("No device", stderr);
 	}
 
 	[Fact]

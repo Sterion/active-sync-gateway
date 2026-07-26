@@ -95,7 +95,7 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 			.Select(g => new { UserName = g.Key.Login, g.Key.Collection, Count = g.Count() })
 			.ToListAsync(cancellationToken);
 		var blocks = await db.LoginBlocks
-			.Select(b => new { Login = b.User.Login, b.DeviceId })
+			.Select(b => new { Login = b.Device.User.Login, b.Device.DeviceId })
 			.ToListAsync(cancellationToken);
 
 		// Full outer join: everyone declared OR seen in the state database.
@@ -165,15 +165,14 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 			int folders = foldersByUser.GetValueOrDefault(user);
 			int ItemCount(string collection) =>
 				itemsByUser[user].Where(i => i.Collection == collection).Sum(i => i.Count);
-			IEnumerable<string?> userBlocks = blocksByUser[user];
-			int deviceBlocks = userBlocks.Count(deviceId => deviceId is not null);
+			// Two distinct mechanisms, reported distinctly: the USER is disabled, or N of their
+			// DEVICES are blocked (blocks are per-device only — decision 19).
+			int deviceBlocks = blocksByUser[user].Count();
 			string blocked = declared?.Enabled == false
 				? "disabled"
-				: userBlocks.Any(deviceId => deviceId is null)
-					? "yes"
-					: deviceBlocks > 0
-						? $"{deviceBlocks} device(s)"
-						: "-";
+				: deviceBlocks > 0
+					? $"{deviceBlocks} device(s)"
+					: "-";
 
 			AddRow(table, user, origin, declared?.MailAddress ?? "-",
 				declared?.Admin == true ? "yes" : "-", password,
@@ -220,7 +219,7 @@ internal sealed class DevicesCommand(IAnsiConsole terminal) : DatabaseCommand<De
 		foreach (DeviceAdminService.DeviceListing listing in page.Devices)
 		{
 			Device device = listing.Device;
-			string blocked = listing.UserBlocked ? "user" : listing.Blocked ? "yes" : "-";
+			string blocked = listing.UserDisabled ? "user disabled" : listing.Blocked ? "yes" : "-";
 			AddRow(table, listing.Login, device.DeviceId,
 				device.DeviceType.Length > 0 ? device.DeviceType : "-",
 				Utc(device.CreatedUtc), Utc(device.LastSeenUtc),

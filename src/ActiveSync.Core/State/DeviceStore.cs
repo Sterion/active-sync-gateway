@@ -12,12 +12,16 @@ namespace ActiveSync.Core.State;
 internal sealed class DeviceStore(SyncDbContext db)
 {
 	/// <summary>
-	///   True when an operator block refuses this login: a user-level block (DeviceId null)
-	///   matches every device; a device-level block matches only that DeviceId.
+	///   True when an operator block refuses THIS DEVICE. Blocks are per-device only — turning a
+	///   whole user off is <c>User.Enabled = false</c>, a distinct mechanism with a distinct
+	///   meaning (see <see cref="LoginBlock" />). A null <paramref name="deviceId" /> (Autodiscover
+	///   carries none) therefore has no block to match and is never refused here.
 	/// </summary>
-	public Task<bool> IsLoginBlockedAsync(int userId, string? deviceId, CancellationToken ct)
-		=> db.LoginBlocks
-			.AnyAsync(b => b.UserId == userId && (b.DeviceId == null || b.DeviceId == deviceId), ct);
+	public Task<bool> IsDeviceBlockedAsync(int userId, string? deviceId, CancellationToken ct)
+		=> deviceId is null
+			? Task.FromResult(false)
+			: db.LoginBlocks
+				.AnyAsync(b => b.Device.UserId == userId && b.Device.DeviceId == deviceId, ct);
 
 	/// <summary>
 	///   The cut-off for this login's web sessions: one started before it is no longer valid.
@@ -153,18 +157,15 @@ internal sealed class DeviceStore(SyncDbContext db)
 		for (int attempt = 1; ; attempt++)
 		{
 			device.PendingAccountWipe = false;
+			// The block is per-partnership and keyed by the device row itself, so the wipe path is
+			// unaffected by blocks having become device-scoped.
 			bool alreadyBlocked = await db.LoginBlocks
-				.AnyAsync(b => b.UserId == device.UserId && b.DeviceId == device.DeviceId, ct)
+				.AnyAsync(b => b.DeviceKey == device.Id, ct)
 				.ConfigureAwait(false);
 			LoginBlock? added = null;
 			if (!alreadyBlocked)
 			{
-				added = new LoginBlock
-				{
-					UserId = device.UserId,
-					DeviceId = device.DeviceId,
-					CreatedUtc = DateTime.UtcNow
-				};
+				added = new LoginBlock { DeviceKey = device.Id, CreatedUtc = DateTime.UtcNow };
 				await db.LoginBlocks.AddAsync(added, ct).ConfigureAwait(false);
 			}
 
@@ -175,7 +176,7 @@ internal sealed class DeviceStore(SyncDbContext db)
 			}
 			catch (DbUpdateException ex) when (added is not null && DbExceptions.IsUniqueViolation(ex))
 			{
-				// A concurrent wipe ack already inserted the (user, device) block between our
+				// A concurrent wipe ack already inserted this device's block between our
 				// AnyAsync check and this insert — the block we want exists, so this is success, not
 				// a 500. Drop our duplicate insert; the next pass's AnyAsync sees the winner and
 				// skips the insert, persisting only the wipe-completion flag (A22).

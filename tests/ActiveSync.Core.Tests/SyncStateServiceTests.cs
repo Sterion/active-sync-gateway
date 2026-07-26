@@ -434,16 +434,20 @@ public sealed class SyncStateServiceTests : IDisposable
 			 new BackendFolder("imap:Sent", "Sent", null, 5, "Email")], CancellationToken.None);
 		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
 
-		async Task<int[]> DeviceFolderIds()
+		// DeviceFolder is keyed by (DeviceKey, ServerId) now, so "the same rows survived" is
+		// observed through the acknowledged hierarchy itself rather than surrogate ids.
+		async Task<(string ServerId, string DisplayName, int Type)[]> AcknowledgedFolders()
 		{
 			await using SqliteSyncDbContext read = StateTestSupport.NewContext(_connection);
 			return await read.DeviceFolders.Where(f => f.DeviceKey == device.Id)
-				.OrderBy(f => f.ServerId).Select(f => f.Id).ToArrayAsync();
+				.OrderBy(f => f.ServerId)
+				.Select(f => new ValueTuple<string, string, int>(f.ServerId, f.DisplayName, f.Type))
+				.ToArrayAsync();
 		}
 
-		int[] before = await DeviceFolderIds();
+		(string, string, int)[] before = await AcknowledgedFolders();
 		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
-		int[] after = await DeviceFolderIds();
+		(string, string, int)[] after = await AcknowledgedFolders();
 
 		Assert.Equal(before, after);
 	}
