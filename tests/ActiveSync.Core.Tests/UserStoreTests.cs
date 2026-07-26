@@ -262,20 +262,27 @@ public sealed class UserStoreTests : IDisposable
 	}
 
 	[Fact]
-	public async Task LoadStartingEntry_FindsConfigUser_CaseInsensitively()
+	public async Task LoadStartingEntry_StartsFromTheDatabaseAlone_NeverCopyingConfig()
 	{
-		// B8: ActiveSyncOptions.Users is bound with the default ORDINAL comparer, so editing a
-		// differently-cased login missed the config entry, started from an empty overlay, and —
-		// since a DB row REPLACES the whole config entry — the write discarded every override.
+		// Item 6: an edit must record only DEVIATIONS. Starting from a copy of the config entry
+		// (which is what a whole-entry-replacement world needed) would freeze every config value
+		// as a database override, so a later configuration change would stop reaching the user.
 		ActiveSyncOptions options = new()
 		{
 			// Ordinal comparer, exactly what ConfigurationBinder produces.
 			Users = new Dictionary<string, UserOptions> { ["phone1"] = new() { MailAddress = "config@x" } },
 		};
 
-		UserOptions starting = await UserEditing.LoadStartingEntryAsync(
+		UserOptions fresh = await UserEditing.LoadStartingEntryAsync(
 			_store, options, "PHONE1", CancellationToken.None);
-		Assert.Equal("config@x", starting.MailAddress);
+		Assert.Null(fresh.MailAddress);
+
+		// An existing database declaration IS the starting point, matched case-insensitively (B8).
+		await _store.UpsertAsync("phone1", new UserOptions { Admin = true }, CancellationToken.None);
+		UserOptions existing = await UserEditing.LoadStartingEntryAsync(
+			_store, options, "PHONE1", CancellationToken.None);
+		Assert.True(existing.Admin);
+		Assert.Null(existing.MailAddress);   // still config's to supply
 	}
 
 	[Fact]

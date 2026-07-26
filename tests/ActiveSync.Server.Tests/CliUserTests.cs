@@ -242,11 +242,13 @@ public sealed class CliUserTests : IDisposable
 	}
 
 	[Fact]
-	public void Set_OnConfigUser_CopiesTheConfigEntry()
+	public void Set_OnConfigUser_RecordsOnlyTheDeviation_ConfigStillSuppliesTheRest()
 	{
 		(int exitCode, _, string output) = Run(null, "user", "set", "confuser", "Backends:MailStore:Settings:Host", "imap.override");
 		Assert.Equal(0, exitCode);
-		// The database entry starts as a copy, so the config MailAddress survives the edit.
+		// The reported user is the EFFECTIVE merge: the deviation applies and the config
+		// MailAddress still comes from configuration (it was not copied into the database, so a
+		// later config change still reaches this user).
 		Assert.Contains("mail=cfg@example.com", output);
 		Assert.Contains("Host=imap.override", output);
 		Assert.Contains("[db, shadows config]", output);

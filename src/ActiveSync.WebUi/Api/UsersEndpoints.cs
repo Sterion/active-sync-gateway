@@ -68,9 +68,14 @@ internal static class UsersEndpoints
 			if (await LastAdminProblemAsync(
 				    resolver, login, request.Admin == true && request.Enabled != false, ct) is { } conflict)
 				return conflict;
-			// Password sentinels merge against the entry a CLI edit would start from (the DB
-			// row, else a clone of the config entry) so "keep" preserves the stored secret.
-			UserOptions starting = await UserEditing.LoadStartingEntryAsync(store, current, login, ct);
+			// Secret sentinels ("keep what I was shown") resolve against the EFFECTIVE entry — the
+			// per-field merge of database over configuration — because that is exactly what the
+			// GET returned masked. Resolving them against the database row alone would silently
+			// drop a config-supplied secret the admin never intended to touch.
+			await resolver.EnsureFreshAsync(false, ct);
+			UserOptions starting = resolver.MergedUsers.TryGetValue(login, out MergedUser? effective)
+				? effective.Options
+				: await UserEditing.LoadStartingEntryAsync(store, current, login, ct);
 
 			UserOptions entry = new()
 			{

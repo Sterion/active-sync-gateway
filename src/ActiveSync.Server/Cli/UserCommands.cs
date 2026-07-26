@@ -59,7 +59,13 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 		}
 
 		await store.UpsertAsync(login, entry, ct);
-		Terminal.WriteLine($"{login}  {StartupSummary.DescribeUser(new MergedUser(entry, true, UserEditing.FindConfigUser(options, login) is not null))}");
+		// Report the EFFECTIVE user, not just the row we wrote: a database declaration is a
+		// per-field deviation now, so everything it does not set still comes from configuration
+		// and the operator needs to see the result rather than the delta.
+		UserOptions? configEntry = UserEditing.FindConfigUser(options, login);
+		UserMerge.Merged effective = UserMerge.Merge(configEntry, entry);
+		Terminal.WriteLine($"{login}  {StartupSummary.DescribeUser(
+			new MergedUser(effective.Options, true, configEntry is not null, false, effective.Sources))}");
 		Terminal.WriteLine(PickupNote(options));
 		return 0;
 	}
@@ -94,14 +100,16 @@ internal sealed class UserShowCommand(IAnsiConsole terminal) : UserCommandBase<U
 			return 1;
 		}
 
-		MergedUser effective = fromDb is not null
-			? new MergedUser(fromDb, true, fromConfig is not null)
-			: new MergedUser(fromConfig!, false, false);
+		UserMerge.Merged resolved = UserMerge.Merge(fromConfig, fromDb);
+		MergedUser effective = new(
+			resolved.Options, fromDb is not null, fromDb is not null && fromConfig is not null,
+			false, resolved.Sources);
 		Terminal.WriteLine($"{settings.Login}  {StartupSummary.DescribeUser(effective)}");
 		if (effective is { FromDatabase: true, ShadowsConfig: true })
 			Terminal.WriteLine(
-				"A config entry for this login exists but is fully replaced by the database entry " +
-				"('eas user remove' falls back to it).");
+				"This login is declared in BOTH configuration and the database; the values above are " +
+				"the per-field merge (database wins per field). 'eas user remove' drops the database " +
+				"deviations and leaves the config entry.");
 		return 0;
 	}
 }

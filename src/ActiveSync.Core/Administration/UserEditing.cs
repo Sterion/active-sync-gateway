@@ -5,10 +5,17 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.Core.Administration;
 
 /// <summary>
-///   Shared edit semantics for declared-user entries (CLI and web API): edits start from the
-///   existing entry — the database row, else a CLONE of the config entry (so the database
-///   write becomes an exact replacement and the bound config object is never mutated), else a
-///   fresh empty overlay.
+///   Shared edit semantics for declared-user entries (CLI and web API): an edit starts from the
+///   DATABASE DECLARATION ALONE — the existing row, else a fresh empty overlay — so what is
+///   written back records only real DEVIATIONS.
+///   <para>
+///     It used to start from a CLONE of the config entry when no row existed, which was correct
+///     while a row REPLACED the whole config entry: the clone made the replacement faithful.
+///     Under per-field resolution (item 4) that would be a trap — copying config into the
+///     database freezes every config-supplied value as a database override, so a later
+///     configuration change would silently stop reaching that user. Config keeps supplying
+///     whatever the database does not say.
+///   </para>
 /// </summary>
 internal static class UserEditing
 {
@@ -18,15 +25,11 @@ internal static class UserEditing
 			JsonSerializer.Serialize(source, UserStore.JsonOptions), UserStore.JsonOptions)!;
 	}
 
-	/// <summary>DB entry, else a copy of the config entry, else a fresh one.</summary>
+	/// <summary>The database declaration, else a fresh empty one (never a copy of config).</summary>
 	internal static async Task<UserOptions> LoadStartingEntryAsync(
 		UserStore store, ActiveSyncOptions options, string login, CancellationToken ct)
 	{
-		if (await store.GetAsync(login, ct).ConfigureAwait(false) is { } fromDb)
-			return fromDb;
-		return FindConfigUser(options, login) is { } fromConfig
-			? Clone(fromConfig)
-			: new UserOptions();
+		return await store.GetAsync(login, ct).ConfigureAwait(false) ?? new UserOptions();
 	}
 
 	/// <summary>

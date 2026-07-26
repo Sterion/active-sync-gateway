@@ -31,15 +31,23 @@ internal static class UserFieldPaths
 	internal static IReadOnlyCollection<string> Keys { get; } =
 	[
 		"MailAddress", "Password", "Admin", "Enabled", "OidcSubject",
+		"DefaultBackendLogin", "DefaultBackendPassword",
 		"Backends:<Role>:Provider", "Backends:<Role>:Enabled",
 		"Backends:<Role>:UserName", "Backends:<Role>:Password",
 		"Backends:<Role>:Settings:<Key>",
 		$"  (roles: {string.Join(", ", Enum.GetNames<BackendRole>())})"
 	];
 
-	/// <summary>The per-role backend password keys accepted by `user secret`.</summary>
+	/// <summary>
+	///   The backend password keys accepted by `user secret` — the per-role ones plus the
+	///   user-wide default every role falls back to. All are sealed (enc:v1:), never hashed:
+	///   a backend has to be able to present the real password.
+	/// </summary>
 	internal static IReadOnlyCollection<string> BackendSecretKeys { get; } =
-		Enum.GetNames<BackendRole>().Select(role => $"Backends:{role}:Password").ToArray();
+		[
+			"DefaultBackendPassword",
+			.. Enum.GetNames<BackendRole>().Select(role => $"Backends:{role}:Password")
+		];
 
 	internal static FieldPath? Find(string key)
 	{
@@ -60,6 +68,14 @@ internal static class UserFieldPaths
 		if (key.Equals("OidcSubject", StringComparison.OrdinalIgnoreCase))
 			return new FieldPath("OidcSubject", typeof(string), false,
 				(account, value) => account.OidcSubject = (string?)value);
+		// GATEWAY → BACKENDS defaults: what every role falls back to. A different trust domain
+		// from the gateway Password above — these are sent to backends, that one never is.
+		if (key.Equals("DefaultBackendLogin", StringComparison.OrdinalIgnoreCase))
+			return new FieldPath("DefaultBackendLogin", typeof(string), false,
+				(account, value) => account.DefaultBackendLogin = (string?)value);
+		if (key.Equals("DefaultBackendPassword", StringComparison.OrdinalIgnoreCase))
+			return new FieldPath("DefaultBackendPassword", typeof(string), true,
+				(account, value) => account.DefaultBackendPassword = (string?)value);
 
 		string[] parts = key.Split(':');
 		if (parts.Length < 3 ||
