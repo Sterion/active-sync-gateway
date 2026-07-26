@@ -71,8 +71,11 @@ public sealed class UserStoreTests : IDisposable
 	}
 
 	[Fact]
-	public async Task DbEntry_ReplacesWholeConfigEntry_AndFallsBackOnDelete()
+	public async Task DbEntry_OverridesConfigPerField_AndClearingRevertsToConfig()
 	{
+		// Item 4 (behaviour change): a database declaration is a per-field DEVIATION, not a
+		// wholesale substitution. Previously setting ONE database field silently discarded every
+		// config-set field for that login.
 		ActiveSyncOptions options = BaseOptions();
 		options.Users = new Dictionary<string, UserOptions>
 		{
@@ -86,8 +89,7 @@ public sealed class UserStoreTests : IDisposable
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 		Assert.Equal("config@x", resolver.Resolve(new BackendCredentials("phone1", "pw")).MailAddress);
 
-		// DB row for the same login: REPLACES the config entry wholesale — the config
-		// MailAddress must not leak through the DB entry that doesn't set one.
+		// The database sets ONLY the backend user name. The config MailAddress must SURVIVE.
 		await _store.UpsertAsync("phone1",
 			new UserOptions { Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { UserName = "db-imap-user" } } },
 			CancellationToken.None);
@@ -95,11 +97,15 @@ public sealed class UserStoreTests : IDisposable
 
 		ResolvedUser fromDb = resolver.Resolve(new BackendCredentials("phone1", "pw"));
 		Assert.Equal("db-imap-user", fromDb.Roles[BackendRole.MailStore].Credentials.UserName);
-		Assert.Null(fromDb.MailAddress);
-		Assert.True(resolver.MergedUsers["phone1"].FromDatabase);
-		Assert.True(resolver.MergedUsers["phone1"].ShadowsConfig);
+		Assert.Equal("config@x", fromDb.MailAddress);   // config field survives the DB override
+		MergedUser merged = resolver.MergedUsers["phone1"];
+		Assert.True(merged.FromDatabase);
+		Assert.True(merged.ShadowsConfig);
+		// ...and each field reports the level it actually came from.
+		Assert.Equal(UserFieldSource.UserDatabase, merged.SourceOf("Backends:MailStore:UserName"));
+		Assert.Equal(UserFieldSource.UserConfig, merged.SourceOf("MailAddress"));
 
-		// Deleting the row falls back to the config entry.
+		// Clearing the database deviation reverts that field to config — not to nothing.
 		Assert.True(await _store.DeleteAsync("phone1", CancellationToken.None));
 		await resolver.EnsureFreshAsync(false, CancellationToken.None);
 		ResolvedUser fromConfig = resolver.Resolve(new BackendCredentials("phone1", "pw"));

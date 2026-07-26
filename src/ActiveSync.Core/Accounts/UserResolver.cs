@@ -13,13 +13,28 @@ using Microsoft.Extensions.Options;
 namespace ActiveSync.Core.Accounts;
 
 /// <summary>
-///   One entry of the merged (config ⊕ database) user view, for banners and the CLI.
-///   <paramref name="Invalid" /> marks a database row that failed validation: it is kept in the view
+///   One entry of the merged user view, for banners, the CLI and the admin API.
+///   <paramref name="Options" /> is the PER-FIELD resolution of the database declaration over the
+///   configuration one (<see cref="UserMerge" />) — not one replacing the other — and
+///   <paramref name="Sources" /> records which level supplied each field, keyed by the same paths
+///   the CLI and admin API address fields with ("MailAddress", "Backends:MailStore:UserName", …).
+///   <paramref name="FromDatabase" /> means a database declaration contributed;
+///   <paramref name="ShadowsConfig" /> means both levels did.
+///   <paramref name="Invalid" /> marks a merge that failed validation: it is kept in the view
 ///   (so operators see it, and <see cref="UserResolver.IsLoginDisabled" /> still honours its
 ///   <see cref="UserOptions.Enabled" />) but the login is refused (fail-closed) until corrected.
 /// </summary>
 public sealed record MergedUser(
-	UserOptions Options, bool FromDatabase, bool ShadowsConfig, bool Invalid = false);
+	UserOptions Options,
+	bool FromDatabase,
+	bool ShadowsConfig,
+	bool Invalid = false,
+	IReadOnlyDictionary<string, UserFieldSource>? Sources = null)
+{
+	/// <summary>Which level supplied this field path, or null when nothing set it.</summary>
+	public UserFieldSource? SourceOf(string fieldPath) =>
+		Sources is not null && Sources.TryGetValue(fieldPath, out UserFieldSource source) ? source : null;
+}
 
 /// <summary>
 ///   Maps a gateway login to its effective backend roles and credentials. Pass-through is
@@ -313,10 +328,12 @@ public sealed class UserResolver
 	}
 
 	/// <summary>
-	///   Compiles the immutable snapshot. Config entries are strict (invalid config already
-	///   failed startup validation; direct construction throws). Database entries are
-	///   lenient: an invalid entry is skipped with a warning so a bad row written by an
-	///   older/newer CLI can never take authentication down.
+	///   Compiles the immutable snapshot, resolving each user PER FIELD across the two user
+	///   levels — database over configuration (<see cref="UserMerge" />) — before compiling the
+	///   result against the global role sections. A config-only user is strict (invalid config
+	///   already failed startup validation; direct construction throws); anything a database
+	///   declaration contributed is lenient — an invalid merge is kept visible but refused, so a
+	///   bad row written by an older/newer CLI can never take authentication down.
 	/// </summary>
 	private static Snapshot BuildSnapshot(
 		ActiveSyncOptions options, BackendRolesConfig roles, BackendProviderRegistry registry,
@@ -339,52 +356,65 @@ public sealed class UserResolver
 		ValidationMemo memo = new();
 		try
 		{
-			if (options.Users is { Count: > 0 })
+			// Every login declared at EITHER level, each resolved once. A login declared in both
+			// is merged field by field — the database no longer replaces the whole config entry.
+			Dictionary<string, UserOptions> configUsers = new(StringComparer.OrdinalIgnoreCase);
+			foreach ((string login, UserOptions account) in options.Users ?? [])
+				configUsers[login] = account;
+
+			List<string> logins = configUsers.Keys
+				.Concat(dbUsers?.Keys ?? Enumerable.Empty<string>())
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.ToList();
+
+			List<string> configOnlyFailures = new();
+			foreach (string login in logins)
 			{
+				UserOptions? configEntry = configUsers.GetValueOrDefault(login);
+				UserOptions? dbEntry = dbUsers?.GetValueOrDefault(login);
+				UserMerge.Merged effective = UserMerge.Merge(configEntry, dbEntry);
+				bool fromDatabase = dbEntry is not null;
+				bool shadows = fromDatabase && configEntry is not null;
+
 				List<string> failures = new();
-				foreach ((string login, UserOptions account) in options.Users)
+				ValidateLogin(login, failures);
+				UserTemplate template = BuildOne(
+					roles, registry, login, effective.Options, key, failures, memo);
+
+				if (failures.Count == 0)
 				{
-					ValidateLogin(login, failures);
-					templates[login] = BuildOne(roles, registry, login, account, key, failures, memo);
-					merged[login] = new MergedUser(account, false, false);
-				}
-
-				// Startup validation already rejected these; this guards direct construction in tests.
-				if (failures.Count > 0)
-					throw new InvalidOperationException(string.Join(Environment.NewLine, failures));
-			}
-
-			if (dbUsers is { Count: > 0 })
-			{
-				foreach ((string login, UserOptions account) in dbUsers)
-				{
-					List<string> failures = new();
-					ValidateLogin(login, failures);
-					UserTemplate template = BuildOne(roles, registry, login, account, key, failures, memo);
-					bool shadows = merged.ContainsKey(login);
-					if (failures.Count > 0)
-					{
-						// B3: fail closed. Skipping the row left NO entry, so Resolve degraded to
-						// pass-through (presented credentials forwarded verbatim, the row's overrides
-						// discarded) and — with no merged entry — IsLoginDisabled UN-disabled an
-						// Enabled=false account. A DB row REPLACES the config entry, so we must not fall
-						// back to a shadowed config identity either. Register an invalid sentinel that
-						// refuses resolution and keep the row in the merged view: operators still see it,
-						// and IsLoginDisabled still honours Enabled==false (evaluated on the raw row,
-						// before validation), while the login is refused until the row is corrected.
-						logger?.LogWarning(
-							"Refusing invalid database account entry for {User} (fail-closed) until corrected: {Failures}",
-							login, string.Join("; ", failures));
-						templates[login] = new UserTemplate(
-							null, null, new Dictionary<BackendRole, RoleTemplate>(), Invalid: true);
-						merged[login] = new MergedUser(account, true, shadows, Invalid: true);
-						continue;
-					}
-
 					templates[login] = template;
-					merged[login] = new MergedUser(account, true, shadows);
+					merged[login] = new MergedUser(
+						effective.Options, fromDatabase, shadows, Invalid: false, effective.Sources);
+					continue;
 				}
+
+				if (!fromDatabase)
+				{
+					// Pure config: startup validation already rejected these, so reaching here means
+					// direct construction (tests). Collect and throw, as before.
+					configOnlyFailures.AddRange(failures);
+					continue;
+				}
+
+				// B3: fail closed. Skipping the entry left NO template, so Resolve degraded to
+				// pass-through (presented credentials forwarded verbatim, the overrides discarded)
+				// and — with no merged entry — IsLoginDisabled UN-disabled an Enabled=false user.
+				// Register an invalid sentinel that refuses resolution and keep the entry in the
+				// merged view: operators still see it, and IsLoginDisabled still honours
+				// Enabled==false (evaluated on the merged values, before validation), while the
+				// login is refused until the declaration is corrected.
+				logger?.LogWarning(
+					"Refusing invalid database account entry for {User} (fail-closed) until corrected: {Failures}",
+					login, string.Join("; ", failures));
+				templates[login] = new UserTemplate(
+					null, null, new Dictionary<BackendRole, RoleTemplate>(), Invalid: true);
+				merged[login] = new MergedUser(
+					effective.Options, true, shadows, Invalid: true, effective.Sources);
 			}
+
+			if (configOnlyFailures.Count > 0)
+				throw new InvalidOperationException(string.Join(Environment.NewLine, configOnlyFailures));
 		}
 		finally
 		{

@@ -128,7 +128,8 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 			.ToDictionary(g => g.Key, g => g.Sum(s => s.Count), StringComparer.OrdinalIgnoreCase);
 		ILookup<string, (string Collection, int Count)> itemsByUser = itemStats
 			.ToLookup(s => s.UserName, s => (s.Collection, s.Count), StringComparer.OrdinalIgnoreCase);
-		ILookup<string, string?> blocksByUser =
+		// One entry per BLOCKED DEVICE, grouped by its owner's login.
+		ILookup<string, string> blocksByUser =
 			blocks.ToLookup(b => b.Login, b => b.DeviceId, StringComparer.OrdinalIgnoreCase);
 
 		Table table = new Table().Border(TableBorder.Rounded);
