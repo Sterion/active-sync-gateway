@@ -63,6 +63,58 @@ not license.
 
 ---
 
+## The problems this fixes
+
+### 1. The login is physically the primary key, so nothing about a user can change
+
+Eight entities carry the login as a string — `Device`, `UserFolder`, `LocalItem`, `LoginBlock`,
+`WebSessionRevocation`, `SharedCalendarGrant`, `AccountEntry`, `OofSetting`
+(`src/ActiveSync.Core/State/Entities.cs`) — and so do the `LocalChangeNotifier` keys, the
+session/watcher cache keys, and the **encryption AAD**: `LocalContentProtector.Aad` is
+`userName + "\n" + collection` (`src/ActiveSync.Core/Security/LocalContentProtector.cs:95`).
+
+Hence the constraint `README.md` states plainly: *keep logins stable or devices re-sync from scratch
+and locally stored items become unreadable*. **A login cannot be renamed** — not "should not":
+renaming orphans every sync-state row and permanently bricks every encrypted local item.
+
+### 2. A DB user row REPLACES the whole config entry
+
+`AccountResolver.cs:362-383`. Set one field in the database and every config-set field for that
+user is silently discarded. Operators reasonably expect an override to be a *deviation*, not a
+wholesale substitution.
+
+### 3. The vocabulary is ambiguous
+
+**The codebase says "user" on the outside and "account" on the inside**, and nothing reconciles them:
+
+| Surface | Term today |
+|---|---|
+| Config — `ActiveSync:Users`, `UsersFile`, `Auth:UsersRefreshSeconds`, `RequireDeclaredUsers`, `AutoProvisionUsers` | **user** |
+| CLI — `eas users`, `eas user <verb>` | **user** |
+| Web — `/admin/api/users`, `UsersEndpoints`, `UserDto`, the admin *Users* page | **user** |
+| Internal types — `AccountEntry`, `AccountOptions`, `AccountResolver`, `AccountStore`, `AccountTemplate`, `AccountEditing`, `AccountFieldPaths`, `AccountSecretPolicy`, `AccountsStamp`, `MergedAccount`, `ResolvedAccount` | **account** |
+
+**Verified: no `User` type exists, and none ever did.** The "account" naming was not forced by a
+collision — there was nothing to collide with. It is simply an inconsistency, and every `User*` type
+that *does* exist (`UserFolder`, the `eas user` command classes, the web DTOs) already means the
+person. **There is no misuse to untangle** — nothing needs renaming to `UserState` or similar.
+
+**Settled vocabulary — "user" wins, because the operator surface already says it:**
+
+| Term | Means |
+|---|---|
+| **User** | The persistent record for one gateway login. The single word for the thing |
+| **Login** | The identity string the phone sends — a mutable attribute (immutable while config-declared) |
+| **`UserId`** | The immutable surrogate key. THE identity |
+| **Effective** | The result of resolving all levels for a field |
+| **Resolved\*** | The compiled per-request view — keep the shape, rename `ResolvedAccount` → `ResolvedUser` |
+
+**This rename removes a term rather than adding one, and breaks nothing operators touch.** The
+internal `Account*` types become `User*`; config keys, CLI verbs and API routes are already right and
+stay exactly as they are.
+
+---
+
 ## Decisions (settled — do not re-open)
 
 Recorded so a fresh session executes rather than re-litigates.
@@ -108,58 +160,6 @@ Recorded so a fresh session executes rather than re-litigates.
 
 ---
 
-## The problems this fixes
-
-### 1. The login is physically the primary key, so nothing about a user can change
-
-Eight entities carry the login as a string — `Device`, `UserFolder`, `LocalItem`, `LoginBlock`,
-`WebSessionRevocation`, `SharedCalendarGrant`, `AccountEntry`, `OofSetting`
-(`src/ActiveSync.Core/State/Entities.cs`) — and so do the `LocalChangeNotifier` keys, the
-session/watcher cache keys, and the **encryption AAD**: `LocalContentProtector.Aad` is
-`userName + "\n" + collection` (`src/ActiveSync.Core/Security/LocalContentProtector.cs:126`).
-
-Hence the constraint `README.md` states plainly: *keep logins stable or devices re-sync from scratch
-and locally stored items become unreadable*. **A login cannot be renamed** — not "should not":
-renaming orphans every sync-state row and permanently bricks every encrypted local item.
-
-### 2. A DB user row REPLACES the whole config entry
-
-`AccountResolver.cs:320-341`. Set one field in the database and every config-set field for that
-user is silently discarded. Operators reasonably expect an override to be a *deviation*, not a
-wholesale substitution.
-
-### 3. The vocabulary is ambiguous
-
-**The codebase says "user" on the outside and "account" on the inside**, and nothing reconciles them:
-
-| Surface | Term today |
-|---|---|
-| Config — `ActiveSync:Users`, `UsersFile`, `Auth:UsersRefreshSeconds`, `RequireDeclaredUsers`, `AutoProvisionUsers` | **user** |
-| CLI — `eas users`, `eas user <verb>` | **user** |
-| Web — `/admin/api/users`, `UsersEndpoints`, `UserDto`, the admin *Users* page | **user** |
-| Internal types — `AccountEntry`, `AccountOptions`, `AccountResolver`, `AccountStore`, `AccountTemplate`, `AccountEditing`, `AccountFieldPaths`, `AccountSecretPolicy`, `AccountsStamp`, `MergedAccount`, `ResolvedAccount` | **account** |
-
-**Verified: no `User` type exists, and none ever did.** The "account" naming was not forced by a
-collision — there was nothing to collide with. It is simply an inconsistency, and every `User*` type
-that *does* exist (`UserFolder`, the `eas user` command classes, the web DTOs) already means the
-person. **There is no misuse to untangle** — nothing needs renaming to `UserState` or similar.
-
-**Settled vocabulary — "user" wins, because the operator surface already says it:**
-
-| Term | Means |
-|---|---|
-| **User** | The persistent record for one gateway login. The single word for the thing |
-| **Login** | The identity string the phone sends — a mutable attribute (immutable while config-declared) |
-| **`UserId`** | The immutable surrogate key. THE identity |
-| **Effective** | The result of resolving all levels for a field |
-| **Resolved\*** | The compiled per-request view — keep the shape, rename `ResolvedAccount` → `ResolvedUser` |
-
-**This rename removes a term rather than adding one, and breaks nothing operators touch.** The
-internal `Account*` types become `User*`; config keys, CLI verbs and API routes are already right and
-stay exactly as they are.
-
----
-
 ## The design
 
 ### Identity: `UserId`
@@ -167,7 +167,7 @@ stay exactly as they are.
 ```
 User
   UserId   int identity   // THE identity — immutable, NEVER reused
-  Login       string         // unique (case-folded), MUTABLE
+  Login    string         // unique (case-folded), MUTABLE
   ...everything else, all mutable
 ```
 
@@ -181,10 +181,10 @@ and the holder just updates the username on the phone.
 transitively through `DeviceKey`, and `DavItem` through `UserFolderKey`; the remaining six
 (`AccountsStamp`, `SettingsStamp`, `GlobalSetting`, `LogEntry`, `ServerCertificate`,
 `DataProtectionKeyEntry`) are global and not per-user at all. Verified against the model — do not add
-an `UserId` to a table that already reaches a user through a FK, or the two paths can disagree
+a `UserId` to a table that already reaches a user through a FK, or the two paths can disagree
 after a rename and there is no constraint that would catch it.
 
-Five things to get right:
+Six things to get right:
 
 1. **Never reuse an id.** Security-critical, not hygiene: if user 42 is deleted and a new user
    becomes 42, any surviving encrypted `LocalItem` decrypts under a *different person's* AAD.
@@ -194,7 +194,7 @@ Five things to get right:
    highest row). Postgres identity sequences do not recycle. Assert this in a schema test rather than
    trusting it to survive a future model tweak.
 2. **The AAD change is the point and the biggest risk.** `Aad(userName, collection)` becomes
-   `Aad(accountId, collection)`. Keep `K2`'s injectivity — the parts must not be ambiguously
+   `Aad(userId, collection)`. Keep `K2`'s injectivity — the parts must not be ambiguously
    concatenable — via explicit length-prefixing or an unambiguous separator that cannot occur in
    either part.
 3. **The id does not exist until the row is persisted.** An identity column is assigned by the
@@ -215,7 +215,7 @@ Five things to get right:
 **The `AccountOptions` JSON blob is gone.** Everything with a compile-time-known shape becomes a real
 column; only the genuinely runtime-discovered part stays serialized. Two tables:
 
-### `Users`
+#### `Users`
 
 | Column | Type | Notes |
 |---|---|---|
@@ -230,7 +230,7 @@ column; only the genuinely runtime-discovered part stays serialized. Two tables:
 | `OidcSubject` | string? | IdP `sub` this user is bound to |
 | `AutoProvisioned` | bool? | Provenance marker for gateway-created rows |
 
-### `UserBackendRoles`
+#### `UserBackendRoles`
 
 One row per (user, role). Child of `Users`, **FK with cascade delete**.
 
@@ -305,7 +305,7 @@ its own precedence.
 
 | # | Level | Written by | Stored in |
 |---|---|---|---|
-| 1 | **User · DB** | the admin (`eas user set`, admin API) **or** the holder (portal) — same slot | `AccountEntry` |
+| 1 | **User · DB** | the admin (`eas user set`, admin API) **or** the holder (portal) — same slot | `Users` / `UserBackendRoles` |
 | 2 | **User · config** | operator, in `ActiveSync:Users:<login>:…` | appsettings / env / users file |
 | 3 | **Global · DB** | admin (`eas config set`, admin UI) | `GlobalSetting` rows |
 | 4 | **Global · config** | operator | appsettings / env |
@@ -336,7 +336,7 @@ Worked example — the SMTP host:
 4. The holder overrides it in the portal (if permitted for that field) → it lands in the **same
    slot**, so it simply replaces the admin's value; clearing it falls back to level 2, then 3.
 
-**Null/absent means "not set at this level", not "cleared."** A gap falls through. Clearing an
+**Null/absent means "not set at this level", not "cleared."** A gap falls through. Clearing a
 user value reverts to config, then global — an override is a *deviation*, and removing the
 deviation restores the inherited value. Keep this distinct from the existing explicit-clear
 semantics on `Settings` (a null value CLEARS the inherited key rather than falling through); carry
@@ -427,6 +427,12 @@ eas block <user>              → error: "use `eas user disable <user>` to disab
 
 Having both `eas block <user>` and `eas user disable <user>` write the same state would put back, in
 the CLI, precisely the two-mechanisms-one-concept problem this removes from the schema.
+
+**Both surfaces change, not just the CLI.** `DevicesEndpoints`' own summary says *"blocks mirror the
+CLI exactly (user-level when deviceId is omitted)"*, so the admin API accepts a user-level block the
+same way and needs the same treatment. `DeviceAdminService` is shared by both, so the natural place
+to enforce device-scoping is there — fix it once and both callers inherit it, rather than guarding
+the CLI and leaving the API able to write a shape the schema no longer has.
 
 **No impact on the wipe path:** `CompleteAccountWipeAsync` already inserts a *per-partnership* block
 on the `(user, device)` unique index, so it is unaffected by the column becoming mandatory.
@@ -580,7 +586,7 @@ State this plainly so nobody "fixes" it later believing it an oversight.
   what stops them changing it blind. Do **not** re-introduce a settings-surface gate — that was tried
   (review item 12, `7f0c73b`) and reverted (`fec1cfe`).
 - **It accepts that a holder can overwrite an admin-set value** for any field they are permitted to
-  write, destroying the previous value. That is the intended semantics of "it is their user". The
+  write, destroying the previous value. That is the intended semantics of "it is their own account to manage". The
   admin's remedy is to set it again, or to remove the field from the self-service surface.
 - **It does not add per-field provenance or an audit trail.** "Who set this?" is not answerable from
   the stored value. If that is ever wanted, it is a separate design — log-based, most likely, since
@@ -614,17 +620,17 @@ State this plainly so nobody "fixes" it later believing it an oversight.
 | `src/ActiveSync.Core/State/SyncDbContext.cs` | `DbSet`s (:14-31) — the definitive table list; indexes, keys and token stamping in `OnModelCreating` |
 | `src/ActiveSync.Core/State/Entities.cs` | The eight entities carrying `UserName`; `AccountEntry` |
 | `src/ActiveSync.Core/Options/AccountOptions.cs` | `AccountOptions` + `BackendRoleOverride` |
-| `src/ActiveSync.Core/Users/AccountResolver.cs` | `MergedAccount` (:21), `BuildSnapshot` (:277), `BuildOne` (:355), `ResolveSecret` (:531), whole-entry replacement (:320-341) |
-| `src/ActiveSync.Core/Users/ResolvedAccount.cs` | Compiled per-request view — keep this shape |
-| `src/ActiveSync.Core/Users/AccountStore.cs` | DB persistence; `NormalizeLogin` case-folding (`B1`) |
-| `src/ActiveSync.Core/Users/PassThroughProvisioner.cs` | Auto-provisioning — moves earlier in the pipeline |
-| `src/ActiveSync.Core/Security/LocalContentProtector.cs` | The AAD (:126) |
+| `src/ActiveSync.Core/Accounts/AccountResolver.cs` | `MergedAccount` (:21), `BuildSnapshot` (:319), `BuildOne` (:397), `ResolveSecret` (:588), whole-entry replacement (:362-383) |
+| `src/ActiveSync.Core/Accounts/ResolvedAccount.cs` | Compiled per-request view — keep this shape |
+| `src/ActiveSync.Core/Accounts/AccountStore.cs` | DB persistence; `NormalizeLogin` case-folding (`B1`) |
+| `src/ActiveSync.Core/Accounts/PassThroughProvisioner.cs` | Auto-provisioning — moves earlier in the pipeline |
+| `src/ActiveSync.Core/Security/LocalContentProtector.cs` | The AAD (`Aad`, :95) |
 | `src/ActiveSync.Core/Administration/AccountFieldPaths.cs` | `Backends:<Role>:<Field>` addressing |
 | `src/ActiveSync.Core/Administration/AccountEditing.cs` | Shared edit pipeline for CLI + web |
 | `src/ActiveSync.Server/Cli/UserCommands.cs` | CLI writer → `eas user` |
 | `src/ActiveSync.WebUi/Api/UsersEndpoints.cs` | Admin writer |
 | `src/ActiveSync.WebUi/Api/PortalEndpoints.cs` | Portal writer (`me` :36, PUT :233) |
-| `src/ActiveSync.Core/Users/LegacyAccountJson.cs` | **Delete** — the reinit removes its reason to exist |
+| `src/ActiveSync.Core/Accounts/LegacyAccountJson.cs` | **Delete** — the reinit removes its reason to exist |
 
 ---
 
@@ -661,7 +667,7 @@ case-folded attribute; land `AutoProvisionUsers`' semantics and delete `RequireD
 new model** — no upgrade path from the old schema, and none needed (Standing context). **Acceptance
 tests, non-negotiable:** (a) rename a login and
 assert sync state survives and an encrypted `LocalItem` written before the rename still decrypts
-after it; (b) past the auth boundary an `UserId` is always present — an undeclared login either
+after it; (b) past the auth boundary a `UserId` is always present — an undeclared login either
 gets a user or is refused; (c) the id column is non-reusing on both providers. Update `AGENTS.md`
 and `README.md` in the same work (Invariant 1).
 
@@ -717,6 +723,59 @@ user sections of `README.md`, `docs/configuration.md`, `docs/webui.md`, `docs/cl
 
 ---
 
+## Implementation hints — take them or leave them
+
+**Non-binding.** These are one reading of how the pieces fit, written to save rediscovery, not to
+constrain the implementer. Where a hint conflicts with what the code actually wants, the code wins —
+but say so, because a hint being wrong is worth knowing.
+
+**Mapping `AccountOptions` ⇄ columns (item 3).** `ActiveSyncOptions.Users` is
+`Dictionary<string, AccountOptions>` (`ActiveSyncOptions.cs:404`), bound straight from config, so the
+type must survive as the DTO. The smallest change is two private mappers inside the store —
+`ToEntity(UserOptions) → User + UserBackendRole[]` and `FromEntity(...) → UserOptions` — leaving every
+caller untouched. Model `UserBackendRoles` as an EF navigation collection on `User` so a load brings
+the roles with it; on write, diff the incoming roles against the loaded ones by `Role` and
+add/update/remove, rather than delete-all-and-reinsert (which would churn ids and defeat the FK
+cascade's usefulness for auditing).
+
+**Do the AAD first inside item 2, not last.** It is the one change whose mistakes surface only when
+data will not decrypt. A concrete framing that keeps `K2`'s injectivity without relying on
+control-character rejection: version tag, then fixed-width id, then length-prefixed collection —
+e.g. `"v2" ‖ LE64(userId) ‖ LE32(len) ‖ collection`. On a blank database the version tag costs
+nothing and buys a future re-key path.
+
+**Give resolution a provenance-carrying return type (item 4), and item 7 comes free.** If `BuildOne`
+resolves each field to `(value, level)` rather than a bare value, the startup banner's "which level
+did this come from" requirement is already satisfied, and `eas user show` / the admin UI can show it
+too. Retrofitting provenance later means touching every resolution site again.
+
+**`Settings` per-key resolution (item 4).** Walk the levels **lowest-priority first**, applying each
+level's keys over the accumulating dictionary: a value sets, a null removes. That yields
+null-clears-inherited naturally. For list replacement, treat a key's list root as one unit —
+`BackendConfigValidation.ListRoot` (`BackendConfigValidation.cs:17`) already computes it — and clear
+sibling `root:N` keys before applying a level that sets any of them.
+
+**One `BumpAsync(db, area)` helper for `DataChanges` (item 3a).** Both stores currently re-implement
+read-row-or-insert. Put it in one place with the unique-violation catch, so a third watched area
+later is a call, not a copy.
+
+**Enforce shared rules in the shared service, not in each caller.** The device-scoped block (decision
+19) and the config-declared rename guard both need to hold for the CLI *and* the admin API.
+`DeviceAdminService` (`Administration/DeviceAdminService.cs:14`) is already the shared seam for device
+work and the natural home; the user-side equivalent is the store/editing pipeline both surfaces
+already share. Guarding only the CLI leaves the API able to write a shape the schema no longer has.
+
+**Prove non-reuse with a schema test, not a comment (item 2).** Assert the generated SQLite DDL for
+the `Users` id contains `AUTOINCREMENT`, and that the Npgsql column is an identity column. It is one
+assertion, and it is the only thing standing between a future model tweak and cross-user data
+disclosure through a recycled id.
+
+**Sequence within item 2 to fail fast:** AAD change + its decrypt-across-rename test → `UserId`
+column and FKs → provisioning move → delete `RequireDeclaredUsers`. Each step leaves the suite
+runnable, and the riskiest part is proven before the mechanical bulk lands on top of it.
+
+---
+
 ## Invariants that must survive
 
 Violating any of these is a stop-and-report.
@@ -730,9 +789,11 @@ Violating any of these is a stop-and-report.
    (timing-safe pinned compare) → MailStore provider probe → undeclared global probe.
 3. **Fail closed.** An invalid/malformed user is kept visible but refused; one bad row never
    breaks auth for everyone.
-4. **Live pickup (~1 s)** via the `AccountsStamp` point-read and atomic snapshot swap survives, and
-   `SnapshotChanged` still clears the auth caches.
-5. **An `UserId` always exists past the auth boundary.** No caller handles a missing user; no
+4. **Live pickup (~1 s) survives** — the stamp point-read plus atomic snapshot swap, and
+   `SnapshotChanged` still clearing the auth caches. The *mechanism* moves (`AccountsStamp` becomes
+   the `"users"` row of `DataChanges`, decision 18); the *behaviour* must not: a CLI or admin edit
+   still reaches every replica within `Auth:UsersRefreshSeconds`, with no restart.
+5. **A `UserId` always exists past the auth boundary.** No caller handles a missing user; no
    code path defers provisioning.
 6. **Secrets never leave the server** — the existing leak-guard test (no `pbkdf2$` / `enc:v1:` in any
    response) must still pass.
