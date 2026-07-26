@@ -1,9 +1,10 @@
 ﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace ActiveSync.Core.Migrations.Sqlite
+namespace ActiveSync.Core.Migrations.Npgsql
 {
     /// <inheritdoc />
     public partial class Initial : Migration
@@ -12,25 +13,26 @@ namespace ActiveSync.Core.Migrations.Sqlite
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.CreateTable(
-                name: "AccountsStamps",
+                name: "DataChanges",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false),
-                    Version = table.Column<Guid>(type: "TEXT", nullable: false)
+                    Key = table.Column<string>(type: "text", nullable: false),
+                    Version = table.Column<Guid>(type: "uuid", nullable: false),
+                    UpdatedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_AccountsStamps", x => x.Id);
+                    table.PrimaryKey("PK_DataChanges", x => x.Key);
                 });
 
             migrationBuilder.CreateTable(
                 name: "DataProtectionKeys",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    FriendlyName = table.Column<string>(type: "TEXT", nullable: true),
-                    Xml = table.Column<string>(type: "TEXT", nullable: true)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    FriendlyName = table.Column<string>(type: "text", nullable: true),
+                    Xml = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -41,11 +43,11 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "GlobalSettings",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    Key = table.Column<string>(type: "TEXT", nullable: false),
-                    Value = table.Column<string>(type: "TEXT", nullable: false),
-                    UpdatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    Key = table.Column<string>(type: "text", nullable: false),
+                    Value = table.Column<string>(type: "text", nullable: false),
+                    UpdatedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -56,15 +58,15 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "LogEntries",
                 columns: table => new
                 {
-                    Id = table.Column<long>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    TimestampUtc = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    Level = table.Column<string>(type: "TEXT", nullable: false),
-                    Message = table.Column<string>(type: "TEXT", nullable: false),
-                    Exception = table.Column<string>(type: "TEXT", nullable: true),
-                    SourceContext = table.Column<string>(type: "TEXT", nullable: true),
-                    User = table.Column<string>(type: "TEXT", nullable: true),
-                    Machine = table.Column<string>(type: "TEXT", nullable: true)
+                    Id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    TimestampUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    Level = table.Column<string>(type: "text", nullable: false),
+                    Message = table.Column<string>(type: "text", nullable: false),
+                    Exception = table.Column<string>(type: "text", nullable: true),
+                    SourceContext = table.Column<string>(type: "text", nullable: true),
+                    User = table.Column<string>(type: "text", nullable: true),
+                    Machine = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -75,14 +77,14 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "SentCommandTokens",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    DeviceKey = table.Column<int>(type: "INTEGER", nullable: false),
-                    CollectionId = table.Column<string>(type: "TEXT", nullable: false),
-                    SyncKeyAtClaim = table.Column<int>(type: "INTEGER", nullable: false),
-                    Key = table.Column<string>(type: "TEXT", nullable: false),
-                    CreatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    Completed = table.Column<bool>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    DeviceKey = table.Column<int>(type: "integer", nullable: false),
+                    CollectionId = table.Column<string>(type: "text", nullable: false),
+                    SyncKeyAtClaim = table.Column<int>(type: "integer", nullable: false),
+                    Key = table.Column<string>(type: "text", nullable: false),
+                    CreatedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    Completed = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -93,10 +95,10 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "ServerCertificates",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false),
-                    PfxProtected = table.Column<string>(type: "TEXT", nullable: false),
-                    CreatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    ConcurrencyToken = table.Column<Guid>(type: "TEXT", nullable: false)
+                    Id = table.Column<int>(type: "integer", nullable: false),
+                    PfxProtected = table.Column<string>(type: "text", nullable: false),
+                    CreatedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    ConcurrencyToken = table.Column<Guid>(type: "uuid", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -104,34 +106,22 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 });
 
             migrationBuilder.CreateTable(
-                name: "SettingsStamps",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false),
-                    Version = table.Column<Guid>(type: "TEXT", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_SettingsStamps", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "Users",
                 columns: table => new
                 {
-                    UserId = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    Login = table.Column<string>(type: "TEXT", nullable: false),
-                    Declared = table.Column<bool>(type: "INTEGER", nullable: false),
-                    Password = table.Column<string>(type: "TEXT", nullable: true),
-                    DefaultBackendLogin = table.Column<string>(type: "TEXT", nullable: true),
-                    DefaultBackendPassword = table.Column<string>(type: "TEXT", nullable: true),
-                    MailAddress = table.Column<string>(type: "TEXT", nullable: true),
-                    Admin = table.Column<bool>(type: "INTEGER", nullable: true),
-                    Enabled = table.Column<bool>(type: "INTEGER", nullable: true),
-                    OidcSubject = table.Column<string>(type: "TEXT", nullable: true),
-                    AutoProvisioned = table.Column<bool>(type: "INTEGER", nullable: true),
-                    UpdatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    UserId = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    Login = table.Column<string>(type: "text", nullable: false),
+                    Declared = table.Column<bool>(type: "boolean", nullable: false),
+                    Password = table.Column<string>(type: "text", nullable: true),
+                    DefaultBackendLogin = table.Column<string>(type: "text", nullable: true),
+                    DefaultBackendPassword = table.Column<string>(type: "text", nullable: true),
+                    MailAddress = table.Column<string>(type: "text", nullable: true),
+                    Admin = table.Column<bool>(type: "boolean", nullable: true),
+                    Enabled = table.Column<bool>(type: "boolean", nullable: true),
+                    OidcSubject = table.Column<string>(type: "text", nullable: true),
+                    AutoProvisioned = table.Column<bool>(type: "boolean", nullable: true),
+                    UpdatedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -142,23 +132,23 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "Devices",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<int>(type: "INTEGER", nullable: false),
-                    DeviceId = table.Column<string>(type: "TEXT", nullable: false),
-                    DeviceType = table.Column<string>(type: "TEXT", nullable: false),
-                    PolicyKey = table.Column<uint>(type: "INTEGER", nullable: false),
-                    PolicyDocHash = table.Column<string>(type: "TEXT", nullable: true),
-                    RecoveryPasswordProtected = table.Column<string>(type: "TEXT", nullable: true),
-                    PendingAccountWipe = table.Column<bool>(type: "INTEGER", nullable: false),
-                    LastProtocolVersion = table.Column<string>(type: "TEXT", nullable: true),
-                    FolderSyncKey = table.Column<int>(type: "INTEGER", nullable: false),
-                    DeviceInfoJson = table.Column<string>(type: "TEXT", nullable: true),
-                    PingParamsJson = table.Column<string>(type: "TEXT", nullable: true),
-                    LastSyncRequestJson = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    LastSeenUtc = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    ConcurrencyToken = table.Column<Guid>(type: "TEXT", nullable: false)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    DeviceId = table.Column<string>(type: "text", nullable: false),
+                    DeviceType = table.Column<string>(type: "text", nullable: false),
+                    PolicyKey = table.Column<long>(type: "bigint", nullable: false),
+                    PolicyDocHash = table.Column<string>(type: "text", nullable: true),
+                    RecoveryPasswordProtected = table.Column<string>(type: "text", nullable: true),
+                    PendingAccountWipe = table.Column<bool>(type: "boolean", nullable: false),
+                    LastProtocolVersion = table.Column<string>(type: "text", nullable: true),
+                    FolderSyncKey = table.Column<int>(type: "integer", nullable: false),
+                    DeviceInfoJson = table.Column<string>(type: "text", nullable: true),
+                    PingParamsJson = table.Column<string>(type: "text", nullable: true),
+                    LastSyncRequestJson = table.Column<string>(type: "text", nullable: true),
+                    CreatedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    LastSeenUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    ConcurrencyToken = table.Column<Guid>(type: "uuid", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -175,16 +165,16 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "LocalItems",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<int>(type: "INTEGER", nullable: false),
-                    Collection = table.Column<string>(type: "TEXT", nullable: false),
-                    Uid = table.Column<string>(type: "TEXT", nullable: false),
-                    Content = table.Column<string>(type: "TEXT", nullable: false),
-                    Version = table.Column<int>(type: "INTEGER", nullable: false),
-                    ItemDateUtc = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    LastModifiedUtc = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    ConcurrencyToken = table.Column<Guid>(type: "TEXT", nullable: false)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    Collection = table.Column<string>(type: "text", nullable: false),
+                    Uid = table.Column<string>(type: "text", nullable: false),
+                    Content = table.Column<string>(type: "text", nullable: false),
+                    Version = table.Column<int>(type: "integer", nullable: false),
+                    ItemDateUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    LastModifiedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    ConcurrencyToken = table.Column<Guid>(type: "uuid", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -201,11 +191,11 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "LoginBlocks",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<int>(type: "INTEGER", nullable: false),
-                    DeviceId = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    DeviceId = table.Column<string>(type: "text", nullable: true),
+                    CreatedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -222,16 +212,16 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "OofSettings",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<int>(type: "INTEGER", nullable: false),
-                    State = table.Column<int>(type: "INTEGER", nullable: false),
-                    StartUtc = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    EndUtc = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    Message = table.Column<string>(type: "TEXT", nullable: false),
-                    BodyType = table.Column<string>(type: "TEXT", nullable: false),
-                    PreviousActiveScript = table.Column<string>(type: "TEXT", nullable: true),
-                    UpdatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    State = table.Column<int>(type: "integer", nullable: false),
+                    StartUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    EndUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    Message = table.Column<string>(type: "text", nullable: false),
+                    BodyType = table.Column<string>(type: "text", nullable: false),
+                    PreviousActiveScript = table.Column<string>(type: "text", nullable: true),
+                    UpdatedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -248,12 +238,12 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "SharedCalendarGrants",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<int>(type: "INTEGER", nullable: false),
-                    CollectionHref = table.Column<string>(type: "TEXT", nullable: false),
-                    ReadOnly = table.Column<bool>(type: "INTEGER", nullable: false),
-                    CreatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    CollectionHref = table.Column<string>(type: "text", nullable: false),
+                    ReadOnly = table.Column<bool>(type: "boolean", nullable: false),
+                    CreatedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -270,15 +260,15 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "UserBackendRoles",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<int>(type: "INTEGER", nullable: false),
-                    Role = table.Column<string>(type: "TEXT", nullable: false),
-                    Enabled = table.Column<bool>(type: "INTEGER", nullable: true),
-                    Provider = table.Column<string>(type: "TEXT", nullable: true),
-                    UserName = table.Column<string>(type: "TEXT", nullable: true),
-                    Password = table.Column<string>(type: "TEXT", nullable: true),
-                    SettingsJson = table.Column<string>(type: "TEXT", nullable: true)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    Role = table.Column<string>(type: "text", nullable: false),
+                    Enabled = table.Column<bool>(type: "boolean", nullable: true),
+                    Provider = table.Column<string>(type: "text", nullable: true),
+                    UserName = table.Column<string>(type: "text", nullable: true),
+                    Password = table.Column<string>(type: "text", nullable: true),
+                    SettingsJson = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -295,16 +285,16 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "UserFolders",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<int>(type: "INTEGER", nullable: false),
-                    BackendKey = table.Column<string>(type: "TEXT", nullable: false),
-                    DisplayName = table.Column<string>(type: "TEXT", nullable: false),
-                    ParentBackendKey = table.Column<string>(type: "TEXT", nullable: true),
-                    Type = table.Column<int>(type: "INTEGER", nullable: false),
-                    EasClass = table.Column<string>(type: "TEXT", nullable: false),
-                    Deleted = table.Column<bool>(type: "INTEGER", nullable: false),
-                    DeletedUtc = table.Column<DateTime>(type: "TEXT", nullable: true)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    BackendKey = table.Column<string>(type: "text", nullable: false),
+                    DisplayName = table.Column<string>(type: "text", nullable: false),
+                    ParentBackendKey = table.Column<string>(type: "text", nullable: true),
+                    Type = table.Column<int>(type: "integer", nullable: false),
+                    EasClass = table.Column<string>(type: "text", nullable: false),
+                    Deleted = table.Column<bool>(type: "boolean", nullable: false),
+                    DeletedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -321,10 +311,10 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "WebSessionRevocations",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<int>(type: "INTEGER", nullable: false),
-                    ValidAfterUtc = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    ValidAfterUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -341,19 +331,19 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "CollectionStates",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    DeviceKey = table.Column<int>(type: "INTEGER", nullable: false),
-                    CollectionId = table.Column<string>(type: "TEXT", nullable: false),
-                    SyncKey = table.Column<int>(type: "INTEGER", nullable: false),
-                    SnapshotCompressed = table.Column<byte[]>(type: "BLOB", nullable: true),
-                    PreviousSnapshotCompressed = table.Column<byte[]>(type: "BLOB", nullable: true),
-                    LastClientAddsJson = table.Column<string>(type: "TEXT", nullable: true),
-                    LastClientChangesJson = table.Column<string>(type: "TEXT", nullable: true),
-                    FilterType = table.Column<int>(type: "INTEGER", nullable: false),
-                    OptionsJson = table.Column<string>(type: "TEXT", nullable: true),
-                    UpdatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    ConcurrencyToken = table.Column<Guid>(type: "TEXT", nullable: false)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    DeviceKey = table.Column<int>(type: "integer", nullable: false),
+                    CollectionId = table.Column<string>(type: "text", nullable: false),
+                    SyncKey = table.Column<int>(type: "integer", nullable: false),
+                    SnapshotCompressed = table.Column<byte[]>(type: "bytea", nullable: true),
+                    PreviousSnapshotCompressed = table.Column<byte[]>(type: "bytea", nullable: true),
+                    LastClientAddsJson = table.Column<string>(type: "text", nullable: true),
+                    LastClientChangesJson = table.Column<string>(type: "text", nullable: true),
+                    FilterType = table.Column<int>(type: "integer", nullable: false),
+                    OptionsJson = table.Column<string>(type: "text", nullable: true),
+                    UpdatedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    ConcurrencyToken = table.Column<Guid>(type: "uuid", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -370,13 +360,13 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "DeviceFolders",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    DeviceKey = table.Column<int>(type: "INTEGER", nullable: false),
-                    ServerId = table.Column<string>(type: "TEXT", nullable: false),
-                    DisplayName = table.Column<string>(type: "TEXT", nullable: false),
-                    ParentServerId = table.Column<string>(type: "TEXT", nullable: true),
-                    Type = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    DeviceKey = table.Column<int>(type: "integer", nullable: false),
+                    ServerId = table.Column<string>(type: "text", nullable: false),
+                    DisplayName = table.Column<string>(type: "text", nullable: false),
+                    ParentServerId = table.Column<string>(type: "text", nullable: true),
+                    Type = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -393,10 +383,10 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "DavItems",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    UserFolderKey = table.Column<int>(type: "INTEGER", nullable: false),
-                    Href = table.Column<string>(type: "TEXT", nullable: false)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    UserFolderKey = table.Column<int>(type: "integer", nullable: false),
+                    Href = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -508,10 +498,10 @@ namespace ActiveSync.Core.Migrations.Sqlite
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
-                name: "AccountsStamps");
+                name: "CollectionStates");
 
             migrationBuilder.DropTable(
-                name: "CollectionStates");
+                name: "DataChanges");
 
             migrationBuilder.DropTable(
                 name: "DataProtectionKeys");
@@ -542,9 +532,6 @@ namespace ActiveSync.Core.Migrations.Sqlite
 
             migrationBuilder.DropTable(
                 name: "ServerCertificates");
-
-            migrationBuilder.DropTable(
-                name: "SettingsStamps");
 
             migrationBuilder.DropTable(
                 name: "SharedCalendarGrants");

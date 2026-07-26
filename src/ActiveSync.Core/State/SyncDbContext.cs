@@ -21,9 +21,8 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	public DbSet<LoginBlock> LoginBlocks => Set<LoginBlock>();
 	public DbSet<User> Users => Set<User>();
 	public DbSet<UserBackendRole> UserBackendRoles => Set<UserBackendRole>();
-	public DbSet<AccountsStamp> AccountsStamps => Set<AccountsStamp>();
 	public DbSet<GlobalSetting> GlobalSettings => Set<GlobalSetting>();
-	public DbSet<SettingsStamp> SettingsStamps => Set<SettingsStamp>();
+	public DbSet<DataChange> DataChanges => Set<DataChange>();
 	public DbSet<LogEntry> LogEntries => Set<LogEntry>();
 	public DbSet<ServerCertificate> ServerCertificates => Set<ServerCertificate>();
 	public DbSet<DataProtectionKeyEntry> DataProtectionKeys => Set<DataProtectionKeyEntry>();
@@ -103,17 +102,13 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 		modelBuilder.Entity<UserBackendRole>(e =>
 			e.HasIndex(r => new { r.UserId, r.Role }).IsUnique());
 
-		// Deliberately no identity column: the CLI writes Id=1 explicitly so the stamp
-		// stays a single well-known row on both providers.
-		modelBuilder.Entity<AccountsStamp>(e =>
-			e.Property(s => s.Id).ValueGeneratedNever());
-
 		modelBuilder.Entity<GlobalSetting>(e =>
 			e.HasIndex(s => s.Key).IsUnique());
 
-		// Single well-known row (Id=1), same explicit-key idiom as AccountsStamp.
-		modelBuilder.Entity<SettingsStamp>(e =>
-			e.Property(s => s.Id).ValueGeneratedNever());
+		// The area string IS the identity — one row per watched area. No surrogate id, so the
+		// "one row per area" rule is a constraint rather than a convention, and the primary-key
+		// conflict is what serializes two replicas racing to create the same area's first row.
+		modelBuilder.Entity<DataChange>(e => e.HasKey(c => c.Key));
 
 		// Indexed by time for the `eas logs` window queries and the retention sweep.
 		modelBuilder.Entity<LogEntry>(e =>

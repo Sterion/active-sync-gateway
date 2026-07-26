@@ -6,22 +6,17 @@ namespace ActiveSync.Core.Settings;
 
 /// <summary>
 ///   CRUD over database-stored global settings (<see cref="GlobalSetting" /> rows: a full
-///   configuration path → string value). Every mutation bumps the single
-///   <see cref="SettingsStamp" /> row IN THE SAME SaveChanges, so each running gateway notices
+///   configuration path → string value). Every mutation bumps the <c>"settings"</c>
+///   <see cref="DataChange" /> row IN THE SAME SaveChanges, so each running gateway notices
 ///   changes with one primary-key point-read — the same idiom as
 ///   <see cref="ActiveSync.Core.Accounts.UserStore" />. Registered as a singleton; used by the
 ///   CLI (writes) and the server's <see cref="SettingsRefresher" /> (reads).
 /// </summary>
 public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)
 {
-	/// <summary>Current change stamp, or null when no setting was ever written.</summary>
-	public async Task<Guid?> ReadStampAsync(CancellationToken ct)
-	{
-		await using SyncDbContext db = contextFactory.CreateDbContext();
-		SettingsStamp? stamp = await db.SettingsStamps.AsNoTracking()
-			.FirstOrDefaultAsync(s => s.Id == 1, ct).ConfigureAwait(false);
-		return stamp?.Version;
-	}
+	/// <summary>Current change stamp of the "settings" area, or null when nothing was ever written.</summary>
+	public Task<Guid?> ReadStampAsync(CancellationToken ct) =>
+		DataChangeStamps.ReadAsync(contextFactory, DataChangeAreas.Settings, ct);
 
 	/// <summary>All settings as a config-key → value map (case-insensitive keys, like configuration).</summary>
 	public async Task<Dictionary<string, string?>> LoadAllAsync(CancellationToken ct)
@@ -99,18 +94,6 @@ public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)
 		return true;
 	}
 
-	private static async Task BumpStampAsync(SyncDbContext db, CancellationToken ct)
-	{
-		SettingsStamp? stamp = await db.SettingsStamps
-			.FirstOrDefaultAsync(s => s.Id == 1, ct).ConfigureAwait(false);
-		if (stamp is null)
-		{
-			// DbSet.Add false positive for VSTHRD103 — see UpsertAsync above.
-#pragma warning disable VSTHRD103
-			db.SettingsStamps.Add(new SettingsStamp { Id = 1, Version = Guid.NewGuid() });
-#pragma warning restore VSTHRD103
-		}
-		else
-			stamp.Version = Guid.NewGuid();
-	}
+	private static Task BumpStampAsync(SyncDbContext db, CancellationToken ct) =>
+		DataChangeStamps.BumpAsync(db, DataChangeAreas.Settings, ct);
 }

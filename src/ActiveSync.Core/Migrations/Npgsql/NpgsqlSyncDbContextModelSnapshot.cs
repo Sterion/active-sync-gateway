@@ -22,19 +22,6 @@ namespace ActiveSync.Core.Migrations.Npgsql
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("ActiveSync.Core.State.AccountsStamp", b =>
-                {
-                    b.Property<int>("Id")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("Version")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("AccountsStamps");
-                });
-
             modelBuilder.Entity("ActiveSync.Core.State.CollectionState", b =>
                 {
                     b.Property<int>("Id")
@@ -84,6 +71,22 @@ namespace ActiveSync.Core.Migrations.Npgsql
                         .IsUnique();
 
                     b.ToTable("CollectionStates");
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.DataChange", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("Version")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("DataChanges");
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.DataProtectionKeyEntry", b =>
@@ -455,19 +458,6 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.HasKey("Id");
 
                     b.ToTable("ServerCertificates");
-                });
-
-            modelBuilder.Entity("ActiveSync.Core.State.SettingsStamp", b =>
-                {
-                    b.Property<int>("Id")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("Version")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("SettingsStamps");
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.SharedCalendarGrant", b =>

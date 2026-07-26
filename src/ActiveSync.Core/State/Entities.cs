@@ -388,13 +388,38 @@ public class UserBackendRole
 }
 
 /// <summary>
-///   Single-row change signal (Id always 1): every account mutation bumps Version in the
-///   same SaveChanges, and each gateway replica point-reads it to notice changes cheaply.
+///   The change signal every replica point-reads (~1 s) to notice edits without re-reading
+///   everything: one row per WATCHED AREA, keyed by a string (<c>"users"</c>, <c>"settings"</c>),
+///   whose <see cref="Version" /> is bumped in the SAME SaveChanges as the mutation.
+///   <para>
+///     One row per area, NEVER one row total: a shared version would make a user write
+///     invalidate the settings snapshot and vice versa, so every consumer would reload on every
+///     unrelated change. On PostgreSQL the distinct rows are also distinct row locks.
+///   </para>
+///   <para>
+///     A stamp belongs to a CONSUMER'S AGGREGATE, not to a table — <c>UserBackendRoles</c> writes
+///     bump <c>"users"</c> because the resolver rebuilds the whole user snapshot anyway. Getting
+///     that backwards yields one stamp per table and a resolver that reloads several times for one
+///     logical change. Adding a watched area later is an inserted row, not a migration.
+///   </para>
 /// </summary>
-public class AccountsStamp
+public class DataChange
 {
-	public int Id { get; set; }
+	/// <summary>The watched area — the primary key (see <see cref="DataChangeAreas" />).</summary>
+	public required string Key { get; set; }
+
 	public Guid Version { get; set; }
+	public DateTime UpdatedUtc { get; set; }
+}
+
+/// <summary>The watched areas of <see cref="DataChange" /> — one constant per consumer aggregate.</summary>
+public static class DataChangeAreas
+{
+	/// <summary>Users: declarations and their per-role overrides (the resolver's snapshot).</summary>
+	public const string Users = "users";
+
+	/// <summary>Global settings (the DB configuration layer).</summary>
+	public const string Settings = "settings";
 }
 
 /// <summary>
@@ -411,17 +436,6 @@ public class GlobalSetting
 	public required string Key { get; set; }
 	public required string Value { get; set; }
 	public DateTime UpdatedUtc { get; set; }
-}
-
-/// <summary>
-///   Single-row change signal (Id always 1) for <see cref="GlobalSetting" />: every settings
-///   mutation bumps Version in the same SaveChanges, and each gateway replica point-reads it to
-///   notice CLI/admin changes cheaply — the same idiom as <see cref="AccountsStamp" />.
-/// </summary>
-public class SettingsStamp
-{
-	public int Id { get; set; }
-	public Guid Version { get; set; }
 }
 
 /// <summary>

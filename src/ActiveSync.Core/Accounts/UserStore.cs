@@ -12,8 +12,8 @@ namespace ActiveSync.Core.Accounts;
 ///   immutable <see cref="User.UserId" /> everything per-user hangs off) and, when
 ///   <see cref="User.Declared" /> is set, a database DECLARATION. Identity-only rows exist for
 ///   every login that ever authenticated — including config-declared ones — without shadowing
-///   configuration. Every declaration mutation bumps the single <see cref="AccountsStamp" /> row
-///   IN THE SAME SaveChanges, so each running gateway notices changes with one primary-key
+///   configuration. Every declaration mutation bumps the <c>"users"</c> <see cref="DataChange" />
+///   row IN THE SAME SaveChanges, so each running gateway notices changes with one primary-key
 ///   point-read. Registered as a singleton.
 ///   <para>
 ///     <see cref="UserOptions" /> remains the in-memory and config-bound shape (it is what
@@ -108,14 +108,9 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 		}
 	}
 
-	/// <summary>Current change stamp, or null when no account mutation was ever written.</summary>
-	public async Task<Guid?> ReadStampAsync(CancellationToken ct)
-	{
-		await using SyncDbContext db = contextFactory.CreateDbContext();
-		AccountsStamp? stamp = await db.AccountsStamps.AsNoTracking()
-			.FirstOrDefaultAsync(s => s.Id == 1, ct).ConfigureAwait(false);
-		return stamp?.Version;
-	}
+	/// <summary>Current change stamp of the "users" area, or null when nothing was ever written.</summary>
+	public Task<Guid?> ReadStampAsync(CancellationToken ct) =>
+		DataChangeStamps.ReadAsync(contextFactory, DataChangeAreas.Users, ct);
 
 	/// <summary>
 	///   All database DECLARATIONS keyed by login (case-insensitive, like config Users) —
@@ -364,18 +359,11 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 		entity.AutoProvisioned = null;
 	}
 
-	private static async Task BumpStampAsync(SyncDbContext db, CancellationToken ct)
-	{
-		AccountsStamp? stamp = await db.AccountsStamps
-			.FirstOrDefaultAsync(s => s.Id == 1, ct).ConfigureAwait(false);
-		if (stamp is null)
-		{
-			// DbSet.Add false positive for VSTHRD103 — see UpsertAsync above.
-#pragma warning disable VSTHRD103
-			db.AccountsStamps.Add(new AccountsStamp { Id = 1, Version = Guid.NewGuid() });
-#pragma warning restore VSTHRD103
-		}
-		else
-			stamp.Version = Guid.NewGuid();
-	}
+	/// <summary>
+	///   Bumps the "users" area. A UserBackendRoles write bumps this SAME area rather than getting
+	///   its own: a stamp belongs to a consumer's aggregate, and the resolver rebuilds the whole
+	///   user snapshot on any bump.
+	/// </summary>
+	private static Task BumpStampAsync(SyncDbContext db, CancellationToken ct) =>
+		DataChangeStamps.BumpAsync(db, DataChangeAreas.Users, ct);
 }
