@@ -148,19 +148,22 @@ public sealed class UserStoreTests : IDisposable
 	}
 
 	[Fact]
-	public async Task MalformedRow_IsSkipped_OthersSurvive()
+	public async Task MalformedSettingsBlob_OnlyDropsThatRolesSettings_UserSurvives()
 	{
+		// Normalising the shape (item 3) NARROWS the corrupt-row guard: every scalar is now a
+		// typed column, so the only thing that can fail to parse is one role's Settings blob.
+		// That role's settings are dropped with a warning; the user's typed columns — including
+		// the gateway password auth depends on — still apply.
 		await _store.UpsertAsync("good", new UserOptions { Password = "pw1" }, CancellationToken.None);
+		await _store.UpsertAsync("partly", new UserOptions
+		{
+			Password = "pw2",
+			Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { UserName = "keep-me" } },
+		}, CancellationToken.None);
 		await using (SyncDbContext db = _factory.CreateDbContext())
 		{
-			// DbSet.Add is synchronous and local (no I/O) — AddAsync exists only to support
-			// async value generators (e.g. HiLo/Cosmos), which this project doesn't use.
-#pragma warning disable VSTHRD103
-			db.Users.Add(new User
-			{
-				Login = "broken", Json = "{not json", UpdatedUtc = DateTime.UtcNow,
-			});
-#pragma warning restore VSTHRD103
+			UserBackendRole role = await db.UserBackendRoles.SingleAsync(r => r.Role == "MailStore");
+			role.SettingsJson = "{not json";
 			await db.SaveChangesAsync();
 		}
 
@@ -168,7 +171,12 @@ public sealed class UserStoreTests : IDisposable
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
 		Assert.True(resolver.VerifyLocally("good", "pw1"));
-		Assert.False(resolver.MergedUsers.ContainsKey("broken"));
+		// The corrupt blob did NOT take the user down: they are still declared, still
+		// authenticate locally, and the role's typed columns survived.
+		Assert.True(resolver.VerifyLocally("partly", "pw2"));
+		UserOptions? reread = await _store.GetAsync("partly", CancellationToken.None);
+		Assert.Equal("keep-me", reread!.Backends!["MailStore"].UserName);
+		Assert.Null(reread.Backends["MailStore"].Settings);
 	}
 
 	[Fact]
@@ -265,25 +273,28 @@ public sealed class UserStoreTests : IDisposable
 	}
 
 	[Fact]
-	public async Task GetAndList_TolerateUnparseableRow_InsteadOfThrowing()
+	public async Task GetAndList_TolerateAnUnparseableSettingsBlob_InsteadOfThrowing()
 	{
-		// B15: LoadAllAsync tolerated a bad row ("one bad row must never take auth down") but
-		// GetAsync/ListAsync deserialized bare, so `eas user show`/`eas users`/the admin list
-		// hard-failed with JsonException — the very tools for finding the bad row.
+		// B15: every read path must tolerate the one remaining blob — `eas user show`/`eas users`/
+		// the admin list are the very tools for finding the bad row, so they must render it
+		// FLAGGED rather than hard-failing with JsonException.
 		await _store.UpsertAsync("good", new UserOptions { MailAddress = "g@x" }, CancellationToken.None);
+		await _store.UpsertAsync("broken", new UserOptions
+		{
+			MailAddress = "b@x",
+			Backends = new Dictionary<string, BackendRoleOverride> { ["Calendar"] = new() { Provider = "caldav" } },
+		}, CancellationToken.None);
 		await using (SyncDbContext db = _factory.CreateDbContext())
 		{
-#pragma warning disable VSTHRD103
-			db.Users.Add(new User
-			{
-				Login = "broken", Json = "{not json", UpdatedUtc = DateTime.UtcNow,
-			});
-#pragma warning restore VSTHRD103
+			UserBackendRole role = await db.UserBackendRoles.SingleAsync(r => r.Role == "Calendar");
+			role.SettingsJson = "{not json";
 			await db.SaveChangesAsync();
 		}
 
-		// GetAsync: a bad row is tolerated (null), a good one still round-trips.
-		Assert.Null(await _store.GetAsync("broken", CancellationToken.None));
+		// GetAsync: the typed columns still round-trip; only the unparseable settings are dropped.
+		UserOptions? broken = await _store.GetAsync("broken", CancellationToken.None);
+		Assert.Equal("b@x", broken!.MailAddress);
+		Assert.Equal("caldav", broken.Backends!["Calendar"].Provider);
 		Assert.Equal("g@x", (await _store.GetAsync("good", CancellationToken.None))?.MailAddress);
 
 		// ListAsync: the bad row is SURFACED (flagged invalid), never omitted or thrown on.
@@ -354,8 +365,8 @@ public sealed class UserStoreTests : IDisposable
 		await using (SyncDbContext db = _factory.CreateDbContext())
 		{
 #pragma warning disable VSTHRD103
-			db.Users.Add(new User { Login = "phone1", Json = "{}", UpdatedUtc = DateTime.UtcNow });
-			db.Users.Add(new User { Login = "Phone1", Json = "{}", UpdatedUtc = DateTime.UtcNow });
+			db.Users.Add(new User { Login = "phone1", Declared = true, UpdatedUtc = DateTime.UtcNow });
+			db.Users.Add(new User { Login = "Phone1", Declared = true, UpdatedUtc = DateTime.UtcNow });
 #pragma warning restore VSTHRD103
 			await db.SaveChangesAsync();
 		}

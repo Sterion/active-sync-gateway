@@ -476,11 +476,35 @@ namespace ActiveSync.Core.Migrations.Sqlite
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("Json")
+                    b.Property<bool?>("Admin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool?>("AutoProvisioned")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Declared")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DefaultBackendLogin")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("DefaultBackendPassword")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool?>("Enabled")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Login")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MailAddress")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OidcSubject")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Password")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedUtc")
@@ -491,7 +515,46 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.HasIndex("Login")
                         .IsUnique();
 
+                    b.HasIndex("OidcSubject")
+                        .IsUnique();
+
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.UserBackendRole", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool?>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Password")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Provider")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SettingsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UserName")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Role")
+                        .IsUnique();
+
+                    b.ToTable("UserBackendRoles");
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.UserFolder", b =>
@@ -641,6 +704,17 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ActiveSync.Core.State.UserBackendRole", b =>
+                {
+                    b.HasOne("ActiveSync.Core.State.User", "User")
+                        .WithMany("BackendRoles")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("ActiveSync.Core.State.UserFolder", b =>
                 {
                     b.HasOne("ActiveSync.Core.State.User", "User")
@@ -666,6 +740,11 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     b.Navigation("Collections");
 
                     b.Navigation("Folders");
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.User", b =>
+                {
+                    b.Navigation("BackendRoles");
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.UserFolder", b =>

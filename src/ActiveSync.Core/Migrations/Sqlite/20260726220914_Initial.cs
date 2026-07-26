@@ -122,7 +122,15 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     UserId = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
                     Login = table.Column<string>(type: "TEXT", nullable: false),
-                    Json = table.Column<string>(type: "TEXT", nullable: true),
+                    Declared = table.Column<bool>(type: "INTEGER", nullable: false),
+                    Password = table.Column<string>(type: "TEXT", nullable: true),
+                    DefaultBackendLogin = table.Column<string>(type: "TEXT", nullable: true),
+                    DefaultBackendPassword = table.Column<string>(type: "TEXT", nullable: true),
+                    MailAddress = table.Column<string>(type: "TEXT", nullable: true),
+                    Admin = table.Column<bool>(type: "INTEGER", nullable: true),
+                    Enabled = table.Column<bool>(type: "INTEGER", nullable: true),
+                    OidcSubject = table.Column<string>(type: "TEXT", nullable: true),
+                    AutoProvisioned = table.Column<bool>(type: "INTEGER", nullable: true),
                     UpdatedUtc = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
@@ -252,6 +260,31 @@ namespace ActiveSync.Core.Migrations.Sqlite
                     table.PrimaryKey("PK_SharedCalendarGrants", x => x.Id);
                     table.ForeignKey(
                         name: "FK_SharedCalendarGrants_Users_UserId",
+                        column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "UserId",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "UserBackendRoles",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    UserId = table.Column<int>(type: "INTEGER", nullable: false),
+                    Role = table.Column<string>(type: "TEXT", nullable: false),
+                    Enabled = table.Column<bool>(type: "INTEGER", nullable: true),
+                    Provider = table.Column<string>(type: "TEXT", nullable: true),
+                    UserName = table.Column<string>(type: "TEXT", nullable: true),
+                    Password = table.Column<string>(type: "TEXT", nullable: true),
+                    SettingsJson = table.Column<string>(type: "TEXT", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_UserBackendRoles", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_UserBackendRoles_Users_UserId",
                         column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "UserId",
@@ -441,6 +474,12 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_UserBackendRoles_UserId_Role",
+                table: "UserBackendRoles",
+                columns: new[] { "UserId", "Role" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_UserFolders_UserId_BackendKey",
                 table: "UserFolders",
                 columns: new[] { "UserId", "BackendKey" },
@@ -450,6 +489,12 @@ namespace ActiveSync.Core.Migrations.Sqlite
                 name: "IX_Users_Login",
                 table: "Users",
                 column: "Login",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Users_OidcSubject",
+                table: "Users",
+                column: "OidcSubject",
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -503,6 +548,9 @@ namespace ActiveSync.Core.Migrations.Sqlite
 
             migrationBuilder.DropTable(
                 name: "SharedCalendarGrants");
+
+            migrationBuilder.DropTable(
+                name: "UserBackendRoles");
 
             migrationBuilder.DropTable(
                 name: "WebSessionRevocations");

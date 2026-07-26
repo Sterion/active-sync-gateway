@@ -55,6 +55,27 @@ public sealed class UserOptions
 	public string? Password { get; set; }
 
 	/// <summary>
+	///   GATEWAY → BACKENDS: the default backend user name for EVERY role, overriding the
+	///   implicit "gateway login" default. A per-role <see cref="BackendRoleOverride.UserName" />
+	///   still wins over it. When unset, the gateway login is used exactly as before.
+	/// </summary>
+	public string? DefaultBackendLogin { get; set; }
+
+	/// <summary>
+	///   GATEWAY → BACKENDS: the default backend secret for EVERY role (plaintext or
+	///   "enc:v1:..." sealed), overriding the implicit "presented EAS password" default. A
+	///   per-role <see cref="BackendRoleOverride.Password" /> still wins over it.
+	///   <para>
+	///     When unset the presented EAS password is forwarded — pass-through, unchanged. That
+	///     fallback is the zero-administration baseline and must not regress. This field exists
+	///     because the implicit chain only works while the device credential IS the mail
+	///     password: decouple it (a gateway <see cref="Password" />, an app password, an external
+	///     IdP) and pass-through has nothing left to forward.
+	///   </para>
+	/// </summary>
+	public string? DefaultBackendPassword { get; set; }
+
+	/// <summary>
 	///   The user's mail address, used for From rewriting, Settings and meeting replies.
 	///   When null, the gateway login is used if it contains '@'.
 	/// </summary>

@@ -123,7 +123,15 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     UserId = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     Login = table.Column<string>(type: "text", nullable: false),
-                    Json = table.Column<string>(type: "text", nullable: true),
+                    Declared = table.Column<bool>(type: "boolean", nullable: false),
+                    Password = table.Column<string>(type: "text", nullable: true),
+                    DefaultBackendLogin = table.Column<string>(type: "text", nullable: true),
+                    DefaultBackendPassword = table.Column<string>(type: "text", nullable: true),
+                    MailAddress = table.Column<string>(type: "text", nullable: true),
+                    Admin = table.Column<bool>(type: "boolean", nullable: true),
+                    Enabled = table.Column<bool>(type: "boolean", nullable: true),
+                    OidcSubject = table.Column<string>(type: "text", nullable: true),
+                    AutoProvisioned = table.Column<bool>(type: "boolean", nullable: true),
                     UpdatedUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
@@ -253,6 +261,31 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     table.PrimaryKey("PK_SharedCalendarGrants", x => x.Id);
                     table.ForeignKey(
                         name: "FK_SharedCalendarGrants_Users_UserId",
+                        column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "UserId",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "UserBackendRoles",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    Role = table.Column<string>(type: "text", nullable: false),
+                    Enabled = table.Column<bool>(type: "boolean", nullable: true),
+                    Provider = table.Column<string>(type: "text", nullable: true),
+                    UserName = table.Column<string>(type: "text", nullable: true),
+                    Password = table.Column<string>(type: "text", nullable: true),
+                    SettingsJson = table.Column<string>(type: "text", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_UserBackendRoles", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_UserBackendRoles_Users_UserId",
                         column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "UserId",
@@ -442,6 +475,12 @@ namespace ActiveSync.Core.Migrations.Npgsql
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_UserBackendRoles_UserId_Role",
+                table: "UserBackendRoles",
+                columns: new[] { "UserId", "Role" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_UserFolders_UserId_BackendKey",
                 table: "UserFolders",
                 columns: new[] { "UserId", "BackendKey" },
@@ -451,6 +490,12 @@ namespace ActiveSync.Core.Migrations.Npgsql
                 name: "IX_Users_Login",
                 table: "Users",
                 column: "Login",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Users_OidcSubject",
+                table: "Users",
+                column: "OidcSubject",
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -504,6 +549,9 @@ namespace ActiveSync.Core.Migrations.Npgsql
 
             migrationBuilder.DropTable(
                 name: "SharedCalendarGrants");
+
+            migrationBuilder.DropTable(
+                name: "UserBackendRoles");
 
             migrationBuilder.DropTable(
                 name: "WebSessionRevocations");

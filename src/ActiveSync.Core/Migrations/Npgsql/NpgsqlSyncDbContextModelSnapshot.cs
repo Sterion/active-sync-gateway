@@ -507,11 +507,35 @@ namespace ActiveSync.Core.Migrations.Npgsql
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("UserId"));
 
-                    b.Property<string>("Json")
+                    b.Property<bool?>("Admin")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool?>("AutoProvisioned")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Declared")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("DefaultBackendLogin")
                         .HasColumnType("text");
+
+                    b.Property<string>("DefaultBackendPassword")
+                        .HasColumnType("text");
+
+                    b.Property<bool?>("Enabled")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Login")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("MailAddress")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OidcSubject")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Password")
                         .HasColumnType("text");
 
                     b.Property<DateTime>("UpdatedUtc")
@@ -522,7 +546,48 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.HasIndex("Login")
                         .IsUnique();
 
+                    b.HasIndex("OidcSubject")
+                        .IsUnique();
+
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.UserBackendRole", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool?>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Password")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Provider")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SettingsJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UserName")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Role")
+                        .IsUnique();
+
+                    b.ToTable("UserBackendRoles");
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.UserFolder", b =>
@@ -676,6 +741,17 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ActiveSync.Core.State.UserBackendRole", b =>
+                {
+                    b.HasOne("ActiveSync.Core.State.User", "User")
+                        .WithMany("BackendRoles")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("ActiveSync.Core.State.UserFolder", b =>
                 {
                     b.HasOne("ActiveSync.Core.State.User", "User")
@@ -701,6 +777,11 @@ namespace ActiveSync.Core.Migrations.Npgsql
                     b.Navigation("Collections");
 
                     b.Navigation("Folders");
+                });
+
+            modelBuilder.Entity("ActiveSync.Core.State.User", b =>
+                {
+                    b.Navigation("BackendRoles");
                 });
 
             modelBuilder.Entity("ActiveSync.Core.State.UserFolder", b =>

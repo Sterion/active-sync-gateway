@@ -284,11 +284,17 @@ public class SharedCalendarGrant
 ///   One gateway user — THE identity record. <see cref="UserId" /> is the immutable surrogate
 ///   key everything per-user hangs off (sync state, local items, blocks, grants, the encryption
 ///   AAD); it is NEVER reused. <see cref="Login" /> is the identity string the phone sends — a
-///   mutable, unique, case-folded attribute. <see cref="Json" /> optionally holds the serialized
-///   ActiveSync.Core.Options.UserOptions declaration (secrets stored exactly as config would
-///   hold them: pbkdf2$/plaintext/enc:v1:); null = an identity-only row (the user exists — e.g.
-///   it authenticated while declared in configuration — but the database declares nothing, so
-///   the resolver ignores it and config keeps supplying the values).
+///   mutable, unique, case-folded attribute.
+///   <para>
+///     Every scalar of the user DECLARATION is a real column (there is no serialized blob left
+///     here): a malformed scalar is impossible, and "which users are admins / disabled / bound to
+///     this OIDC subject" are real queries rather than a full-table deserialize. Secrets are
+///     stored exactly as configuration would hold them — <c>pbkdf2$…</c> for the gateway password,
+///     <c>enc:v1:…</c> (or plaintext) for backend passwords. <see cref="Declared" /> distinguishes
+///     a database DECLARATION from an identity-only row (the user exists — it authenticated while
+///     declared in configuration, or was named by a block/share — but the database declares
+///     nothing, so the resolver ignores it and config keeps supplying the values).
+///   </para>
 /// </summary>
 public class User
 {
@@ -298,10 +304,87 @@ public class User
 	/// <summary>The gateway login, stored case-folded, unique. Mutable (rename = one-row update).</summary>
 	public required string Login { get; set; }
 
-	/// <summary>The serialized declaration, or null for an identity-only row.</summary>
-	public string? Json { get; set; }
+	/// <summary>
+	///   True when this row is a database DECLARATION (it REPLACES the config entry for the same
+	///   login); false = identity only. A declaration with every column null is still a
+	///   declaration — that is exactly the allowlist grant `eas user add` writes.
+	/// </summary>
+	public bool Declared { get; set; }
+
+	/// <summary>
+	///   DEVICE → GATEWAY password: a <c>pbkdf2$…</c> hash (preferred) or plaintext, verified
+	///   LOCALLY and never sent to any backend. A different trust domain from the backend
+	///   credentials below — keep the two chains apart.
+	/// </summary>
+	public string? Password { get; set; }
+
+	/// <summary>
+	///   GATEWAY → BACKENDS: the default backend user name for every role. Unset ⇒ the gateway
+	///   login (today's behaviour).
+	/// </summary>
+	public string? DefaultBackendLogin { get; set; }
+
+	/// <summary>
+	///   GATEWAY → BACKENDS: the default backend secret for every role, <c>enc:v1:</c> sealed.
+	///   Unset ⇒ the PRESENTED EAS password, i.e. pass-through — the zero-administration
+	///   baseline, which must survive.
+	/// </summary>
+	public string? DefaultBackendPassword { get; set; }
+
+	/// <summary>Mail address for From rewriting, Settings and meeting replies; null ⇒ the login if it contains '@'.</summary>
+	public string? MailAddress { get; set; }
+
+	/// <summary>Grants access to the web admin interface (/admin).</summary>
+	public bool? Admin { get; set; }
+
+	/// <summary><c>false</c> = disabled: every login refused with 403 after valid credentials.</summary>
+	public bool? Enabled { get; set; }
+
+	/// <summary>The identity-provider subject (<c>sub</c>) this user is bound to (OIDC TOFU).</summary>
+	public string? OidcSubject { get; set; }
+
+	/// <summary>Provenance marker for a declaration the gateway created itself on first sign-in.</summary>
+	public bool? AutoProvisioned { get; set; }
 
 	public DateTime UpdatedUtc { get; set; }
+
+	/// <summary>Per-role overrides; only roles that actually deviate have a row.</summary>
+	public List<UserBackendRole> BackendRoles { get; set; } = [];
+}
+
+/// <summary>
+///   One (user, role) backend override. The host-owned parts — Enabled/Provider/UserName/Password —
+///   have a compile-time-known shape and so are columns; <see cref="SettingsJson" /> is the ONE
+///   surviving serialized blob because its keys are provider-defined and discoverable only at
+///   runtime (<c>IBackendProvider.DescribeConfiguration</c>), which is the provider model working
+///   as intended rather than a shortcut.
+/// </summary>
+public class UserBackendRole
+{
+	public int Id { get; set; }
+
+	/// <summary>Owning user (FK, cascade). Unique with <see cref="Role" />.</summary>
+	public int UserId { get; set; }
+
+	public User User { get; set; } = null!;
+
+	/// <summary>Role name: MailStore, MailSubmit, Calendar, Tasks, Contacts, Notes, Oof.</summary>
+	public required string Role { get; set; }
+
+	/// <summary><c>false</c> = turn the role off (content roles fall back to local, Oof off). Invalid on the mail roles.</summary>
+	public bool? Enabled { get; set; }
+
+	/// <summary>Serve this role with a different provider than the global assignment.</summary>
+	public string? Provider { get; set; }
+
+	/// <summary>Backend login for this role.</summary>
+	public string? UserName { get; set; }
+
+	/// <summary>Backend secret for this role, <c>enc:v1:</c> sealed.</summary>
+	public string? Password { get; set; }
+
+	/// <summary>Flat provider-defined settings keys overlaid on the global role section.</summary>
+	public string? SettingsJson { get; set; }
 }
 
 /// <summary>

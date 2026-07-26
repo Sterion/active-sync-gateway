@@ -20,6 +20,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	public DbSet<LocalItem> LocalItems => Set<LocalItem>();
 	public DbSet<LoginBlock> LoginBlocks => Set<LoginBlock>();
 	public DbSet<User> Users => Set<User>();
+	public DbSet<UserBackendRole> UserBackendRoles => Set<UserBackendRole>();
 	public DbSet<AccountsStamp> AccountsStamps => Set<AccountsStamp>();
 	public DbSet<GlobalSetting> GlobalSettings => Set<GlobalSetting>();
 	public DbSet<SettingsStamp> SettingsStamps => Set<SettingsStamp>();
@@ -87,7 +88,20 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 		});
 
 		modelBuilder.Entity<User>(e =>
-			e.HasIndex(u => u.Login).IsUnique());
+		{
+			e.HasIndex(u => u.Login).IsUnique();
+			// Two users bound to one identity-provider subject is an account-takeover vector, so
+			// the binding is enforced by the database rather than by whoever writes it. Filtered
+			// on both providers so the (many) unbound users don't collide on null.
+			e.HasIndex(u => u.OidcSubject).IsUnique().HasFilter(null);
+			e.HasMany(u => u.BackendRoles).WithOne(r => r.User).HasForeignKey(r => r.UserId)
+				.OnDelete(DeleteBehavior.Cascade);
+		});
+
+		// One override row per (user, role); the unique index is what makes the store's
+		// diff-by-role upsert safe against a concurrent writer.
+		modelBuilder.Entity<UserBackendRole>(e =>
+			e.HasIndex(r => new { r.UserId, r.Role }).IsUnique());
 
 		// Deliberately no identity column: the CLI writes Id=1 explicitly so the stamp
 		// stays a single well-known row on both providers.
