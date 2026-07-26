@@ -78,6 +78,13 @@ Recorded so a fresh session executes rather than re-litigates.
 | 7 | **`RequireDeclaredUsers` is deleted** — `AutoProvisionAccounts=false` now means exactly that. |
 | 8 | **`eas user` → `eas account`, with no alias.** No legacy surface anywhere; this is a clean refresh. |
 | 9 | **An admin may read and overwrite a holder's values, and a holder may overwrite an admin's** — same slot, last write wins. |
+| 10 | **An account carries two passwords**: `Password` (device → gateway, verified locally) and `DefaultBackendPassword` (gateway → backends), plus `DefaultBackendLogin`. Different trust domains; keep the chains separate. |
+| 11 | **Unset defaults mean today's behaviour** — `DefaultBackendPassword` unset ⇒ forward the presented EAS password; `DefaultBackendLogin` unset ⇒ the gateway login. Zero-administration pass-through must survive. |
+| 12 | **Per-device credentials are deferred**, not rejected — see "What this deliberately does NOT do". |
+
+> **The shape is still settling.** Decisions 1–9 have been through a full round of review; 10–12 are
+> newer and the owner expects them to move. Treat the *direction* as agreed and the field-level detail
+> as provisional — but do not silently re-open 1–9 while adjusting the rest.
 
 ---
 
@@ -172,6 +179,53 @@ Five things to get right:
 6. **A rename must invalidate every cache keyed by login** — `BackendSessionFactory`'s session cache,
    the auth verdict caches, watchers — exactly as `SnapshotChanged` already does for account edits.
 
+### Account shape — two passwords, and explicit backend defaults
+
+```
+Account
+  AccountId              int identity   // THE identity — immutable, never reused
+  Login                  string         // unique (case-folded), MUTABLE
+
+  Password               string?        // EAS/gateway login. pbkdf2$ (preferred) or plaintext.
+                                        // Verified LOCALLY. Never sent to a backend.
+  DefaultBackendLogin    string?        // default user name for every role
+  DefaultBackendPassword string?        // default secret for every role. enc:v1: sealed.
+
+  MailAddress            string?
+  Admin                  bool?
+  Enabled                bool?
+  OidcSubject            string?
+  AutoProvisioned        bool?
+
+  Backends  Dictionary<role, RoleOverride { Enabled, Provider, UserName, Password, Settings }>
+```
+
+**An account carries two distinct credentials, and conflating them is the current model's weak
+point.** `Password` authenticates the *device to the gateway*; `DefaultBackendLogin`/
+`DefaultBackendPassword` authenticate the *gateway to the backends*. They answer different questions
+and belong to different trust domains.
+
+**What this replaces.** Today there is no default-credential field — there is an implicit *rule*:
+an unset role password inherits the presented EAS password, and non-MailStore roles inherit the
+effective MailStore pair. So the MailStore role does double duty: "the mail backend" **and** "the
+template every other role copies from". That works only while the EAS password *is* the mail
+password. The moment the device credential is decoupled — a gateway password, an app password, or
+anything an external IdP governs — pass-through has nothing left to forward, and the operator must
+set credentials per role or lean on MailStore-as-implicit-default. Explicit defaults collapse that to
+one pair, and let MailStore go back to being just another role.
+
+**Unset must mean today's behaviour — this is not optional.** The zero-administration baseline is the
+project's core value proposition (`README.md`: *"The baseline needs zero user administration"*), and
+it must survive:
+
+| Field | Unset ⇒ |
+|---|---|
+| `DefaultBackendLogin` | the gateway login (as today) |
+| `DefaultBackendPassword` | the **presented EAS password** — i.e. pass-through, unchanged |
+
+So an undeclared, unconfigured account behaves exactly as it does now, and a decoupled account is one
+field instead of N.
+
 ### THE RESOLUTION RULE — one order, every setting, per field
 
 The load-bearing rule of this design, and **not specific to accounts**: it is the order *every*
@@ -218,6 +272,26 @@ account value reverts to config, then global — an override is a *deviation*, a
 deviation restores the inherited value. Keep this distinct from the existing explicit-clear
 semantics on `Settings` (a null value CLEARS the inherited key rather than falling through); carry
 that forward deliberately, not by accident.
+
+### Credentials resolve by the same rule, with one extra scope tier
+
+Backend credentials are not a special case — they add a level of **scope** (this role vs every role)
+between the account and global tiers. The rule is unchanged; there is simply one more step:
+
+```
+account · role · DB      →  account · role · config
+  →  account · default · DB  →  account · default · config
+    →  global role section (DB → config)
+      →  pass-through (presented EAS credential / gateway login)
+```
+
+Read it as "most specific wins" on two axes at once — **which role** and **which source** — with role
+beating default, and DB beating config within each. The terminal step is pass-through, which is why
+an account with nothing set still works.
+
+The gateway `Password` is **not** in this chain. It never resolves against anything global, is never
+sent to a backend, and is verified locally — keep the two chains visibly separate in the code, or
+someone will eventually "simplify" a device credential into a backend one.
 
 ### `Settings` resolves per key
 
@@ -282,6 +356,25 @@ State this plainly so nobody "fixes" it later believing it an oversight.
 - **It does not add per-field provenance or an audit trail.** "Who set this?" is not answerable from
   the stored value. If that is ever wanted, it is a separate design — log-based, most likely, since
   logs already record the actor.
+- **It does not add per-device credentials (considered, deferred).** The idea: N app-password-style
+  credentials per account instead of one, each revocable independently — Google's model, and a
+  natural fit because every EAS request carries a DeviceId. Deferred for one decisive reason and
+  three supporting ones:
+  - **The users who would benefit do not use the portal.** Self-service registration is the entire
+    point of per-device credentials, and in this deployment most accounts are administered rather
+    than self-managed. It solves a problem that is not being had.
+  - Binding a credential to a DeviceId is **fragile**: iOS regenerates its DeviceId on
+    restore-from-backup and after a reset, so a hard binding locks the user out precisely when they
+    are least able to diagnose it. If it is ever built, *record* the DeviceId that used a credential,
+    never *require* it.
+  - **Autodiscover carries no DeviceId at all** (it authenticates with Basic and parses an email from
+    the body), and the WebUi portal login is a human in a browser — so an account-level credential
+    has to exist regardless. Per-device would be additive, never a replacement.
+  - Naive verification is **O(N) PBKDF2 per failed attempt**, which is the verify-cost DoS `K3` was
+    about. It would need the DeviceId as a lookup *hint* to stay O(1) in the common case.
+
+  Per-device *revocation* already exists via `LoginBlock` (`eas block <user> <device>`); what is
+  missing is only that it is admin-only rather than self-service.
 
 ---
 
@@ -308,9 +401,18 @@ State this plainly so nobody "fixes" it later believing it an oversight.
 
 ## Implementation plan
 
+**Two phases, and the split is deliberate. Get the schema right first; the wiring is mechanical
+afterwards.** The shape is what the reinit makes free and what cannot be cheaply revisited once
+deployments exist — the resolver, CLI, portal and banner are just work. Phase A can land and be
+verified on its own, before anything downstream is touched.
+
 One item ≈ one session, in order. Follow `docs/review/fix-review.md`'s working protocol: red-first
 tests, commit per unit of work, build at 0 warnings, and the live suite for anything touching the
 schema, auth or the request pipeline.
+
+### Phase A — the schema
+
+*The shape decisions. Land these before touching how the application reads them.*
 
 **1. Vocabulary, no behaviour change.** `ActiveSync:Users` → `ActiveSync:Accounts`,
 `AutoProvisionUsers` → `AutoProvisionAccounts` (rename only; semantics land in item 2), `eas user` →
@@ -329,17 +431,34 @@ after it; (b) past the auth boundary an `AccountId` is always present — an und
 gets an account or is refused; (c) the id column is non-reusing on both providers. Update `AGENTS.md`
 and `README.md` in the same work (Invariant 1).
 
-**3. Per-field resolution.** Replace whole-entry replacement with the resolution rule across levels
-1–5. Round-trip tests for: account DB beats account config; clearing an account value reverts to
-config, then to global DB, then global config, then default; a global DB change reaches every account
-live; `Settings` resolves per key with list-replacement and null-clear intact.
+**3. The account shape.** Add `DefaultBackendLogin` / `DefaultBackendPassword` alongside the existing
+gateway `Password`; keep the per-role `Backends` overrides. Regenerate the `Initial` pair again
+(Standing context — regenerate, do not chain). No resolver changes yet: this item only establishes
+the columns and proves they persist, seal and round-trip. **Assert the two credential chains stay
+separate** — the gateway `Password` is verified locally and must never be reachable by anything that
+builds a backend connection.
 
-**4. Write paths + permissions.** One slot, both writers; `AccountFieldPaths` unchanged in shape but
-now addressing a single layer. Enforce the permission table: assert the holder cannot write
+### Phase B — the wiring
+
+*Mechanical once Phase A is right. Each item is a behaviour change with its own tests.*
+
+**4. Per-field resolution.** Replace whole-entry replacement with the resolution rule. Round-trip
+tests for: account DB beats account config; clearing an account value reverts to config, then to
+global DB, then global config, then default; a global DB change reaches every account live;
+`Settings` resolves per key with list-replacement and null-clear intact.
+
+**5. Credential resolution.** The extra scope tier: role beats account-default beats global beats
+pass-through, DB beating config within each. **The tests that matter are the fallbacks**, because
+they are what preserves zero-administration: unset `DefaultBackendPassword` still forwards the
+presented EAS password; unset `DefaultBackendLogin` still uses the gateway login; an account with
+nothing set behaves exactly as it does today. Prove those before proving the overrides.
+
+**6. Write paths + permissions.** One slot, both writers; `AccountFieldPaths` gains the two new
+account-level fields. Enforce the permission table: assert the holder cannot write
 `Enabled`/`Provider`/account-level fields or non-`SelfServiceEditable` settings keys, for every role
 and provider. That assertion is the security property of this design.
 
-**5. Docs + banner.** Startup banner shows the level each effective value came from. Rewrite the
+**7. Docs + banner.** Startup banner shows the level each effective value came from. Rewrite the
 account sections of `README.md`, `docs/configuration.md`, `docs/webui.md`, `docs/cli.md`, and
 `AGENTS.md` § *Auth model*.
 
@@ -374,9 +493,9 @@ Violating any of these is a stop-and-report.
 - Live: `./scripts/stalwart-up.ps1`, then
   `dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration`. **Read the
   passed/skipped counts, never the exit code** — a skipped suite exits 0 and looks identical to a
-  passing one. Items 2, 3 and 4 change the schema, auth and the request pipeline, so the live suite is
-  mandatory for them; item 2 especially, since re-keying every entity is exactly the class of change
-  whose blast radius no unit suite can see.
+  passing one. **Every Phase A item changes the schema, and items 4–6 change auth and the request
+  pipeline — the live suite is mandatory for all of them.** Item 2 especially: re-keying every entity
+  is exactly the class of change whose blast radius no unit suite can see.
 - **The migration contract is a test, not an assumption:** a **blank** database plus the regenerated
   `Initial` must yield a working schema on **both** providers. SQLite is covered by the live suite
   (which boots the real host, and so runs `MigrateAsync` for real); **Postgres only runs in CI** with
