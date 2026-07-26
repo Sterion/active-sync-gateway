@@ -70,7 +70,7 @@ Recorded so a fresh session executes rather than re-litigates.
 | # | Decision |
 |---|---|
 | 1 | **`AccountId` is an `int` identity column.** Not a GUID. Immutable, never reused. |
-| 2 | **The login is a mutable attribute**, unique and case-folded. Everything else is mutable too. |
+| 2 | **The login is a mutable attribute**, unique and case-folded — **except while the account is config-declared**, when it is immutable so config↔DB matching by login can never drift. Everything else is mutable. |
 | 3 | **One stored value per field per account.** Admin and holder write the **same** slot; the difference between them is *permission*, not storage. |
 | 4 | **Resolution is per field**, following the one rule below. Whole-entry replacement is deleted. |
 | 5 | **`Settings` resolves per key**, by the same rule. |
@@ -96,8 +96,8 @@ Recorded so a fresh session executes rather than re-litigates.
 1. **`LoginBlock.DeviceId`: non-nullable FK (recommended) or nullable?** Non-nullable removes the
    whole-account case from `LoginBlock` and leaves `Enabled = false` owning it — one mechanism per
    concept instead of two overlapping ones. Nullable preserves today's "block the whole user" shape.
-2. **Config identity: stable key + `Login` field (recommended), explicit numeric `Id`, or accept the
-   rename gap?** See "Config-declared accounts need rows too".
+2. ~~Config identity~~ — **settled**: no config-side identifier; match by login, and make the login
+   immutable per account while it is config-declared. See "Config-declared accounts need rows too".
 3. **Delete guard: confirm-and-cascade (as written) or refuse-until-purged?** The latter makes
    accidental content loss structurally impossible rather than confirmation-dependent.
 4. **Terminology: `Account` or `User`?** This document uses **Account** throughout. A rename to
@@ -459,28 +459,41 @@ has nothing to point at. So **on startup, every account declared in `ActiveSync:
 accounts file) gets a row**: `AccountId` + `Login`, everything else null. Config keeps supplying the
 *values*; the row supplies the *identity*.
 
-That leaves one genuine problem. **Matching config to rows by login means renaming a login in config
-looks like a brand-new account** — the old row (and all its sync state, and any local content) is
-orphaned, and the user re-syncs from scratch. Three ways to handle it:
+**Matching is always by login. There is no config-side identifier** — no `Id` to hand-manage, no
+`ConfigKey` column, no new concept. That works because of one rule:
 
-- **(a) A stable config key, login as a field — recommended.** Today the config key *is* the login
-  (`Accounts:anna@example.com: {…}`). Make the key a stable handle and let `Login` be an optional
-  field defaulting to it. Renaming then means adding `Login: "anna.smith@example.com"` under the
-  unchanged key `anna@example.com` — the row is found by the key, the login changes, nothing is
-  orphaned. **Costs nothing for anyone who never renames**, because the existing config shape keeps
-  working unchanged and means exactly what it means today.
-- **(b) Require an explicit numeric `Id` in config.** Works, but pushes a surrogate key into
-  hand-edited YAML/JSON where operators must keep it unique against a database identity sequence —
-  duplicate or colliding ids corrupt the mapping, and nothing in the config file can validate it.
-- **(c) Match on login and accept the gap**, providing `eas account rename` so the supported path is
-  "rename the row first, then update config to match". Note this is **exactly today's behaviour** —
-  renaming a config login already orphans everything, which `README.md` warns about — so it is not a
-  regression, just an unfixed sharp edge.
+> **The login is immutable for as long as the account is declared in configuration, and freely
+> renameable when it is not.**
 
-(a) is the recommendation: it solves the problem without inventing an identifier the operator has to
-manage, and it degrades to today's config shape when unused. **A rename command is worth having
-regardless** — making renames possible is the whole point of the surrogate key, and the CLI should
-expose it.
+Evaluated **per account**, not globally: an account currently declared in `ActiveSync:Accounts` (or
+the accounts file) cannot be renamed through the CLI or admin UI; every other account can. A DB-only
+account stays renameable even when other accounts come from config, and an account dropped from
+config becomes renameable again.
+
+This is what makes matching-by-login safe. The database side can never drift from configuration,
+because the only mutable side is the one config doesn't own. `AccountResolver` already tracks whether
+an entry is config-declared (`MergedAccount.FromDatabase` / `ShadowsConfig`), so the guard is a check
+the code can already answer.
+
+**Three guards complete it:**
+
+1. **Refuse the rename** for a config-declared account, in both the CLI and the admin UI, naming
+   where to change it instead: *"`anna@example.com` is declared in configuration — change it there."*
+   The UI should not offer the action at all rather than fail after the fact.
+2. **Reject a colliding rename.** The new login must not match any existing account, config-declared
+   or not.
+3. **Reconcile at startup and warn.** For every config-declared login with no matching account:
+   *"configuration declares `anna@example.com` but no account has that login — was it renamed?"*
+   Cheap, and it is the only thing that catches the residual below.
+
+**What this deliberately does not cover, and cannot.** Renaming the *configuration key itself* still
+creates a new account and strands the old row's data — the gateway cannot distinguish a rename from
+a delete-plus-add in a file it does not own. Immutability closes the database side, which is where
+the accident is far more likely (an admin clicking rename in a UI, unaware the account is
+config-backed); the config side stays an operator responsibility, made visible by guard 3.
+
+**A rename command is worth having regardless.** Making renames possible at all is the whole point of
+the surrogate key, and it is the supported path for every account configuration does not declare.
 
 ---
 
@@ -610,7 +623,10 @@ account-level fields. Enforce the permission table: assert the holder cannot wri
 and provider. That assertion is the security property of this design.
 
 **6a. Account lifecycle.** The config-declared bootstrap (rows created at startup for every declared
-account), `eas account rename`, and the delete guard that counts content before destroying it.
+account, matched by login), `eas account rename` **with the config-declared immutability guard and
+the collision check**, the startup reconciliation warning for config logins with no account, and the
+delete guard that counts content before destroying it. **Test the guard from both surfaces** — CLI
+and admin UI must both refuse to rename a config-declared account.
 
 **7. Docs + banner.** Startup banner shows the level each effective value came from. Rewrite the
 account sections of `README.md`, `docs/configuration.md`, `docs/webui.md`, `docs/cli.md`, and
