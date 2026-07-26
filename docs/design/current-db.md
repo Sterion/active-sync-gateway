@@ -1,8 +1,12 @@
 # Current database schema — as it exists today
 
-> **This describes the schema as it is NOW**, before the account-model restructure. It is a reference
-> for planning that work, not a description of the target. For the target, see
-> [`account-model.md`](account-model.md).
+> **This describes the schema as it is NOW**, before the restructure. It is a reference for planning
+> that work, not a description of the target. For the target, see
+> [`db-restructure.md`](db-restructure.md).
+>
+> Note the terminology shift: this document uses the **current** code's vocabulary (`AccountEntry`,
+> `AccountOptions`, …). The target renames the internal `Account*` family to `User*`, matching the
+> operator-facing surface, which already says "user" everywhere.
 
 Transcribed from `src/ActiveSync.Core/State/Entities.cs` (the C# entities) and
 `src/ActiveSync.Core/State/SyncDbContext.cs` (`DbSet`s, keys, indexes, relationships). Those two
