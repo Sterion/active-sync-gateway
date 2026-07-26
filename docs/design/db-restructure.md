@@ -136,7 +136,7 @@ Recorded so a fresh session executes rather than re-litigates.
 | 13 | **The `AccountOptions` JSON blob is normalised away.** Scalars become columns on `Users`; per-role `Enabled`/`Provider`/`UserName`/`Password` become columns on a new **`UserBackendRoles`** child table. |
 | 14 | **Only `Settings` stays serialized** (`UserBackendRoles.SettingsJson`) — its keys are provider-defined and discoverable only at runtime, which is the provider model working as intended. |
 | 15 | **Every user-linked table gets a real FK to `UserId` with cascade delete**, and `SentCommandToken` gets the FK to `Device` it is missing today. |
-| 16 | **Deleting a user must not silently destroy content.** The DB cascades; the application counts what would be lost and demands confirmation naming it. |
+| 16 | **Deleting a user must not silently destroy content — confirm-and-cascade.** The DB cascades; the application counts what would be lost first and demands confirmation naming it. The CLI gets a `ConfirmRequest` round-trip so the forwarded path can ask (it cannot today); the web reuses its existing typed-echo. One dry-run counting service behind both. |
 | 17 | **Config-declared users get rows at startup** (identity from the row, values from config). |
 | 18 | **`AccountsStamp` + `SettingsStamp` merge into one `DataChanges` table**, keyed by area string, **one row per watched area**. A stamp belongs to a consumer's aggregate, not to a table — so `UserBackendRoles` bumps `"users"` rather than getting its own. |
 | 19 | **`LoginBlock` is per-device only** — `DeviceKey` is a non-nullable FK. Whole-user blocking is `Users.Enabled = false`, and `eas block` becomes device-scoped so the CLI does not recreate the duplication the schema just removed. |
@@ -145,15 +145,19 @@ Recorded so a fresh session executes rather than re-litigates.
 > newer and the owner expects them to move. Treat the *direction* as agreed and the field-level detail
 > as provisional — but do not silently re-open 1–9 while adjusting the rest.
 
-### Open — needs a decision before Phase A completes
+### Questions raised during design — all now settled
+
+Kept with their reasoning, because "why not the other way" is the part a fresh reader cannot
+reconstruct, and each of these was argued at least once.
 
 1. ~~`LoginBlock.DeviceId` nullable?~~ — **settled: non-nullable.** Whole-user blocking is
    `Users.Enabled = false`; `LoginBlock` is per-device only. See "Real foreign keys and cascade
    delete" for the CLI consequence.
 2. ~~Config identity~~ — **settled**: no config-side identifier; match by login, and make the login
    immutable per user while it is config-declared. See "Config-declared users need rows too".
-3. **Delete guard: confirm-and-cascade (as written) or refuse-until-purged?** The latter makes
-   accidental content loss structurally impossible rather than confirmation-dependent.
+3. ~~Delete guard shape?~~ — **settled: confirm-and-cascade.** Refuse-until-purged was a workaround
+   for the CLI being unable to prompt over `/cli`; the `ConfirmRequest` round-trip removes that
+   limitation. See "Deleting a user must not silently destroy data".
 4. ~~Terminology: `Account` or `User`?~~ — **settled: `User`.** The internal `Account*` family is
    renamed to `User*`; the operator-facing surface already said "user" and does not change. See
    "The vocabulary is ambiguous".
@@ -453,17 +457,77 @@ So the *database* cascades, and the *application* refuses to issue the delete bl
 3. Sync state alone (devices, folders, collection state) is *not* worth prompting over — it rebuilds
    on the next sync. Only content is.
 
-**The CLI is not the hard part.** The precedent already exists on both surfaces: the web API demands
-a typed confirmation echo for destructive device operations (`DevicesEndpoints.cs:85` — *"confirm
-must echo the exact device id"*), and the CLI has its own confirmation flow for the same operations.
-Reuse both. Add a `--yes`/`--force` escape for scripting, and make the *default* interactive path
-refuse rather than proceed.
+**Settled: confirm-and-cascade**, on both surfaces. (The alternative — refuse to delete while the
+user owns `LocalItem` rows, forcing an explicit purge first — was mostly a workaround for the CLI
+being unable to ask a question. The round-trip below removes that limitation, so the workaround is no
+longer worth its extra step.)
 
-**A cheaper structural option worth weighing:** refuse to delete a user that still owns
-`LocalItem` rows at all, and require an explicit purge first (`eas user purge-data`, then
-`eas user remove`). That makes accidental content loss impossible rather than
-confirmation-dependent — the prompt becomes an error you cannot click through. Costs one extra step
-in the rare legitimate case.
+#### One counting service, two confirmation idioms
+
+The only genuinely new piece is a **dry-run count**, and both surfaces need the same one.
+`DeviceAdminService.PurgeAsync` already returns `PurgeCount(Table, Count)` — but only *after*
+deleting. The guard needs "what *would* go" before deciding, so add a count-only variant beside it.
+Write it once; it feeds the CLI's question text and the web dialog's warning alike.
+
+| | Server returns | Client does |
+|---|---|---|
+| **CLI** | `ConfirmRequest { Question, ResendArgs }` | prompt → resend `ResendArgs` verbatim |
+| **Web** | 400 + the expected echo + counts | render dialog → repost with `Confirm` |
+
+**Graduate the friction** (this is step 3 above, made concrete): no content ⇒ a plain confirm;
+content ⇒ typed echo *plus* the counts. Sync state alone rebuilds on the next sync and does not
+deserve a typed echo.
+
+#### Web: already built
+
+`WipeRequest`/`PurgeRequest` carry a `Confirm` field and the endpoint rejects anything that does not
+echo the target exactly (`DevicesEndpoints.cs` — *"confirm must echo '{expected}'"*, the device id or
+the **user** for a full purge). User deletion is that same pattern with the login as the expected
+echo, and the SPA already renders this dialog for wipe and purge. Nothing new is required beyond
+surfacing the counts.
+
+#### CLI: needs a round-trip, because the forwarded console cannot prompt
+
+**This is a real gap today, not a hypothetical.** `LocalCliEndpoint` builds its captured console with
+`Interactive = InteractionSupport.No`, so a forwarded command can never prompt — which means
+`eas purge` over `/cli` **always** fails with *"confirm with --yes when running non-interactively"*
+(`PurgeCommands.cs`). The interactive branch only ever runs in the local-fallback path. Fixing this
+for user deletion fixes `purge` too.
+
+The mechanism: let the result carry an optional confirmation request, and let the **slim client** —
+which is a real terminal process — do the asking.
+
+```
+LocalCliResult(int ExitCode, string Stdout, string Stderr, ConfirmRequest? Confirm)
+    ConfirmRequest { string Question, string[] ResendArgs }
+```
+
+```
+eas user delete anna@example.com
+  → server: needs confirmation, returns Question + ResendArgs
+  → client prompts locally: "…deletes 342 contacts, 89 events, 12 notes. Continue? [y/N]"
+  → on yes, client sends ResendArgs verbatim (not shown to the operator)
+```
+
+Five details that make this safe rather than clever:
+
+1. **The server supplies `ResendArgs`; the client never constructs them.** The slim client is a dumb
+   forwarder by design — it must not learn which flag means "confirmed", nor re-assemble a command
+   line (quoting bugs). A future command then gets this for free without touching the client.
+2. **Use `--yes`, not `--force`.** `PurgeSettings` already defines `-y|--yes`; a second spelling for
+   the same idea is exactly the duplication decisions 19 and 18 removed elsewhere.
+3. **Re-check on the second call.** Call 1 counted; call 2 re-executes and deletes what is there
+   *then*. If the counts have moved materially, refuse and re-prompt — the operator confirmed a
+   specific loss, not an open-ended one.
+4. **A non-interactive client must not auto-confirm.** If the client itself is piped or scripted,
+   print the question to stderr and exit non-zero telling the operator to pass `--yes` — today's
+   behaviour, preserved. The server never needs to distinguish "forwarded" from "piped": it always
+   returns the request and the client decides.
+5. **`LocalCliResult` is internal, so this costs nothing externally.** It lives in
+   `ActiveSync.Crypto`, whose csproj states *"Host-only, NOT published"* — only `ActiveSync.Contracts`
+   and `ActiveSync.Protocol` are packable. No contract version bump. The slim client already
+   references Crypto, so it sees the new field for free, and a plain `Console.ReadLine()` suffices
+   (the client is BCL-only — it has no Spectre dependency and needs none).
 
 ### `AutoProvisionUsers` — a user always exists past auth
 
@@ -711,11 +775,20 @@ user-level fields. Enforce the permission table: assert the holder cannot write
 `Enabled`/`Provider`/user-level fields or non-`SelfServiceEditable` settings keys, for every role
 and provider. That assertion is the security property of this design.
 
-**6a. User lifecycle.** The config-declared bootstrap (rows created at startup for every declared
+**6a. `ConfirmRequest` round-trip.** Add the optional `Confirm` field to `LocalCliResult`, teach the
+slim client to prompt and resend `ResendArgs`, and add the dry-run counting method both surfaces
+consume. **This is a prerequisite for 6b's delete guard**, and it stands on its own: retrofit
+`eas purge` / `eas device wipe` onto it in the same change, since they demand `--yes` over `/cli`
+today purely because the forwarded console is non-interactive. It fixes an existing wart rather than
+only serving the new command. Test the non-interactive client path explicitly: piped stdin must fail
+with the question on stderr, never auto-confirm.
+
+**6b. User lifecycle.** The config-declared bootstrap (rows created at startup for every declared
 user, matched by login), `eas user rename` **with the config-declared immutability guard and
 the collision check**, the startup reconciliation warning for config logins with no user, and the
-delete guard that counts content before destroying it. **Test the guard from both surfaces** — CLI
-and admin UI must both refuse to rename a config-declared user.
+delete guard on top of 6a. **Test the guards from both surfaces** — CLI and admin UI must both refuse
+to rename a config-declared user, and both must refuse to delete a content-owning user without
+confirmation.
 
 **7. Docs + banner.** Startup banner shows the level each effective value came from. Rewrite the
 user sections of `README.md`, `docs/configuration.md`, `docs/webui.md`, `docs/cli.md`, and
