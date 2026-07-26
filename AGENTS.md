@@ -400,11 +400,17 @@ TProvider>`), and the connection string is resolved **lazily** from `IOptions` i
 `AddDbContext` callback — reading it eagerly from `builder.Configuration` misses
 `WebApplicationFactory` overrides and silently shares one DB across tests. When you change an
 entity, add a migration for **both** contexts (see README) — never hand-edit the model
-snapshot. Entities, by purpose: **sync state** — `Device`, `UserFolder`, `DeviceFolder`,
-`CollectionState`, `DavItem`; **local user data** — `LocalItem` (contacts/calendar/tasks/notes;
+snapshot. **All 18 entities** (one `DbSet` each — `SyncDbContext.cs:14-31` is the definitive list),
+by purpose: **sync state** — `Device`, `UserFolder`, `DeviceFolder`, `CollectionState`,
+`SentCommandToken`, `DavItem`; **local user data** — `LocalItem` (contacts/calendar/tasks/notes;
 `AddLocalItems` migration); **accounts & access** — `AccountEntry` + `AccountsStamp`,
-`LoginBlock`, `SharedCalendarGrant`, `OofSetting`; **settings & ops** — `GlobalSetting` +
-`SettingsStamp`, `LogEntry`, `ServerCertificate`, `DataProtectionKeyEntry`.
+`LoginBlock`, `SharedCalendarGrant`, `OofSetting`, `WebSessionRevocation`; **settings & ops** —
+`GlobalSetting` + `SettingsStamp`, `LogEntry`, `ServerCertificate`, `DataProtectionKeyEntry`.
+**Per-user scoping is split two ways, and it matters when touching identity:** eight entities carry
+the gateway login as a `UserName` column — `Device`, `UserFolder`, `LocalItem`, `LoginBlock`,
+`WebSessionRevocation`, `SharedCalendarGrant`, `AccountEntry`, `OofSetting` — while
+`DeviceFolder`/`CollectionState`/`SentCommandToken` scope transitively via `DeviceKey` and `DavItem`
+via `UserFolderKey`. The remaining six are global (not per-user).
 `LocalItem.Content` is **AES-256-GCM ciphertext at rest** (`"v1:" + base64`,
 sealed by `LocalContentProtector` with user+collection as AAD) — never read or write the
 column except through the local stores, which decrypt/encrypt at their seams.

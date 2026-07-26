@@ -133,10 +133,18 @@ Account
   ...everything else, all mutable
 ```
 
-All eight entities FK to `AccountId` instead of carrying the login. Notifier keys, cache keys and the
-encryption AAD key on `AccountId`. **A rename then becomes a single-row update**: sync state survives,
-encrypted local items stay readable, the device keeps its folder registry and sync keys, and the
-holder just updates the username on the phone.
+Those eight entities FK to `AccountId` instead of carrying the login. Notifier keys, cache keys and
+the encryption AAD key on `AccountId`. **A rename then becomes a single-row update**: sync state
+survives, encrypted local items stay readable, the device keeps its folder registry and sync keys,
+and the holder just updates the username on the phone.
+
+**Only those eight need the new column — the rest come along for free.** Of the 18 tables
+(`SyncDbContext.cs:14-31`), `DeviceFolder`, `CollectionState` and `SentCommandToken` scope
+transitively through `DeviceKey`, and `DavItem` through `UserFolderKey`; the remaining six
+(`AccountsStamp`, `SettingsStamp`, `GlobalSetting`, `LogEntry`, `ServerCertificate`,
+`DataProtectionKeyEntry`) are global and not per-user at all. Verified against the model — do not add
+an `AccountId` to a table that already reaches an account through a FK, or the two paths can disagree
+after a rename and there is no constraint that would catch it.
 
 Five things to get right:
 
@@ -281,6 +289,7 @@ State this plainly so nobody "fixes" it later believing it an oversight.
 
 | File | Role |
 |---|---|
+| `src/ActiveSync.Core/State/SyncDbContext.cs` | `DbSet`s (:14-31) — the definitive table list; indexes, keys and token stamping in `OnModelCreating` |
 | `src/ActiveSync.Core/State/Entities.cs` | The eight entities carrying `UserName`; `AccountEntry` |
 | `src/ActiveSync.Core/Options/AccountOptions.cs` | `AccountOptions` + `BackendRoleOverride` |
 | `src/ActiveSync.Core/Accounts/AccountResolver.cs` | `MergedAccount` (:21), `BuildSnapshot` (:277), `BuildOne` (:355), `ResolveSecret` (:531), whole-entry replacement (:320-341) |
@@ -308,7 +317,8 @@ schema, auth or the request pipeline.
 `eas account` (no alias), "user" → "account" for the persistent record in code and docs. Mechanical,
 large diff, zero semantic change — do it first so later diffs read cleanly.
 
-**2. `AccountId` + provisioning.** Add the identity column; FK all eight entities to it; move
+**2. `AccountId` + provisioning.** Add the identity column; FK the eight login-carrying entities to it
+(and only those — see Identity); move
 notifier keys, cache keys and the `LocalContentProtector` AAD onto it; keep the login as a unique
 case-folded attribute; land `AutoProvisionAccounts`' semantics and delete `RequireDeclaredUsers`.
 **Delete the existing migration chain for both providers and generate a fresh `Initial` pair from the
