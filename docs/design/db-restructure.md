@@ -140,6 +140,7 @@ Recorded so a fresh session executes rather than re-litigates.
 | 17 | **Config-declared users get rows at startup** (identity from the row, values from config). |
 | 18 | **`AccountsStamp` + `SettingsStamp` merge into one `DataChanges` table**, keyed by area string, **one row per watched area**. A stamp belongs to a consumer's aggregate, not to a table — so `UserBackendRoles` bumps `"users"` rather than getting its own. |
 | 19 | **`LoginBlock` is per-device only** — a single non-nullable `DeviceKey` FK, **and no `UserId`** (it reaches the user through the device). Whole-user blocking is `Users.Enabled = false`, and `eas block` becomes device-scoped — on both the CLI and the admin API — so the duplication the schema removes is not recreated a level up. |
+| 20 | **One identity per row.** Where a table carries an unused surrogate `Id` *and* a unique natural key, the natural key becomes the PK and the surrogate goes — nine tables, none of which is ever looked up by `Id`. Keep the surrogate only where it is a FK target, a wire value, or where no natural key exists. See [`future-db.md`](future-db.md) § *One identity per row* for the list and the exceptions. |
 
 > **The shape is still settling.** Decisions 1–9 have been through a full round of review; 10–17 are
 > newer and the owner expects them to move. Treat the *direction* as agreed and the field-level detail
@@ -757,7 +758,10 @@ must never be reachable by anything that builds a backend connection.
 that the areas stay independent** — a user write must not move the `"settings"` version, or every
 consumer reloads on every unrelated change.
 
-**3b. Foreign keys and cascades.** Convert every user-linked soft link to a real FK with cascade
+**3b. Foreign keys, cascades, and primary keys.** Promote the nine natural keys to PKs and drop their
+unused surrogate `Id`s (decision 20) — do it in the same pass as the FK work, since both are pure
+model configuration and one regenerated `Initial` covers them. Then convert every user-linked soft
+link to a real FK with cascade
 (see "Real foreign keys and cascade delete"), including the `SentCommandToken` → `Device` FK that is
 missing today and `LoginBlock`'s `DeviceKey`. **Test that deleting a user removes exactly its
 own rows and nothing else's**, and that deleting a device no longer orphans `SentCommandToken` rows.

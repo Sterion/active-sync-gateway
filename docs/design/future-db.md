@@ -19,7 +19,44 @@
 | Re-keyed | 8 tables carrying `UserName` string | FK to `Users.UserId`, cascade |
 | FK added | `SentCommandToken.DeviceKey` (no FK) | real FK → `Device`, cascade |
 | Narrowed | `LoginBlock` (nullable `DeviceId` string) | per-device only, non-nullable FK |
-| Unchanged | `DeviceFolder`, `CollectionState`, `DavItem`, `GlobalSetting`, `LogEntry`, `ServerCertificate`, `DataProtectionKeys` | — |
+| **Surrogate `Id` dropped** | 9 tables carried an unused `Id` *and* a unique natural key | natural key promoted to PK — see below |
+| Unchanged | `DavItem`, `LogEntry`, `ServerCertificate`, `DataProtectionKeys` | — |
+
+### One identity per row
+
+Nine tables today carry a surrogate `Id` **and** a unique index that already identifies the row —
+two ways to name one thing, which is the same drift risk that keeps `UserId` off `LoginBlock`.
+Verified against the code: **not one of them is ever looked up by `Id`.** So the natural key becomes
+the primary key and the surrogate goes:
+
+| Table | New PK |
+|---|---|
+| `WebSessionRevocation` | `UserId` |
+| `OofSetting` | `UserId` |
+| `LoginBlock` | `DeviceKey` |
+| `GlobalSetting` | `Key` |
+| `DataChanges` | `Key` |
+| `UserBackendRoles` | (`UserId`, `Role`) |
+| `DeviceFolder` | (`DeviceKey`, `ServerId`) |
+| `CollectionState` | (`DeviceKey`, `CollectionId`) |
+| `SharedCalendarGrant` | (`UserId`, `CollectionHref`) |
+
+**The gain is not tidiness — it turns conventions into constraints.** `current-db.md` says of
+`WebSessionRevocation`: *"one row per login; the unique index is what keeps the revocation a
+rewrite."* That rule currently rides a unique index while the PK sits unused; promote it and the rule
+*is* the identity. Same for `OofSetting` (one Oof per user) and `LoginBlock` (a device is blocked or
+it is not).
+
+**No index is added** — the unique constraint already exists, so the PK replaces it rather than
+joining it. **No composite FK propagates** — none of these tables has children. On SQLite the net
+effect is one fewer *column*, not one fewer index, since `Id INTEGER PRIMARY KEY` is the rowid and a
+non-integer PK leaves a hidden rowid behind (EF Core does not emit `WITHOUT ROWID`).
+
+**Surrogates that stay, and why:** `Users.UserId` (the immutable identity), `Device.Id` and
+`UserFolder.Id` (FK targets — and `UserFolder.Id` is the EAS CollectionId on the wire), `DavItem.Id`
+(the sub-part of every DAV item ServerId), `LocalItem.Id` (the item key), `LogEntry.Id` (no natural
+key exists), `ServerCertificate.Id` (the `= 1` single-row idiom), `DataProtectionKeys.Id`, and
+`SentCommandToken.Id` (see its entry).
 
 ---
 
@@ -96,8 +133,7 @@ dictionary is the table below.
 
 | Column | Type | Key / index | Purpose |
 |---|---|---|---|
-| `Id` | int identity | **PK** | |
-| `UserId` | int | **unique (UserId, Role)**, **FK → `Users`, cascade** | Owning user |
+| `UserId` | int | **PK (UserId, Role)**, **FK → `Users`, cascade** | Owning user |
 | `Role` | string | ↑ | `MailStore`, `MailSubmit`, `Calendar`, `Tasks`, `Contacts`, `Notes`, `Oof` |
 | `Enabled` | bool? | | `false` = turn this role off (content roles fall back to `local`, Oof off). Invalid on the two mail roles |
 | `Provider` | string? | | Serve this role with a different provider than the global assignment |
@@ -119,8 +155,7 @@ unreadable in the table.
 
 | Column | Type | Key / index | Purpose |
 |---|---|---|---|
-| `Id` | int identity | **PK** | |
-| `DeviceKey` | int | **unique**, **FK → `Device`, cascade** | The blocked device. **Non-nullable** — the whole-user case moved to `Users.Enabled` |
+| `DeviceKey` | int | **PK**, **FK → `Device`, cascade** | The blocked device. **Non-nullable** — the whole-user case moved to `Users.Enabled`. No surrogate `Id`: one block per device, enforced by identity |
 | `CreatedUtc` | DateTime | | |
 
 **What it is:** an operator cut-off for **one device**, enforced after successful authentication with
@@ -141,8 +176,7 @@ versus `Users → Device → LoginBlock`. `db-restructure.md` was corrected to m
 
 | Column | Type | Key / index | Purpose |
 |---|---|---|---|
-| `Id` | int identity | **PK** | |
-| `UserId` | int | **unique (UserId, CollectionHref)**, **FK → `Users`, cascade** | Grantee |
+| `UserId` | int | **PK (UserId, CollectionHref)**, **FK → `Users`, cascade** | Grantee |
 | `CollectionHref` | string | ↑ | The extra CalDAV collection href |
 | `ReadOnly` | bool | | Enforced gateway-side via silent revert |
 | `CreatedUtc` | DateTime | | |
@@ -160,8 +194,7 @@ against any local table.
 
 | Column | Type | Key / index | Purpose |
 |---|---|---|---|
-| `Id` | int identity | **PK** | |
-| `UserId` | int | **unique**, **FK → `Users`, cascade** | One row per user |
+| `UserId` | int | **PK**, **FK → `Users`, cascade** | One row per user — now enforced by identity, not by a separate unique index |
 | `ValidAfterUtc` | DateTime | | Any web session *started* before this is refused at next revalidation |
 
 **What it is:** the server-side half of web logout — the auth cookie is a self-contained ticket, so
@@ -175,8 +208,7 @@ this row is what actually invalidates copies of it. Rewritten, never appended.
 
 | Column | Type | Key / index | Purpose |
 |---|---|---|---|
-| `Id` | int identity | **PK** | |
-| `UserId` | int | **unique**, **FK → `Users`, cascade** | Owner |
+| `UserId` | int | **PK**, **FK → `Users`, cascade** | Owner — one Oof row per user, enforced by identity |
 | `State` | int | | 0 = disabled, 1 = enabled, 2 = scheduled |
 | `StartUtc` / `EndUtc` | DateTime? | | Scheduled window |
 | `Message` | string | | Reply body — deliberately plaintext |
@@ -213,17 +245,32 @@ Columns otherwise unchanged (`BackendKey`, `DisplayName`, `ParentBackendKey`, `T
 **Links:** → `Users` (**FK, cascade**); ← `DavItem` (**FK, cascade**); self-link
 `ParentBackendKey` → `BackendKey` (still soft); ← the three tables holding `Id` as a string.
 
-## `DeviceFolder`, `CollectionState`, `DavItem` — unchanged
+## `DeviceFolder` and `CollectionState`
 
-Already correctly keyed through `DeviceKey` / `UserFolderKey`, so the restructure does not touch them.
-They reach a user transitively and **must not gain a `UserId` column**.
+Columns unchanged, and both keep reaching a user transitively through `DeviceKey` — they **must not
+gain a `UserId`**. The one change is that each **drops its surrogate `Id`** and promotes what was
+already its unique index to the primary key:
+
+- `DeviceFolder` → **PK (`DeviceKey`, `ServerId`)**
+- `CollectionState` → **PK (`DeviceKey`, `CollectionId`)**
+
+## `DavItem` — unchanged
+
+Keeps its surrogate `Id`, and that is deliberate: `item.Id.ToString()` is the sub-part of every DAV
+item ServerId on the wire (`DavItemMap.cs:55`). Unique index on (`UserFolderKey`, `Href`) stays.
 
 ## `SentCommandToken`
 
-Columns unchanged (`DeviceKey`, `CollectionId`, `SyncKeyAtClaim`, `Key`, `CreatedUtc`, `Completed`)
-and the unique index stays **(`DeviceKey`, `CollectionId`, `SyncKeyAtClaim`, `Key`)**. The change is
-that `DeviceKey` becomes a **real FK to `Device` with cascade**, closing today's orphan-on-device-delete
-gap.
+Columns unchanged (`Id`, `DeviceKey`, `CollectionId`, `SyncKeyAtClaim`, `Key`, `CreatedUtc`,
+`Completed`) and the unique index stays **(`DeviceKey`, `CollectionId`, `SyncKeyAtClaim`, `Key`)**.
+The change is that `DeviceKey` becomes a **real FK to `Device` with cascade**, closing today's
+orphan-on-device-delete gap.
+
+**This is the one table that deliberately keeps a surrogate `Id`** despite having a natural key. The
+key is four columns wide including a variable-length string, and this is the hot write path — a claim
+is inserted before every irreversible send. The payoff for promoting it is the smallest of any table
+here and the churn is the highest. ⓘ **judgement, not a decision** — flip it if the implementer
+disagrees.
 
 ---
 
@@ -260,8 +307,7 @@ in a local-stores deployment, and it cascades.
 
 | Column | Type | Key / index | Purpose |
 |---|---|---|---|
-| `Id` | int identity | **PK** | |
-| `Key` | string | **unique** | Watched area: `"users"`, `"settings"` |
+| `Key` | string | **PK** | Watched area: `"users"`, `"settings"` |
 | `Version` | Guid | | Bumped in the same `SaveChanges` as the mutation |
 | `UpdatedUtc` | DateTime | | ⓘ **inferred** — mirrors `GlobalSetting` |
 
@@ -276,9 +322,17 @@ write invalidate the settings snapshot and vice versa.
 
 **Links:** none — a bare signal. Adding a watched area later is an inserted row, not a migration.
 
-## `GlobalSetting`, `LogEntry`, `ServerCertificate`, `DataProtectionKeys` — unchanged
+## `GlobalSetting`
 
-As [`current-db.md`](current-db.md) describes. Two notes:
+Columns unchanged (`Key`, `Value`, `UpdatedUtc`), but **drops its surrogate `Id`**: `Key` was already
+unique and becomes the primary key.
+
+## `LogEntry`, `ServerCertificate`, `DataProtectionKeys` — unchanged
+
+As [`current-db.md`](current-db.md) describes, surrogate keys included — and in these three that is
+correct, not an oversight. A log line has **no** natural key (timestamp plus message is not unique),
+`ServerCertificate` keeps its explicit single-row `Id = 1` idiom, and a DataProtection key-ring entry
+is identified by content the gateway does not parse. Two notes:
 
 - **`LogEntry.User` stays a login string, not a `UserId`.** ⓘ **inferred** — not stated in
   `db-restructure.md`. Rationale: a log line is an audit record of what was true at the time, so it
