@@ -579,6 +579,28 @@ derive an address from `UserName` with `Contains('@')`.
   `Directory.Build.targets` gated on `IsPackable` (a .props gate would evaluate too early), so a
   host-only assembly carries no license/authors at all. See docs/plugins.md (contract NOT
   ABI-stable pre-2.0).
+- **Contract version ≠ release version — do not conflate them.** `$(ContractVersion)` in
+  `Directory.Build.props` is the single definition, pinned onto Contracts' and Protocol's
+  `AssemblyVersion`/`FileVersion`/`PackageVersion` so the release tag (which CI passes as a global
+  `-p:Version`) can NEVER reach those two. That separation is load-bearing: if it leaked, tagging
+  the gateway 2.0.0 for a product reason would flip the contract major and refuse every existing
+  plugin without the contract having changed. `ContractVersion.Major/Minor` READ that assembly
+  version (properties, not `const` — a `const` is inlined into the consumer and would report the
+  plugin's build-time value while appearing to report the host's), so there is nothing to keep in
+  sync by hand. Raise `$(ContractVersion)` ONLY for a real surface change; both major and minor are
+  breaking (the loader demands an exact match), and `ContractSurfaceTests` carries a literal
+  tripwire so it cannot move by accident.
+- **Plugins DECLARE their contract, they are not sniffed.** A plugin entry assembly must carry
+  `[assembly: SupportedGatewayContract(major, minor)]`; `PluginLoader.VerifyDeclaredContract` reads
+  it from metadata (`PEReader`/`MetadataReader` + a minimal `ICustomAttributeTypeProvider`) BEFORE
+  anything loads, which is why it is an assembly attribute and not an `IGatewayPlugin` member —
+  asking an object means instantiating a type from a possibly-incompatible assembly, i.e. exactly
+  the TypeLoadException-mid-sync failure the check prevents. An unreadable file falls through to the
+  load so the corrupt-assembly message still wins. The older reference-table scan
+  (`VerifyContractVersions`) stays as a SECONDARY guard over the whole folder: it catches a bundle
+  whose entry declares correctly but ships a private helper built against another contract. The
+  in-repo fixture plugin gets its declaration injected from `$(ContractVersionMajor/Minor)` via
+  `<AssemblyAttribute>`, so it cannot go stale.
 - One `CompositeBackendSession` per (user, deviceId), cached in `BackendSessionFactory`
   with idle eviction; auth verdicts are cached ~5 minutes. Content roles are optional —
   when a role has no configured provider it falls back to the **local store** (below), so

@@ -13,8 +13,9 @@ project doesn't ship.
 
 ## The contract
 
-Reference **one** NuGet package (published per release to GitHub Packages, and nuget.org
-when configured) — pin the **exact minor** you target (see *Versioning* below):
+Reference **one** NuGet package (published to GitHub Packages, and nuget.org when
+configured) — its version is the *contract* version, which moves independently of the
+gateway's release version (see *Versioning* below):
 
 - **`ActiveSync.Contracts`** — the whole plugin contract: `IBackendProvider`,
   `IContentStore`, `IGatewayPlugin`, the roles, provider settings and config schema. It is a
@@ -254,8 +255,30 @@ loaded.
 ## Versioning
 
 The backend contract is **not ABI-stable before 2.0** — `IContentStore` and friends still
-evolve with new EAS features. The loader enforces that a plugin's referenced
-`ActiveSync.Contracts` **major** version matches the host and aborts on a mismatch — that major
-is `ActiveSync.Contracts.ContractVersion.Major`, which you can also read at runtime
-(`ContractVersion.Current` is `Major.Minor`). Pin the exact minor you built against and rebuild
-your plugin when you upgrade the gateway across a minor, until a 2.0 stability guarantee lands.
+evolve with new EAS features.
+
+**Declare the contract you support.** Every plugin entry assembly must carry:
+
+```csharp
+[assembly: SupportedGatewayContract(1, 0)]
+```
+
+The loader reads that declaration from metadata *before loading anything* and refuses the
+plugin unless it matches the host exactly. It is a declaration rather than an inference on
+purpose: your plugin's own version is your business (a plugin at 3.7.2 may support contract
+1.0), and the package version you happened to compile against says nothing about which
+contract you actually verified against. Only you know that.
+
+**Both components are breaking.** Major *and* minor must match — a plugin declaring 1.0 will
+not load on a 1.1 host. That is deliberate while the contract is pre-2.0: it lets an
+incompatible change ship as a minor bump instead of inflating the major into a meaningless
+counter. The patch component is not part of the declaration and never gates anything.
+
+**The contract version is not the gateway version.** It moves only when the contract surface
+changes, so it stays put across ordinary gateway releases — a gateway released as 1.5.0, or
+even 2.0.0, still runs a plugin declaring contract 1.0, as long as the surface itself did not
+change. Track the contract, not the release. You can read the host's value at runtime as
+`ActiveSync.Contracts.ContractVersion.Current` (`Major.Minor`).
+
+When the contract does move, rebuild against the new package and update your declaration; the
+loader's error message names both versions.

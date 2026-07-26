@@ -4,6 +4,15 @@
 	     (see LICENSE-MIT) — one of only two projects that are; the rest of the repository is
 	     PolyForm Noncommercial. Anything moved INTO this assembly becomes permanently
 	     permissive, so keep it to protocol primitives. -->
+	<!-- Versioned by the CONTRACT alongside ActiveSync.Contracts, not by the gateway release —
+	     set explicitly so a global -p:Version=<tag> cannot reach them. See Directory.Build.props. -->
+	<PropertyGroup>
+		<AssemblyVersion>$(ContractVersion).0</AssemblyVersion>
+		<FileVersion>$(ContractVersion).0</FileVersion>
+		<PackageVersion>$(ContractVersion)</PackageVersion>
+		<InformationalVersion>$(ContractVersion)</InformationalVersion>
+	</PropertyGroup>
+
 	<PropertyGroup>
 		<IsPackable>true</IsPackable>
 		<PackageId>ActiveSync.Protocol</PackageId>

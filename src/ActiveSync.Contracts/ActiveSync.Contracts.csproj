@@ -14,6 +14,17 @@
 		<RootNamespace>ActiveSync.Contracts</RootNamespace>
 	</PropertyGroup>
 
+	<!-- Versioned by the CONTRACT, not by the gateway release. These are set explicitly so the
+	     global -p:Version=<tag> CI passes for the release build cannot reach them: the SDK only
+	     falls back to $(Version) for a version property the project leaves empty. See the
+	     ContractVersion block in Directory.Build.props for why that separation is load-bearing. -->
+	<PropertyGroup>
+		<AssemblyVersion>$(ContractVersion).0</AssemblyVersion>
+		<FileVersion>$(ContractVersion).0</FileVersion>
+		<PackageVersion>$(ContractVersion)</PackageVersion>
+		<InformationalVersion>$(ContractVersion)</InformationalVersion>
+	</PropertyGroup>
+
 	<PropertyGroup>
 		<IsPackable>true</IsPackable>
 		<PackageId>ActiveSync.Contracts</PackageId>

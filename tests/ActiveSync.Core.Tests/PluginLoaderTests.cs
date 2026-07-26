@@ -330,6 +330,99 @@ public sealed class PluginLoaderTests : IDisposable
 		Assert.Contains("ActiveSync.TestPlugin", ex.Message, StringComparison.Ordinal);
 	}
 
+	/// <summary>
+	///   The primary gate: a plugin DECLARES the contract it supports, and it must match exactly.
+	///   Minor counts as breaking by current policy, so 1.1 against a 1.0 host is refused — that is
+	///   what lets an incompatible change land as a minor bump instead of inflating the major.
+	/// </summary>
+	[Fact]
+	public void DeclaredContractMinorMismatch_FailsFast()
+	{
+		string pluginDir = StagePlugin("ActiveSync.TestPlugin");
+		PatchDeclaredContractVersion(
+			Path.Combine(pluginDir, "ActiveSync.TestPlugin.dll"),
+			ContractVersion.Major,
+			ContractVersion.Minor + 1);
+
+		ServiceCollection services = new();
+		services.AddLogging();
+		InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+			PluginLoader.LoadInto(services, ConfigFor(_root), NullLogger.Instance));
+
+		Assert.Contains("ActiveSync.TestPlugin", ex.Message, StringComparison.Ordinal);
+		Assert.Contains($"{ContractVersion.Major}.{ContractVersion.Minor + 1}", ex.Message, StringComparison.Ordinal);
+	}
+
+	/// <summary>A different major is refused by the same gate, before anything is loaded.</summary>
+	[Fact]
+	public void DeclaredContractMajorMismatch_FailsFast()
+	{
+		string pluginDir = StagePlugin("ActiveSync.TestPlugin");
+		PatchDeclaredContractVersion(
+			Path.Combine(pluginDir, "ActiveSync.TestPlugin.dll"), ContractVersion.Major + 1, 0);
+
+		ServiceCollection services = new();
+		services.AddLogging();
+		InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+			PluginLoader.LoadInto(services, ConfigFor(_root), NullLogger.Instance));
+
+		Assert.Contains($"{ContractVersion.Major + 1}.0", ex.Message, StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	///   Declaring is mandatory: an entry assembly without the attribute is refused with a message
+	///   naming the attribute to add, rather than being inferred from what it happens to reference.
+	///   PluginPrivateLib is a real managed assembly that carries no declaration.
+	/// </summary>
+	[Fact]
+	public void UndeclaredPlugin_FailsFast_NamingTheAttribute()
+	{
+		string pluginDir = Path.Combine(_root, "PluginPrivateLib");
+		Directory.CreateDirectory(pluginDir);
+		File.Copy(StagedDepDll, Path.Combine(pluginDir, "PluginPrivateLib.dll"));
+
+		ServiceCollection services = new();
+		services.AddLogging();
+		InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+			PluginLoader.LoadInto(services, ConfigFor(_root), NullLogger.Instance));
+
+		Assert.Contains("SupportedGatewayContract", ex.Message, StringComparison.Ordinal);
+		Assert.Contains("PluginPrivateLib", ex.Message, StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	///   Rewrites the two int arguments of the fixture's SupportedGatewayContract declaration. Same
+	///   trick as <see cref="PatchContractReferenceVersion" />: producing these files honestly would
+	///   mean shipping plugins built against contract versions that do not exist.
+	/// </summary>
+	private static void PatchDeclaredContractVersion(string assemblyPath, int major, int minor)
+	{
+		byte[] image = File.ReadAllBytes(assemblyPath);
+		int offset;
+		using (MemoryStream stream = new(image, false))
+		using (PEReader pe = new(stream))
+		{
+			MetadataReader metadata = pe.GetMetadataReader();
+			CustomAttribute attribute = metadata.GetAssemblyDefinition().GetCustomAttributes()
+				.Select(metadata.GetCustomAttribute)
+				.First(a => a.Constructor.Kind == HandleKind.MemberReference
+				            && metadata.GetString(metadata.GetTypeReference(
+					            (TypeReferenceHandle)metadata.GetMemberReference(
+						            (MemberReferenceHandle)a.Constructor).Parent).Name)
+				            == nameof(SupportedGatewayContractAttribute));
+			offset = pe.PEHeaders.MetadataStartOffset
+			         + metadata.GetHeapMetadataOffset(HeapIndex.Blob)
+			         + MetadataTokens.GetHeapOffset(attribute.Value);
+		}
+
+		// Blob heap entry: a compressed length, then the value — a 2-byte prolog followed by the
+		// fixed arguments (two int32s here). A length under 0x80 occupies a single byte.
+		Assert.InRange(image[offset], 1, 0x7F);
+		BinaryPrimitives.WriteInt32LittleEndian(image.AsSpan(offset + 3), major);
+		BinaryPrimitives.WriteInt32LittleEndian(image.AsSpan(offset + 7), minor);
+		File.WriteAllBytes(assemblyPath, image);
+	}
+
 	/// <summary>Copies the fixture plugin into a correctly-named subdirectory and returns it.</summary>
 	private string StagePlugin(string name)
 	{

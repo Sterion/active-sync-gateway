@@ -14,6 +14,25 @@
 		<Copyright>Copyright (c) 2026 Ruben Andersen</Copyright>
 	</PropertyGroup>
 
+	<!-- THE backend plugin contract version — one definition for both ActiveSync.Contracts and
+	     ActiveSync.Protocol, which version together as a single surface.
+
+	     DELIBERATELY INDEPENDENT of the gateway release version. The release tag arrives as a
+	     global -p:Version and must never reach those two projects: if it did, tagging the gateway
+	     2.0.0 for a product reason would flip the contract major and lock out every existing
+	     plugin without the contract having changed at all.
+
+	     Raise Major or Minor ONLY when the surface of either project changes. BOTH count as
+	     breaking — the loader demands an exact major.minor match — so Minor absorbs breaks that
+	     would otherwise inflate Major into a meaningless counter. Patch is free: use it for
+	     non-surface fixes (docs, comments), and the loader ignores it. -->
+	<PropertyGroup>
+		<ContractVersionMajor>1</ContractVersionMajor>
+		<ContractVersionMinor>0</ContractVersionMinor>
+		<ContractVersionPatch>0</ContractVersionPatch>
+		<ContractVersion>$(ContractVersionMajor).$(ContractVersionMinor).$(ContractVersionPatch)</ContractVersion>
+	</PropertyGroup>
+
 	<!-- NuGet: nothing packs unless a project opts in with <IsPackable>true</IsPackable>.
 	     Exactly two do — ActiveSync.Contracts (the plugin contract) and ActiveSync.Protocol
 	     (its single dependency); see the CI pack/push step. The package METADATA (authors,

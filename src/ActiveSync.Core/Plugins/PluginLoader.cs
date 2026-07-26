@@ -56,9 +56,8 @@ public static class PluginLoader
 			return;
 		}
 
-		// The host contract version is the authoritative ContractVersion constant (kept in lockstep
-		// with the assembly version a plugin references — ContractSurfaceTests guards the match), so
-		// the major a plugin is gated against is the one plugin authors read, not a reflected default.
+		// The host contract version, read from the ActiveSync.Contracts assembly itself (pinned to
+		// $(ContractVersion) in Directory.Build.props, never to the gateway release tag).
 		Version hostContractVersion = ContractVersion.Current;
 		int loaded = 0;
 		foreach (string pluginDir in Directory.EnumerateDirectories(directory).OrderBy(d => d, StringComparer.Ordinal))
@@ -84,6 +83,7 @@ public static class PluginLoader
 					"assembly must be named after its directory.");
 
 			VerifyPin(pluginDir, name, configuration, logger);
+			VerifyDeclaredContract(entryDll, name, hostContractVersion);
 			VerifyContractVersions(pluginDir, hostContractVersion);
 			loaded += LoadPlugin(services, configuration, logger, entryDll);
 		}
@@ -148,13 +148,131 @@ public static class PluginLoader
 	}
 
 	/// <summary>
-	///   Compatibility guard: the major version of ActiveSync.Contracts every assembly in the
-	///   plugin folder was built against must match the host — the backend contract is not
-	///   ABI-stable across majors. Read from METADATA, before anything is loaded, and over the
-	///   whole folder rather than the entry assembly alone: a plugin whose entry targets the right
-	///   major can still ship a private helper that does not, and a reference table only lists what
-	///   an assembly itself uses. Getting that wrong turns a comprehensible startup failure into a
-	///   TypeLoadException deep inside a sync.
+	///   The PRIMARY compatibility gate: the entry assembly must DECLARE the contract it supports
+	///   via <see cref="SupportedGatewayContractAttribute" />, and it must match the host exactly
+	///   on major and minor.
+	///   <para>
+	///     A declaration rather than an inference, because a plugin's own version and the contract
+	///     package version it compiled against both say nothing about what its author actually
+	///     verified. Read from METADATA so an incompatible assembly is refused before anything is
+	///     loaded — the whole point being a comprehensible startup failure instead of a
+	///     TypeLoadException deep inside a sync.
+	///   </para>
+	///   <para>
+	///     An unreadable file is NOT rejected here: it falls through to the load, which fails with
+	///     the loader's own "which plugin, and why" message rather than a misleading complaint
+	///     about a missing attribute.
+	///   </para>
+	/// </summary>
+	private static void VerifyDeclaredContract(string entryDll, string pluginName, Version hostContractVersion)
+	{
+		(int Major, int Minor)? declared = ReadDeclaredContract(entryDll, out bool readable);
+		if (!readable)
+			return;
+
+		if (declared is null)
+			throw new InvalidOperationException(
+				$"Plugin '{pluginName}' does not declare which gateway contract it supports. Add " +
+				$"[assembly: SupportedGatewayContract({hostContractVersion.Major}, {hostContractVersion.Minor})] " +
+				$"to its entry assembly '{Path.GetFileName(entryDll)}'.");
+
+		if (declared.Value.Major != hostContractVersion.Major || declared.Value.Minor != hostContractVersion.Minor)
+			throw new InvalidOperationException(
+				$"Plugin '{pluginName}' declares support for gateway contract " +
+				$"{declared.Value.Major}.{declared.Value.Minor}, but this host implements " +
+				$"{hostContractVersion.Major}.{hostContractVersion.Minor}. Every contract version is " +
+				"breaking while the contract is pre-2.0; rebuild the plugin against this one.");
+	}
+
+	/// <summary>
+	///   Reads the declared contract version out of the assembly's metadata without loading it.
+	///   <paramref name="readable" /> is false when the file is not a readable managed image, which
+	///   the caller treats as "not my problem" rather than as an undeclared plugin.
+	/// </summary>
+	private static (int Major, int Minor)? ReadDeclaredContract(string assemblyPath, out bool readable)
+	{
+		readable = true;
+		try
+		{
+			using FileStream stream = File.OpenRead(assemblyPath);
+			using PEReader pe = new(stream);
+			if (!pe.HasMetadata)
+			{
+				readable = false;
+				return null;
+			}
+
+			MetadataReader metadata = pe.GetMetadataReader();
+			foreach (CustomAttributeHandle handle in metadata.GetAssemblyDefinition().GetCustomAttributes())
+			{
+				CustomAttribute attribute = metadata.GetCustomAttribute(handle);
+				if (!IsSupportedGatewayContract(metadata, attribute))
+					continue;
+
+				CustomAttributeValue<string> value = attribute.DecodeValue(AttributeTypeProvider.Instance);
+				if (value.FixedArguments.Length >= 2
+				    && value.FixedArguments[0].Value is int major
+				    && value.FixedArguments[1].Value is int minor)
+					return (major, minor);
+			}
+		}
+		catch (Exception ex) when (ex is BadImageFormatException or IOException or UnauthorizedAccessException)
+		{
+			readable = false;
+		}
+
+		return null;
+	}
+
+	/// <summary>
+	///   Matches the attribute by type name alone: the plugin's reference to ActiveSync.Contracts
+	///   is a TypeReference into whatever it resolved at ITS build time, so comparing resolution
+	///   scopes would defeat the purpose of asking the plugin to declare a version at all.
+	/// </summary>
+	private static bool IsSupportedGatewayContract(MetadataReader metadata, CustomAttribute attribute)
+	{
+		if (attribute.Constructor.Kind != HandleKind.MemberReference)
+			return false;
+
+		MemberReference constructor = metadata.GetMemberReference((MemberReferenceHandle)attribute.Constructor);
+		if (constructor.Parent.Kind != HandleKind.TypeReference)
+			return false;
+
+		TypeReference type = metadata.GetTypeReference((TypeReferenceHandle)constructor.Parent);
+		return metadata.GetString(type.Name) == nameof(SupportedGatewayContractAttribute)
+		       && metadata.GetString(type.Namespace) == typeof(SupportedGatewayContractAttribute).Namespace;
+	}
+
+	/// <summary>
+	///   Minimal type provider for <see cref="CustomAttribute.DecodeValue{TType}" />. The attribute
+	///   carries two <see cref="int" /> arguments, so only primitives ever need naming; the rest
+	///   satisfy the interface.
+	/// </summary>
+	private sealed class AttributeTypeProvider : ICustomAttributeTypeProvider<string>
+	{
+		internal static readonly AttributeTypeProvider Instance = new();
+
+		public string GetPrimitiveType(PrimitiveTypeCode typeCode) => typeCode.ToString();
+		public string GetSystemType() => "System.Type";
+		public string GetSZArrayType(string elementType) => elementType + "[]";
+		public string GetTypeFromSerializedName(string name) => name;
+		public PrimitiveTypeCode GetUnderlyingEnumType(string type) => PrimitiveTypeCode.Int32;
+		public bool IsSystemType(string type) => type == "System.Type";
+
+		public string GetTypeFromDefinition(MetadataReader reader, TypeDefinitionHandle handle, byte rawTypeKind)
+			=> string.Empty;
+
+		public string GetTypeFromReference(MetadataReader reader, TypeReferenceHandle handle, byte rawTypeKind)
+			=> string.Empty;
+	}
+
+	/// <summary>
+	///   Secondary guard, behind <see cref="VerifyDeclaredContract" />: no assembly in the plugin
+	///   folder may REFERENCE a contract version other than the host's. This catches a bundle whose
+	///   entry declares the right contract but which ships a private helper compiled against a
+	///   different one — the helper's mismatched types would otherwise blow up deep inside a sync.
+	///   Read from metadata over the whole folder, since a reference table only lists what an
+	///   assembly itself uses.
 	/// </summary>
 	private static void VerifyContractVersions(string pluginDir, Version hostContractVersion)
 	{
@@ -184,10 +302,12 @@ public static class PluginLoader
 				continue;
 			}
 
-			if (builtAgainst is not null && builtAgainst.Major != hostContractVersion.Major)
+			if (builtAgainst is not null
+			    && (builtAgainst.Major != hostContractVersion.Major || builtAgainst.Minor != hostContractVersion.Minor))
 				throw new InvalidOperationException(
 					$"Plugin assembly '{Path.GetFileName(dll)}' was built against {contractName} " +
-					$"{builtAgainst} but the host is {hostContractVersion}; major versions must match.");
+					$"{builtAgainst.Major}.{builtAgainst.Minor} but the host is {hostContractVersion}; " +
+					"the major and minor versions must match.");
 		}
 	}
 

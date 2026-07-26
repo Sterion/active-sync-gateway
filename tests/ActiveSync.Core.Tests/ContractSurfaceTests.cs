@@ -16,15 +16,33 @@ namespace ActiveSync.Core.Tests;
 public sealed class ContractSurfaceTests
 {
 	// K69: there was no version constant anywhere — the loader gated on the raw assembly version
-	// and a plugin had nothing to read or assert against. ContractVersion is that constant, and it
-	// must stay in lockstep with the assembly version the plugin loader actually compares.
+	// and a plugin had nothing to read or assert against. ContractVersion now READS that assembly
+	// version, which is pinned to $(ContractVersion) in Directory.Build.props, so this asserts the
+	// derivation rather than a hand-maintained match.
 	[Fact]
-	public void ContractVersion_MatchesTheAssemblyVersion()
+	public void ContractVersion_ReadsTheContractAssemblyVersion()
 	{
 		Version assemblyVersion = typeof(IGatewayPlugin).Assembly.GetName().Version!;
 		Assert.Equal(ContractVersion.Major, assemblyVersion.Major);
 		Assert.Equal(ContractVersion.Minor, assemblyVersion.Minor);
 		Assert.Equal(new Version(ContractVersion.Major, ContractVersion.Minor), ContractVersion.Current);
+	}
+
+	/// <summary>
+	///   A deliberate tripwire, not a duplicate definition. Raising $(ContractVersion) refuses every
+	///   existing plugin — both major and minor are breaking by current policy — so it must never
+	///   happen as a side effect of an unrelated edit. Update this literal in the same commit that
+	///   raises the property, and only when the contract surface genuinely changed.
+	///   <para>
+	///     It also pins the decoupling from the gateway release: this stays 1.0 across gateway
+	///     releases 1.1.3, 1.5.0, 2.0.0. If a release tag ever starts leaking into the contract
+	///     assemblies again, this is what fails.
+	///   </para>
+	/// </summary>
+	[Fact]
+	public void ContractVersion_IsTheExpectedSurfaceVersion()
+	{
+		Assert.Equal(new Version(1, 0), ContractVersion.Current);
 	}
 
 	// K67: BackendItemNotFoundException derived straight from Exception, so the codebase-wide
