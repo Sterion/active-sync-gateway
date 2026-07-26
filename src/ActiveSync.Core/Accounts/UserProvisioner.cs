@@ -79,4 +79,57 @@ public sealed class UserProvisioner(
 
 		return userId;
 	}
+
+	/// <summary>
+	///   Gives every CONFIG-declared login an identity row at startup. Once every per-user table
+	///   FKs to <c>UserId</c>, a config-declared user cannot stay config-only — its sync state
+	///   would have nothing to point at. Configuration keeps supplying the VALUES; the row only
+	///   supplies the IDENTITY, so it is created identity-only and never shadows the config entry.
+	///   <para>
+	///     Matching is by login, and that is safe precisely because a login is IMMUTABLE while it
+	///     is config-declared (<c>eas user rename</c> refuses one): the database side can never
+	///     drift from configuration, because the only mutable side is the one configuration does
+	///     not own.
+	///   </para>
+	///   <para>
+	///     The residual this CANNOT close: renaming the configuration KEY itself reads as a
+	///     delete-plus-add to a gateway that does not own the file, so it creates a new user and
+	///     strands the old row's data. Newly-created rows are therefore logged — cheap, and the
+	///     only thing that surfaces it.
+	///   </para>
+	/// </summary>
+	public async Task BootstrapConfigUsersAsync(CancellationToken ct)
+	{
+		Dictionary<string, UserOptions>? configUsers = options.CurrentValue.Users;
+		if (configUsers is not { Count: > 0 })
+			return;
+
+		foreach (string login in configUsers.Keys)
+		{
+			List<string> failures = new();
+			UserResolver.ValidateLogin(login, failures);
+			if (failures.Count > 0)
+				continue;   // startup validation already reports these
+
+			try
+			{
+				bool existed = await store.FindUserIdAsync(login, ct).ConfigureAwait(false) is not null;
+				(int userId, _) = await store.GetOrCreateUserAsync(login, null, ct).ConfigureAwait(false);
+				if (existed)
+					continue;
+
+				logger.LogInformation(
+					"Configuration declares {User} and no user had that login — created user {UserId}. " +
+					"If you RENAMED a configuration key, the previous user's devices and locally-stored " +
+					"items are still under the old login (the gateway cannot tell a rename from a " +
+					"delete-plus-add in a file it does not own).",
+					login, userId);
+			}
+			catch (Exception ex) when (ex is not OperationCanceledException)
+			{
+				// One unusable config login must not stop the gateway from starting.
+				logger.LogWarning(ex, "Could not create the identity row for config-declared user {User}", login);
+			}
+		}
+	}
 }

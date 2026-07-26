@@ -108,6 +108,77 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 		}
 	}
 
+	/// <summary>Why a rename could not be applied — the caller phrases the message.</summary>
+	public enum RenameOutcome
+	{
+		Renamed,
+
+		/// <summary>No user has the old login.</summary>
+		UnknownUser,
+
+		/// <summary>The new login is already taken by another user.</summary>
+		Collision,
+	}
+
+	/// <summary>
+	///   Renames a user — a SINGLE-ROW UPDATE, which is the whole point of the surrogate key:
+	///   sync state stays attached, encrypted local items stay readable (the AAD binds
+	///   <c>UserId</c>), and the device keeps its folder registry and sync keys. The holder just
+	///   updates the username on the phone.
+	///   <para>
+	///     Refuses a collision, case-folded like every other login comparison. The
+	///     config-declared immutability guard lives in the CALLER, which is the layer that knows
+	///     the configuration — see the CLI/admin surfaces.
+	///   </para>
+	/// </summary>
+	public async Task<RenameOutcome> RenameAsync(string oldLogin, string newLogin, CancellationToken ct)
+	{
+		string from = NormalizeLogin(oldLogin);
+		string to = NormalizeLogin(newLogin);
+		await using SyncDbContext db = contextFactory.CreateDbContext();
+		User? user = await db.Users.FirstOrDefaultAsync(u => u.Login == from, ct).ConfigureAwait(false);
+		if (user is null)
+			return RenameOutcome.UnknownUser;
+		if (from == to)
+			return RenameOutcome.Renamed;   // nothing to do; not an error
+		if (await db.Users.AnyAsync(u => u.Login == to, ct).ConfigureAwait(false))
+			return RenameOutcome.Collision;
+
+		user.Login = to;
+		user.UpdatedUtc = DateTime.UtcNow;
+		await BumpStampAsync(db, ct).ConfigureAwait(false);
+		try
+		{
+			await db.SaveChangesAsync(ct).ConfigureAwait(false);
+			return RenameOutcome.Renamed;
+		}
+		catch (DbUpdateException ex) when (DbExceptions.IsUniqueViolation(ex))
+		{
+			// A concurrent writer took the new login between our check and this save.
+			return RenameOutcome.Collision;
+		}
+	}
+
+	/// <summary>
+	///   Deletes the USER — identity and all — cascading every per-user row the database owns.
+	///   Destructive in a way removing a declaration is not: <c>LocalItem</c> content goes with
+	///   it, and in a local-stores deployment that data exists nowhere else. Callers MUST count
+	///   the impact and obtain confirmation first (<c>DeviceAdminService.CountDeletionImpactAsync</c>);
+	///   the database cascades, the application is what refuses to issue it blind.
+	/// </summary>
+	public async Task<bool> DeleteUserAsync(string login, CancellationToken ct)
+	{
+		await using SyncDbContext db = contextFactory.CreateDbContext();
+		string normalized = NormalizeLogin(login);
+		User? user = await db.Users.FirstOrDefaultAsync(u => u.Login == normalized, ct).ConfigureAwait(false);
+		if (user is null)
+			return false;
+		db.Users.Remove(user);
+		await BumpStampAsync(db, ct).ConfigureAwait(false);
+		await db.SaveChangesAsync(ct).ConfigureAwait(false);
+		return true;
+	}
+
 	/// <summary>Current change stamp of the "users" area, or null when nothing was ever written.</summary>
 	public Task<Guid?> ReadStampAsync(CancellationToken ct) =>
 		DataChangeStamps.ReadAsync(contextFactory, DataChangeAreas.Users, ct);

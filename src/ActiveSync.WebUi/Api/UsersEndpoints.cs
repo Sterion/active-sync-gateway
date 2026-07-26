@@ -173,7 +173,99 @@ internal static class UsersEndpoints
 				UserResolver resolver, BackendRolesConfig roles, BackendProviderRegistry registry,
 				IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
 			SetEnabledAsync(login, true, principal, store, resolver, roles, registry, options, ct));
+
+		// Renaming a login is possible at all only because identity is a surrogate key: the
+		// rename is a single-row update, so sync state and locally-stored items are unaffected.
+		api.MapPost("users/{login}/rename", async (
+			string login, RenameRequest request, UserStore store, UserResolver resolver,
+			IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
+		{
+			if (AdminIdentifiers.LoginProblem(request.NewLogin) is { } loginError)
+				return EndpointHelpers.BadRequest(loginError);
+			string newLogin = request.NewLogin!.Trim();
+			ActiveSyncOptions current = options.CurrentValue;
+
+			// The SAME two guards the CLI applies — the UI must not be able to write a shape the
+			// CLI refuses. A config-declared login is immutable, which is exactly what keeps
+			// config↔database matching-by-login from ever drifting.
+			if (UserEditing.FindConfigUser(current, login) is not null)
+				return EndpointHelpers.BadRequest(
+					$"'{login}' is declared in configuration — change it there (ActiveSync:Users). " +
+					"A config-declared login is immutable so the two sides cannot drift.");
+			if (UserEditing.FindConfigUser(current, newLogin) is not null)
+				return EndpointHelpers.BadRequest(
+					$"'{newLogin}' is already declared in configuration — pick a login that is free.");
+
+			UserStore.RenameOutcome outcome = await store.RenameAsync(login, newLogin, ct);
+			if (outcome == UserStore.RenameOutcome.UnknownUser)
+				return Results.NotFound();
+			if (outcome == UserStore.RenameOutcome.Collision)
+				return EndpointHelpers.BadRequest($"'{newLogin}' is already taken by another user.");
+
+			await resolver.EnsureFreshAsync(true, ct);
+			return Results.Ok(new
+			{
+				login = newLogin,
+				previousLogin = login,
+				note = "Sync state, devices and locally-stored items are unaffected — the phone " +
+				       "just needs its username updated.",
+			});
+		});
+
+		// DELETE the user itself (distinct from `remove`, which only drops the database
+		// declaration). Confirm-and-cascade: the database cascades, and this refuses to issue it
+		// blind — GET the impact, then repost with the login echoed back.
+		api.MapGet("users/{login}/deletion-impact", async (
+			string login, DeviceAdminService devices, UserStore store, CancellationToken ct) =>
+		{
+			if (await store.FindUserIdAsync(login, ct) is null)
+				return Results.NotFound();
+			DeviceAdminService.DeletionImpact impact = await devices.CountDeletionImpactAsync(login, null, ct);
+			return Results.Ok(new
+			{
+				login,
+				destroysContent = impact.DestroysContent,
+				content = impact.Content.Where(c => c.Count > 0)
+					.Select(c => new { collection = c.Table, count = c.Count }),
+				syncState = impact.SyncState.Where(c => c.Count > 0)
+					.Select(c => new { table = c.Table, count = c.Count }),
+				summary = impact.DescribeContent(),
+			});
+		});
+
+		api.MapPost("users/{login}/delete", async (
+			string login, DeleteUserRequest request, UserStore store, UserResolver resolver,
+			DeviceAdminService devices, IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct) =>
+		{
+			if (await store.FindUserIdAsync(login, ct) is null)
+				return Results.NotFound();
+
+			// Typed echo, the same idiom wipe/purge already use. Graduated: content-owning users
+			// get the counts in the refusal so the dialog can name what is at stake.
+			DeviceAdminService.DeletionImpact impact = await devices.CountDeletionImpactAsync(login, null, ct);
+			if (!string.Equals(request.Confirm, login, StringComparison.Ordinal))
+				return EndpointHelpers.BadRequest(impact.DestroysContent
+					? $"confirm must echo '{login}' — this permanently destroys " +
+					  $"{impact.DescribeContent()}, which exist nowhere else"
+					: $"confirm must echo '{login}'");
+
+			if (!await store.DeleteUserAsync(login, ct))
+				return Results.NotFound();
+			await resolver.EnsureFreshAsync(true, ct);
+			return Results.Ok(new
+			{
+				login,
+				deleted = true,
+				destroyed = impact.DescribeContent(),
+				// Configuration is not ours to edit: say so rather than let the row silently return.
+				configFallback = UserEditing.FindConfigUser(options.CurrentValue, login) is not null,
+			});
+		});
 	}
+
+	internal sealed record RenameRequest(string? NewLogin);
+
+	internal sealed record DeleteUserRequest(string? Confirm);
 
 	/// <summary>
 	///   A 409 when the write would leave the gateway with no enabled admin, otherwise null.

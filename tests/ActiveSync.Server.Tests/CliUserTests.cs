@@ -242,6 +242,73 @@ public sealed class CliUserTests : IDisposable
 	}
 
 	[Fact]
+	public void Rename_RoundTrips_AndRefusesTheGuardedCases()
+	{
+		// The CLI half of item 6b. The same two guards the admin API applies, because the design
+		// requires both surfaces to refuse the same shapes.
+		Run(null, "user", "add", "dbuser");
+		Run(null, "user", "add", "otheruser");
+
+		(int exitCode, _, string output) = Run(null, "user", "rename", "dbuser", "dbuser2");
+		Assert.Equal(0, exitCode);
+		Assert.Contains("Renamed", output);
+		Assert.Contains("unaffected", output);   // the point of the surrogate key
+
+		// Guard 1: a config-declared login is immutable — change it in configuration.
+		(int configExit, string configErr, _) = Run(null, "user", "rename", "confuser", "somethingelse");
+		Assert.Equal(1, configExit);
+		Assert.Contains("declared in configuration", configErr);
+
+		// Guard 2: no collision, including onto a config-declared login.
+		(int collideExit, string collideErr, _) = Run(null, "user", "rename", "dbuser2", "otheruser");
+		Assert.Equal(1, collideExit);
+		Assert.Contains("already taken", collideErr);
+
+		(int configTargetExit, string configTargetErr, _) =
+			Run(null, "user", "rename", "dbuser2", "confuser");
+		Assert.Equal(1, configTargetExit);
+		Assert.Contains("already declared in configuration", configTargetErr);
+
+		// And an unknown user is reported rather than silently succeeding.
+		(int ghostExit, string ghostErr, _) = Run(null, "user", "rename", "ghost", "whoever");
+		Assert.Equal(1, ghostExit);
+		Assert.Contains("No user", ghostErr);
+	}
+
+	[Fact]
+	public void Delete_NeedsConfirmation_AndIsDistinctFromRemove()
+	{
+		Run(null, "user", "add", "victim");
+
+		// Non-interactive without --yes: refused, with the question shown.
+		(int refusedExit, string refusedErr, _) = Run(null, "user", "delete", "victim");
+		Assert.Equal(1, refusedExit);
+		Assert.Contains("Permanently delete", refusedErr);
+		Assert.Contains("--yes", refusedErr);
+
+		(int deletedExit, _, string deletedOut) = Run(null, "user", "delete", "victim", "--yes");
+		Assert.Equal(0, deletedExit);
+		Assert.Contains("Deleted user", deletedOut);
+
+		(int goneExit, string goneErr, _) = Run(null, "user", "delete", "victim", "--yes");
+		Assert.Equal(1, goneExit);
+		Assert.Contains("No user", goneErr);
+	}
+
+	[Fact]
+	public void Delete_OfAConfigDeclaredUser_WarnsItWillReturn()
+	{
+		// The server gives every config-declared login an identity row at startup; a CLI-only
+		// test stands in for that by touching the user once.
+		Run(null, "user", "add", "confuser");
+
+		(int exitCode, _, string output) = Run(null, "user", "delete", "confuser", "--yes");
+
+		Assert.Equal(0, exitCode);
+		Assert.Contains("configuration still declares this login", output);
+	}
+
+	[Fact]
 	public void Set_OnConfigUser_RecordsOnlyTheDeviation_ConfigStillSuppliesTheRest()
 	{
 		(int exitCode, _, string output) = Run(null, "user", "set", "confuser", "Backends:MailStore:Settings:Host", "imap.override");

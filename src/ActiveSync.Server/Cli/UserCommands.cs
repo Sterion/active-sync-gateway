@@ -23,9 +23,13 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 	protected BackendRolesConfig Roles { get; private set; } = null!;
 	protected BackendProviderRegistry Registry { get; private set; } = null!;
 
+	/// <summary>The resolved provider for commands that need more than the store (e.g. the delete guard).</summary>
+	protected IServiceProvider Services { get; private set; } = null!;
+
 	protected sealed override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, TSettings settings, CancellationToken cancellationToken)
 	{
+		Services = services;
 		UserStore store = services.GetRequiredService<UserStore>();
 		ActiveSyncOptions options = services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value;
 		Roles = services.GetRequiredService<BackendRolesConfig>();
@@ -38,7 +42,7 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 
 	protected static UserOptions Clone(UserOptions source) => UserEditing.Clone(source);
 
-	/// <summary>DB entry, else a copy of the config entry, else a fresh one.</summary>
+	/// <summary>The database declaration, else a fresh one (never a copy of config — item 6).</summary>
 	protected static Task<UserOptions> LoadStartingEntryAsync(
 		UserStore store, ActiveSyncOptions options, string login, CancellationToken ct)
 	{
@@ -162,6 +166,160 @@ internal sealed class UserRemoveCommand(IAnsiConsole terminal) : UserCommandBase
 		Terminal.WriteLine(options.Users?.ContainsKey(settings.Login) == true
 			? $"Removed the database entry for '{settings.Login}' — the config entry is active again."
 			: $"Removed the database entry for '{settings.Login}'.");
+		Terminal.WriteLine(PickupNote(options));
+		return 0;
+	}
+}
+
+/// <summary>
+///   Renames a user's login. Possible at all only because the identity is a surrogate key: the
+///   rename is a single-row update, so sync state stays attached and locally-stored items stay
+///   readable. The holder just updates the username on their phone.
+/// </summary>
+internal sealed class UserRenameCommand(IAnsiConsole terminal) : UserCommandBase<UserRenameCommand.Settings>(terminal)
+{
+	public sealed class Settings : CommandSettings
+	{
+		[CommandArgument(0, "<login>")]
+		[Description("The current login.")]
+		public required string Login { get; init; }
+
+		[CommandArgument(1, "<newLogin>")]
+		[Description("The login the phone will present from now on.")]
+		public required string NewLogin { get; init; }
+	}
+
+	protected override async Task<int> RunAsync(
+		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+	{
+		// Guard 1: a login is IMMUTABLE while configuration declares it. That is exactly what
+		// makes matching config to database BY LOGIN safe — the database side can never drift,
+		// because the only mutable side is the one configuration does not own.
+		if (UserEditing.FindConfigUser(options, settings.Login) is not null)
+		{
+			await Console.Error.WriteLineAsync(
+				$"'{settings.Login}' is declared in configuration — change it there (ActiveSync:Users), " +
+				"not here. A config-declared login is immutable so the two sides cannot drift.");
+			return 1;
+		}
+
+		// Guard 2: the new login must be free — including of a config entry, which would other-
+		// wise start shadowing this user the moment configuration is next read.
+		List<string> failures = new();
+		UserResolver.ValidateLogin(settings.NewLogin, failures);
+		if (failures.Count > 0)
+		{
+			foreach (string failure in failures)
+				await Console.Error.WriteLineAsync(failure);
+			return 1;
+		}
+
+		if (UserEditing.FindConfigUser(options, settings.NewLogin) is not null)
+		{
+			await Console.Error.WriteLineAsync(
+				$"'{settings.NewLogin}' is already declared in configuration — pick a login that is free.");
+			return 1;
+		}
+
+		UserStore.RenameOutcome outcome =
+			await store.RenameAsync(settings.Login, settings.NewLogin, cancellationToken);
+		switch (outcome)
+		{
+			case UserStore.RenameOutcome.UnknownUser:
+				await Console.Error.WriteLineAsync($"No user '{settings.Login}'.");
+				return 1;
+			case UserStore.RenameOutcome.Collision:
+				await Console.Error.WriteLineAsync(
+					$"'{settings.NewLogin}' is already taken by another user.");
+				return 1;
+			default:
+				Terminal.WriteLine(
+					$"Renamed '{settings.Login}' to '{settings.NewLogin}'. Sync state, devices and " +
+					"locally-stored items are unaffected — the phone just needs its username updated.");
+				Terminal.WriteLine(PickupNote(options));
+				return 0;
+		}
+	}
+}
+
+/// <summary>
+///   Deletes a user outright: the identity and everything the database cascades from it. Unlike
+///   `user remove` (which drops the DATABASE DECLARATION and falls back to configuration), this
+///   destroys data — locally-stored contacts, calendar, tasks and notes included, which in a
+///   local-stores deployment exist nowhere else. Confirm-and-cascade: the impact is counted
+///   first and the question names what is lost.
+/// </summary>
+internal sealed class UserDeleteCommand(IAnsiConsole terminal) : UserCommandBase<UserDeleteCommand.Settings>(terminal)
+{
+	public sealed class Settings : CommandSettings
+	{
+		[CommandArgument(0, "<login>")]
+		public required string Login { get; init; }
+
+		[CommandOption("-y|--yes")]
+		[Description("Skip the confirmation prompt (required when not running interactively).")]
+		public bool Yes { get; init; }
+	}
+
+	protected override async Task<int> RunAsync(
+		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
+	{
+		if (await store.FindUserIdAsync(settings.Login, cancellationToken) is null)
+		{
+			await Console.Error.WriteLineAsync($"No user '{settings.Login}'.");
+			return 1;
+		}
+
+		DeviceAdminService devices = Services.GetRequiredService<DeviceAdminService>();
+		DeviceAdminService.DeletionImpact impact =
+			await devices.CountDeletionImpactAsync(settings.Login, null, cancellationToken);
+
+		if (!settings.Yes)
+		{
+			// Graduated friction: sync state alone rebuilds on the next sync and does not deserve
+			// a dire warning; real content does, named exactly.
+			string question = impact.DestroysContent
+				? $"Permanently delete user '{settings.Login}'? This destroys {impact.DescribeContent()} " +
+				  "which exist nowhere else."
+				: $"Permanently delete user '{settings.Login}' and all of its gateway state?";
+
+			if (CliConfirmation.CanAsk)
+			{
+				CliConfirmation.Ask(question);
+				return 1;
+			}
+
+			if (!Terminal.Profile.Capabilities.Interactive)
+			{
+				await Console.Error.WriteLineAsync(
+					$"{question}\nThis permanently deletes data; confirm with --yes when running non-interactively.");
+				return 1;
+			}
+
+			if (!await Terminal.ConfirmAsync(question, false, cancellationToken))
+			{
+				Terminal.WriteLine("Aborted; nothing was deleted.");
+				return 1;
+			}
+		}
+		else if (impact.DestroysContent)
+		{
+			// Re-check on the confirmed call: the operator agreed to a SPECIFIC loss, and this is
+			// a re-execution rather than a resumed transaction.
+			Terminal.WriteLine($"Deleting {impact.DescribeContent()} along with the user.");
+		}
+
+		if (!await store.DeleteUserAsync(settings.Login, cancellationToken))
+		{
+			await Console.Error.WriteLineAsync($"No user '{settings.Login}'.");
+			return 1;
+		}
+
+		Terminal.WriteLine($"Deleted user '{settings.Login}' and all of its gateway state.");
+		if (UserEditing.FindConfigUser(options, settings.Login) is not null)
+			Terminal.WriteLine(
+				"NOTE: configuration still declares this login, so it will be re-created (empty) at the " +
+				"next start or sign-in. Remove it from ActiveSync:Users to make the deletion final.");
 		Terminal.WriteLine(PickupNote(options));
 		return 0;
 	}

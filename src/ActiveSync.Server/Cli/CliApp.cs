@@ -44,6 +44,10 @@ internal static class CliApp
 				.WithDescription("Show the effective entry for one login (secrets masked).");
 			user.AddCommand<UserAddCommand>("add")
 				.WithDescription("Declare a user in the database (copies a same-login config entry).");
+			user.AddCommand<UserRenameCommand>("rename")
+				.WithDescription("Change a user's login (sync state and local items are unaffected).");
+			user.AddCommand<UserDeleteCommand>("delete")
+				.WithDescription("DELETE a user and everything it owns, including locally-stored items.");
 			user.AddCommand<UserRemoveCommand>("remove")
 				.WithDescription("Delete the database entry (a config entry becomes active again).");
 			user.AddCommand<UserDisableCommand>("disable")

@@ -350,6 +350,11 @@ public partial class Program
 			(serverCertificate, tlsSource) = await app.Services.GetRequiredService<TlsCertificateResolver>()
 				.LoadForServingAsync(startupLogger, CancellationToken.None);
 
+		// Every config-declared login needs an identity row: per-user tables FK to UserId, so a
+		// config-only user would have nothing for its sync state to point at (item 6b).
+		await app.Services.GetRequiredService<UserProvisioner>()
+			.BootstrapConfigUsersAsync(CancellationToken.None);
+
 		// Load database-declared users into the resolver before the first request.
 		UserResolver resolver = app.Services.GetRequiredService<UserResolver>();
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
