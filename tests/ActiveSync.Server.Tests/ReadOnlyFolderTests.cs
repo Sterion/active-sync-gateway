@@ -82,10 +82,12 @@ public sealed class ReadOnlyFolderTests : IDisposable
 				new XElement(IO + "EmptyFolderContents",
 					new XElement(AS + "CollectionId", shared.ServerId)))));
 
-		// F45 split the collapsed status 2 into distinct causes: a read-only grant is now 3
-		// (access-denied), leaving 2 to mean "not a mail folder".
+		// F11: a read-only-blocked EmptyFolderContents answers the documented TERMINAL status 2
+		// (AGENTS.md's read-only scheme), not the "3" F45 originally gave it — "3" is now reserved
+		// for F10's genuine, retryable backend failure, and a client that read a permanent refusal
+		// as retryable would retry the bulk delete forever without ever seeing it refused.
 		XElement? result = response?.Root?.Element(IO + "Response")?.Element(IO + "EmptyFolderContents");
-		Assert.Equal("3", result?.Element(IO + "Status")?.Value);
+		Assert.Equal("2", result?.Element(IO + "Status")?.Value);
 		Assert.Empty(_harness.Session.Mail.Emptied);
 	}
 

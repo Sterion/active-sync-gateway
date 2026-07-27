@@ -10,8 +10,12 @@ namespace ActiveSync.Server.Tests;
 
 /// <summary>
 ///   F45 — EmptyFolderContents must report distinct statuses for its distinct failure causes
-///   (6 unresolvable, 2 not a mail folder, 3 read-only/access-denied) rather than collapsing all
-///   three to status 2, which leaves a client unable to tell "not permitted" from "not found".
+///   (6 unresolvable, 2 not a mail folder / read-only-blocked, 3 a genuine retryable backend
+///   failure) rather than collapsing them. F11: the read-only/blocked case specifically must
+///   answer the documented terminal status "2" (AGENTS.md's read-only scheme: "EmptyFolderContents/
+///   MeetingResponse Status 2"), not "3" — "3" is reserved for F10's genuine backend failure, which
+///   a client may legitimately retry; a client that retries a permanently-blocked bulk delete every
+///   sync round against a gateway that will never allow it never sees a refusal.
 /// </summary>
 public sealed class ItemOperationsEmptyFolderTests : IDisposable
 {
@@ -50,8 +54,12 @@ public sealed class ItemOperationsEmptyFolderTests : IDisposable
 		Assert.Empty(_harness.Session.Mail.Emptied);
 	}
 
+	// F11 — read-only mode's documented scheme answers EmptyFolderContents with the terminal
+	// status "2", not the retryable "3" a genuine backend failure gets (F10). Renamed from
+	// ReadOnlyFolder_ReportsStatus3: that was the finding itself — the read-only/blocked case was
+	// wrongly sharing "3" with a transient failure, a BEHAVIOUR CHANGE this test now asserts.
 	[Fact]
-	public async Task ReadOnlyFolder_ReportsStatus3()
+	public async Task ReadOnlyFolder_ReportsStatus2()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
 			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
@@ -59,7 +67,7 @@ public sealed class ItemOperationsEmptyFolderTests : IDisposable
 
 		XDocument? response = await RunAsync(registry.Single().ServerId);
 
-		Assert.Equal("3", StatusOf(response));
+		Assert.Equal("2", StatusOf(response));
 		Assert.Empty(_harness.Session.Mail.Emptied);
 	}
 

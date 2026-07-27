@@ -189,12 +189,16 @@ public sealed class ItemOperationsHandler(
 		(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
 			context.Session, context.UserId, collectionId, ct);
 		// Distinct statuses for distinct causes so the client can tell them apart: 6 unresolvable,
-		// 2 not a mail folder, 3 read-only/access-denied (emptying is a bulk delete, so a read-only
-		// grant on the folder blocks it just like global ReadOnly mode does).
+		// 2 not a mail folder OR read-only/access-denied (emptying is a bulk delete, so a read-only
+		// grant on the folder blocks it just like global ReadOnly mode does) — AGENTS.md's
+		// documented read-only scheme is explicit that EmptyFolderContents answers the TERMINAL
+		// status 2 here, not 3 (F11); 3 is reserved for F10's genuine, retryable backend failure —
+		// a client that read a blocked bulk delete as retryable would retry it every sync round
+		// against a gateway that will never allow it, and never see a refusal.
 		string? failure =
 			resolved is null ? "6"
 			: resolved.Value.Store.EasClass != EasClass.Email ? "2"
-			: WritePermission.IsBlocked(context, options.Value, resolved.Value.Folder) ? "3"
+			: WritePermission.IsBlocked(context, options.Value, resolved.Value.Folder) ? "2"
 			: null;
 		if (failure is not null || resolved is null)
 			return new XElement(IO + "EmptyFolderContents",
