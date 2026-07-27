@@ -81,6 +81,7 @@ public sealed class ManageSieveClient : IAsyncDisposable
 		// Greeting: capability lines terminated by OK.
 		SieveResponse greeting = await ReadResponseAsync(ct).ConfigureAwait(false);
 		greeting.ThrowUnlessOk("greeting");
+		IReadOnlyList<string> capabilityLines = greeting.Lines;
 
 		if (_options.UseTls)
 		{
@@ -99,9 +100,18 @@ public sealed class ManageSieveClient : IAsyncDisposable
 				ct).ConfigureAwait(false);
 			_stream = ssl;
 			BindReader();
-			// The server re-announces its capabilities after the TLS handshake.
-			(await ReadResponseAsync(ct).ConfigureAwait(false)).ThrowUnlessOk("post-TLS capabilities");
+			// The server re-announces its capabilities after the TLS handshake — re-check SASL
+			// there rather than trusting the plaintext greeting (G10): a pre-TLS capability
+			// announcement is not authenticated.
+			SieveResponse postTls = await ReadResponseAsync(ct).ConfigureAwait(false);
+			postTls.ThrowUnlessOk("post-TLS capabilities");
+			capabilityLines = postTls.Lines;
 		}
+
+		if (!SupportsPlainSasl(capabilityLines))
+			throw new BackendException(
+				$"The ManageSieve server at {_options.Host}:{_options.Port} does not advertise a mutually " +
+				"supported SASL mechanism (PLAIN); refusing to send credentials.");
 
 		string token = Convert.ToBase64String(
 			Encoding.UTF8.GetBytes($"\0{_credentials.UserName}\0{_credentials.Password}"));
@@ -111,6 +121,31 @@ public sealed class ManageSieveClient : IAsyncDisposable
 		if (!auth.IsOk)
 			throw new BackendException(
 				$"ManageSieve authentication failed for {_credentials.UserName}: {auth.StatusLine}");
+	}
+
+	/// <summary>
+	///   RFC 5804 §1.7: the "SASL" capability line carries a single quoted string of space-separated
+	///   mechanism names (empty = none — a "TLS first" signal). Absent entirely or excluding PLAIN,
+	///   there is nothing this client can negotiate.
+	/// </summary>
+	private static bool SupportsPlainSasl(IReadOnlyList<string> capabilityLines)
+	{
+		foreach (string line in capabilityLines)
+		{
+			if (!line.StartsWith("\"SASL\"", StringComparison.OrdinalIgnoreCase))
+				continue;
+
+			int firstQuote = line.IndexOf('"', "\"SASL\"".Length);
+			int lastQuote = line.LastIndexOf('"');
+			if (firstQuote < 0 || lastQuote <= firstQuote)
+				return false;
+
+			string mechanisms = line[(firstQuote + 1)..lastQuote];
+			return mechanisms.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+				.Any(m => m.Equals("PLAIN", StringComparison.OrdinalIgnoreCase));
+		}
+
+		return false; // no SASL capability advertised at all — nothing to negotiate.
 	}
 
 	/// <summary>Script names with the active one flagged. Names are unquoted.</summary>

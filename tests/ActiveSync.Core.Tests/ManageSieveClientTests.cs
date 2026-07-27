@@ -37,7 +37,7 @@ public sealed class ManageSieveClientTests
 		Task serverTask = Task.Run(async () =>
 		{
 			await server.AcceptAsync(cts.Token);
-			await server.SendAsync("OK\r\n", cts.Token);
+			await server.SendAsync("\"SASL\" \"PLAIN\"\r\nOK\r\n", cts.Token);
 			await server.ReceiveCommandAsync(cts.Token); // AUTHENTICATE
 			await server.SendAsync("OK\r\n", cts.Token);
 			await server.ReceiveCommandAsync(cts.Token); // LISTSCRIPTS
@@ -78,7 +78,7 @@ public sealed class ManageSieveClientTests
 		Task serverTask = Task.Run(async () =>
 		{
 			await server.AcceptAsync(cts.Token);
-			await server.SendAsync("OK\r\n", cts.Token);
+			await server.SendAsync("\"SASL\" \"PLAIN\"\r\nOK\r\n", cts.Token);
 			await server.ReceiveCommandAsync(cts.Token); // AUTHENTICATE
 			await server.SendAsync("OK\r\n", cts.Token);
 			await server.ReceiveCommandAsync(cts.Token); // LISTSCRIPTS
@@ -118,7 +118,7 @@ public sealed class ManageSieveClientTests
 		Task serverTask = Task.Run(async () =>
 		{
 			await server.AcceptAsync(serverCts.Token);
-			await server.SendAsync("OK\r\n", serverCts.Token);
+			await server.SendAsync("\"SASL\" \"PLAIN\"\r\nOK\r\n", serverCts.Token);
 			await server.ReceiveCommandAsync(serverCts.Token); // AUTHENTICATE
 			await server.SendAsync("OK\r\n", serverCts.Token);
 			await server.ReceiveCommandAsync(serverCts.Token); // LOGOUT — deliberately never answered
@@ -227,7 +227,7 @@ public sealed class ManageSieveClientTests
 		Task serverTask = Task.Run(async () =>
 		{
 			await server.AcceptAsync(cts.Token);
-			await server.SendAsync("OK\r\n", cts.Token);
+			await server.SendAsync("\"SASL\" \"PLAIN\"\r\nOK\r\n", cts.Token);
 			await server.ReceiveCommandAsync(cts.Token); // AUTHENTICATE
 			await server.SendAsync("OK\r\n", cts.Token);
 			await server.ReceiveCommandAsync(cts.Token); // LISTSCRIPTS
@@ -266,7 +266,7 @@ public sealed class ManageSieveClientTests
 		Task serverTask = Task.Run(async () =>
 		{
 			await server.AcceptAsync(cts.Token);
-			await server.SendAsync("OK\r\n", cts.Token);
+			await server.SendAsync("\"SASL\" \"PLAIN\"\r\nOK\r\n", cts.Token);
 			commands.Add(await server.ReceiveCommandAsync(cts.Token)); // AUTHENTICATE
 			await server.SendAsync("OK\r\n", cts.Token);
 			commands.Add(await server.ReceiveCommandAsync(cts.Token)); // LISTSCRIPTS
@@ -314,7 +314,7 @@ public sealed class ManageSieveClientTests
 		Task serverTask = Task.Run(async () =>
 		{
 			await server.AcceptAsync(cts.Token);
-			await server.SendAsync("OK\r\n", cts.Token);
+			await server.SendAsync("\"SASL\" \"PLAIN\"\r\nOK\r\n", cts.Token);
 			await server.ReceiveCommandAsync(cts.Token); // AUTHENTICATE
 			await server.SendAsync("OK\r\n", cts.Token);
 			await server.ReceiveCommandAsync(cts.Token); // LISTSCRIPTS
