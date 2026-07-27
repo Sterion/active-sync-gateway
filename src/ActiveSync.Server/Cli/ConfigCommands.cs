@@ -266,6 +266,14 @@ internal sealed class ConfigUnsetCommand(IAnsiConsole terminal) : SettingsComman
 			return 0;
 		}
 
+		// B4: a removal is validated exactly like a write — `unset` must not persist a
+		// configuration the next start refuses to boot on.
+		if (SettingKeys.ValidateRemovalImpact(fileConfig, db, Registry, stored) is { } error)
+		{
+			await Console.Error.WriteLineAsync(error);
+			return 1;
+		}
+
 		await store.DeleteAsync(stored, cancellationToken);
 		bool restart = SettingKeys.Find(stored)?.Restart ?? false;
 		Terminal.WriteLine($"Unset {stored}. {PickupNote(restart)}");

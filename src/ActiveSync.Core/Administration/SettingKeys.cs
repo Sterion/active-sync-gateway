@@ -1,5 +1,6 @@
 using System.Globalization;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using Microsoft.Extensions.Configuration;
@@ -319,6 +320,68 @@ internal static class SettingKeys
 
 			index = found + 1;
 		}
+	}
+
+	/// <summary>
+	///   Cross-field / startup validation of a pending REMOVAL (B4) — the sibling of
+	///   <see cref="ValidateStartupImpact" />, which covers only the write direction. `eas config
+	///   unset` and the web settings DELETE deleted the database row unconditionally: a section the
+	///   RUNNING gateway tolerates (<c>BackendRolesProvider.OnConfigReload</c> keeps the last-good
+	///   config on a bad reload) can still refuse the very NEXT start, where
+	///   <see cref="ActiveSyncOptionsValidator" /> and <see cref="BackendConfigurationValidator" />
+	///   both run unconditionally. This rebuilds the effective configuration WITHOUT the row —
+	///   <paramref name="fileConfig" /> (the layer beneath the database) takes back over for
+	///   <paramref name="key" />, exactly like a real <c>GlobalSettingStore.DeleteAsync</c> — and runs
+	///   BOTH startup gates against the result: the host options validator for catalogue keys, and
+	///   <see cref="ActiveSync.Core.Accounts.BackendRolesConfig.Load" /> + each assigned provider's own
+	///   <see cref="IBackendProvider.ValidateConfiguration" /> for the <c>ActiveSync:Backends:*</c>
+	///   section the finding's own example removes (MailStore:Host). Unlike a write, a single unset
+	///   is a complete action with no "the operator is mid-completing an interdependent group" excuse
+	///   (see <see cref="ValidateStartupImpact" />'s remarks) — so every NEWLY introduced failure is
+	///   surfaced, not only ones naming the removed key.
+	///   Returns a combined error message, or null when the removal is safe.
+	/// </summary>
+	internal static string? ValidateRemovalImpact(
+		IConfiguration fileConfig, IReadOnlyDictionary<string, string?> dbValues,
+		BackendProviderRegistry registry, string key)
+	{
+		IConfiguration before = EffectiveFrom(fileConfig, dbValues);
+		Dictionary<string, string?> withoutRow = new(dbValues, StringComparer.OrdinalIgnoreCase);
+		withoutRow.Remove(key);
+		IConfiguration after = EffectiveFrom(fileConfig, withoutRow);
+
+		List<string> beforeFailures = [.. HostFailures(before), .. BackendSectionFailures(before, registry)];
+		List<string> afterFailures = [.. HostFailures(after), .. BackendSectionFailures(after, registry)];
+
+		List<string> introduced = afterFailures.Where(failure => !beforeFailures.Contains(failure)).ToList();
+		return introduced.Count > 0 ? string.Join(" ", introduced) : null;
+	}
+
+	private static IConfiguration EffectiveFrom(
+		IConfiguration fileConfig, IReadOnlyDictionary<string, string?> dbValues) =>
+		new ConfigurationBuilder().AddConfiguration(fileConfig).AddInMemoryCollection(dbValues).Build();
+
+	private static IReadOnlyList<string> HostFailures(IConfiguration config) =>
+		Failures(new ActiveSyncOptionsValidator(), Bind(config));
+
+	/// <summary>The other half of <see cref="BackendConfigurationValidator.Validate" /> — the part
+	/// that needs the provider registry rather than just the bound host options.</summary>
+	private static List<string> BackendSectionFailures(IConfiguration config, BackendProviderRegistry registry)
+	{
+		List<string> failures = new();
+		BackendRolesConfig roles = BackendRolesConfig.Load(config, failures);
+		foreach ((BackendRole role, RoleAssignment assignment) in roles.Assignments)
+			try
+			{
+				registry.GetFor(assignment.ProviderName, role)
+					.ValidateConfiguration(role, assignment.Settings, failures);
+			}
+			catch (InvalidOperationException ex)
+			{
+				failures.Add($"ActiveSync:Backends:{role}: {ex.Message}");
+			}
+
+		return failures;
 	}
 
 	private static ActiveSyncOptions Bind(IConfiguration config) =>

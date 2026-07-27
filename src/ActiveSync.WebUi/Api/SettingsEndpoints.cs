@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.WebUi.Api;
@@ -98,13 +99,31 @@ internal static class SettingsEndpoints
 			return Results.Ok(new { key = definition.Key, tier = definition.Tier });
 		});
 
-		api.MapDelete("settings/{**key}", async (string key, GlobalSettingStore store, CancellationToken ct) =>
+		api.MapDelete("settings/{**key}", async (
+			string key, GlobalSettingStore store, IConfiguration config, BackendProviderRegistry registry,
+			IServiceProvider services, CancellationToken ct) =>
 		{
 			// Find the stored key case-insensitively so casing differences don't leave a stale row.
 			Dictionary<string, string?> db = await store.LoadAllAsync(ct);
 			string? stored = db.Keys.FirstOrDefault(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));
 			if (stored is null)
 				return Results.Ok(new { key, tier = SettingKeys.Find(key)?.Tier ?? "live", removed = false });
+
+			// B4: a removal is validated exactly like a write (B1) — `DELETE` must not persist a
+			// configuration the next start refuses to boot on. `config` already carries the database
+			// layer (it IS the effective value everywhere else in this file), so the layer BENEATH it
+			// — what a real removal would fall back to — is whatever remains once the database
+			// provider itself is excluded. Resolved via IServiceProvider (rather than a plain
+			// constructor parameter) because it is not registered in every host that maps this
+			// endpoint (e.g. a lean test host with no live settings pipeline) — a missing registration
+			// there just means the database layer was never mixed into `config` to begin with.
+			DbSettingsConfigurationProvider? dbSettings = services.GetService<DbSettingsConfigurationProvider>();
+			IConfiguration fileConfig = dbSettings is not null && config is IConfigurationRoot root
+				? new ConfigurationRoot(root.Providers.Where(p => !ReferenceEquals(p, dbSettings)).ToList())
+				: config;
+			if (SettingKeys.ValidateRemovalImpact(fileConfig, db, registry, stored) is { } error)
+				return EndpointHelpers.BadRequest(error);
+
 			await store.DeleteAsync(stored, ct);
 			return Results.Ok(new { key = stored, tier = SettingKeys.Find(stored)?.Tier ?? "live", removed = true });
 		});
