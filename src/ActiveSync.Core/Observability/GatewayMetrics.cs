@@ -211,6 +211,19 @@ public static class GatewayMetrics
 		_sessionsObserver = observe;
 	}
 
+	/// <summary>
+	///   Removes the sessions observer, but only if it is still the EXACT delegate passed in
+	///   (A10) — a disposed <c>BackendSessionFactory</c> must not clear a later factory's observer
+	///   (e.g. a fresh <c>WebApplicationFactory</c> in a test host) out from under it; it may only
+	///   ever clear its own. Benign race with a concurrent <see cref="SetSessionsObserver" />, same
+	///   as the rest of this last-write-wins slot.
+	/// </summary>
+	public static void ClearSessionsObserver(Func<IEnumerable<Measurement<long>>> observe)
+	{
+		if (_sessionsObserver == observe)
+			_sessionsObserver = null;
+	}
+
 	public static void SetIdleWatchersObserver(Func<IEnumerable<Measurement<long>>> observe)
 	{
 		_idleWatchersObserver = observe;

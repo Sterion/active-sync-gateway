@@ -43,6 +43,10 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	// singletons that outlive this factory (notably across test fixtures), and a leaked handler
 	// keeps a disposed factory reachable and fires on its cleared state.
 	private readonly Action _onSnapshotChanged;
+	// A10: same reasoning as _onSnapshotChanged above, but for the static GatewayMetrics sessions
+	// gauge — DisposeAsync must be able to name the EXACT delegate it installed so it can clear it
+	// without clobbering a later factory's observer.
+	private readonly Func<IEnumerable<Measurement<long>>> _sessionsObserve;
 
 	public BackendSessionFactory(
 		IOptionsMonitor<ActiveSyncOptions> options,
@@ -73,11 +77,12 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		_rolesProvider.Changed += RecycleAll;
 		// Per-user live-count gauge. Keys are "user\ndevice"; only materialized Lazy
 		// values count (an unrealized slot is not a live connection).
-		GatewayMetrics.SetSessionsObserver(() => _sessions
+		_sessionsObserve = () => _sessions
 			.Where(pair => IsBuilt(pair.Value))
 			.GroupBy(pair => pair.Key.Split('\n')[0], StringComparer.OrdinalIgnoreCase)
 			.Select(g => new Measurement<long>(g.Count(),
-				new KeyValuePair<string, object?>("user", GatewayMetrics.PerUserLabels ? g.Key : "-"))));
+				new KeyValuePair<string, object?>("user", GatewayMetrics.PerUserLabels ? g.Key : "-")));
+		GatewayMetrics.SetSessionsObserver(_sessionsObserve);
 	}
 
 	public async ValueTask DisposeAsync()
@@ -85,6 +90,9 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// A28: detach the event handlers first — the resolver/roles-provider outlive this factory.
 		_resolver.SnapshotChanged -= _onSnapshotChanged;
 		_rolesProvider.Changed -= RecycleAll;
+		// A10: same leak, but into the static GatewayMetrics sessions gauge — a disposed factory's
+		// closure over its own (now torn down) _sessions dictionary must not stay installed.
+		GatewayMetrics.ClearSessionsObserver(_sessionsObserve);
 		await _evictionTimer.DisposeAsync().ConfigureAwait(false);
 		foreach ((string _, Lazy<Task<CompositeBackendSession>> lazy) in _sessions)
 			await DisposeLazyAsync(lazy).ConfigureAwait(false);

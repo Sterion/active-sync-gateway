@@ -3,6 +3,7 @@ using System.Xml.Linq;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Observability;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using ActiveSync.Crypto;
@@ -241,6 +242,33 @@ public sealed class BackendSessionFactoryTests : IDisposable
 
 		Assert.False(HasHandlerTargeting(roles, "Changed", factory));
 		Assert.False(HasHandlerTargeting(resolver, "SnapshotChanged", factory));
+	}
+
+	[Fact]
+	public async Task DisposedFactory_ClearsTheStaticSessionsObserver()
+	{
+		// A10: the ctor wires GatewayMetrics.SetSessionsObserver to a closure over THIS factory's
+		// _sessions dictionary (the activesync_backend_sessions_active gauge). DisposeAsync
+		// detaches the SnapshotChanged/Changed handlers (A28, above) but leaves this observer
+		// installed — a disposed factory's closure stays reachable in the static slot until some
+		// LATER factory happens to overwrite it (last-write-wins), which never happens in a
+		// single-host process. After disposal the static slot must no longer target this factory.
+		FakeMailProvider provider = new();
+		BackendSessionFactory factory = NewFactory(provider);
+
+		Assert.True(SessionsObserverTargets(factory)); // the ctor installed a closure over this factory
+
+		await factory.DisposeAsync();
+
+		Assert.False(SessionsObserverTargets(factory)); // disposal must clear/replace it
+	}
+
+	private static bool SessionsObserverTargets(BackendSessionFactory factory)
+	{
+		Delegate? observer = (Delegate?)typeof(GatewayMetrics)
+			.GetField("_sessionsObserver", BindingFlags.NonPublic | BindingFlags.Static)!
+			.GetValue(null);
+		return ReferenceEquals(observer?.Target, factory);
 	}
 
 	[Fact]
