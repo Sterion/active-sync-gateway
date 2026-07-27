@@ -63,6 +63,21 @@ public sealed class ItemOperationsEmptyFolderTests : IDisposable
 		Assert.Empty(_harness.Session.Mail.Emptied);
 	}
 
+	// F10 — a backend failure during EmptyFolderContents must fail just that one operation with a
+	// retryable status, not escape as an unhandled exception that turns the whole ItemOperations
+	// request into an HTTP 500 (the sibling Fetch already wraps its core for the same reason).
+	[Fact]
+	public async Task BackendFailure_ReportsRetryableStatus_InsteadOfThrowing()
+	{
+		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+		_harness.Session.Mail.EmptyFolderFailWith = () => new BackendException("backend blipped");
+
+		XDocument? response = await RunAsync(registry.Single().ServerId);
+
+		Assert.Equal("3", StatusOf(response));
+	}
+
 	[Fact]
 	public async Task WritableMailFolder_IsEmptied()
 	{

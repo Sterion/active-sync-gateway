@@ -538,8 +538,17 @@ public sealed class EasHandlerHarness : IDisposable
 			return Task.FromResult(page);
 		}
 
+		/// <summary>
+		///   When set, <see cref="EmptyFolderAsync" /> throws this instead of recording — a backend
+		///   hiccup during EmptyFolderContents that must fail just that operation (a Status), not the
+		///   whole ItemOperations request (F10).
+		/// </summary>
+		public Func<Exception>? EmptyFolderFailWith { get; set; }
+
 		public Task EmptyFolderAsync(string folderBackendKey, CancellationToken ct)
 		{
+			if (EmptyFolderFailWith is { } fail)
+				throw fail();
 			Emptied.Add(folderBackendKey);
 			return Task.CompletedTask;
 		}

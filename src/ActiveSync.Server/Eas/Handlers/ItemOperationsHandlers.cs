@@ -200,7 +200,20 @@ public sealed class ItemOperationsHandler(
 			return new XElement(IO + "EmptyFolderContents",
 				new XElement(IO + "Status", failure ?? "6"),
 				new XElement(AS + "CollectionId", collectionId));
-		await context.Session.MailStore.EmptyFolderAsync(resolved.Value.Folder.BackendKey, ct);
+		// A backend hiccup here must fail just this ItemOperations child (a retryable status),
+		// not escape unhandled and turn the whole request into an HTTP 500 — matching the
+		// try/catch HandleFetchAsync already wraps its own core in (F10).
+		try
+		{
+			await context.Session.MailStore.EmptyFolderAsync(resolved.Value.Folder.BackendKey, ct);
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			logger.LogWarning(ex, "ItemOperations EmptyFolderContents failed");
+			return new XElement(IO + "EmptyFolderContents",
+				new XElement(IO + "Status", "3"),
+				new XElement(AS + "CollectionId", collectionId));
+		}
 		return new XElement(IO + "EmptyFolderContents",
 			new XElement(IO + "Status", "1"),
 			new XElement(AS + "CollectionId", collectionId));
