@@ -409,6 +409,43 @@ public sealed class UserStoreTests : IDisposable
 	// written the login case-folded since B1/B8 — covered by Upsert_NormalizesStoredCasing.)
 
 	[Fact]
+	public async Task LoadAll_CaseVariantDuplicate_DeterministicallyKeepsTheHighestUserId()
+	{
+		// B20 — COVERAGE, NOT PROOF: the collapsing query had no OrderBy, so "keeping the last"
+		// depended on storage/enumeration order rather than a defined rule. This cannot be proven
+		// red-first against SQLite: UserId is SQLite's ROWID alias (INTEGER PRIMARY KEY), and a
+		// full table scan with no applicable index always enumerates in ascending rowid order
+		// regardless of insertion order (verified: this test is GREEN even on the unfixed query) —
+		// so the symptom (a lower-id row winning) cannot be exhibited on this engine. It documents
+		// the rule the fix establishes and guards a regression on providers where it CAN happen
+		// (Postgres gives no such ordering guarantee without ORDER BY).
+		int higherId;
+		await using (SyncDbContext db = _factory.CreateDbContext())
+		{
+#pragma warning disable VSTHRD103
+			db.Users.Add(new User { Login = "phone1", Declared = true, UpdatedUtc = DateTime.UtcNow, MailAddress = "high@x" });
+#pragma warning restore VSTHRD103
+			await db.SaveChangesAsync();
+			higherId = await db.Users.Select(u => u.UserId).SingleAsync();
+		}
+
+		await using (SyncDbContext db = _factory.CreateDbContext())
+		{
+			// A raw, parameterized insert with an EXPLICIT, LOWER id — an out-of-band write /
+			// restored dump, the exact scenario the finding names — landing physically AFTER the
+			// higher-id row.
+			await db.Database.ExecuteSqlAsync(
+				$"INSERT INTO Users (UserId, Login, Declared, UpdatedUtc, MailAddress) VALUES ({higherId - 1}, {"Phone1"}, 1, {DateTime.UtcNow:O}, {"low@x"})");
+		}
+
+		CapturingLogger logger = new();
+		Dictionary<string, UserOptions> result = await _store.LoadAllAsync(logger, CancellationToken.None);
+
+		Assert.Equal("high@x", result["phone1"].MailAddress); // the higher UserId's row must win
+		Assert.Contains(logger.Lines, l => l.Message.Contains(higherId.ToString())); // names the winner
+	}
+
+	[Fact]
 	public async Task ConcurrentRoleChange_DuringAccountRefresh_IsNotLostToTheStaleRefreshFinishingLast()
 	{
 		// B4: EnsureFreshAsync (account refresh — captures _rolesProvider.Current at BuildSnapshot

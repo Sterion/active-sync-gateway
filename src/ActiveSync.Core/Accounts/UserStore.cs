@@ -195,8 +195,12 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 	public async Task<Dictionary<string, UserOptions>> LoadAllAsync(ILogger? logger, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
+		// B20: ordered by UserId so "keeping the last" (below) is a DEFINED rule — the highest
+		// UserId always wins — rather than depending on storage/enumeration order, which can differ
+		// between providers and between replicas of the same database.
 		List<User> entries = await db.Users.AsNoTracking().Include(u => u.BackendRoles)
 			.Where(u => u.Declared)
+			.OrderBy(u => u.UserId)
 			.ToListAsync(ct).ConfigureAwait(false);
 
 		Dictionary<string, UserOptions> result = new(StringComparer.OrdinalIgnoreCase);
@@ -208,8 +212,9 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 			if (result.ContainsKey(entry.Login))
 				logger?.LogWarning(
 					"Multiple database account rows collapse to login {User} (case-insensitive); keeping the " +
-					"last and ignoring an earlier duplicate — remove the redundant row (`eas user` / the Users page)",
-					entry.Login);
+					"one with the highest UserId ({UserId}) and ignoring an earlier duplicate — remove the " +
+					"redundant row (`eas user` / the Users page)",
+					entry.Login, entry.UserId);
 			result[entry.Login] = FromEntity(entry, logger, out _);
 		}
 
