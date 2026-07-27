@@ -88,19 +88,20 @@ function scalarControl(field, values, inherited) {
 	const isMaskedSecret = set === SECRET_MASK;
 	const current = isMaskedSecret ? '' : (set ?? '');
 	const error = h('div', { class: 'field-error' });
+	let cleared = false;
 
-	let node;
+	let input;
 	if (field.type === 'Bool' || field.enumValues) {
 		const options = field.enumValues ?? ['true', 'false'];
 		// Config providers normalize JSON literals ("True"/"False", any enum casing) — match
 		// case-insensitively or a set value silently renders as the default.
 		const selected = options.find(v => v.toLowerCase() === String(current).toLowerCase()) ?? '';
-		node = h('select', {},
+		input = h('select', {},
 			h('option', { value: '', selected: selected === '' },
 				`(default: ${fallback === '' ? 'unset' : fallback})`),
 			options.map(v => h('option', { value: v, selected: v === selected }, v)));
 	} else {
-		node = h('input', {
+		input = h('input', {
 			type: field.type === 'Secret' ? 'password' : 'text',
 			inputmode: field.type === 'Int' ? 'numeric' : null,
 			value: current,
@@ -111,12 +112,33 @@ function scalarControl(field, values, inherited) {
 		});
 	}
 
+	// C6: a masked secret otherwise has no way to reach "unset" — leaving it empty means "keep",
+	// and the only other escape is discarding the WHOLE role via "Reset to config". Give it the
+	// same explicit Clear affordance the admin user editor and the portal already have for their
+	// host-reserved password fields, so collect() can emit null (PersistAsync already treats null
+	// as "delete the row").
+	const clearButton = isMaskedSecret
+		? h('button', {
+			type: 'button',
+			onclick: () => {
+				cleared = true;
+				input.value = '';
+				input.placeholder = 'will be REMOVED on save';
+			},
+		}, 'Clear')
+		: null;
+
+	const node = clearButton
+		? h('div', { style: 'display:flex; gap:8px' }, input, clearButton)
+		: input;
+
 	return {
 		name: field.name,
 		node,
 		error,
 		collect() {
-			const entered = node.value.trim();
+			if (isMaskedSecret && cleared) return { [field.name]: null };
+			const entered = input.value.trim();
 			// Untouched secret: leave the stored value alone.
 			if (isMaskedSecret && entered === '') return { [field.name]: SECRET_MASK };
 			// Cleared, or exactly what the level below already supplies — store nothing.
