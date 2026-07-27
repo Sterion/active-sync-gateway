@@ -196,3 +196,41 @@ new tests (`GetItemRevisions_QueryStateChangesMidEnumeration_RecoversTheShiftedI
 - H8 and H9 have no behaviour change on a compliant server (Stalwart advertises blob and uses one account
   for both, which is exactly why CI never caught either). Their value only appears on servers the test
   matrix does not include — so the live suite's green is consistency evidence, not proof of the fix.
+
+## Item 6 — ManageSieve protocol safety [LIVE]
+**Findings:** `G1` `G2` `G5` `G10` `G17` `G23` `G24`
+**Commits:** `c7caa5b` (G1) · `273e39a` (G2) · `ceda39c` (G5) · `a8f7b6f` (G10) · `418eb0f` (G17) ·
+`cf1a177` (G23) · `b011bef` (G24) · `ba90696` (no finding — removes a duplicate XML doc comment the G17
+edit left behind)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 7 ✓ · one commit per finding, ID in each subject ✓ · strike shipped in all seven fix
+commits ✓ · scope confined to `ManageSieveClient.cs`, `SieveOofBackend.cs` and one new test file — **no
+pre-existing test was modified** ✓ · build 0 warnings ✓ · unit **1303 passed, 0 skipped** (Cli 16 ·
+Protocol 91 · Core 793 · WebUi 101 · Server 302) ✓ · live **141 passed, 0 skipped** ✓
+**Red-first re-proved independently:** both source files reverted to `02b252a` → **7 failures and 1 pass**.
+The 7 are G1, G2, G5, G10, G17 (×2) and G23. The 1 pass is
+`ListScriptsAsync_LineEndingInBraceWithNoOpeningBrace_IsTreatedAsPlainText` — G24's test, which the worker
+labelled "coverage, not proof" in both the test comment and the commit message. Reverting confirms the
+label is accurate rather than an excuse.
+**Notes:**
+- **`G2` is half-implemented, and the unfixed half is named in the finding itself.** The literal-length
+  ceiling (1 MiB) is in. The finding's second clause — *"bound the line reader similarly"* — is not:
+  `_reader.ReadLineAsync` still grows its internal buffer without limit against a server that never sends
+  CRLF. It is no longer unbounded in *time* (G5's 30 s operation ceiling now caps it), so the realistic
+  worst case fell from "until the process dies" to "30 s of inbound data", but the allocation itself is
+  still uncapped. The pooled-buffer clause was also skipped — that one is a genuine non-issue once the
+  1 MiB cap exists.
+- **`G10` is the behaviour change to watch.** A ManageSieve server that does not advertise `"SASL" "PLAIN"`
+  — including one advertising an empty SASL list, RFC 5804 §1.7's "TLS first" signal — is now refused at
+  connect time with a named error instead of having credentials sent to it. That is the finding's point,
+  but it converts a previously-working-by-accident configuration into a hard failure. The live suite's
+  Sieve/Oof tests against Stalwart pass, so the mainstream path is unaffected; a server that only advertises
+  SASL post-STARTTLS while the gateway is configured `UseTls=false` will now fail where it once connected.
+- **`G24` changed no behaviour and cannot** — the finding says so outright ("accidentally legal, so it does
+  not throw today"). Struck on the fix's merit, which is the protocol's own rule for an unreproducible
+  finding. What landed is the guard ordering plus a regression test around it.
+- `G17` implemented both remedies the finding offers (strip control characters in `Quote` **and** fold lone
+  CR/LF, not just the CRLF pair) rather than either alone — they cover different paths, since `Quote` also
+  guards names that never pass through the literal fold.
+- Every ManageSieve operation now has a 30 s ceiling and `DisposeAsync` a 3 s one (`G5`). Both are fixed
+  constants, not configurable — worth knowing before someone reports a slow sieve server timing out.
