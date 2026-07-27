@@ -128,6 +128,25 @@ public sealed class TlsCertificateResolverTests : IDisposable
 	}
 
 	[Fact]
+	public void LoadExternal_NotYetValidCertificate_ThrowsInsteadOfLoadingSilently()
+	{
+		// K11: a certificate whose NotBefore is in the future (a raced ACME issuance, a pre-staged
+		// rotation mount, clock skew) passed both existing checks and loaded "successfully" — the
+		// mirror-image case of K17's expired-certificate guard, and just as opaque at handshake time.
+		using RSA rsa = RSA.Create(2048);
+		CertificateRequest request = new(
+			"CN=not-yet-valid.example.com", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+		DateTimeOffset now = DateTimeOffset.UtcNow;
+		using X509Certificate2 notYetValid = request.CreateSelfSigned(now.AddDays(1), now.AddDays(30));
+		string path = Path.Combine(_dir, "not-yet-valid.pfx");
+		File.WriteAllBytes(path, notYetValid.Export(X509ContentType.Pkcs12));
+
+		InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+			TlsCertificateResolver.LoadExternal(new TlsOptions { CertificatePath = path }, null));
+		Assert.Contains("not valid until", ex.Message, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
 	public void LoadExternal_PfxWithPassword_Loads_AndRejectsWrongPassword()
 	{
 		using X509Certificate2 ok = TlsCertificateResolver.LoadExternal(

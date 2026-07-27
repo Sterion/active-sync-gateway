@@ -179,6 +179,17 @@ public sealed class TlsCertificateResolver(
 			throw new InvalidOperationException(
 				$"Certificate at '{certPath}' expired on {notAfter:u}.");
 		}
+		// K11: the mirror-image case of the NotAfter check above — a certificate whose NotBefore is
+		// in the future (a raced cert-manager/ACME issuance, a pre-staged rotation mount, clock skew
+		// across replicas) otherwise loads "successfully" and every phone then fails the handshake
+		// with no server-side explanation. Fail fast here too, same reasoning as K17.
+		if (certificate.NotBefore.ToUniversalTime() > DateTime.UtcNow)
+		{
+			DateTime notBefore = certificate.NotBefore.ToUniversalTime();
+			certificate.Dispose();
+			throw new InvalidOperationException(
+				$"Certificate at '{certPath}' is not valid until {notBefore:u}.");
+		}
 		return certificate;
 	}
 

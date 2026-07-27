@@ -243,7 +243,7 @@ work. Every finding ID appears in exactly one item.
 > `A2` `DisposeAsync` can throw into the request's `await using` after the response is written. `A3` an
 > unauthenticated caller controls an unbounded Prometheus label. `A10` a static observer is never detached.
 
-**9. TLS certificate lifecycle** — ~~`K1`~~ `K11` `K13` `K18`
+**9. TLS certificate lifecycle** — ~~`K1`~~ ~~`K11`~~ `K13` `K18`
 > `K1` the self-signed certificate is **never renewed inside a running process** — the 397-day cap landed,
 > the renewal did not, so a long-lived gateway serves an expired leaf and every phone stops connecting.
 > `K11` no `NotBefore` check. `K13` an unzeroed PKCS#12 holding the private key. `K18` a misleading error
