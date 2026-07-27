@@ -513,10 +513,18 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>Number of times the backend search was actually invoked (F41 skips it).</summary>
 		public int SearchCalls { get; private set; }
 
+		/// <summary>
+		///   When set, <see cref="SearchAsync" /> throws this instead of returning hits — a transient
+		///   backend failure mid-search (F5), distinct from a malformed request.
+		/// </summary>
+		public Func<Exception>? SearchFailWith { get; set; }
+
 		public Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
 			string? folderBackendKey, string freeText, DateTime? sinceUtc, int maxResults, CancellationToken ct)
 		{
 			SearchCalls++;
+			if (SearchFailWith is { } fail)
+				throw fail();
 			IReadOnlyList<(string FolderBackendKey, string ItemKey)> page =
 				SearchHits.Take(maxResults).ToList();
 			return Task.FromResult(page);

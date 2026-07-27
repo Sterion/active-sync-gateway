@@ -198,6 +198,26 @@ public sealed class SearchFindConformanceTests : IDisposable
 		Assert.Equal(archive.ServerId, results[1].Element(AS + "CollectionId")?.Value);
 	}
 
+	// F5 — a transient backend failure during Find must answer the retryable server-error status
+	// (matching Search's own "3"), not the SAME terminal "2" a malformed request gets — otherwise a
+	// phone whose IMAP server blipped is told its request was invalid and never retries.
+	[Fact]
+	public async Task Find_BackendFailure_ReportsRetryableStatus_NotProtocolError()
+	{
+		await InboxAsync();
+		_harness.Session.Mail.SearchFailWith = () => new BackendException("backend blipped");
+
+		XDocument? response = await _harness.RunAsync(NewFind(), "Find",
+			new XDocument(new XElement(F + "Find",
+				new XElement(F + "SearchId", "x"),
+				new XElement(F + "ExecuteSearch",
+					new XElement(F + "MailBoxSearchCriterion",
+						new XElement(F + "Query", new XElement(F + "FreeText", "hello")),
+						new XElement(F + "Options", new XElement(F + "Range", "0-24")))))));
+
+		Assert.Equal("3", response?.Root?.Element(F + "Status")?.Value);
+	}
+
 	// F41 — a request whose offset is at/beyond the fetch cap must be refused without hitting the
 	// backend (it would otherwise fetch the whole cap and Skip() it all away).
 	[Fact]

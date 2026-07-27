@@ -71,8 +71,12 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
+			// A transient backend failure is retryable and must not be reported with the SAME
+			// status a malformed request gets ("2") — Search already makes this distinction
+			// (SearchHandler.cs); a client told "protocol error" for a backend blip stops retrying
+			// the search entirely (F5).
 			logger.LogError(ex, "Find failed");
-			await WriteAsync(context, searchId, "2", null);
+			await WriteAsync(context, searchId, "3", null);
 		}
 	}
 
