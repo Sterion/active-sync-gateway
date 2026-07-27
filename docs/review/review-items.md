@@ -212,7 +212,7 @@ work. Every finding ID appears in exactly one item.
 > construct. `D26` is the same hole at the `RedirectingHttpSender` seam; one guard closes both. `H24` is the
 > one JMAP call site missing the same assertion.
 
-**4. DAV create: cost and href resolution** [LIVE] — ~~`H2`~~ ~~`H10`~~ ~~`H13`~~ `H20`
+**4. DAV create: cost and href resolution** [LIVE] — ~~`H2`~~ ~~`H10`~~ ~~`H13`~~ ~~`H20`~~ **COMPLETE**
 > `H2` on a server whose listings lag a PUT (Axigen — a CI backend) a single Sync Add fetches **every**
 > existing item in the collection. `H10` a create-PUT 409 is misread as success → phantom snapshot entry the
 > next diff deletes. `H13` a replayed update-PUT surfaces a spurious ETag conflict. `H20` a missing ETag

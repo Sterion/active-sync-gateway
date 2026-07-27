@@ -105,7 +105,7 @@ public abstract class DavStoreBase(
 		string etag = listedETag
 		              ?? (PathsEqual(href, putHref) ? putETag : null)
 		              ?? await dav.GetPropertyAsync(href, DavNs.D + "getetag", ct).ConfigureAwait(false)
-		              ?? Guid.NewGuid().ToString();
+		              ?? UnknownRevision;
 		return (href, etag);
 	}
 
@@ -120,8 +120,19 @@ public abstract class DavStoreBase(
 		string? etag = await dav.PutAsync(itemKey, content, MediaType, existing.ETag, false, ct)
 			.ConfigureAwait(false);
 		return etag ?? await dav.GetPropertyAsync(itemKey, DavNs.D + "getetag", ct).ConfigureAwait(false)
-			?? Guid.NewGuid().ToString();
+			?? UnknownRevision;
 	}
+
+	/// <summary>
+	///   H20: fallback revision when the server exposes no ETag at all for a just-created/updated
+	///   item — neither on the PUT/response headers nor via a direct <c>getetag</c> PROPFIND. A
+	///   fresh <c>Guid.NewGuid()</c> here looked exactly like a genuine opaque ETag while being
+	///   unable to ever equal one (indistinguishable in a snapshot dump or log line from a real
+	///   value, yet guaranteed to differ from whatever the next listing reports); this fixed,
+	///   unmistakable placeholder is honest about what it is instead. It is intentionally NOT a
+	///   valid ETag shape (no quotes) so it can never collide with one.
+	/// </summary>
+	private const string UnknownRevision = "!etag-unknown";
 
 	public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
 	{

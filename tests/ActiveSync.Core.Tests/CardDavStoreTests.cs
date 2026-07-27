@@ -345,6 +345,62 @@ public sealed class CardDavStoreTests
 		Assert.Equal("put-etag", revision.Trim('"'));
 	}
 
+	// H20: when the server exposes no ETag anywhere for a newly created item -- not on the PUT
+	// response, not via a direct getetag PROPFIND -- the old code fell back to a fresh
+	// Guid.NewGuid() on every call: a value indistinguishable from a genuine opaque ETag that can
+	// never equal what a later listing reports, so the very next diff treats the item as
+	// changed/deleted even though nothing changed (defeating the echo suppression AGENTS.md
+	// describes: "patch the snapshot in place so the same change is not sent back"). The revision
+	// must instead be a fixed, self-documenting "unknown" placeholder -- proven here by checking it
+	// does not look like a random GUID and is stable across calls (a fresh GUID would differ every
+	// time; a fixed sentinel would not).
+	[Fact]
+	public async Task CreateItem_WhenServerExposesNoEtagAnywhere_ReturnsAStableNonGuidSentinel()
+	{
+		string? putHref = null;
+		string? putContent = null;
+		StubHandler stub = new(request =>
+		{
+			string method = request.Method.Method;
+			if (method == "PUT")
+			{
+				putHref = request.RequestUri!.AbsolutePath;
+				putContent = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+				return new HttpResponseMessage(HttpStatusCode.Created); // no ETag header anywhere
+			}
+			if (method == "REPORT")
+				return Xml("""<D:multistatus xmlns:D="DAV:"></D:multistatus>"""); // no UID-query hit
+			if (method == "GET")
+				// Verifies the content at putHref, but the server carries no ETag on GET either.
+				return new HttpResponseMessage(HttpStatusCode.OK)
+				{
+					Content = new StringContent(putContent ?? string.Empty)
+				};
+			// PROPFIND (the direct getetag probe): the resource exists but carries no getetag
+			// property at all (not merely an empty one -- absent, so the lookup finds nothing).
+			return Xml($"""
+			<D:multistatus xmlns:D="DAV:">
+			  <D:response><D:href>{putHref}</D:href>
+			    <D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop></D:prop></D:propstat>
+			  </D:response>
+			</D:multistatus>
+			""");
+		});
+		using WebDavClient dav = new(Base, new HttpClient(stub));
+		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
+		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		XElement app = new("ApplicationData", new XElement(EasNamespaces.Contacts + "FirstName", "Ada"));
+
+		(_, string revision1) = await store.CreateItemAsync(
+			CardDavStore.KeyPrefix + "/dav/ab/default/", app, CancellationToken.None);
+		(_, string revision2) = await store.CreateItemAsync(
+			CardDavStore.KeyPrefix + "/dav/ab/default/", app, CancellationToken.None);
+
+		Assert.False(Guid.TryParse(revision1, out _),
+			$"'{revision1}' looks like a random GUID, not a self-documenting sentinel");
+		Assert.Equal(revision1, revision2); // stable placeholder, not a fresh random value per call
+	}
+
 	private static HttpResponseMessage Xml(string body)
 	{
 		return new HttpResponseMessage((HttpStatusCode)207)
