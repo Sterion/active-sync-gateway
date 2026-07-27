@@ -291,32 +291,39 @@ public sealed class ManageSieveClient : IAsyncDisposable
 			    line.StartsWith("BYE", StringComparison.OrdinalIgnoreCase))
 				return new SieveResponse(line, lines);
 
-			// Trailing synchronizing literal: consume its byte count from the reader.
+			// Trailing synchronizing literal: consume its byte count from the reader. The
+			// open >= 0 check runs BEFORE the slice it protects (G24) — with no '{' present the
+			// minimum matching line is "}" alone (length 1), so line[(open + 1)..^1] would have
+			// been in range today regardless, but only by accident of that minimum length; guard
+			// first so a future edit to the slice can't turn a hostile line into a crash.
 			if (line.EndsWith('}'))
 			{
 				int open = line.LastIndexOf('{');
-				string count = line[(open + 1)..^1].TrimEnd('+');
-				if (open >= 0 && int.TryParse(count, out int literalLength) && literalLength >= 0)
+				if (open >= 0)
 				{
-					if (literalLength > MaxLiteralLength)
+					string count = line[(open + 1)..^1].TrimEnd('+');
+					if (int.TryParse(count, out int literalLength) && literalLength >= 0)
+					{
+						if (literalLength > MaxLiteralLength)
 							throw new BackendException(
 								$"The ManageSieve server sent an oversized literal ({literalLength} octets; " +
 								$"the gateway only ever reads scripts back, capped at {MaxLiteralLength} octets).");
 
 						char[] buffer = new char[literalLength];
-					int read = 0;
-					while (read < literalLength)
-					{
-						int n = await _reader.ReadAsync(buffer.AsMemory(read, literalLength - read), ct)
-							.ConfigureAwait(false);
-						if (n == 0)
-							throw new BackendException("The ManageSieve server closed mid-literal.");
-						read += n;
-					}
+						int read = 0;
+						while (read < literalLength)
+						{
+							int n = await _reader.ReadAsync(buffer.AsMemory(read, literalLength - read), ct)
+								.ConfigureAwait(false);
+							if (n == 0)
+								throw new BackendException("The ManageSieve server closed mid-literal.");
+							read += n;
+						}
 
-					line = line[..open] +
+						line = line[..open] +
 						       Quote(new string(buffer).Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ')) +
 						       (await _reader.ReadLineAsync(ct).ConfigureAwait(false) ?? "");
+					}
 				}
 			}
 
