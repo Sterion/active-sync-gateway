@@ -6,4 +6,37 @@ entry per completed item; each pairs the worker's claim with the orchestrator's 
 Baseline at `406b83f`: build 0 warnings · 1270 unit tests green, 0 skipped (Cli 16 · Protocol 91 ·
 Core 771 · WebUi 101 · Server 291) · integration 8 skipped (no backend up).
 
-*(No items worked yet — the cursor rests at item 1.)*
+## Item 1 — Lost server-to-client changes [LIVE]
+**Findings:** `F3` `F2` `K2`
+**Commits:** `8ef0f7b` (F3, F2, K2) — one tight-cluster commit; all three findings are the same
+server→client loop in `SyncHandler.ProcessCollectionAsync` plus the contract doc that describes it, so
+the whole commit was read against all three IDs rather than per-finding diffs.
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 2 ✓ · strike shipped **with** the fix (the commit's diffstat lists `review-items.md`) ✓ ·
+build 0 warnings ✓ · unit **1272 passed, 0 skipped** (Cli 16 · Protocol 91 · Core 771 · WebUi 101 ·
+Server 293 — +2 over baseline, exactly the two new tests) ✓ · live **141 passed, 0 failed, 0 skipped**
+against a clean-volume Stalwart ✓
+**Red-first re-proved independently:** the worker's claim was not taken on trust — `SyncHandler.Collection.cs`
+was reverted to `8ef0f7b~1` and both tests re-run: `F3_ChangeRenderFailure_IsReofferedOnNextRound_NotLostForever`
+fails `Assert.NotNull()` (the change is never re-offered) and `F2_ItemSkippedThisRound_CollectionNotOfferedToLongPollWait`
+fails `Expected: 0, Actual: 1` (the collection is handed to the waiter). Both are the findings' own symptoms.
+**Notes:**
+- **F3 got the fix its own entry recommends; K2's alternative was correctly not taken.** K2 suggests
+  `newSnapshot.Remove(change.ServerId)`, which would make the next diff re-offer the item as an **Add**
+  rather than a Change. The worker used F3's remedy — revert to the client's last-acked revision (or
+  `ReadOnlyRevertRevision` when absent) — which re-offers it as a Change. That is the better of the two and
+  the one the shared fix should be judged against.
+- **Not a no-op — checked.** The revert reads `snapshot` while mutating `newSnapshot`; those are distinct
+  objects (`CollectionDiff.Compute` builds `new Dictionary(snapshot)` at `CollectionDiff.cs:50`), so the
+  rollback genuinely restores the old revision. Had `Compute` returned the same instance the fix would have
+  compiled, passed its own test and done nothing.
+- **K2 is documentation-only** (`IContentStore.cs` XML doc). No public member added, removed or retyped, so
+  no `ContractVersionMinor` bump was required — confirmed by `ContractSurfaceApprovalTests` staying green.
+- **F2 landed only the minimum its entry names** ("at minimum, do not return `waitable` when items were
+  skipped"), deliberately not the N-consecutive-failure poisoning the entry also offers. The worker's
+  reasoning is sound and worth carrying: poisoning on first failure would drop items on a *transient* render
+  error, reintroducing the silent-loss class this very item exists to close. **Residual, by design:** a
+  permanently-unrenderable item still leaves the collection reporting pending changes via
+  `PendingChangeDetector` every round — the tightest backend-hammering loop (the long-poll re-check) is gone,
+  the "never quiesces" property is not. A full fix needs persistent per-item retry state; that is a design
+  decision, not a worker's call. Not filed as a new finding since F2's own text names the tradeoff.
