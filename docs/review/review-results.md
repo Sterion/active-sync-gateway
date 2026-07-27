@@ -572,3 +572,38 @@ predicates. Reverting the three source files to `a2552a7` → both fail
   300 ms by default, so the live-tier test has to wait it out. That is exporter behaviour, not something
   this item changed — but a future test asserting a metric change immediately after a settings flip will
   trip over it.
+
+## Item 15 — Find & ItemOperations conformance [LIVE]
+**Findings:** `F4` `F5` `F6` `F10` `F11`
+**Commits:** `682fd66` (F4) · `b07cfb6` (F5) · `2a6af36` (F6) · `40b0e16` (F10) · `1b11e64` (F11)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 16 ✓ · one commit per finding ✓ · strike shipped with each ✓ · build 0 warnings ✓ ·
+unit **1342 passed, 0 skipped** (Cli 16 · Protocol 91 · Core 818 · WebUi 105 · Server 312) ✓ ·
+live **143 passed, 0 skipped** on a clean volume ✓
+**Red-first re-proved independently:** `src/ActiveSync.Server/Eas/` reverted to `c4fb557` → **7 failures**
+covering all five findings (F6 and F11 contribute two each), 18 pre-existing green.
+**Notes:**
+- **`F11` partially reverses a round-2 decision, with cause.** Round 2's `F45` split a collapsed status 2
+  into distinct causes and gave the read-only case `3`. `F11` moves it back to `2`, because AGENTS.md's
+  read-only scheme states plainly "EmptyFolderContents/MeetingResponse Status 2" (line 337) and `3` is
+  needed for `F10`'s genuine retryable backend failure. Verified the AGENTS.md text myself rather than
+  taking it from the worker. This is a **client-visible status change**: a client that treated `3` as
+  retryable would have retried a permanently-blocked bulk delete forever.
+- **Two pre-existing tests were rewritten for F11, and neither was weakened.** Only the expected status
+  value changed in each; both keep the substantive assertion that nothing was actually deleted
+  (`Assert.Empty(...Emptied)`), and both carry comments explaining the reversal and citing AGENTS.md.
+- **PROTOCOL DEVIATION, disclosed by the worker: `F4` added production code before the red observation.**
+  `FolderService.GetFolderMapAsync` was written before the F4 test was run red. The worker's mitigation is
+  sound — the helper was **inert** (added but not yet called), so the red run still reproduced the genuine
+  defect rather than a compile error, and it reports the failure was specifically the missing
+  `ServerId`/`CollectionId`. My independent revert confirms the test is red without the fix. Strictly the
+  protocol wants zero production changes before red; the deviation is minor and self-reported, and I accept
+  it. Flagged so the provenance is on the record.
+- **`F6` is a silent-data fix for 16.x clients**: ItemOperations and Search never set `BodyPreference.Eas16`,
+  so a 16.x client lost event locations and attachments on those paths. Now threaded from
+  `context.Version >= EasVersion.V160` at both ItemOperations call sites and Search's mailbox fetch,
+  matching the invariant AGENTS.md states for version gating.
+- **`F4` costs one folder-registry read per Find page.** Previously a mailbox-wide Find used a single
+  optional CollectionId-scoped folder; it now resolves each hit's own folder via a map. That is what makes
+  results openable at all (they carried neither ServerId nor CollectionId before), so the cost is the price
+  of the feature working — but it is a new per-page read on the search path.
