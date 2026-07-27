@@ -22,6 +22,9 @@ namespace ActiveSync.Server.Tests;
 ///     <item>F1 — SendMail/SmartReply/SmartForward must dedup on <c>composemail:ClientId</c>: a
 ///       retried submit (the phone resending after it lost the 200) must not send the mail a second
 ///       time. A request with no ClientId (the 12.x raw form) always falls through to a real send.</item>
+///     <item>F12 — SendMail-by-reference (Source with no Mime) must only hard-delete the source when
+///       it is actually a Drafts item; a Source pointing at any other folder must be left untouched
+///       after the send, not permanently deleted with no tombstone and no Trash copy.</item>
 ///   </list>
 /// </summary>
 public sealed class ComposeMailIdempotencyTests : IDisposable
@@ -39,6 +42,13 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
 			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+		return registry.Single();
+	}
+
+	private async Task<UserFolder> DraftsAsync()
+	{
+		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:Drafts", "Drafts", null, EasFolderType.Drafts, EasClass.Email));
 		return registry.Single();
 	}
 
@@ -183,6 +193,59 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		await _harness.RunAsync(NewHandler(), "SendMail", RequestWithoutClientId());
 
 		Assert.Equal(2, _harness.Session.Submit.Sent.Count);
+	}
+
+	// F12 — a Source pointing into a NON-Drafts folder (e.g. the Inbox) must be re-sent but NOT
+	// hard-deleted: nothing enforces the 16.x "submit a stored draft" flow's assumption that Source
+	// names a draft, so a client (or a bug) pointing SendMail at an ordinary message must not lose
+	// it with no tombstone and no Trash copy.
+	[Fact]
+	public async Task SendMailByReference_FromNonDraftsFolder_DoesNotDeleteTheSource()
+	{
+		UserFolder inbox = await InboxAsync();
+		_harness.Session.Mail.RawMessage = Encoding.UTF8.GetBytes(
+			"From: sender@example.test\r\nTo: u@example.test\r\nSubject: original\r\n\r\noriginal body\r\n");
+
+		XDocument request = new(new XElement(CM + "SendMail",
+			new XElement(CM + "Source",
+				new XElement(CM + "FolderId", inbox.ServerId),
+				new XElement(CM + "ItemId", $"{inbox.ServerId}:42"))));
+
+		SendMailHandler handler = new(
+			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<SendMailHandler>.Instance);
+
+		XDocument? response = await _harness.RunAsync(handler, "SendMail", request);
+
+		Assert.Null(response); // success = empty 200 — the message DOES still go out
+		Assert.Single(_harness.Session.Submit.Sent);
+		// …but the source, which is NOT a draft, must survive untouched.
+		Assert.Empty(_harness.Session.Store.Deleted);
+	}
+
+	// Companion: the legitimate 16.x "submit a stored draft" flow (Source names an item actually IN
+	// Drafts) must keep consuming the draft — the fix must not regress this.
+	[Fact]
+	public async Task SendMailByReference_FromDraftsFolder_StillDeletesTheSource()
+	{
+		UserFolder drafts = await DraftsAsync();
+		_harness.Session.Mail.RawMessage = Encoding.UTF8.GetBytes(
+			"From: u@example.test\r\nTo: dest@example.com\r\nSubject: draft\r\n\r\ndraft body\r\n");
+
+		XDocument request = new(new XElement(CM + "SendMail",
+			new XElement(CM + "Source",
+				new XElement(CM + "FolderId", drafts.ServerId),
+				new XElement(CM + "ItemId", $"{drafts.ServerId}:99"))));
+
+		SendMailHandler handler = new(
+			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<SendMailHandler>.Instance);
+
+		XDocument? response = await _harness.RunAsync(handler, "SendMail", request);
+
+		Assert.Null(response);
+		Assert.Single(_harness.Session.Submit.Sent);
+		Assert.Equal(["imap:Drafts/99"], _harness.Session.Store.Deleted);
 	}
 
 	private static XElement OpaqueMime(string mime)

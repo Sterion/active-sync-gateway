@@ -5,6 +5,7 @@ using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
+using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using Microsoft.Extensions.Options;
 using MimeKit;
@@ -19,6 +20,10 @@ public abstract class ComposeMailHandlerBase(
 {
 	protected static readonly XNamespace CM = EasNamespaces.ComposeMail;
 	protected FolderService Folders => folders;
+	// F12: exposed so a derived handler's post-send logic (SendMailHandler.MarkSourceAsync) can
+	// consult the read-only grant without also capturing its OWN copy of the primary constructor
+	// parameter (which would trigger CS9107 — captured by both this type and the base class).
+	protected IOptionsSnapshot<ActiveSyncOptions> Options => options;
 
 	public abstract string Command { get; }
 
@@ -325,6 +330,15 @@ public sealed class SendMailHandler(
 		(UserFolder Folder, IContentStore Store)? resolved = await Folders.ResolveCollectionAsync(
 			context.Session, context.UserId, request.SourceFolderId, ct);
 		if (resolved is null)
+			return;
+		// F12: nothing else enforces the 16.x "submit a stored draft" flow's assumption that Source
+		// names a draft — a client (or a bug) pointing SendMail at an ordinary message would
+		// otherwise get it re-sent AND hard-deleted with no tombstone and no Trash copy. Only a
+		// genuine Drafts item may be consumed by the send; anything else is left untouched. Also
+		// honour the per-folder write grant the same way every other mutating handler does — the
+		// global ReadOnly check above the send only covers the SEND, not this post-send delete.
+		if (resolved.Value.Folder.Type != EasFolderType.Drafts ||
+		    WritePermission.IsBlocked(context, Options.Value, resolved.Value.Folder))
 			return;
 		string? itemKey = await Folders.ResolveItemKeyAsync(
 			resolved.Value.Folder, resolved.Value.Store, request.SourceItemId, ct);
