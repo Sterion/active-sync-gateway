@@ -271,3 +271,43 @@ finding (`MeetingRequest_LeadingVTimezone_DoesNotShadowVeventDtstart`,
 - **`D1` still takes the first VEVENT** when an ICS carries several (a REQUEST with exception overrides).
   That is unchanged from before and outside the finding, but it means the fix guarantees "not VTIMEZONE",
   not "the right occurrence".
+
+## Item 8 — Backend session lifetime & metric cardinality
+**Findings:** `A1` `A2` `A3` `A10`
+**Commits:** `8a9f2e9` (A1) · `1ce0814` (A2) · `dc64eae` (A3) · `92dcb9f` (A10)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 9 ✓ · one commit per finding ✓ · strike shipped with each ✓ · scope confined to the two
+Core/Backend files, `GatewayMetrics.cs` and their three test files ✓ · build 0 warnings ✓ ·
+unit **1312 passed, 0 skipped** (Cli 16 · Protocol 91 · Core 802 · WebUi 101 · Server 302) ✓
+**Live suite run even though item 8 is NOT marked [LIVE]:** **141 passed, 0 skipped**. `A1`/`A2` change
+session construction and disposal, which `EasEndpoint` reaches on every request via `await using` — exactly
+the "can I show it cannot need a live run?" case `fix-review.md` says to resolve by running it.
+**Red-first re-proved independently:** the three source files reverted to `77c9189` → 5 failures
+(`CreateAsync_DisposesAlreadyOpenedConnections_WhenALaterProviderFails`,
+`Session_Dispose_ContinuesPastAThrowingConnection_WithoutThrowing`,
+`RecordAuthOutcome_NonSuccess_NeverEmitsTheRawUsername`,
+`RecordSyncItems_UserLabel_IsLengthClampedAndControlCharsNeutralized`,
+`DisposedFactory_ClearsTheStaticSessionsObserver`), 28 pre-existing green.
+**Notes:**
+- **A pre-existing test was rewritten, and I checked it was not weakened.**
+  `Session_Dispose_ContinuesPastAThrowingConnection_AndAggregates` asserted the *defect* A2 removes (an
+  `AggregateException` escaping `DisposeAsync`). The rewrite inverts only that assertion — now
+  `Assert.Null(escaped)` — and **keeps both** original assertions, that the throwing connection was still
+  attempted and the later connection still disposed. So A12's property, which that test existed to guard,
+  survives intact. This is the step-9 "a test encoding behaviour a finding deliberately changes" case, and
+  the worker disclosed it unprompted.
+- **`A3` removes an operational capability, deliberately.** The `user` label on `activesync_auth_outcomes`
+  is now the sentinel `"-"` for every `throttled`/`failure`/`error` outcome, regardless of
+  `Metrics:PerUser`. Anyone alerting on *failed logins per user* loses that dimension — it moves to the
+  logs, which already sanitise the same field via `LogText.Clean(..., 128)`. That is the point of the
+  finding (an unauthenticated caller was minting Prometheus series at will), but it is a monitoring change
+  an operator would notice, not a silent internal fix. AGENTS.md's "ALWAYS emit the user tag so series
+  shapes stay consistent" invariant is preserved — the tag is still emitted, only its value collapses.
+- **A1 and A2 are load-bearing on each other.** A1's cleanup calls `DisposeConnectionsAsync`, which still
+  threw at the point A1 landed; only A2 (the next commit) made it non-throwing. Between those two commits a
+  simultaneous build failure *and* teardown failure would have replaced the original exception with the
+  aggregate. The window is one commit wide and never shipped — noted because bisecting to `8a9f2e9` alone
+  would reproduce it.
+- `A10` clears the static observer **only if it is still the exact delegate this factory installed**, so a
+  disposed factory cannot clobber a live one's gauge. That is the finding's own preferred wording, and the
+  test verifies delegate-target identity by reflection rather than just "not null".
