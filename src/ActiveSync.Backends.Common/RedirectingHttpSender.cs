@@ -1,3 +1,4 @@
+using ActiveSync.Contracts;
 using ActiveSync.Protocol;
 using Microsoft.Extensions.Logging;
 
@@ -33,6 +34,17 @@ public sealed class RedirectingHttpSender(HttpClient http, Uri baseUri, ILogger?
 			if (redirectTarget is not null)
 				request.RequestUri = redirectTarget;
 			Uri currentUri = request.RequestUri!; // the URI actually requested this hop
+			// H1/D26: every later hop already passed IsSafeRedirect before becoming redirectTarget
+			// (below), but hop 0 is whatever the caller built — and for WebDavClient that can be an
+			// absolute, server-controlled href (RFC 4918 permits it). The Authorization header lives
+			// on the shared HttpClient and rides whatever URI is requested, so an unchecked hop 0
+			// would hand credentials to a foreign origin the DAV server merely named in a response.
+			if (hop == 0 && !IsSafeRedirect(baseUri, currentUri))
+			{
+				request.Dispose();
+				throw new BackendException(
+					$"Refusing to attach credentials to off-origin URL '{currentUri}'.");
+			}
 			string method = request.Method.Method;
 			// Verbose wire logging — method, URI and body only, NEVER headers (the
 			// Authorization header must stay out of the logs by construction).

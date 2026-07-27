@@ -190,6 +190,29 @@ public sealed class WebDavClientTests
 				CancellationToken.None));
 	}
 
+	// H1/D26: RFC 4918 permits a multistatus <D:href> to be an absolute URI, and every href fed to
+	// Resolve() is server-controlled (current-user-principal, home-set, every multistatus <href>,
+	// schedule-outbox-URL). A malicious/compromised DAV server can therefore hand back an absolute
+	// off-origin href; the Basic Authorization header lives on the shared HttpClient and rides
+	// whatever URI the caller builds, so the gateway would send the user's mail password to that
+	// foreign host. The request must never reach the handler.
+	[Fact]
+	public async Task GetAsync_WithOffOriginAbsoluteHref_IsRefused_NotSent()
+	{
+		bool requestReachedHandler = false;
+		RecordingHandler stub = new(_ =>
+		{
+			requestReachedHandler = true;
+			return Ok("");
+		});
+		using WebDavClient client = new(Base, new HttpClient(stub));
+
+		await Assert.ThrowsAsync<ActiveSync.Contracts.BackendException>(() =>
+			client.GetAsync("https://evil.example.net/x", CancellationToken.None));
+
+		Assert.False(requestReachedHandler, "credentials must never be attached to an off-origin URL");
+	}
+
 	// H24: multistatus/GET/REPORT bodies were read with ReadAsStringAsync — fully buffered with no
 	// size ceiling, so a malicious or malfunctioning server could stream an unbounded body into
 	// memory and OOM the gateway. A response whose declared Content-Length exceeds the ceiling must

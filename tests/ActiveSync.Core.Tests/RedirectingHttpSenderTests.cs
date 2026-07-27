@@ -1,4 +1,6 @@
+using System.Net;
 using ActiveSync.Backends.Common;
+using ActiveSync.Contracts;
 
 namespace ActiveSync.Core.Tests;
 
@@ -27,5 +29,37 @@ public class RedirectingHttpSenderTests
 	public void IsSafeRedirect_ProtectsCredentials(string baseUri, string target, bool expected)
 	{
 		Assert.Equal(expected, RedirectingHttpSender.IsSafeRedirect(new Uri(baseUri), new Uri(target)));
+	}
+
+	// D26: IsSafeRedirect was consulted only for a Location target on hop >= 1 — the very first
+	// request (built by the caller, e.g. WebDavClient.Resolve on a server-supplied absolute href)
+	// was sent as-is with no same-origin check at all, riding the shared HttpClient's Authorization
+	// header off-origin. The guard must be enforced once, here, for every caller.
+	[Fact]
+	public async Task SendAsync_FirstHopOffOrigin_IsRefused_NotSent()
+	{
+		bool reachedHandler = false;
+		StubHandler handler = new(_ =>
+		{
+			reachedHandler = true;
+			return new HttpResponseMessage(HttpStatusCode.OK);
+		});
+		using HttpClient http = new(handler);
+		RedirectingHttpSender sender = new(http, new Uri("https://dav.example.com/"));
+
+		await Assert.ThrowsAsync<BackendException>(() =>
+			sender.SendAsync(() => new HttpRequestMessage(HttpMethod.Get, new Uri("https://evil.example.net/x")),
+				CancellationToken.None));
+
+		Assert.False(reachedHandler, "credentials must never be attached to an off-origin URL");
+	}
+
+	private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
+	{
+		protected override Task<HttpResponseMessage> SendAsync(
+			HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			return Task.FromResult(responder(request));
+		}
 	}
 }

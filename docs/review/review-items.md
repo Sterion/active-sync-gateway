@@ -206,7 +206,7 @@ work. Every finding ID appears in exactly one item.
 > no dedup claim → duplicate iTIP REPLY. `F8`/`F9` respond for the whole series and default a malformed
 > UserResponse to Accept. `F12` SendMail-by-reference hard-deletes whatever it was pointed at.
 
-**3. DAV credential boundary** [LIVE] — `H1` `D26` `H24`
+**3. DAV credential boundary** [LIVE] — ~~`H1`~~ ~~`D26`~~ `H24`
 > `H1` `WebDavClient.Resolve` returns an absolute server-supplied href verbatim, and the Basic header rides
 > every request — a malicious CalDAV server harvests the user's mail password with a legal RFC 4918
 > construct. `D26` is the same hole at the `RedirectingHttpSender` seam; one guard closes both. `H24` is the
