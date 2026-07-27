@@ -267,6 +267,84 @@ public sealed class CardDavStoreTests
 		Assert.Equal("canon-etag", revision.Trim('"'));
 	}
 
+	// H2: on a server whose listings AND UID-query index lag a PUT (Axigen — AGENTS.md: "listings
+	// can lag a PUT by up to ~a minute"), neither FindByUidAsync (REPORT) nor GetItemRevisionsAsync
+	// (PROPFIND) sees the just-created item yet. The old code fell straight from there into a
+	// content scan of the (stale) listing it just fetched — fetching every PRE-EXISTING item in the
+	// collection to compare UIDs that can never match, because the listing never contained the new
+	// item to begin with. A direct GET of the PUT target does not depend on either index, so trying
+	// it first resolves a server that honoured the PUT target (Axigen included) in exactly one GET,
+	// with zero GETs spent on the collection's other contents.
+	[Fact]
+	public async Task CreateItem_WhenListingLagsThePut_VerifiesPutHrefDirectly_WithoutScanningExistingItems()
+	{
+		string? putHref = null;
+		string? putContent = null;
+		int putHrefGetCount = 0;
+		int otherItemGetCount = 0;
+		StubHandler stub = new(request =>
+		{
+			string method = request.Method.Method;
+			string path = request.RequestUri!.AbsolutePath;
+			if (method == "PUT")
+			{
+				putHref = path;
+				putContent = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+				return new HttpResponseMessage(HttpStatusCode.Created); // Axigen: no ETag on the PUT response
+			}
+			if (method == "REPORT")
+				// UID-query index lags the PUT: no match yet.
+				return Xml("""<D:multistatus xmlns:D="DAV:"></D:multistatus>""");
+			if (method == "GET")
+			{
+				if (path == putHref)
+				{
+					putHrefGetCount++;
+					HttpResponseMessage ok = new(HttpStatusCode.OK)
+					{
+						Content = new StringContent(putContent ?? string.Empty)
+					};
+					ok.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"put-etag\"");
+					return ok;
+				}
+				// A pre-existing item: its content can never match the new item's UID. Must never be
+				// fetched once the direct PUT-href GET already resolved the create.
+				otherItemGetCount++;
+				return new HttpResponseMessage(HttpStatusCode.OK)
+				{
+					Content = new StringContent("BEGIN:VCARD\nVERSION:3.0\nUID:someone-else\nEND:VCARD\n")
+				};
+			}
+			// PROPFIND: the listing also lags the PUT — three pre-existing items, none of them ours.
+			return Xml("""
+			<D:multistatus xmlns:D="DAV:">
+			  <D:response><D:href>/dav/ab/default/x1.vcf</D:href>
+			    <D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop><D:getetag>"e1"</D:getetag></D:prop></D:propstat>
+			  </D:response>
+			  <D:response><D:href>/dav/ab/default/x2.vcf</D:href>
+			    <D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop><D:getetag>"e2"</D:getetag></D:prop></D:propstat>
+			  </D:response>
+			  <D:response><D:href>/dav/ab/default/x3.vcf</D:href>
+			    <D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop><D:getetag>"e3"</D:getetag></D:prop></D:propstat>
+			  </D:response>
+			</D:multistatus>
+			""");
+		});
+		using WebDavClient dav = new(Base, new HttpClient(stub));
+		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
+		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+
+		XElement app = new("ApplicationData",
+			new XElement(EasNamespaces.Contacts + "FirstName", "Ada"));
+		(string itemKey, string revision) = await store.CreateItemAsync(
+			CardDavStore.KeyPrefix + "/dav/ab/default/", app, CancellationToken.None);
+
+		Assert.Equal(0, otherItemGetCount); // the three pre-existing items must never be fetched
+		Assert.Equal(1, putHrefGetCount);   // resolved via one direct GET of the PUT target
+		Assert.Equal(putHref, itemKey);
+		Assert.Equal("put-etag", revision.Trim('"'));
+	}
+
 	private static HttpResponseMessage Xml(string body)
 	{
 		return new HttpResponseMessage((HttpStatusCode)207)

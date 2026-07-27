@@ -220,17 +220,29 @@ public abstract class DavStoreBase(
 			}
 		}
 
+		// H2: try the PUT target directly before paying for a full listing. On a server whose
+		// listings AND UID-query index lag a PUT (Axigen indexes asynchronously — see AGENTS.md),
+		// the UID query above and the listing below can both miss the item for up to ~a minute,
+		// but a direct GET of putHref does not depend on either index — it resolves the common
+		// case (server honoured the PUT target) in exactly one GET, with no listing enumeration
+		// and no content scan at all.
+		(bool putVerified, string? putVerifiedETag) = await TryVerifyByContentAsync(putHref, uid, ct)
+			.ConfigureAwait(false);
+		if (putVerified)
+			return (putHref, putVerifiedETag);
+
 		IReadOnlyDictionary<string, string> after =
 			await GetItemRevisionsAsync(folderBackendKey, ContentFilter.All, ct).ConfigureAwait(false);
 		string? exact = after.Keys.FirstOrDefault(k => PathsEqual(k, putHref));
 		if (exact is not null)
 			return (exact, after[exact]);
 
-		// Neither the UID query nor the naive PUT href located it: the server both lacks (or
-		// ignored) UID-query support and rewrote the href. With no pre-PUT baseline available
-		// (H2), the only remaining way to identify our item is by content — scan the candidates
-		// the post-PUT listing already gave us.
-		foreach (string candidate in after.Keys)
+		// Last resort: the UID query missed, the direct PUT-href GET missed (a genuinely rewritten
+		// href, not just index lag), and the naive href isn't in the listing either — the only
+		// remaining way to identify our item is by content, scanning the candidates the post-PUT
+		// listing gave us. Bounded so a large collection cannot turn one create into thousands of
+		// GETs (H2) when the server neither honoured the PUT target nor supports a UID query.
+		foreach (string candidate in after.Keys.Take(ContentScanCeiling))
 		{
 			(bool verified, string? verifiedETag) = await TryVerifyByContentAsync(candidate, uid, ct)
 				.ConfigureAwait(false);
@@ -246,9 +258,16 @@ public abstract class DavStoreBase(
 		logger.LogWarning(
 			"{Protocol}: created {ItemNoun} {PutHref} could not be located in the collection listing " +
 			"({Count} candidates scanned); the next sync may briefly duplicate the item",
-			ProtocolLabel, ItemNoun, putHref, after.Count);
+			ProtocolLabel, ItemNoun, putHref, Math.Min(after.Count, ContentScanCeiling));
 		return (putHref, null);
 	}
+
+	/// <summary>
+	///   Ceiling on the last-resort per-item content scan in <see cref="ResolveStoredHrefAsync" />
+	///   (H2) — bounds the worst case (server neither honours the PUT target nor supports a UID
+	///   query) to a small, fixed number of GETs rather than one per item in the collection.
+	/// </summary>
+	private const int ContentScanCeiling = 50;
 
 	/// <summary>
 	///   Fetches <paramref name="href" /> and reports whether its content's UID matches
