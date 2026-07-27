@@ -82,3 +82,37 @@ classes — including the companion `…FromDraftsFolder_StillDeletesTheSource` 
 - **F12 now silently no-ops** (rather than erroring) when `Source` names a non-draft; the mail is still sent,
   the source is left intact. It also newly honours the per-folder read-only grant on that delete, which the
   global `ReadOnly` check above the send never covered.
+
+## Item 3 — DAV credential boundary [LIVE]
+**Findings:** `H1` `D26` `H24`
+**Commits:** `efd6396` (H1, D26 — one fix at the shared seam, as both entries prescribe) · `ba2b6db` (H24)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 4 ✓ · one commit per finding/cluster with the ID in the subject ✓ · strike shipped with each
+fix ✓ · build 0 warnings ✓ · unit **1285 passed, 0 skipped** (Cli 16 · Protocol 91 · Core 775 · WebUi 101 ·
+Server 302) ✓ · live **141 passed, 0 failed, 0 skipped** against a clean-volume Stalwart ✓
+**Red-first re-proved independently, in two stages:** with both source files reverted to `f7071b4`
+(pristine), all three tests fail — `SendAsync_FirstHopOffOrigin_IsRefused_NotSent`,
+`GetAsync_WithOffOriginAbsoluteHref_IsRefused_NotSent`, `Invoke_WithOffOriginApiUrl_IsRefused_NotSent`.
+Restoring only the H1/D26 commit and leaving `JmapClient.cs` reverted turns the H24 test **green**, which
+confirms the worker's disclosure below rather than contradicting it.
+**Notes:**
+- **The fix is at the seam, not at the site H1 names — and that is correct.** H1 asks for a guard inside
+  `WebDavClient.Resolve`; the worker instead asserted `IsSafeRedirect` at hop 0 in
+  `RedirectingHttpSender.SendAsync`, which is D26's prescription and which both entries endorse ("one fix
+  closes both"). Checked that this genuinely covers H1's reachability list: every `WebDavClient` request
+  funnels through one private `SendAsync` → `_redirectSender` (`WebDavClient.cs:218`), and the sender's
+  `baseUri` is the **configured** base (`WebDavClient.cs:60`), not anything the server supplies — so the
+  comparison cannot be subverted by the very href it is checking.
+- **H24 is honestly labelled coverage, and the label is right.** Its test was red on the pristine tree but
+  went green from the H1/D26 fix alone, *before* `JmapClient.cs` was touched, because `InvokeAsync` routes
+  through the same sender. The commit adds the explicit `RequireSameOrigin` call the Nit asks for — real
+  defence-in-depth symmetry across the four credential-attaching call sites — but it is not a fresh
+  red→green transition, and the worker said so unprompted in both the commit message and the test comment.
+- **New failure mode, accepted by the findings:** a DAV or JMAP server that names a legitimately off-origin
+  URL (a cross-host home set is legal under RFC 4918) now gets a `BackendException` instead of being
+  followed. That is the intended trade — credentials ride the shared `HttpClient`'s default headers, so
+  "follow it" means "disclose the user's mail password." Stalwart's hrefs are all same-origin; the live
+  suite confirms no legitimate path regressed.
+- Judgment call left as-is: `JmapSessionResource.ApiUrl` stays typed `Uri` rather than being retyped to
+  `string` as H24's text literally suggests. Functionally identical at the call site
+  (`RequireSameOrigin(session.ApiUrl.ToString())`) and it avoids a gratuitous record-shape change for a Nit.
