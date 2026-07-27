@@ -234,3 +234,40 @@ label is accurate rather than an excuse.
   guards names that never pass through the literal fold.
 - Every ManageSieve operation now has a 30 s ceiling and `DisposeAsync` a 3 s one (`G5`). Both are fixed
   constants, not configurable — worth knowing before someone reports a slow sieve server timing out.
+
+## Item 7 — Calendar & draft data corruption [LIVE]
+**Findings:** `D1` `D2` `D3` `D5`
+**Commits:** `8791322` (D1) · `5d641ea` (D2) · `5845665` (D3) · `0eba865` (D5)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 8 ✓ · one commit per finding ✓ · strike shipped with each ✓ · scope confined to the four
+converter files + their three test files ✓ · build 0 warnings ✓ · unit **1308 passed, 0 skipped** (Cli 16 ·
+Protocol 91 · Core 798 · WebUi 101 · Server 302) ✓ · live **141 passed, 0 skipped** ✓
+**Red-first re-proved independently:** `Converters/` reverted to `f6fc5dd` → exactly four failures, one per
+finding (`MeetingRequest_LeadingVTimezone_DoesNotShadowVeventDtstart`,
+`Change_MultipleCommaSeparatedRecipients_AreAllKept`, `AllDayEvent_CreatedDuringDst_LandsOnTheCorrectNominalDate`,
+`Change_OmittingAllDayEvent_PreservesStoredAllDayness`), 36 pre-existing tests green.
+**Notes:**
+- **`D3` is new hand-written protocol code, so I checked it against MS-ASTZ rather than against its own
+  test.** The struct offsets are right (Bias 0, StandardDate 68, StandardBias 84, DaylightDate 152,
+  DaylightBias 168, total 172) and the SYSTEMTIME field layout is right (wMonth +2, wDayOfWeek +4, wDay +6,
+  wHour +8 …). The southern-hemisphere case is handled — when `daylightStart > standardStart` the window
+  test inverts to a wrap — as is the "last weekday of month" form (`wDay == 5`) and a week-4 rule
+  overflowing a short month. Fallbacks are conservative: a short blob, an unparsable one, or
+  `DaylightBias == 0` all return the old base offset, so a foreign encoding degrades to today's behaviour
+  rather than to a wrong one.
+- **`D3` went beyond its entry, correctly.** The finding asks for one effective offset; the implementation
+  resolves it **per instant** for start and end separately, so a multi-day all-day event that straddles a
+  DST transition gets the right nominal date at both ends. The noon anchor the finding suggests as
+  belt-and-braces is also in.
+- **The noon anchor has a behaviour consequence worth knowing.** `LocalDate` now returns
+  `(utc + offset).AddHours(12).Date`. For a well-formed all-day event (local midnight) that is exactly
+  right and immune to ±11 h of offset error. For a *malformed* one whose local time is already past noon,
+  the nominal date now rolls to the following day where it previously did not. That is the trade the
+  finding explicitly asks for.
+- **`D2` relies on MimeKit's leniency for the fallback path.** `InternetAddressList.TryParse` is tried
+  first and the `;`-split only runs when it fails outright. MimeKit parses several `;`-separated forms
+  successfully, so the historical fallback is now reached less often than the code shape suggests — the
+  observable behaviour (recipients preserved under both conventions) is what the tests pin, and both pass.
+- **`D1` still takes the first VEVENT** when an ICS carries several (a REQUEST with exception overrides).
+  That is unchanged from before and outside the finding, but it means the fix guarantees "not VTIMEZONE",
+  not "the right occurrence".
