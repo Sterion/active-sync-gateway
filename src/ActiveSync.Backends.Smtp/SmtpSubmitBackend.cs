@@ -69,7 +69,15 @@ public sealed class SmtpSubmitBackend(
 		// on retry, and the DATA transfer is spared.
 		EnsureWithinMaxSize(mime.LongLength, smtp.Capabilities, smtp.MaxSize);
 
-		await smtp.SendAsync(message, ct).ConfigureAwait(false); // NOT retried — submission is not idempotent
+		// G4: once the DATA phase starts, the exchange must not observe the caller's own request
+		// abort — if the phone drops the connection between the server durably accepting the final
+		// "." and MailKit reading the "250", cancelling here would surface as OperationCanceledException,
+		// which ComposeMailHandlerBase deliberately does NOT catch (a cancelled request must not turn
+		// an already-sent message into a reported failure), so the client would resend and the
+		// recipient would get the mail twice — the very thing this "NOT retried" comment protects
+		// against one line down. CancellationToken.None is safe here: Timeout above already bounds a
+		// wedged transfer, so this cannot hang past that.
+		await smtp.SendAsync(message, CancellationToken.None).ConfigureAwait(false); // NOT retried — submission is not idempotent
 
 		// The mail is accepted at this point. The QUIT teardown must NOT be able to fail the
 		// operation: pass CancellationToken.None (a cancelled request must not make an already-sent
