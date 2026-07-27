@@ -220,7 +220,8 @@ public sealed class ManageSieveClient : IAsyncDisposable
 						read += n;
 					}
 
-					line = line[..open] + Quote(new string(buffer).Replace("\r\n", " "));
+					line = line[..open] + Quote(new string(buffer).Replace("\r\n", " ")) +
+						       (await _reader.ReadLineAsync(ct).ConfigureAwait(false) ?? "");
 				}
 			}
 
