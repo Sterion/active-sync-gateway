@@ -116,9 +116,15 @@ async function route() {
 		await module.render(container);
 	} catch (e) {
 		if (e?.status === 401) return; // the unauthorized handler already switched views
+		// A view that fails to PARSE or throws while rendering used to read as "not built yet",
+		// which is indistinguishable from a feature that genuinely does not exist — a syntax error
+		// in devices.js hid behind this message across a whole release. Say which it is, and put
+		// the real error where a browser console will show it.
+		console.error(`Admin view "${view}" failed to load:`, e);
 		render(container,
 			h('h1', { class: 'page-title' }, view[0].toUpperCase() + view.slice(1)),
-			h('div', { class: 'notice' }, 'This view is not available yet.'));
+			h('div', { class: 'notice' },
+				'This view failed to load — see the browser console for the error.'));
 	}
 }
 

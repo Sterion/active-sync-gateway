@@ -30,7 +30,7 @@ export async function render(container) {
 					{ label: 'Last seen (UTC)', cell: d => (d.lastSeenUtc ?? '').replace('T', ' ').slice(0, 16) },
 					{ label: 'Status', cell: d => status(d) },
 					{ label: 'Actions', cell: d => actions(d, container) },
-				], devices)),
+				], devices),
 			devices.length < page.total
 				? h('div', { class: 'notice' },
 					`Showing ${devices.length} of ${page.total} partnerships. Filter by user to narrow it.`)

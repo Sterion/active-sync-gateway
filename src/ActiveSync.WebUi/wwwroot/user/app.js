@@ -83,9 +83,12 @@ async function showShell(session) {
 		await module.render(container);
 	} catch (e) {
 		if (e?.status === 401) return;
+		// Same reasoning as the admin shell: a parse/render failure must not read as "not built".
+		console.error('Portal account view failed to load:', e);
 		render(container,
 			h('h1', { class: 'page-title' }, 'Account'),
-			h('div', { class: 'notice' }, 'This view is not available yet.'));
+			h('div', { class: 'notice' },
+				'This view failed to load — see the browser console for the error.'));
 	}
 }
 
