@@ -55,13 +55,41 @@ internal sealed class LogsCommand(IAnsiConsole terminal) : AsyncCommand<LogsComm
 		}
 
 		int limit = settings.Limit is > 0 and <= 10_000 ? settings.Limit : 100;
-		ServiceProvider? services = await CliServices.TryCreateLeanAsync();
-		if (services is null)
-			return 1;
-		await using ServiceProvider _ = services;
-		LogQueryService logs = services.GetRequiredService<LogQueryService>();
 
-		DateTime cutoff = DateTime.UtcNow - window;
+		// E5: forwarded to the warm gateway — reuse its already-built provider (same short-circuit
+		// DatabaseCommand<TSettings> uses) instead of rebuilding a parallel container per call.
+		LogQueryService logs;
+		AsyncServiceScope? hostScope = null;
+		ServiceProvider? services = null;
+		if (CliHostServices.Current is { } host)
+		{
+			hostScope = host.CreateAsyncScope();
+			logs = hostScope.Value.ServiceProvider.GetRequiredService<LogQueryService>();
+		}
+		else
+		{
+			services = await CliServices.TryCreateLeanAsync();
+			if (services is null)
+				return 1;
+			logs = services.GetRequiredService<LogQueryService>();
+		}
+
+		try
+		{
+			return await QueryAndRenderAsync(logs, cutoff: DateTime.UtcNow - window, accepted, settings, limit, ct);
+		}
+		finally
+		{
+			if (hostScope is { } scope)
+				await scope.DisposeAsync();
+			if (services is not null)
+				await services.DisposeAsync();
+		}
+	}
+
+	private async Task<int> QueryAndRenderAsync(
+		LogQueryService logs, DateTime cutoff, string[]? accepted, Settings settings, int limit, CancellationToken ct)
+	{
 		LogQueryService.LogPage page = await logs.QueryAsync(
 			new LogQueryService.LogQuery(cutoff, null, accepted, settings.User, null, null, null, limit), ct);
 		List<LogEntry> rows = [.. page.Entries];

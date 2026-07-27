@@ -19,13 +19,41 @@ internal sealed class TlsCommand(IAnsiConsole terminal) : AsyncCommand<TlsComman
 	protected override async Task<int> ExecuteAsync(
 		CommandContext context, Settings settings, CancellationToken cancellationToken)
 	{
-		// Lean provider: TLS is independent of mail configuration, so this works even on an
-		// unconfigured or broken gateway.
-		ServiceProvider? services = await CliServices.TryCreateLeanAsync();
-		if (services is null)
-			return 1;
-		await using ServiceProvider _ = services;
+		// E5: forwarded to the warm gateway — reuse its already-built provider (same short-circuit
+		// DatabaseCommand<TSettings> uses) instead of rebuilding a parallel container per call.
+		// Standalone: the lean provider works even on an unconfigured or broken gateway (TLS is
+		// independent of mail configuration).
+		ServiceProvider? services = null;
+		AsyncServiceScope? hostScope = null;
+		IServiceProvider resolved;
+		if (CliHostServices.Current is { } host)
+		{
+			hostScope = host.CreateAsyncScope();
+			resolved = hostScope.Value.ServiceProvider;
+		}
+		else
+		{
+			services = await CliServices.TryCreateLeanAsync();
+			if (services is null)
+				return 1;
+			resolved = services;
+		}
 
+		try
+		{
+			return await DescribeAndRenderAsync(resolved, cancellationToken);
+		}
+		finally
+		{
+			if (hostScope is { } scope)
+				await scope.DisposeAsync();
+			if (services is not null)
+				await services.DisposeAsync();
+		}
+	}
+
+	private async Task<int> DescribeAndRenderAsync(IServiceProvider services, CancellationToken cancellationToken)
+	{
 		TlsCertificateInfo info = await services.GetRequiredService<TlsCertificateResolver>()
 			.DescribeAsync(services.GetRequiredService<ILoggerFactory>().CreateLogger("eas.tls"),
 				cancellationToken);

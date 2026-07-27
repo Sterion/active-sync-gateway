@@ -25,6 +25,18 @@ internal abstract class SettingsCommandBase<TSettings>(IAnsiConsole terminal) : 
 	protected sealed override async Task<int> ExecuteAsync(
 		CommandContext context, TSettings settings, CancellationToken cancellationToken)
 	{
+		// E5: when forwarded to the warm gateway, reuse the HOST's already-built provider — same
+		// short-circuit DatabaseCommand<TSettings> uses — instead of rebuilding a parallel container
+		// (re-running plugin discovery and leaking a non-collectible AssemblyLoadContext) per call.
+		if (CliHostServices.Current is { } host)
+		{
+			await using AsyncServiceScope hostScope = host.CreateAsyncScope();
+			GlobalSettingStore hostStore = hostScope.ServiceProvider.GetRequiredService<GlobalSettingStore>();
+			IConfiguration hostConfig = hostScope.ServiceProvider.GetRequiredService<IConfiguration>();
+			Registry = hostScope.ServiceProvider.GetRequiredService<BackendProviderRegistry>();
+			return await RunAsync(hostStore, hostConfig, settings, cancellationToken);
+		}
+
 		ServiceProvider? services = await CliServices.TryCreateLeanAsync();
 		if (services is null)
 			return 1;
