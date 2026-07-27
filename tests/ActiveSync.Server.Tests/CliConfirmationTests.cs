@@ -143,6 +143,28 @@ public sealed class CliConfirmationTests : IDisposable
 	}
 
 	[Fact]
+	public async Task ConfirmedPurge_ReRunsTheImpactCount_AndNamesWhatItDestroys()
+	{
+		// E20: CliConfirmation's own type doc states "a command must therefore RE-CHECK on the second
+		// call — the operator confirmed a specific loss, not an open-ended one" (docs/review's finding
+		// quotes it verbatim), and UserDeleteCommand does re-count on its --yes path. PurgeCommand's
+		// --yes path skipped the whole count-and-ask block (lines 33-66) and went straight to
+		// DeleteAsync, so nothing re-checked the impact or told the operator what was actually being
+		// destroyed on the confirmed call — only the ASKING call ever named the content ("3 contacts").
+		await SeedAsync("anna", contacts: 3);
+
+		LocalCliEndpoint.CliResponse response = await LocalCliEndpoint.ExecuteAsync(
+			["purge", "user", "anna", "--yes"], "", CancellationToken.None);
+
+		Assert.Equal(0, response.ExitCode);
+		// DescribeContent() renders "3 contacts" — distinct from the post-delete summary line's
+		// "contacts: 3 row(s)" — so this only matches a pre-delete re-check message.
+		Assert.Contains("3 contacts", response.Stdout);
+		await using SqliteSyncDbContext verify = NewContext();
+		Assert.Empty(verify.LocalItems);
+	}
+
+	[Fact]
 	public async Task DevicePurge_AsksToo_AndScopesTheCountToThatDevice()
 	{
 		await SeedAsync("anna", contacts: 3);

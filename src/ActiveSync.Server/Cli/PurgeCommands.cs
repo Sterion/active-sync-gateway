@@ -30,15 +30,19 @@ internal abstract class PurgeCommand<TSettings>(IAnsiConsole terminal) : Databas
 		IServiceProvider services, SyncDbContext db, TSettings settings, CancellationToken cancellationToken)
 	{
 		DeviceAdminService devices = services.GetRequiredService<DeviceAdminService>();
+		// E20: counted unconditionally — including on the --yes call — so a confirmed purge RE-CHECKS
+		// the impact rather than trusting the count from the asking round-trip. CliConfirmation's own
+		// type doc requires this: "the operator confirmed a specific loss, not an open-ended one."
+		(string user, string? deviceId) = Target(settings);
+		DeviceAdminService.DeletionImpact impact =
+			await devices.CountDeletionImpactAsync(user, deviceId, cancellationToken);
+
 		if (!settings.Yes)
 		{
-			// Count first, then ask naming what is actually at stake. The question goes back to
-			// the CLIENT when this command was forwarded (the captured console cannot prompt),
-			// which is what makes `eas purge` work over /cli at all — it used to fail outright
-			// telling the operator to pass --yes.
-			(string user, string? deviceId) = Target(settings);
-			DeviceAdminService.DeletionImpact impact =
-				await devices.CountDeletionImpactAsync(user, deviceId, cancellationToken);
+			// Ask naming what is actually at stake. The question goes back to the CLIENT when this
+			// command was forwarded (the captured console cannot prompt), which is what makes
+			// `eas purge` work over /cli at all — it used to fail outright telling the operator to
+			// pass --yes.
 			string question = impact.DestroysContent
 				? $"Permanently delete {Describe(settings)}? This destroys {impact.DescribeContent()} " +
 				  "which exist nowhere else."
@@ -63,6 +67,12 @@ internal abstract class PurgeCommand<TSettings>(IAnsiConsole terminal) : Databas
 				Terminal.WriteLine("Aborted; nothing was deleted.");
 				return 1;
 			}
+		}
+		else if (impact.DestroysContent)
+		{
+			// Re-checked on the confirmed call, as above: name the loss again rather than deleting
+			// silently against whatever exists now.
+			Terminal.WriteLine($"Deleting {impact.DescribeContent()} along with {Describe(settings)}.");
 		}
 
 		IReadOnlyList<DeviceAdminService.PurgeCount> deleted = await DeleteAsync(devices, settings, cancellationToken);
