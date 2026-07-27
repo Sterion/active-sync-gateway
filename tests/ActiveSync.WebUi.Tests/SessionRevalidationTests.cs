@@ -213,6 +213,29 @@ public sealed class SessionRevalidationTests : IDisposable
 	}
 
 	[Fact]
+	public async Task ReissuedSessionAfterASameInstantRevocation_Survives()
+	{
+		// C1: RevokeSessionsBeforeAsync stores DateTime.UtcNow at full (sub-second) precision, but
+		// SessionValidation.SessionStart floors to the whole second. A password change revokes at
+		// instant T, then immediately re-signs the caller in at instant T' (T' > T, same wall-clock
+		// second) — the reissued ticket must survive its own revocation. Construct that exact
+		// ordering with fixed instants (no real-time flakiness): the revoke instant is 200ms into an
+		// arbitrary whole second, the reissue happens 700ms into the SAME second (i.e. strictly
+		// AFTER the revoke).
+		DateTime second = new(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+		DateTime revokedAtUtc = second.AddMilliseconds(200);
+		DateTimeOffset reissuedAt = new(second.AddMilliseconds(700), TimeSpan.Zero);
+
+		CookieValidatePrincipalContext context = await ValidateAsync(
+			Users(("alice", new UserOptions { Admin = true })), "alice", admin: true,
+			blocked: false, revokedAtUtc: revokedAtUtc,
+			(SessionValidation.SessionStartClaim, SessionValidation.SessionStart(reissuedAt).Value));
+
+		// The session was minted strictly after the revocation instant, so it must not be rejected.
+		Assert.NotNull(context.Principal);
+	}
+
+	[Fact]
 	public async Task SessionStart_SurvivesRevalidation()
 	{
 		// The re-minted principal has to carry the start stamp forward, or a revocation would

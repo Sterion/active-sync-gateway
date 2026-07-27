@@ -44,11 +44,18 @@ internal static class SessionValidation
 	/// </summary>
 	internal const string SessionStartClaim = "eas:sid-iat";
 
-	/// <summary>The sign-in stamp both login paths attach to a freshly minted session.</summary>
+	/// <summary>
+	///   The sign-in stamp both login paths attach to a freshly minted session. Rounded UP to the
+	///   next whole second (never truncated) so a ticket minted a moment after a same-instant
+	///   revocation (<c>RevokeSessionsBeforeAsync</c> stores its cut-off at full precision) can
+	///   never read as older than that cut-off — flooring, as this used to, could put both instants
+	///   in the same integer second while the cut-off's fractional remainder still made the
+	///   floored stamp compare as "before" it (C1).
+	/// </summary>
 	internal static Claim SessionStart(DateTimeOffset now)
 	{
 		return new Claim(SessionStartClaim,
-			now.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
+			(now.ToUnixTimeSeconds() + 1).ToString(CultureInfo.InvariantCulture));
 	}
 
 	/// <summary>How long a validated session may run before it is checked again.</summary>
