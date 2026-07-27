@@ -144,6 +144,11 @@ public sealed partial class JmapMailStore(
 		int page = PageSize(await client.GetSessionAsync(ct).ConfigureAwait(false));
 		Dictionary<string, string> map = new(StringComparer.Ordinal);
 		int position = 0;
+		int previousPosition = -1;
+		string? queryState = null;
+		// H3: bounded restarts before falling back to whatever the last pass collected, rather than
+		// restarting forever against a mailbox that never settles.
+		int restartsRemaining = 3;
 		while (true)
 		{
 			JmapCall query = new("Email/query", new Dictionary<string, object?>
@@ -162,10 +167,31 @@ public sealed partial class JmapMailStore(
 			}, "1");
 
 			using JmapResponse response = await client.InvokeAsync(CapMail, [query, get], ct).ConfigureAwait(false);
+			JsonElement queryArgs = response.Arguments("0");
+
+			// H3: `queryState` (RFC 8620 §5.5) changes whenever the result set shifts. A concurrent
+			// insert/remove earlier in the descending-sort order slides every later item's position,
+			// so continuing at our own `position` can skip an item entirely — it lands in the gap
+			// between the page we already read and the page we are about to ask for, and never comes
+			// back in either. Restart the whole enumeration from position 0 instead of trusting it.
+			string? currentState =
+				queryArgs.TryGetProperty("queryState", out JsonElement qsEl) ? qsEl.GetString() : null;
+			if (queryState is not null &&
+			    !string.Equals(queryState, currentState, StringComparison.Ordinal) &&
+			    restartsRemaining > 0)
+			{
+				restartsRemaining--;
+				map.Clear();
+				position = 0;
+				previousPosition = -1;
+				queryState = null;
+				continue;
+			}
+
+			queryState = currentState;
 			foreach (JsonElement email in response.Arguments("1").GetProperty("list").EnumerateArray())
 				map[email.GetProperty("id").GetString()!] = RevisionOf(KeywordsOf(email));
 
-			JsonElement queryArgs = response.Arguments("0");
 			int returned = queryArgs.GetProperty("ids").GetArrayLength();
 			// H8: a short page does NOT mean "done" — servers may return fewer than requested. Advance
 			// by the server's own reported position (it may clamp ours) and stop only when a page comes
@@ -174,6 +200,13 @@ public sealed partial class JmapMailStore(
 			int reported = queryArgs.TryGetProperty("position", out JsonElement pos) && pos.TryGetInt32(out int pv)
 				? pv
 				: position;
+			// H18: `total` is normally absent (calculateTotal is never requested), so the
+			// `position >= total` guard below is usually dead — termination rests on the position
+			// actually advancing. A server that ignores our `position` and keeps reporting the same
+			// value must not spin this loop forever.
+			if (reported <= previousPosition)
+				break;
+			previousPosition = reported;
 			position = reported + returned;
 			if (returned == 0)
 				break;

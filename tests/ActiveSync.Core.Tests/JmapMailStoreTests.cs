@@ -175,6 +175,49 @@ public sealed class JmapMailStoreTests
 		Assert.True(patch.GetProperty("mailboxIds/ARCHIVEID").GetBoolean());
 	}
 
+	// H3: position-based paging over a descending sort is not stable under a concurrent mailbox
+	// change. Server-side timeline: [A,B,C,D,E] (positions 0-4). Page 1 (position 0, limit 2)
+	// returns [A,B] under queryState "s1". Before page 2 is issued, B is deleted, so the live
+	// order becomes [A,C,D,E] under queryState "s2" — C has shifted from position 2 down to
+	// position 1. A naive continuation asks for position 2 next and gets [D,E]: C is never
+	// returned by any page and silently vanishes from the revision map, which is exactly what
+	// makes the diff engine delete a message that still exists on the server. The fix must notice
+	// the queryState change and restart the whole enumeration from position 0 so it re-reads the
+	// live order and picks C up.
+	[Fact]
+	public async Task GetItemRevisions_QueryStateChangesMidEnumeration_RecoversTheShiftedItem()
+	{
+		QueryStateShiftStub stub = new();
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+
+		IReadOnlyDictionary<string, string> map = await store.GetItemRevisionsAsync(
+			JmapMailStore.ToKey("INBOXID"), new ContentFilter(null), CancellationToken.None);
+
+		Assert.True(map.ContainsKey("C"),
+			"an item that shifted position under a concurrent delete must not be dropped from the revision map");
+	}
+
+	// H18: the query never sets calculateTotal, so RFC 8620 §5.5 says `total` is normally absent
+	// and the `position >= total` break is dead — termination rests solely on `returned == 0`. A
+	// server that ignores the `position` argument and always reports `position: 0` (while still
+	// returning non-empty pages) must not spin this loop forever. Bounded with a cancellation
+	// token rather than waited out — an unbounded loop would otherwise hang the test itself.
+	[Fact]
+	public async Task GetItemRevisions_ServerNeverAdvancesPosition_Terminates()
+	{
+		StuckPositionStub stub = new();
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+
+		IReadOnlyDictionary<string, string> map = await store.GetItemRevisionsAsync(
+			JmapMailStore.ToKey("INBOXID"), new ContentFilter(null), cts.Token);
+
+		Assert.True(stub.Calls < 100, $"the loop must terminate on its own; it made {stub.Calls} requests");
+		Assert.NotEmpty(map);
+	}
+
 	private static HttpResponseMessage Json(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)
@@ -277,6 +320,91 @@ public sealed class JmapMailStoreTests
 			}
 
 			return Json($"{{\"methodResponses\":[{string.Join(",", responses)}],\"sessionState\":\"x\"}}");
+		}
+	}
+
+	/// <summary>
+	///   Models a mailbox where a concurrent delete shifts the descending-sort order between
+	///   pages: position 0 first returns the PRE-delete page ([A,B], queryState "s1"); every
+	///   request thereafter reflects the POST-delete order (queryState "s2") — a position-0 re-read
+	///   returns [A,C] and a position-2 read returns [D,E]. B is gone; C shifted from index 2 to
+	///   index 1 and must be recovered by restarting from 0 rather than continuing at the old
+	///   position.
+	/// </summary>
+	private sealed class QueryStateShiftStub : HttpMessageHandler
+	{
+		private bool _changed;
+
+		protected override async Task<HttpResponseMessage> SendAsync(
+			HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			string body = await request.Content!.ReadAsStringAsync(cancellationToken);
+			using JsonDocument doc = JsonDocument.Parse(body);
+			JsonElement calls = doc.RootElement.GetProperty("methodCalls");
+			JsonElement queryCall = calls[0];
+			int position = queryCall[1].GetProperty("position").GetInt32();
+			string queryId = queryCall[2].GetString()!;
+			string getId = calls[1][2].GetString()!;
+
+			string state;
+			string[] ids;
+			if (position == 0 && !_changed)
+			{
+				state = "s1";
+				ids = ["A", "B"];
+				_changed = true; // the delete happens concurrently right after this page is served
+			}
+			else if (position == 0)
+			{
+				state = "s2";
+				ids = ["A", "C"];
+			}
+			else if (position == 2)
+			{
+				state = "s2";
+				ids = ["D", "E"];
+			}
+			else
+			{
+				state = "s2";
+				ids = [];
+			}
+
+			string idsJson = string.Join(",", ids.Select(i => $"\"{i}\""));
+			string listJson = string.Join(",", ids.Select(i => $"{{\"id\":\"{i}\",\"keywords\":{{}}}}"));
+			string queryResponse =
+				$"[\"Email/query\",{{\"accountId\":\"c\",\"queryState\":\"{state}\",\"position\":{position},\"ids\":[{idsJson}]}},\"{queryId}\"]";
+			string getResponse = $"[\"Email/get\",{{\"accountId\":\"c\",\"list\":[{listJson}]}},\"{getId}\"]";
+			return Json($"{{\"methodResponses\":[{queryResponse},{getResponse}],\"sessionState\":\"x\"}}");
+		}
+	}
+
+	/// <summary>
+	///   Models a server that ignores the requested <c>position</c> and always reports <c>0</c>
+	///   while still returning a non-empty page — the H18 hang. Caps itself so a still-broken loop
+	///   fails the test's iteration-count assertion instead of only being caught by the
+	///   cancellation token.
+	/// </summary>
+	private sealed class StuckPositionStub : HttpMessageHandler
+	{
+		public int Calls;
+
+		protected override Task<HttpResponseMessage> SendAsync(
+			HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Task.FromResult(Json(SessionJson));
+			Calls++;
+			if (Calls > 200)
+				return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+			return Task.FromResult(Json("""
+			{"methodResponses":[
+			  ["Email/query",{"accountId":"c","queryState":"s1","position":0,"ids":["X1","X2"]},"0"],
+			  ["Email/get",{"accountId":"c","list":[{"id":"X1","keywords":{}},{"id":"X2","keywords":{}}]},"1"]
+			],"sessionState":"x"}
+			"""));
 		}
 	}
 }
