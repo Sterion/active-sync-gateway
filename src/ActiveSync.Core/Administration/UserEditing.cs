@@ -47,4 +47,59 @@ internal static class UserEditing
 				return value;
 		return null;
 	}
+
+	/// <summary>Case-insensitive role lookup on a (config or database) entry's <c>Backends</c> dictionary.</summary>
+	internal static BackendRoleOverride? FindRole(UserOptions? entry, string roleName)
+	{
+		if (entry?.Backends is null)
+			return null;
+		foreach ((string key, BackendRoleOverride value) in entry.Backends)
+			if (string.Equals(key, roleName, StringComparison.OrdinalIgnoreCase))
+				return value;
+		return null;
+	}
+
+	/// <summary>
+	///   C2: an incoming scalar value that exactly matches what configuration alone already
+	///   supplies for the same field is elided (returned as null — "no database override") rather
+	///   than written back. A full-replacement PUT is populated from the MERGED (config ⊕ database)
+	///   view, so an untouched field submits the config value verbatim; storing it as-is would
+	///   freeze that value in the database row, and a later configuration edit would silently stop
+	///   reaching this user. Storing null instead leaves the field to keep resolving through
+	///   configuration, exactly as an unset row already does. A value with no config counterpart
+	///   to match — or one the caller deliberately changed — passes through unchanged, so a real
+	///   deviation is still recorded.
+	/// </summary>
+	internal static string? ElideIfMatchesConfig(string? incoming, string? configValue) =>
+		incoming is not null && configValue is not null &&
+		string.Equals(incoming, configValue, StringComparison.Ordinal)
+			? null
+			: incoming;
+
+	/// <summary>The <see cref="bool" /> counterpart of <see cref="ElideIfMatchesConfig(string?, string?)" />.</summary>
+	internal static bool? ElideIfMatchesConfig(bool? incoming, bool? configValue) =>
+		incoming is not null && configValue is not null && incoming == configValue
+			? null
+			: incoming;
+
+	/// <summary>
+	///   The per-key <c>Settings</c> counterpart: drops a key whose incoming value equals the
+	///   configuration-level value for the same key (so it stops being frozen as a database
+	///   override), keeping everything else — including an explicit null "clear the inherited
+	///   global key" directive, which by construction never equals a present config value.
+	/// </summary>
+	internal static Dictionary<string, string?>? ElideSettingsMatchingConfig(
+		Dictionary<string, string?>? incoming, Dictionary<string, string?>? configSettings)
+	{
+		if (incoming is not { Count: > 0 })
+			return incoming;
+		Dictionary<string, string?> result = new(incoming, StringComparer.OrdinalIgnoreCase);
+		if (configSettings is { Count: > 0 })
+			foreach ((string key, string? value) in incoming)
+				if (value is not null &&
+				    configSettings.TryGetValue(key, out string? configValue) &&
+				    string.Equals(value, configValue, StringComparison.Ordinal))
+					result.Remove(key);
+		return result.Count > 0 ? result : null;
+	}
 }

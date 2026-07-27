@@ -68,38 +68,50 @@ internal static class UsersEndpoints
 			if (await LastAdminProblemAsync(
 				    resolver, login, request.Admin == true && request.Enabled != false, ct) is { } conflict)
 				return conflict;
-			// Secret sentinels ("keep what I was shown") resolve against the EFFECTIVE entry — the
-			// per-field merge of database over configuration — because that is exactly what the
-			// GET returned masked. Resolving them against the database row alone would silently
-			// drop a config-supplied secret the admin never intended to touch.
-			await resolver.EnsureFreshAsync(false, ct);
-			UserOptions starting = resolver.MergedUsers.TryGetValue(login, out MergedUser? effective)
-				? effective.Options
-				: await UserEditing.LoadStartingEntryAsync(store, current, login, ct);
+
+			UserOptions? configUser = UserEditing.FindConfigUser(current, login);
 
 			// Fields this DTO does not model are CARRIED FORWARD from the database row, not dropped:
 			// the PUT replaces the row wholesale, so anything the admin screen cannot see would
 			// otherwise be silently destroyed by an unrelated edit — a stored DefaultBackendPassword
 			// (breaking every backend for that user), the OIDC subject binding that stops the login
 			// being claimed by someone else, or the auto-provisioned provenance marker.
-			// Deliberately the DATABASE ROW and not `starting`: `starting` is the db-over-config
-			// merge, and copying a config-supplied value into the row would freeze it there, so
-			// later config edits would stop taking effect (UserEditing: a row is never a copy of
-			// config). A field that lives only in config keeps living only in config.
 			UserOptions? storedRow = await store.GetAsync(login, ct);
+			// Reveals what a re-posted "***" settings mask (C5) stands for: the GET that produced it
+			// masked the MERGED (config over database) value, so unmasking must resolve against the
+			// same merge — resolving against the database row alone would treat a config-only secret
+			// as if nothing were behind the mask and silently drop it. This is ONLY for reading
+			// through the mask; ElideSettingsMatchingConfig below still keeps an unmasked value that
+			// turns out to equal configuration from being written back as a database override.
+			UserOptions merged = UserMerge.Merge(configUser, storedRow).Options;
 			UserOptions entry = new()
 			{
-				MailAddress = string.IsNullOrWhiteSpace(request.MailAddress) ? null : request.MailAddress.Trim(),
-				Admin = request.Admin == true ? true : null,
+				// C2: the form is populated from the MERGED (config over database) view the GET
+				// returned, so an admin who touches nothing resubmits the config value verbatim.
+				// Storing it here would freeze it as a permanent database override — precisely the
+				// trap docs/design/db-restructure.md deviation 2 says was designed out — so a
+				// submitted value equal to what configuration alone already supplies is elided back
+				// to null: the field keeps resolving through configuration exactly as an unset row
+				// already does. A value that genuinely differs still lands as a real deviation.
+				MailAddress = UserEditing.ElideIfMatchesConfig(
+					string.IsNullOrWhiteSpace(request.MailAddress) ? null : request.MailAddress.Trim(),
+					configUser?.MailAddress),
+				Admin = UserEditing.ElideIfMatchesConfig(request.Admin == true ? true : null, configUser?.Admin),
 				// Store the disabled flag only when explicitly off; enabled is the default (no flag).
-				Enabled = request.Enabled == false ? false : null,
+				Enabled = UserEditing.ElideIfMatchesConfig(
+					request.Enabled == false ? false : null, configUser?.Enabled),
 				DefaultBackendLogin = storedRow?.DefaultBackendLogin,
 				DefaultBackendPassword = storedRow?.DefaultBackendPassword,
 				OidcSubject = storedRow?.OidcSubject,
 				AutoProvisioned = storedRow?.AutoProvisioned
 			};
 
-			string? gatewayPassword = MergeSecret(request.Password, starting.Password,
+			// Secret sentinel ("keep what I was shown") resolves against the STORED ROW alone, not
+			// the merged view: an unset row already falls back to configuration on its own, so
+			// resolving "keep" against the row is enough to preserve the effective password.
+			// Resolving it against the merge (the previous behaviour) copied a config-supplied
+			// password into the row on every untouched save — the same freeze as C2, one field over.
+			string? gatewayPassword = MergeSecret(request.Password, storedRow?.Password,
 				raw => UserSecretPolicy.PrepareGatewayPassword(raw), out string? passwordError);
 			if (passwordError is not null)
 				return EndpointHelpers.BadRequest(passwordError);
@@ -110,11 +122,10 @@ internal static class UsersEndpoints
 				entry.Backends = new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase);
 				foreach ((string roleName, RoleUpdate role) in request.Backends)
 				{
-					BackendRoleOverride? startingRole = starting.Backends?
-						.FirstOrDefault(b => b.Key.Equals(roleName, StringComparison.OrdinalIgnoreCase))
-						.Value;
-					string? storedRolePassword = startingRole?.Password;
-					string? rolePassword = MergeSecret(role.Password, storedRolePassword,
+					BackendRoleOverride? configRole = UserEditing.FindRole(configUser, roleName);
+					BackendRoleOverride? storedRole = UserEditing.FindRole(storedRow, roleName);
+					BackendRoleOverride? mergedRole = UserEditing.FindRole(merged, roleName);
+					string? rolePassword = MergeSecret(role.Password, storedRole?.Password,
 						raw => UserSecretPolicy.PrepareBackendPassword(
 							raw, current.Encryption, $"Backends:{roleName}:Password"),
 						out string? roleError);
@@ -123,11 +134,15 @@ internal static class UsersEndpoints
 
 					BackendRoleOverride @override = new()
 					{
-						Enabled = role.Enabled,
-						Provider = string.IsNullOrWhiteSpace(role.Provider) ? null : role.Provider,
-						UserName = string.IsNullOrWhiteSpace(role.UserName) ? null : role.UserName,
+						Enabled = UserEditing.ElideIfMatchesConfig(role.Enabled, configRole?.Enabled),
+						Provider = UserEditing.ElideIfMatchesConfig(
+							string.IsNullOrWhiteSpace(role.Provider) ? null : role.Provider, configRole?.Provider),
+						UserName = UserEditing.ElideIfMatchesConfig(
+							string.IsNullOrWhiteSpace(role.UserName) ? null : role.UserName, configRole?.UserName),
 						Password = rolePassword,
-						Settings = EndpointHelpers.UnmaskSecretSettings(role.Settings, startingRole?.Settings)
+						Settings = UserEditing.ElideSettingsMatchingConfig(
+							EndpointHelpers.UnmaskSecretSettings(role.Settings, mergedRole?.Settings),
+							configRole?.Settings)
 					};
 					// An all-empty override carries no information — drop it instead of storing noise.
 					if (@override is not
@@ -147,7 +162,7 @@ internal static class UsersEndpoints
 			await resolver.EnsureFreshAsync(true, ct);
 			return Results.Ok(new
 			{
-				user = ToDto(login, new MergedUser(entry, true, UserEditing.FindConfigUser(current, login) is not null)),
+				user = ToDto(login, new MergedUser(entry, true, configUser is not null)),
 				warning = SelfEditWarning(principal, login, request.Admin == true, request.Enabled != false)
 			});
 		});
