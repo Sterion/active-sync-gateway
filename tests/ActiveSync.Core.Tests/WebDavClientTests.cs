@@ -227,6 +227,49 @@ public sealed class WebDavClientTests
 				CancellationToken.None));
 	}
 
+	// H13: every DAV verb funnels through the same fast transient retry (SendAsync), PUT included.
+	// If the server applies an update-PUT and the response is then lost (a reset, or a 503 from a
+	// load balancer after the write landed), the retry replays the SAME If-Match header against a
+	// resource whose ETag the replay's own first attempt already moved — a genuine-looking 412 for
+	// a write the server in fact accepted. The client saw a failed Sync Change on a change that
+	// succeeded. Re-GETting on 412 and finding the stored content already matches what we just sent
+	// distinguishes this lost-response replay from a real concurrent conflict.
+	[Fact]
+	public async Task UpdatePut_WhenReplayed412MatchesOwnContent_IsTreatedAsSuccess()
+	{
+		const string body = "BEGIN:VCALENDAR\r\nSUMMARY:same\r\nEND:VCALENDAR\r\n";
+		RecordingHandler stub = new(request =>
+		{
+			if (request.Method == HttpMethod.Put)
+				return new HttpResponseMessage(HttpStatusCode.PreconditionFailed);
+			HttpResponseMessage get = new(HttpStatusCode.OK) { Content = new StringContent(body) };
+			get.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"new-etag\"");
+			return get;
+		});
+		using WebDavClient client = new(Base, new HttpClient(stub));
+
+		string? etag = await client.PutAsync(
+			"/dav/cal/x.ics", body, "text/calendar", etag: "\"old-etag\"", ifNoneMatch: false,
+			CancellationToken.None);
+
+		Assert.Equal("\"new-etag\"", etag);
+	}
+
+	// H13 (continued): a REAL concurrent conflict — the stored content is someone else's edit, not
+	// ours — must keep surfacing as a failure. Only a content match proves it was our own replay.
+	[Fact]
+	public async Task UpdatePut_When412AndStoredContentDiffers_StillThrows()
+	{
+		RecordingHandler stub = new(request => request.Method == HttpMethod.Put
+			? new HttpResponseMessage(HttpStatusCode.PreconditionFailed)
+			: Ok("BEGIN:VCALENDAR\r\nSUMMARY:someone-elses-edit\r\nEND:VCALENDAR\r\n"));
+		using WebDavClient client = new(Base, new HttpClient(stub));
+
+		await Assert.ThrowsAsync<ActiveSync.Contracts.BackendException>(() =>
+			client.PutAsync("/dav/cal/x.ics", "BEGIN:VCALENDAR\r\nSUMMARY:my-edit\r\nEND:VCALENDAR\r\n",
+				"text/calendar", etag: "\"old-etag\"", ifNoneMatch: false, CancellationToken.None));
+	}
+
 	// H1/D26: RFC 4918 permits a multistatus <D:href> to be an absolute URI, and every href fed to
 	// Resolve() is server-controlled (current-user-principal, home-set, every multistatus <href>,
 	// schedule-outbox-URL). A malicious/compromised DAV server can therefore hand back an absolute

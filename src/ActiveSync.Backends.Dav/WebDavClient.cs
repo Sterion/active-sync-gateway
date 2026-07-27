@@ -150,9 +150,9 @@ public sealed class WebDavClient : IDisposable
 		// ResolveStoredHrefAsync, which re-reads the collection) adopt the stored href/ETag.
 		// Servers disagree on the status for a failed If-None-Match:*: Stalwart answers 412
 		// Precondition Failed (RFC 7232) — unambiguously the If-* precondition itself, so no further
-		// check is needed. An update-PUT uses If-Match, so its 412 (a real ETag conflict / lost
-		// update) still surfaces below; this reinterpretation is gated on ifNoneMatch (create-only).
-		// (H18)
+		// check is needed. This reinterpretation is gated on ifNoneMatch (create-only); an
+		// update-PUT's own 412 handling (a real ETag conflict OR a lost-response replay, H13) is
+		// below. (H18)
 		if (ifNoneMatch && response.StatusCode is HttpStatusCode.PreconditionFailed)
 		{
 			_wireLogger?.LogDebug(
@@ -175,6 +175,25 @@ public sealed class WebDavClient : IDisposable
 				"treating as success",
 				href);
 			return null;
+		}
+
+		// H13: every DAV verb funnels through the same fast transient retry (SendAsync). If an
+		// update-PUT's write actually landed but its response was lost (a reset, or a 503 from a
+		// load balancer after the write), the retry replays the SAME If-Match header — which the
+		// first attempt's own write has already invalidated, so the replay genuinely 412s even
+		// though the server accepted the change. Re-GETting the resource and finding its content
+		// already matches exactly what we just tried to write distinguishes that lost-response
+		// replay from a real concurrent conflict (someone else's edit, or a stale client cache),
+		// which keeps surfacing as a failure below.
+		if (!ifNoneMatch && response.StatusCode is HttpStatusCode.PreconditionFailed &&
+			await GetAsync(href, ct).ConfigureAwait(false) is { } existing &&
+			string.Equals(existing.Content, content, StringComparison.Ordinal))
+		{
+			_wireLogger?.LogDebug(
+				"DAV update-PUT {Href} returned 412 but the stored content already matches (a replayed update); " +
+				"treating as success",
+				href);
+			return existing.ETag;
 		}
 
 		await EnsureSuccessAsync(response, "PUT", href, ct).ConfigureAwait(false);
