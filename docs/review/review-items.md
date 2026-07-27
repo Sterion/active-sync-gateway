@@ -286,7 +286,7 @@ work. Every finding ID appears in exactly one item.
 > never set `BodyPreference.Eas16`, so a 16.x client silently loses event locations and attachments.
 > `F5`/`F10`/`F11` status classification.
 
-**16. WBXML untrusted-input hardening** — ~~`W1`~~ ~~`W2`~~ `W4` `W5`
+**16. WBXML untrusted-input hardening** — ~~`W1`~~ ~~`W2`~~ ~~`W4`~~ `W5`
 > **Protocol layer — read the AGENTS.md hard gate; any table change needs a round-trip test.** `W1` the
 > decoder caps elements and depth but not text nodes: a well-formed 64 MB body allocates ~1.3 GB. `W2`
 > illegal-XML code points survive into the `XDocument` and throw from `ToString()` on any Trace-enabled
