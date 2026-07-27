@@ -116,3 +116,52 @@ confirms the worker's disclosure below rather than contradicting it.
 - Judgment call left as-is: `JmapSessionResource.ApiUrl` stays typed `Uri` rather than being retyped to
   `string` as H24's text literally suggests. Functionally identical at the call site
   (`RequireSameOrigin(session.ApiUrl.ToString())`) and it avoids a gratuitous record-shape change for a Nit.
+
+## Item 4 — DAV create: cost and href resolution [LIVE]
+**Findings:** `H2` `H10` `H13` `H20`
+**Commits:** `759ab2c` (H2) · `88b2791` (H10) · `14f6d30` (H13) · `316f914` (H20)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 5 ✓ · one commit per finding, ID in each subject ✓ · strike shipped with each fix ✓ ·
+nothing outside the item's file cluster (`git diff --stat` = `DavStoreBase.cs`, `WebDavClient.cs`, their two
+test files, `review-items.md`) ✓ · build 0 warnings ✓ · unit **1290 passed, 0 skipped** (Cli 16 ·
+Protocol 91 · Core 780 · WebUi 101 · Server 302) ✓ · live **141 passed, 0 skipped** on Stalwart ✓
+**Also run against Axigen — the server H2 is actually about.** `scripts/test-backends.sh -b axigen`:
+**124 passed, 17 skipped, 0 failed** (the skips are the documented JMAP/ManageSieve/free-busy capability
+gates). Stalwart indexes synchronously, so it cannot exercise the lagging-listing path H2 exists for; this
+is the run that shows the new direct-GET resolution and the narrowed 409 handling behave on a real
+async-indexing backend.
+**Red-first re-proved independently:** both source files reverted to `59caec9` → exactly four failures, one
+per finding (`CreateItem_WhenListingLagsThePut_VerifiesPutHrefDirectly_WithoutScanningExistingItems`,
+`CreatePut_When409AndTargetNotPresent_ThrowsInsteadOfSilentlySucceeding`,
+`UpdatePut_WhenReplayed412MatchesOwnContent_IsTreatedAsSuccess`,
+`CreateItem_WhenServerExposesNoEtagAnywhere_ReturnsAStableNonGuidSentinel`).
+**Notes:**
+- **`H20` is cosmetic only — its headline symptom is NOT fixed, and that should be understood.** The finding
+  is titled "…guaranteeing a spurious Change on the next diff", but replacing `Guid.NewGuid()` with the fixed
+  sentinel `"!etag-unknown"` does not stop the resend: the sentinel still cannot equal the ETag the next
+  listing reports, so the item is still re-sent exactly once, self-healing. What the change buys is honesty —
+  the placeholder no longer looks like a genuine opaque ETag in a snapshot dump or log line. Note the
+  finding's own first suggested remedy (an `!ro`-style poison) has the same property; only its second
+  (omit the key) changes the resend, and only into an Add rather than a Change. The worker chose the
+  single-file option and disclosed the residual. **Nothing here eliminates the one spurious resend.**
+- **`H10` checks existence, not UID.** The finding says "re-GETting `putHref` and accepting only when the
+  resource is actually present *with the expected UID*"; the implementation accepts on presence alone. That
+  is sound in context — `CreateItemAsync` always PUTs to a freshly minted `Guid` href, so anything present
+  there is our own replayed create — but it is a narrowing of the finding's literal text, recorded here so
+  it is not rediscovered as a gap.
+- **`H13` fails safe.** The lost-response replay is recognised by an ordinal content match; a server that
+  normalises what it stores (property reordering, line folding) will simply not match and the 412 still
+  surfaces as an error. Wrong-direction failure is impossible by construction — it can only ever miss a
+  legitimate replay, never invent one.
+- **`H2`'s last-resort content scan is now bounded at 50 candidates.** Beyond that the item falls through to
+  the existing "could not be located" warning. On a server that neither honours the PUT target nor supports
+  a UID query *and* holds more than 50 items, resolution now gives up where it previously (very slowly)
+  might have succeeded. That is the finding's own instruction ("bound it … e.g. skip it once `after.Count`
+  exceeds a small ceiling"), and the new direct-GET makes reaching that path far less likely.
+- **Flaky test in the suite, pre-existing, carried forward:**
+  `CliLocalEndpointTests.UnfixedPattern_TwoIndependentWrappersOverOneStringWriter_CorruptsUnderConcurrentWrites`
+  failed once mid-run for the worker with an unrelated `StringBuilder.ToString()` `ArgumentOutOfRangeException`.
+  The worker followed step 9 (stashed, re-ran on unmodified `HEAD`, saw it pass) and correctly declared it
+  not theirs. It passed in every one of my own full-suite runs. The test deliberately provokes a concurrent-
+  write corruption, so intermittency is plausible by design — but a suite that fails ~1-in-N obscures real
+  regressions for every later item. Worth a human deciding whether to make it deterministic.
