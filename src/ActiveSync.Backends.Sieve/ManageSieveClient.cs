@@ -17,6 +17,13 @@ namespace ActiveSync.Backends.Sieve;
 /// </summary>
 public sealed class ManageSieveClient : IAsyncDisposable
 {
+	/// <summary>
+	///   Ceiling on a server-advertised literal's byte count (G2). Scripts are the only large
+	///   payload the gateway ever reads back — and it only ever WRITES those — so a literal above
+	///   this is a hostile or badly malfunctioning server, not a legitimate response.
+	/// </summary>
+	private const int MaxLiteralLength = 1024 * 1024;
+
 	private readonly SieveOptions _options;
 	private readonly BackendCredentials _credentials;
 	private readonly ILogger? _wireLogger;
@@ -209,7 +216,12 @@ public sealed class ManageSieveClient : IAsyncDisposable
 				string count = line[(open + 1)..^1].TrimEnd('+');
 				if (open >= 0 && int.TryParse(count, out int literalLength) && literalLength >= 0)
 				{
-					char[] buffer = new char[literalLength];
+					if (literalLength > MaxLiteralLength)
+							throw new BackendException(
+								$"The ManageSieve server sent an oversized literal ({literalLength} octets; " +
+								$"the gateway only ever reads scripts back, capped at {MaxLiteralLength} octets).");
+
+						char[] buffer = new char[literalLength];
 					int read = 0;
 					while (read < literalLength)
 					{
