@@ -74,7 +74,8 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 	{
 		// Declared side: config overlay ⊕ database rows (the former `eas user list`).
 		UserStore store = services.GetRequiredService<UserStore>();
-		ActiveSyncOptions options = services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value;
+		// E17: IOptionsMonitor, not a captured IOptions — see UserCommandBase.RunAsync's note.
+		ActiveSyncOptions options = services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>().CurrentValue;
 		List<(string UserName, UserOptions Options, DateTime UpdatedUtc, bool Valid)> dbEntries =
 			await store.ListAsync(cancellationToken);
 		Dictionary<string, UserOptions> configUsers =

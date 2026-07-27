@@ -31,7 +31,11 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 	{
 		Services = services;
 		UserStore store = services.GetRequiredService<UserStore>();
-		ActiveSyncOptions options = services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value;
+		// E17: IOptionsMonitor, not a captured IOptions — this command may run inside the warm
+		// gateway (forwarded via /cli), whose IOptions<ActiveSyncOptions> singleton was bound once at
+		// first resolution and never recomputes, while a live database settings change (`eas config
+		// set`) fires the reload token IOptionsMonitor DOES pick up.
+		ActiveSyncOptions options = services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>().CurrentValue;
 		Roles = services.GetRequiredService<BackendRolesConfig>();
 		Registry = services.GetRequiredService<BackendProviderRegistry>();
 		return await RunAsync(store, options, settings, cancellationToken);
