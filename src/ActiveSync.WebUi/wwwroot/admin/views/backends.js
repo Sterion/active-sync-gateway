@@ -165,9 +165,13 @@ function roleCard(role, providers, reload) {
 					if (!await confirmDialog(
 						`Discard the stored settings for ${role.role} and fall back to the config file?`,
 						'Reset')) return;
-					await api(`/admin/api/backends/${role.role}`, { method: 'DELETE' });
-					toast(`${role.role} reset to the config file.`, 'ok');
-					await reload();
+					try {
+						await api(`/admin/api/backends/${role.role}`, { method: 'DELETE' });
+						toast(`${role.role} reset to the config file.`, 'ok');
+						await reload();
+					} catch (e) {
+						toast(e.body?.error ?? 'Reset failed.', 'error');
+					}
 				},
 			}, 'Reset to config')));
 }

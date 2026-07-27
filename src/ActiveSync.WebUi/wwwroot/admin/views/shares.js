@@ -58,10 +58,14 @@ export async function render(container) {
 
 	async function remove(share) {
 		if (!await confirmDialog(`Remove ${share.collectionHref} from ${share.user}?`, 'Remove')) return;
-		await api(`/admin/api/shares?user=${encodeURIComponent(share.user)}&collectionHref=${encodeURIComponent(share.collectionHref)}`,
-			{ method: 'DELETE' });
-		toast('Grant removed.', 'ok');
-		refresh(container);
+		try {
+			await api(`/admin/api/shares?user=${encodeURIComponent(share.user)}&collectionHref=${encodeURIComponent(share.collectionHref)}`,
+				{ method: 'DELETE' });
+			toast('Grant removed.', 'ok');
+			refresh(container);
+		} catch (e) {
+			toast(e.body?.error ?? 'Removing the grant failed.', 'error');
+		}
 	}
 }
 
