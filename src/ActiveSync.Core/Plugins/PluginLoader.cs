@@ -106,7 +106,7 @@ public static class PluginLoader
 		string? pinned = configuration[$"ActiveSync:Plugins:Pins:{name}"];
 		if (string.IsNullOrWhiteSpace(pinned))
 		{
-			if (!bool.TryParse(configuration["ActiveSync:Plugins:RequirePinned"], out bool required) || !required)
+			if (!IsPinningRequired(configuration))
 				return;
 
 			throw new InvalidOperationException(
@@ -122,6 +122,29 @@ public static class PluginLoader
 				$"found '{actual}'. The plugin directory changed since it was pinned.");
 
 		logger.LogDebug("Plugin {Name} matches its pinned digest", name);
+	}
+
+	/// <summary>
+	///   <c>ActiveSync:Plugins:RequirePinned</c> is read as a raw configuration string rather than
+	///   through the options binder, so it must parse it itself rather than fail open on a value
+	///   <see cref="bool.TryParse(string?, out bool)" /> cannot read. The natural env-var forms for
+	///   the documented deployment (<c>ActiveSync__Plugins__RequirePinned=1</c>, or <c>yes</c>/
+	///   <c>on</c>) are exactly the values <c>bool.TryParse</c> rejects — treating that as "not
+	///   required" let an operator believe unpinned plugins were refused when they were not, with
+	///   no log line and no startup error. A defaulting security gate must default to refusing, so
+	///   an unparseable non-empty value is a startup failure instead.
+	/// </summary>
+	private static bool IsPinningRequired(IConfiguration configuration)
+	{
+		string? raw = configuration["ActiveSync:Plugins:RequirePinned"];
+		if (string.IsNullOrEmpty(raw))
+			return false;
+
+		if (bool.TryParse(raw, out bool required))
+			return required;
+
+		throw new InvalidOperationException(
+			$"ActiveSync:Plugins:RequirePinned must be true or false (got '{raw}').");
 	}
 
 	/// <summary>

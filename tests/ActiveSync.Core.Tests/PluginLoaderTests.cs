@@ -331,6 +331,33 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
+	///   K4 — RequirePinned was read as a raw configuration string via <c>bool.TryParse</c>, not
+	///   through the options binder, so a value TryParse cannot read (the natural env-var forms
+	///   "1"/"yes"/"on" — <c>ActiveSync__Plugins__RequirePinned=1</c> is the documented deployment)
+	///   silently fell through to "not required": an operator who set it believed unpinned plugins
+	///   were refused when they were not, with no log line and no startup error.
+	/// </summary>
+	[Theory]
+	[InlineData("1")]
+	[InlineData("yes")]
+	[InlineData("on")]
+	public void RequirePinned_UnparseableValue_FailsFastInsteadOfSilentlyDisabling(string value)
+	{
+		StagePlugin("ActiveSync.TestPlugin");
+
+		ServiceCollection services = new();
+		services.AddLogging();
+		InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+			PluginLoader.LoadInto(services, ConfigWith(new Dictionary<string, string?>
+			{
+				["ActiveSync:Plugins:Directory"] = _root,
+				["ActiveSync:Plugins:RequirePinned"] = value
+			}), NullLogger.Instance));
+		Assert.Contains("RequirePinned", ex.Message, StringComparison.Ordinal);
+		Assert.Contains(value, ex.Message, StringComparison.Ordinal);
+	}
+
+	/// <summary>
 	///   K3 — the pin is the only enforceable trust control the loader has, and it hashed
 	///   <c>*.dll</c> files only. On the shipped Linux image a plugin's native P/Invoke payload
 	///   is a <c>.so</c>, never a <c>.dll</c>, and its <c>.deps.json</c> drives where the loader's
