@@ -237,7 +237,6 @@ public sealed class ManageSieveClient : IAsyncDisposable
 		}
 	}
 
-	/// <summary>RFC 5804 quoted string: backslash-escape backslashes and double quotes.</summary>
 	/// <summary>
 	///   RFC 5804 quoted string: backslash-escape backslashes and double quotes. Also strips any
 	///   control character (G17) — RFC 5804's <c>quoted-string</c> forbids them, and a name arriving
