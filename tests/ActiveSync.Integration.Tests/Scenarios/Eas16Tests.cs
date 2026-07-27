@@ -336,6 +336,68 @@ public sealed class Eas16Tests(GatewayFixture gateway)
 		}
 	}
 
+	// F14: a pre-16.1 device cannot decode AccountOnlyRemoteWipe (16.1-only, MS-ASPROV token
+	// 0x3B), so herding it into Provision — the 16.1 path — produces a 449 loop it can never
+	// escape: it never sends the Status-1 acknowledgment, so CompleteAccountWipeAsync never
+	// runs and the partnership never blocks. The wipe must complete server-side instead.
+	[BackendFact]
+	public async Task AccountOnlyWipe_OnPre161Device_CompletesServerSide_InsteadOfLoopingProvision()
+	{
+		string dbPath = Path.Combine(Path.GetTempPath(), $"activesync-wipe-pre161-{Guid.NewGuid():N}.db");
+		try
+		{
+			await using Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> factory =
+				gateway.CreateIsolatedFactory(new Dictionary<string, string?>
+				{
+					["ActiveSync:Database:ConnectionString"] = $"Data Source={dbPath}"
+				});
+			EasTestClient device = new(
+				factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+				{
+					AllowAutoRedirect = false
+				}),
+				TestBackend.User1, TestBackend.Password, $"DEV{Guid.NewGuid():N}"[..16].ToUpperInvariant())
+			{
+				ProtocolVersion = "14.1"
+			};
+			await device.HandshakeAsync();
+
+			// Arm the wipe — exactly what 'eas device wipe' writes.
+			await using (Microsoft.Data.Sqlite.SqliteConnection connection = new($"Data Source={dbPath}"))
+			{
+				await connection.OpenAsync();
+				await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
+				command.CommandText = "UPDATE Devices SET PendingAccountWipe = 1 WHERE DeviceId = $device";
+				command.Parameters.AddWithValue("$device", device.DeviceId);
+				Assert.Equal(1, await command.ExecuteNonQueryAsync());
+			}
+
+			// A 14.1 device's next request must not be herded into an undecodable Provision
+			// directive — the gateway must complete the wipe itself and refuse this very request.
+			using HttpResponseMessage response = await device.PostRawAsync("FolderSync",
+				new XDocument(new XElement(EasNamespaces.FolderHierarchy + "FolderSync",
+					new XElement(EasNamespaces.FolderHierarchy + "SyncKey", "0"))));
+			Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+			// And it stays blocked — not a one-off refusal that reverts on the next try.
+			using HttpResponseMessage again = await device.PostRawAsync("FolderSync",
+				new XDocument(new XElement(EasNamespaces.FolderHierarchy + "FolderSync",
+					new XElement(EasNamespaces.FolderHierarchy + "SyncKey", "0"))));
+			Assert.Equal(HttpStatusCode.Forbidden, again.StatusCode);
+		}
+		finally
+		{
+			try
+			{
+				File.Delete(dbPath);
+			}
+			catch (IOException)
+			{
+				// still locked on Windows — temp files get cleaned eventually
+			}
+		}
+	}
+
 	private static string AddedServerId(SyncResult result)
 	{
 		XElement? add = result.Responses.FirstOrDefault(r => r.Name.LocalName == "Add");

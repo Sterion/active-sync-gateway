@@ -4,6 +4,7 @@ using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
+using ActiveSync.Protocol;
 using ActiveSync.Protocol.Http;
 using ActiveSync.Protocol.Wbxml;
 using Microsoft.Extensions.DependencyInjection;
@@ -214,6 +215,24 @@ public static class EasEndpoint
 		if (device.PendingAccountWipe &&
 		    !parameters.Command.Equals("Provision", StringComparison.OrdinalIgnoreCase))
 		{
+			// F14: AccountOnlyRemoteWipe (MS-ASPROV token 0x3B) is a 16.1-only element. A pre-16.1
+			// device herded into Provision cannot decode the directive, never sends the Status-1
+			// acknowledgment, and so never completes the wipe — every command 449s forever. Complete
+			// the wipe server-side instead (the same terminal state a 16.1 device reaches once it
+			// acknowledges) rather than waiting on an acknowledgment that can never arrive.
+			if (EasVersion.Parse(parameters.ProtocolVersion) < EasVersion.V161)
+			{
+				logger.LogInformation(
+					"Account wipe pending for {User} ({DeviceId}) on pre-16.1 client (EAS {Version}); " +
+					"completing it server-side instead of herding into an undecodable Provision",
+					LogText.Clean(credentials.UserName, 128), parameters.DeviceId,
+					parameters.ProtocolVersion ?? "(unknown)");
+				await state.CompleteAccountWipeAsync(device, ct);
+				http.Response.StatusCode = StatusCodes.Status403Forbidden;
+				await http.Response.WriteAsync("This account or device is blocked on the gateway.", ct);
+				return;
+			}
+
 			logger.LogInformation("Account wipe pending for {User} ({DeviceId}); forcing Provision",
 				LogText.Clean(credentials.UserName, 128), parameters.DeviceId);
 			http.Response.StatusCode = 449;
