@@ -75,28 +75,30 @@ internal static class PortalEndpoints
 		// What the portal needs to render a form instead of asking a user to know that CardDAV
 		// calls its server "BaseUrl": for each role, who serves it and which fields that
 		// provider reads. Schemas are descriptions, never values — nothing configured leaks.
-		api.MapGet("backends/meta", (
+		api.MapGet("backends/meta", async (
 			ClaimsPrincipal principal, UserResolver resolver,
-			BackendRolesProvider rolesProvider, BackendProviderRegistry registry) =>
+			BackendRolesProvider rolesProvider, BackendProviderRegistry registry, CancellationToken ct) =>
 		{
 			string? login = principal.Identity?.Name;
 			if (login is null)
 				return Results.Unauthorized();
 
+			// C13: this used to read `resolver.MergedUsers` straight off whatever snapshot happened
+			// to be resident — every OTHER endpoint here that touches `MergedUsers` (`me`, `users`,
+			// `devices`, `shares`, login, `SessionValidation`) refreshes first. The window is normally
+			// closed by the cookie-auth pipeline's own periodic refresh, but that one runs at most
+			// once every 60 seconds per ticket (`SessionValidation.Interval`) — inside that window an
+			// admin who has just moved the caller's role to another provider hands the portal a form
+			// built from the OLD provider's schema, whose fields the PUT (which resolves live) then
+			// refuses.
+			await resolver.EnsureFreshAsync(false, ct);
 			BackendRolesConfig roles = rolesProvider.Current;
 			resolver.MergedUsers.TryGetValue(login, out MergedUser? account);
 
 			Dictionary<string, object> meta = new(StringComparer.OrdinalIgnoreCase);
 			foreach (BackendRole role in Enum.GetValues<BackendRole>())
 			{
-				// The user's own provider override wins, exactly as UserResolver resolves it.
-				string? provider = null;
-				if (account?.Options.Backends?.TryGetValue(role.ToString(), out BackendRoleOverride? own) == true)
-					provider = own.Provider;
-				if (string.IsNullOrWhiteSpace(provider))
-					provider = roles.Assignments.TryGetValue(role, out RoleAssignment? assignment)
-						? assignment.ProviderName
-						: null;
+				string? provider = ResolveEffectiveProvider(account, roles, role);
 
 				// ONLY the self-service fields: this drives the portal's form, and a field it
 				// renders but the save below refuses is a form that cannot be submitted.

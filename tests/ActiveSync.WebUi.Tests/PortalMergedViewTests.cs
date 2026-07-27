@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Options;
+using ActiveSync.WebUi.Auth;
 
 namespace ActiveSync.WebUi.Tests;
 
@@ -120,5 +121,75 @@ public sealed class PortalMergedViewTests
 
 		UserOptions? stored = await new UserStore(host.Factory).GetAsync("bob", CancellationToken.None);
 		Assert.Equal("bob.dav.custom", stored!.Backends!["Calendar"].UserName);
+	}
+
+	/// <summary>
+	///   C13 — `GET /user/api/backends/meta` reads `resolver.MergedUsers` without ever refreshing
+	///   it: the handler is synchronous and never calls `EnsureFreshAsync`, unlike every other
+	///   endpoint under `Api/` that touches `MergedUsers`. An admin who has just moved the caller's
+	///   role to another provider (a DIFFERENT request, via the database) hands the portal a form
+	///   built from the OLD provider's schema — whose fields the PUT (which resolves live) then
+	///   refuses. `Auth:UsersRefreshSeconds` is forced to 0 so the fix is provable without a
+	///   real-time sleep: the staleness comes from `meta` never checking at all, not from the
+	///   interval not having elapsed yet.
+	///   <para>
+	///   The cookie-auth pipeline ALSO refreshes the resolver on its own (`SessionValidation`'s
+	///   `OnValidatePrincipal` hook), but only once per 60-second `Interval`, and only when the
+	///   ticket carries no `ValidatedAtClaim` yet — which is true of the very first request after
+	///   sign-in. <see cref="RewarmSessionAsync" /> spends that one free refresh up front (on a
+	///   snapshot that already matches "caldav", so it changes nothing observable) and captures the
+	///   renewed cookie, so the interval is fresh for the rest of the test and the ONLY thing left
+	///   that can explain what `meta` returns next is the endpoint's own (missing) refresh.
+	///   </para>
+	/// </summary>
+	[Fact]
+	public async Task Meta_ReflectsALiveProviderChange_WithoutATimeBasedWait()
+	{
+		Dictionary<string, string?> zeroRefresh = new() { ["ActiveSync:Auth:UsersRefreshSeconds"] = "0" };
+		await using WebUiHost host = await WebUiHost.StartAsync(
+			WebUiHost.Users(("bob", new UserOptions())), zeroRefresh);
+		UserStore store = new(host.Factory);
+		await store.UpsertAsync("bob", new UserOptions
+		{
+			Backends = new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase)
+			{
+				["Calendar"] = new BackendRoleOverride
+				{
+					Provider = "caldav",
+					Settings = new Dictionary<string, string?> { ["BaseUrl"] = "https://dav.example.com" },
+				},
+			},
+		}, CancellationToken.None);
+
+		using HttpClient client = await host.SignInAsync("bob", admin: false);
+		await RewarmSessionAsync(client);
+
+		// An admin — a separate request entirely — switches bob's Calendar role to "local".
+		await store.UpsertAsync("bob", new UserOptions
+		{
+			Backends = new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase)
+			{
+				["Calendar"] = new BackendRoleOverride { Provider = "local" },
+			},
+		}, CancellationToken.None);
+
+		JsonElement meta = await host.ReadJsonAsync(await client.GetAsync("/user/api/backends/meta"));
+		Assert.Equal("local", meta.GetProperty("Calendar").GetProperty("provider").GetString());
+	}
+
+	/// <summary>
+	///   Spends SessionValidation's one free per-ticket refresh on an authenticated GET that changes
+	///   nothing observable, and updates <paramref name="client" />'s Cookie header to the renewed
+	///   ticket the response carries (the response's Set-Cookie is otherwise never fed back into a
+	///   client whose Cookie header was set manually, once, in <see cref="WebUiHost.SignInAsync" />).
+	/// </summary>
+	private static async Task RewarmSessionAsync(HttpClient client)
+	{
+		HttpResponseMessage response = await client.GetAsync("/user/api/me");
+		if (!response.Headers.TryGetValues("Set-Cookie", out IEnumerable<string>? cookies))
+			throw new InvalidOperationException("expected the session to be renewed with a fresh cookie");
+		string renewed = cookies.First(v => v.StartsWith(WebUiAuth.CookieName, StringComparison.Ordinal)).Split(';')[0];
+		client.DefaultRequestHeaders.Remove("Cookie");
+		client.DefaultRequestHeaders.Add("Cookie", renewed);
 	}
 }
