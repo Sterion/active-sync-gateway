@@ -99,6 +99,21 @@ public sealed class AdministrationTests
 		Assert.True(SettingKeys.Find("ActiveSync:Backends:MailStore:Host") is { Secret: false });
 	}
 
+	// B6 — every other AuthOptions member is catalogued; TrustedProxies (a List<string>, so neither
+	// the bare key nor an indexed element resolves) is not, so `eas config set`/the admin Settings
+	// page answer "not a recognized setting" for a security-relevant, documented-as-DB-settable
+	// option (docs/configuration.md's Auth table, and AGENTS.md's "every setting is CLI-settable").
+	[Theory]
+	[InlineData("ActiveSync:Auth:TrustedProxies:0")]
+	[InlineData("ActiveSync:Auth:TrustedProxies:1")]
+	public void TrustedProxies_IndexedElement_IsSettableThroughTheCatalogue(string key)
+	{
+		SettingKeys.SettingKey? definition = SettingKeys.Find(key);
+		Assert.NotNull(definition);
+		Assert.False(definition.Restart);
+		Assert.False(definition.Secret);
+	}
+
 	[Fact]
 	public void SecretPolicy_GatewayPassword_HashesPlaintext_PassesHash_RejectsSealed()
 	{

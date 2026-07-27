@@ -244,6 +244,20 @@ internal static class SettingKeys
 				$"Backend setting for the {parts[2]} role (validated by its provider).",
 				Secret: SecretRedaction.IsSecretName(parts[^1]));
 
+		// B6: AuthOptions.TrustedProxies is a List<string> — every other Auth member is a scalar
+		// catalogue entry, but a list binds from indexed keys (":0", ":1", ...), so neither the bare
+		// key nor an element ever matched. Match the indexed family the same dynamic way the
+		// Backends:<Role>:* leaves above are matched, rather than trying to catalogue it as a single
+		// scalar key.
+		if (parts.Length == 4 &&
+		    parts[0].Equals("ActiveSync", StringComparison.OrdinalIgnoreCase) &&
+		    parts[1].Equals("Auth", StringComparison.OrdinalIgnoreCase) &&
+		    parts[2].Equals("TrustedProxies", StringComparison.OrdinalIgnoreCase) &&
+		    int.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out _))
+			return new SettingKey(key, ValueType.String, false, null,
+				"One trusted reverse-proxy hop (IP or CIDR) to honor X-Forwarded-* from; index the " +
+				"family from 0 (ActiveSync:Auth:TrustedProxies:0, :1, ...).");
+
 		return null;
 	}
 
