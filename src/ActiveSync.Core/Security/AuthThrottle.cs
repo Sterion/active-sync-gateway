@@ -29,6 +29,15 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options, Tim
 	/// <summary>Minimum spacing between full-table cleanup scans.</summary>
 	private const int PruneIntervalSeconds = 30;
 
+	/// <summary>
+	///   Number of candidates inspected by <see cref="EvictOldestToMakeRoom" /> (K6). A full O(n)
+	///   scan over up to <see cref="MaxTrackedKeys" /> entries on every over-capacity insert would
+	///   itself become an O(n)-per-request cost once an attack keeps the table pinned at the cap
+	///   (the exact problem the prune rate-limit exists to avoid) — a small bounded sample is
+	///   enough to always make room without that cost.
+	/// </summary>
+	private const int EvictionSampleSize = 32;
+
 	private readonly ConcurrentDictionary<string, Entry> _failures = new();
 
 	private long _pruneScans;
@@ -88,13 +97,18 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options, Tim
 		{
 			// Only a key we have never seen can grow the table, so this is the only path that
 			// pays for cleanup — the old code scanned on EVERY failure once the table was large,
-			// which handed a username-rotating attacker an O(n) cost per request. Beyond the cap
-			// new keys are dropped rather than tracked: the attacker's own per-address counter was
-			// minted long before the table filled and keeps blocking them, whereas growing without
-			// bound is the denial of service itself.
+			// which handed a username-rotating attacker an O(n) cost per request.
 			Prune();
+			// K6: beyond the cap, EVICT rather than refuse. Refusing meant one address that fills
+			// the table by rotating usernames permanently starves every OTHER address of its own
+			// per-address ceiling key for the rest of the failure window — a two-host attacker
+			// (host A floods and accepts its own throttling, host B then brute-forces) faced no
+			// throttling at all, because host B's key could never be minted. Dropping the
+			// oldest-windowed entry keeps a new key always mintable; it is also the entry closest
+			// to expiring anyway, so this tends to reclaim exactly what Prune() would have taken
+			// next.
 			if (_failures.Count >= MaxTrackedKeys)
-				return;
+				EvictOldestToMakeRoom();
 			entry = _failures.GetOrAdd(key, _ => new Entry { WindowStartUtc = now });
 		}
 
@@ -134,6 +148,35 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options, Tim
 		foreach ((string key, Entry entry) in _failures)
 			if (entry.WindowStartUtc <= cutoff)
 				_failures.TryRemove(key, out _);
+	}
+
+	/// <summary>
+	///   Makes room for one more key by dropping the oldest-windowed entry among a bounded sample
+	///   (K6) — an approximate LRU eviction, not an exact global-oldest scan, so the cost per
+	///   over-capacity insert stays O(<see cref="EvictionSampleSize" />) instead of O(table size).
+	/// </summary>
+	private void EvictOldestToMakeRoom()
+	{
+		string? victim = null;
+		DateTime oldest = DateTime.MaxValue;
+		int scanned = 0;
+		foreach ((string candidateKey, Entry candidate) in _failures)
+		{
+			DateTime windowStart;
+			lock (candidate)
+				windowStart = candidate.WindowStartUtc;
+			if (windowStart < oldest)
+			{
+				oldest = windowStart;
+				victim = candidateKey;
+			}
+
+			if (++scanned >= EvictionSampleSize)
+				break;
+		}
+
+		if (victim is not null)
+			_failures.TryRemove(victim, out _);
 	}
 
 	private sealed class Entry

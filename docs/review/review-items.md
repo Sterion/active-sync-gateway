@@ -255,7 +255,7 @@ work. Every finding ID appears in exactly one item.
 > reviewed" is false as implemented. `K4` `RequirePinned` fails **open** on `1`/`yes`/`on`. `K19` the
 > contract gate defaults to the permissive version when unreadable.
 
-**11. Password & throttle hardening** — ~~`K5`~~ `K6` `K7` `K21`
+**11. Password & throttle hardening** — ~~`K5`~~ ~~`K6`~~ `K7` `K21`
 > `K5` the stored hash **length** is unbounded, so a lower-privilege writer can plant a credential that costs
 > minutes of PBKDF2 per login attempt. `K6` filling the throttle table from one address disables protection
 > for every other address. `K7` the WebUi login clears the per-address ceiling, voiding the class's own

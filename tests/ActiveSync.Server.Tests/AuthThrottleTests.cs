@@ -165,6 +165,26 @@ public class AuthThrottleTests
 	}
 
 	[Fact]
+	public void TableAtCapacity_StillAdmitsANewAddressFromADifferentSource()
+	{
+		// K6: once the table hits MaxTrackedKeys, RecordFailure just returns without creating a
+		// new entry — so a single attacking address that fills the table by rotating usernames
+		// (10,000 distinct (address, username) keys, well within one failure window) permanently
+		// starves every OTHER address of its own per-address ceiling key until the window drains.
+		// A two-host attacker (host A floods and accepts its own block, host B then brute-forces)
+		// faces no throttling at all: BlockedForSeconds simply finds nothing in the table for B.
+		AuthThrottle throttle = Create(2, 3600);
+		for (int i = 0; i < 10_000; i++)
+			throttle.RecordFailure($"203.0.113.9\nuser{i}@example.com");
+
+		const string otherAddress = "198.51.100.7";
+		for (int i = 0; i < 5; i++)
+			throttle.RecordFailure(otherAddress);
+
+		Assert.NotNull(throttle.BlockedForSeconds(otherAddress));
+	}
+
+	[Fact]
 	public void Prune_UnderConcurrentAccess_StaysConsistent()
 	{
 		// K8 (COVERAGE, not red-first): `_nextPruneUtc` was a plain, non-atomic `DateTime`
