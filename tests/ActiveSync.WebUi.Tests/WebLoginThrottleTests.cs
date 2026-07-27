@@ -6,20 +6,26 @@ using ActiveSync.WebUi.Auth;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C1: a successful web login must clear BOTH throttle keys — the per-(address, user) key AND
-///   the IP-wide key. When only the per-user key is cleared, the IP-wide counter accrues
-///   monotonically across the mixed failed/successful logins of a shared egress IP (a NAT/proxy)
-///   until it 429s every user behind that address, including the ones logging in correctly.
+///   K7: a successful web login must clear ONLY its own per-(address, user) key — never the
+///   shared per-address ceiling. This replaces a test that asserted the opposite (a leftover from
+///   an earlier review round): clearing the ceiling on any one account's success let an attacker
+///   holding any single valid credential reset the address-wide counter after every batch of
+///   guesses and rotate usernames indefinitely from that address, voiding
+///   <see cref="ActiveSync.Core.Security.AuthThrottle" />'s own documented guarantee. The
+///   accepted tradeoff: a shared NAT/proxy egress address that racks up failures from OTHER users
+///   behind it is no longer forgiven by one user's successful logins on that address — it can
+///   still 429 that address until the failure window drains.
 /// </summary>
 public sealed class WebLoginThrottleTests
 {
 	[Fact]
-	public async Task SuccessfulLogin_ClearsTheIpWideThrottle_SoTyposDoNotLockOutTheWholeNat()
+	public async Task SuccessfulLogin_DoesNotClearTheAddressWideCeiling()
 	{
-		// MaxFailures = 2 ⇒ the IP-wide ceiling is 2 × 5 = 10. A single legitimate user (alice)
-		// shares the egress IP with a stream of failed attempts (unknown users — the shared-NAT
-		// "occasional typo"). Every failure bumps the IP-wide counter; only a success that ALSO
-		// clears it keeps alice reachable.
+		// MaxFailures = 2 ⇒ the address-wide ceiling is 2 × 5 = 10. A legitimate user (alice)
+		// shares the egress IP with a stream of failed attempts from other, unknown users
+		// (ghosts). Interleave alice's successes with the ghost failures: each success must clear
+		// only alice's own key, never the shared ceiling, so the ghost failures still accumulate
+		// toward it undisturbed.
 		await using WebUiHost host = await WebUiHost.StartAsync(
 			WebUiHost.Users(("alice", new UserOptions())),
 			new Dictionary<string, string?>
@@ -30,17 +36,27 @@ public sealed class WebLoginThrottleTests
 
 		HttpClient client = host.Anonymous();
 
-		// Enough iterations that, WITHOUT clearing the IP-wide key, the 10 failed attempts alone
-		// drive the counter to its ceiling and every subsequent login — alice's included — 429s.
-		for (int i = 0; i < 12; i++)
+		for (int i = 0; i < 9; i++)
 		{
-			HttpResponseMessage failed = await client.PostAsJsonAsync(
-				"/user/api/login", new { username = $"ghost{i}", password = "wrong" });
-			Assert.Equal(HttpStatusCode.Unauthorized, failed.StatusCode);
-
 			HttpResponseMessage ok = await client.PostAsJsonAsync(
 				"/user/api/login", new { username = "alice", password = "irrelevant" });
 			Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+
+			HttpResponseMessage failed = await client.PostAsJsonAsync(
+				"/user/api/login", new { username = $"ghost{i}", password = "wrong" });
+			Assert.Equal(HttpStatusCode.Unauthorized, failed.StatusCode);
 		}
+
+		// One more ghost failure crosses the ceiling (10 total) — proving alice's nine intervening
+		// successes never reset it.
+		HttpResponseMessage tenthFailure = await client.PostAsJsonAsync(
+			"/user/api/login", new { username = "ghost9", password = "wrong" });
+		Assert.Equal(HttpStatusCode.Unauthorized, tenthFailure.StatusCode);
+
+		// Now even alice — who has been logging in successfully the whole time — is blocked: the
+		// address-wide ceiling is not forgiven by anyone's success.
+		HttpResponseMessage blocked = await client.PostAsJsonAsync(
+			"/user/api/login", new { username = "alice", password = "irrelevant" });
+		Assert.Equal(HttpStatusCode.TooManyRequests, blocked.StatusCode);
 	}
 }
