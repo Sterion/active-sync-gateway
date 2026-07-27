@@ -329,6 +329,18 @@ public sealed class WebUiOidcOptions
 
 	/// <summary>Require HTTPS for the OIDC discovery endpoint. Disable only for local dev IdPs.</summary>
 	public bool RequireHttpsMetadata { get; set; } = true;
+
+	/// <summary>
+	///   Opt-out (default false): allow a config-declared account that has never bound an OIDC
+	///   subject to still sign in on a bare login-claim match. A config-declared account is never
+	///   written to, so it can never trust-on-first-use a subject the way a database account does
+	///   — it stays keyed on the mutable login claim forever. The login claim is user-editable at
+	///   several common identity providers, so leaving this off (the default) means anyone who can
+	///   make their own IdP profile carry that value is refused outright rather than handed a full
+	///   portal session for an account that isn't theirs. Set true only for a deployment that
+	///   deliberately wants login-claim-only matching for such accounts.
+	/// </summary>
+	public bool AllowUnboundLoginMatch { get; set; }
 }
 
 /// <summary>The web interfaces (admin + user portal), served by the same listeners.</summary>

@@ -74,6 +74,19 @@ internal static class OidcLogin
 				subjectBound = false;
 			}
 
+			// C9: a config-declared account can never TOFU-bind (it is never written to), so it
+			// stays keyed on the mutable login claim forever unless an operator sets OidcSubject
+			// explicitly. A bare login match used to still sign such an account in (withholding
+			// only its Admin flag, below) — but the login claim is user-editable at common IdPs,
+			// so any directory user who renames themselves onto it gets a full portal session as
+			// that account, from which they can set its gateway password and read the victim's
+			// mail over EAS. Refuse outright unless the deployment explicitly opts in to the old
+			// login-only matching.
+			if (!subjectBound && !account.FromDatabase && !string.IsNullOrEmpty(subject) &&
+			    !oidc.AllowUnboundLoginMatch)
+				return new Verdict(false, login, false, false,
+					"this account is not bound to an identity-provider subject");
+
 			// A config-declared account's own Admin flag must NOT be honored while it is unbound: a
 			// login match alone would let a directory user who renames themselves onto the admin's
 			// login inherit admin (the mutable-preferred_username takeover). Database accounts are

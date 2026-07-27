@@ -70,6 +70,7 @@ eas config set ActiveSync:WebUi:Oidc:LoginClaim preferred_username              
 eas config set ActiveSync:WebUi:Oidc:AdminClaim groups                              # live
 eas config set ActiveSync:WebUi:Oidc:AdminClaimValue eas-admin                      # live
 eas config set ActiveSync:WebUi:Oidc:AutoProvision true                             # live
+eas config set ActiveSync:WebUi:Oidc:AllowUnboundLoginMatch true                    # live (opt-out, default false)
 ```
 
 - The **`LoginClaim`** (default `preferred_username`) maps the token to a gateway login.
@@ -80,9 +81,13 @@ eas config set ActiveSync:WebUi:Oidc:AutoProvision true                         
   alone would let any directory user claim someone else's gateway account, admin flag included.
   The gateway therefore binds each account to the IdP's immutable `sub`: the first OIDC sign-in
   of a **database** account records it (`OidcSubject`), and every later ticket must present the
-  same subject or it is refused. A **config-declared** account is never written to, so it stays
-  unbound until you set `OidcSubject` on it yourself — do that, or use a `LoginClaim` the IdP
-  does not let users edit. Re-binding after a genuine IdP migration means clearing the field
+  same subject or it is refused. A **config-declared** account is never written to, so it can
+  never TOFU-bind this way — set `OidcSubject` on it yourself, or use a `LoginClaim` the IdP does
+  not let users edit. Until you do, sign-in for that account is **refused outright** (not merely
+  stripped of admin) whenever the ticket carries a subject, so a renamed-onto login claim cannot
+  reach even a plain portal session for it. `Oidc:AllowUnboundLoginMatch` (default `false`) is the
+  explicit opt-out for a deployment that really does want the old login-claim-only matching for
+  such accounts. Re-binding after a genuine IdP migration means clearing the field
   (`eas user set <login> OidcSubject ""`).
 - **Behind a TLS-terminating proxy** (e.g. a Kubernetes ingress that forwards to the plain-HTTP
   port), the gateway must know it's serving https so the `redirect_uri` it sends the IdP — used
@@ -103,7 +108,8 @@ eas config set ActiveSync:WebUi:Oidc:AutoProvision true                         
 - The web session cookie carries only the gateway login + admin bit — IdP claims never
   leak into it. Logout is local (no RP-initiated IdP logout yet).
 - Authority/ClientId/ClientSecret/Scopes/LoginClaim are **restart tier** (the handler
-  registers at startup); AdminClaim/AdminClaimValue/AutoProvision apply **live**.
+  registers at startup); AdminClaim/AdminClaimValue/AutoProvision/AllowUnboundLoginMatch apply
+  **live**.
 
 ## Security model
 

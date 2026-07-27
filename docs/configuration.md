@@ -300,7 +300,7 @@ document (the device default applies). See [Device security policies](../README.
 Enable/disable flags apply **live**. The full endpoint reference, OIDC claim-mapping details
 and security model are in **[docs/webui.md](webui.md)**; this table is just the settable keys.
 The OIDC issuer/client/scopes/login-claim knobs are **restart-tier** (the handler registers
-at startup); `AdminClaim`/`AdminClaimValue`/`AutoProvision` apply live.
+at startup); `AdminClaim`/`AdminClaimValue`/`AutoProvision`/`AllowUnboundLoginMatch` apply live.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -317,6 +317,7 @@ at startup); `AdminClaim`/`AdminClaimValue`/`AutoProvision` apply live.
 | `Oidc:AdminClaimValue` | `null` | Value of `AdminClaim` that grants admin — required whenever `AdminClaim` is set (startup fails otherwise), because "any value" would hand admin to every user carrying the claim. Use `*` to deliberately accept any value. |
 | `Oidc:AutoProvision` | `false` | Create a database account for unknown OIDC logins on first sign-in (`MailAddress` from the `email` claim), so they can use the portal. Admin only via the claim until an admin grants the flag. |
 | `Oidc:RequireHttpsMetadata` | `true` | Require HTTPS for the OIDC discovery endpoint. Disable only for local dev IdPs. Restart-tier. |
+| `Oidc:AllowUnboundLoginMatch` | `false` | Opt-out: allow a config-declared account that has never bound an OIDC subject to still sign in on a bare login-claim match, instead of being refused outright. A config-declared account can never trust-on-first-use a subject (it is never written to), so leaving this off means the user-editable login claim alone can never reach even a plain sign-in for it. |
 
 ## `Cli` (loopback CLI-forwarding endpoint)
 

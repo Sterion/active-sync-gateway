@@ -19,7 +19,8 @@ public sealed class OidcLoginTests
 	}
 
 	private static WebUiOidcOptions Oidc(
-		bool autoProvision = false, string? adminClaim = null, string? adminClaimValue = null)
+		bool autoProvision = false, string? adminClaim = null, string? adminClaimValue = null,
+		bool allowUnboundLoginMatch = false)
 	{
 		return new WebUiOidcOptions
 		{
@@ -27,7 +28,8 @@ public sealed class OidcLoginTests
 			ClientId = "eas",
 			AutoProvision = autoProvision,
 			AdminClaim = adminClaim,
-			AdminClaimValue = adminClaimValue
+			AdminClaimValue = adminClaimValue,
+			AllowUnboundLoginMatch = allowUnboundLoginMatch
 		};
 	}
 
@@ -208,7 +210,9 @@ public sealed class OidcLoginTests
 		Assert.Equal(("alice", "sub-alice"), Assert.Single(bound));
 
 		// A config-declared account is never written to — that would mint a database row
-		// shadowing the configuration entry. It simply stays unbound.
+		// shadowing the configuration entry. It simply stays unbound, which (C9) now refuses the
+		// sign-in outright by default; opt in to the old login-only matching to still observe that
+		// it never binds.
 		Dictionary<string, MergedUser> configUsers = new(StringComparer.OrdinalIgnoreCase)
 		{
 			["carol"] = new MergedUser(new UserOptions(), false, false)
@@ -216,7 +220,7 @@ public sealed class OidcLoginTests
 		bound.Clear();
 		OidcLogin.Verdict config = await OidcLogin.EvaluateAsync(
 			Ticket(("preferred_username", "carol"), ("sub", "sub-carol")),
-			Oidc(), configUsers, NoProvision(),
+			Oidc(allowUnboundLoginMatch: true), configUsers, NoProvision(),
 			(login, subject) =>
 			{
 				bound.Add((login, subject));
@@ -229,19 +233,20 @@ public sealed class OidcLoginTests
 	[Fact]
 	public async Task UnboundConfigAdmin_IsNotGrantedAdmin_OnLoginClaimAlone()
 	{
-		// C4: a config-declared account is never written to, so it can never TOFU-bind a subject —
-		// it stays keyed on the user-MUTABLE login claim. Honoring its Admin flag on a bare login
-		// match is exactly the preferred_username takeover the subject binding exists to stop: a
-		// directory user who renames themselves onto the admin's login would inherit admin. The
-		// account may still sign in (as a plain user), but the admin bit must be withheld until the
-		// operator binds a subject.
+		// C4 (round 2): a config-declared account is never written to, so it can never TOFU-bind a
+		// subject — it stays keyed on the user-MUTABLE login claim. Honoring its Admin flag on a
+		// bare login match is exactly the preferred_username takeover the subject binding exists
+		// to stop: a directory user who renames themselves onto the admin's login would inherit
+		// admin. C9 (this round) since made the unbound case refuse outright by default; opt in to
+		// the old login-only matching here to keep observing that even then the admin bit is
+		// withheld until the operator binds a subject.
 		Dictionary<string, MergedUser> configAdmin = new(StringComparer.OrdinalIgnoreCase)
 		{
 			["root"] = new MergedUser(new UserOptions { Admin = true }, false, false)
 		};
 		OidcLogin.Verdict unbound = await OidcLogin.EvaluateAsync(
 			Ticket(("preferred_username", "root"), ("sub", "sub-anyone")),
-			Oidc(), configAdmin, NoProvision());
+			Oidc(allowUnboundLoginMatch: true), configAdmin, NoProvision());
 		Assert.True(unbound.Allowed);
 		Assert.False(unbound.IsAdmin);
 
@@ -256,6 +261,29 @@ public sealed class OidcLoginTests
 			Ticket(("preferred_username", "root"), ("sub", "sub-root")),
 			Oidc(), boundConfigAdmin, NoProvision());
 		Assert.True(bound is { Allowed: true, IsAdmin: true });
+	}
+
+	[Fact]
+	public async Task UnboundConfigAccount_IsRefused_WhenTheTicketCarriesASubject()
+	{
+		// C9: a config-declared account is never written to, so it can never TOFU-bind a subject
+		// and stays keyed on the mutable login claim forever. A bare login match used to still
+		// sign such an account in (withholding only the Admin flag) — but the login claim is
+		// user-editable at common IdPs, so any directory user who renames themselves onto it gets
+		// a full PORTAL session as that account, from which they can set its gateway password and
+		// read the victim's mail over EAS. That must be refused outright, not just stripped of
+		// admin.
+		Dictionary<string, MergedUser> configUsers = new(StringComparer.OrdinalIgnoreCase)
+		{
+			["root"] = new MergedUser(new UserOptions { Admin = true }, false, false)
+		};
+
+		OidcLogin.Verdict verdict = await OidcLogin.EvaluateAsync(
+			Ticket(("preferred_username", "root"), ("sub", "sub-anyone")),
+			Oidc(), configUsers, NoProvision());
+
+		Assert.False(verdict.Allowed);
+		Assert.Contains("subject", verdict.Reason);
 	}
 
 	[Fact]

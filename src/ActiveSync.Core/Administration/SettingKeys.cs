@@ -167,6 +167,9 @@ internal static class SettingKeys
 			"Create a database account for unknown OIDC logins on first sign-in."),
 		new("ActiveSync:WebUi:Oidc:RequireHttpsMetadata", ValueType.Bool, true, "true",
 			"Require HTTPS for the OIDC discovery endpoint (disable only for dev)."),
+		new("ActiveSync:WebUi:Oidc:AllowUnboundLoginMatch", ValueType.Bool, false, "false",
+			"Opt-out: allow a config-declared account that never bound an OIDC subject to still " +
+			"sign in on a bare login-claim match, instead of being refused outright."),
 
 		new("ActiveSync:Cli:Enabled", ValueType.Bool, false, "true",
 			"Answer the loopback CLI-forwarding endpoint (/cli) that the slim 'eas' client uses."),
