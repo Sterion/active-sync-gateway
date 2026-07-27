@@ -178,7 +178,15 @@ public sealed class CompositeBackendSession : IBackendSession
 				(failures ??= []).Add(ex);
 			}
 
+		// A2: this used to rethrow, but the public DisposeAsync() above is reached through the
+		// request's `await using` in EasEndpoint — which sits OUTSIDE its try/catch — so a
+		// throwing teardown (e.g. an IMAP LOGOUT on a dead socket) surfaced as an unhandled
+		// exception for a lease release that has nothing to do with the request's own outcome
+		// (the response may already be written). It also reaches here from CreateAsync's failure
+		// cleanup (A1), where throwing would replace the ORIGINAL build failure. Log instead —
+		// every connection was still given its chance to dispose above.
 		if (failures is { Count: > 0 })
-			throw new AggregateException("One or more backend connections failed to dispose.", failures);
+			_logger?.LogWarning(new AggregateException(failures),
+				"One or more backend connections failed to dispose for user {UserId}", UserId);
 	}
 }

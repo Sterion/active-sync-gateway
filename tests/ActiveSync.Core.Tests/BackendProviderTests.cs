@@ -114,10 +114,18 @@ public class BackendProviderTests
 	}
 
 	[Fact]
-	public async Task Session_Dispose_ContinuesPastAThrowingConnection_AndAggregates()
+	public async Task Session_Dispose_ContinuesPastAThrowingConnection_WithoutThrowing()
 	{
-		// A12: a provider whose connection throws on dispose (e.g. IMAP LOGOUT on a dead socket)
-		// must not strand the other providers' connections — they still hold live sockets.
+		// A12 (still true): a provider whose connection throws on dispose (e.g. IMAP LOGOUT on a
+		// dead socket) must not strand the other providers' connections — they still hold live
+		// sockets.
+		//
+		// A2 (behaviour change): DisposeAsync used to rethrow the collected failures as an
+		// AggregateException. EasEndpoint's `await using session = ...` sits OUTSIDE its
+		// try/catch, so that escaped as an unhandled exception on a request whose response had
+		// ALREADY been written successfully — for a lease release that has nothing to do with the
+		// request's own outcome (idle eviction, a live settings recycle, password rotation).
+		// Disposal failures are now logged, never rethrown.
 		FakeProvider bad = new("bad", [BackendRole.MailStore, BackendRole.MailSubmit], throwOnDispose: true);
 		FakeProvider good = new("good", [BackendRole.Calendar]);
 		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(bad, good), Gateway, 1, null,
@@ -127,8 +135,10 @@ public class BackendProviderTests
 				new ResolvedRole(BackendRole.Calendar, "good", ProviderSettings.Empty, Gateway)
 			], [], CancellationToken.None);
 
-		await Assert.ThrowsAsync<AggregateException>(async () => await session.DisposeAsync());
-		Assert.True(bad.LastResource!.Disposed);  // the throwing connection was attempted
+		Exception? escaped = await Record.ExceptionAsync(async () => await session.DisposeAsync());
+
+		Assert.Null(escaped);             // must never throw into the caller's `await using`
+		Assert.True(bad.LastResource!.Disposed);  // the throwing connection was still attempted
 		Assert.True(good.LastResource!.Disposed); // and the later connection still got disposed
 	}
 

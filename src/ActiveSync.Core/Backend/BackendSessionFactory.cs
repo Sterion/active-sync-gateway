@@ -215,7 +215,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 						await LoadShareGrantsAsync(userId, CancellationToken.None).ConfigureAwait(false);
 					return await CompositeBackendSession.CreateAsync(
 						_registry, credentials, userId, account.MailAddress, roles, sharedCalendars,
-						CancellationToken.None).ConfigureAwait(false);
+						CancellationToken.None, _logger).ConfigureAwait(false);
 				});
 
 			Lazy<Task<CompositeBackendSession>> lazy = _sessions.GetOrAdd(key, _ => NewLazy());
