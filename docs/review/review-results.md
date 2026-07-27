@@ -924,3 +924,48 @@ absent — see below.
 - **`E5` closes a real leak**, not just a slowdown: forwarded `config`/`logs`/`tls` each rebuilt a provider
   and re-ran `PluginLoader.LoadInto`, leaking a non-collectible `AssemblyLoadContext` per invocation in any
   plugin-bearing deployment.
+
+## Item 21 — `/cli` endpoint hardening — ⚠ PARTIAL, NOT COMPLETE
+**This entry describes an item that is still in progress.** Two of five findings landed before the
+session running them was killed (the host OOM-killed the process twice). The tree is consistent and safe:
+each landed finding was committed with its own strike, so the cursor is accurate and nothing is lost.
+**Whoever picks this up should replace this entry with a normal one when the item finishes.**
+
+**Landed:** `E3` — `d53bb8d` · `E11` — `b10cee3`
+**Remaining (un-struck on the queue line):** `E18` `E19` `E20`
+
+**What I verified (orchestrator, after the fact — I did not run these workers):**
+- Both commits carry `review-items.md` in their diffstat, so each strike shipped **with** its fix; there is
+  no trailing bookkeeping commit and the cursor is honest ✓
+- Queue integrity at this state: items=37 live=14 assigned=245 unique=245 dupes=0 ✓
+- Working tree clean at `b10cee3` ✓
+- **`E3` read against its entry:** the handler no longer takes `CliRequest` as a bound parameter; in the
+  current file the gates run first — `Cli.Enabled` (`LocalCliEndpoint.cs:131`) and `IsLoopback` (`:133`) —
+  and the body is read at `:142` inside a try/catch that returns `Results.NotFound()` on any failure. That
+  is the finding's FIX exactly, and the ordering (which is the entire point) holds. Every refusal on this
+  path now returns 404, closing the 415/400 existence oracle.
+- **`E11` read against its entry:** `TryClaim` now records `envelope.TimestampUnixMs` rather than the claim
+  time — the first of the two remedies its entry offers, so a nonce can no longer be pruned before the
+  envelope it protects expires.
+- **`E11` red-first re-proved independently:** reverting `LocalCliEndpoint.cs` to `5c600c1` makes
+  `ReplayCache_CannotBeReopened_WhenClaimedEarlyByAnEnvelopeReceivedUnderClockSkew` fail.
+
+**What is NOT verified — do not read this entry as a clean bill of health:**
+- **`E3`'s red-first was not independently re-proved.** Its test lives in the integration suite
+  (`tests/ActiveSync.Integration.Tests/Scenarios/WebUiTests.cs`), which needs a live backend; I did not
+  start one, so it was neither run nor confirmed red on unmodified source.
+- **No full unit suite run at this HEAD**, and **no live suite run at all** for this item. `E3` changes the
+  `/cli` request pipeline, which is HTTP-reachable — under this document's own rule that is an item whose
+  live suite must be run before it is called done.
+- No worker report exists for these two findings in this transcript; the session that produced them did not
+  survive to report.
+
+**For whoever continues:**
+1. Spawn a worker on item 21 with the constant brief. It will read the cursor, see `E3`/`E11` struck, and
+   work `E18`/`E19`/`E20`. Add one situational line noting the previous session was killed mid-item.
+2. When it returns, verify the whole item — including a red-first re-proof of **`E3`** and a **live suite
+   run**, both of which this partial state still owes.
+3. Replace this entry with a normal item entry covering all five findings.
+4. The last recorded full-suite figures were item 20's: unit **1397 passed, 0 skipped**
+   (Cli 16 · Protocol 99 · Core 842 · WebUi 119 · Server 321), live **143 passed, 0 skipped**. Item 21's two
+   landed findings add tests beyond that, so expect higher counts, not equal ones.
