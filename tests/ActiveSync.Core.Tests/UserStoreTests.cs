@@ -335,6 +335,20 @@ public sealed class UserStoreTests : IDisposable
 	}
 
 	[Fact]
+	public async Task Upsert_IsWhitespaceInsensitive_NoDuplicateRow()
+	{
+		// B13: NormalizeLogin case-folded but did not trim, so an upsert under a whitespace-padded
+		// login (Basic auth delivers it verbatim) inserted a SECOND row rather than matching the
+		// existing one — mirroring the B2 case-folding bug this normalization already fixed.
+		await _store.UpsertAsync("phone1", new UserOptions { MailAddress = "first@x" }, CancellationToken.None);
+		await _store.UpsertAsync(" phone1 ", new UserOptions { MailAddress = "second@x" }, CancellationToken.None);
+
+		Assert.Single(await _store.ListAsync(CancellationToken.None));
+		Assert.Equal("second@x", (await _store.GetAsync("phone1", CancellationToken.None))?.MailAddress);
+		Assert.NotNull(await _store.GetAsync(" phone1", CancellationToken.None));
+	}
+
+	[Fact]
 	public async Task Store_ListAndGet_RoundTrip()
 	{
 		Assert.Null(await _store.ReadStampAsync(CancellationToken.None));

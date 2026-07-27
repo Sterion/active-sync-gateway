@@ -835,6 +835,14 @@ public sealed class UserResolver
 		// would corrupt the session/watcher key separator and the encryption AAD.
 		if (login.Contains(':') || login.Any(char.IsControl))
 			failures.Add($"ActiveSync:Users:{login}: login must not contain ':' or control characters.");
+
+		// B13: Basic auth delivers leading/trailing whitespace verbatim. UserStore.NormalizeLogin does
+		// not trim, so an untrimmed login like " bob" misses MergedUsers (" bob" != "bob"), degrades
+		// to pass-through, and — with AutoProvisionUsers on — mints a second, PERMANENT identity
+		// (UserId is never reused) the real "bob" can never see. Refuse it outright rather than
+		// silently provisioning a phantom.
+		if (login != login.Trim())
+			failures.Add($"ActiveSync:Users:{login}: login must not have leading or trailing whitespace.");
 	}
 
 	/// <summary>

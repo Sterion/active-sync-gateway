@@ -491,6 +491,23 @@ public class UserResolverTests
 	}
 
 	[Fact]
+	public void ValidateUsers_RejectsALoginWithLeadingOrTrailingWhitespace()
+	{
+		// B13: Basic auth delivers a login's leading/trailing spaces verbatim. ValidateLogin only
+		// rejected ':' and control characters, so " bob" passed validation — it then misses
+		// MergedUsers ( " bob" != "bob" ), degrades to pass-through, and (with AutoProvisionUsers)
+		// mints a second, permanent identity the real "bob" can never see. The login must be
+		// refused when it differs from its trimmed form, so the phantom identity is never minted.
+		ActiveSyncOptions options = HostOptions();
+		options.Users = new Dictionary<string, UserOptions> { [" bob"] = new() };
+
+		List<string> failures = new();
+		UserResolver.ValidateUsers(options, Roles(BaseConfig()), Registry(), null, failures);
+
+		Assert.Contains(failures, f => f.Contains(" bob") && f.Contains("whitespace"));
+	}
+
+	[Fact]
 	public void ValidateUsers_ValidationMemo_ReplaysSharedFailurePerUser()
 	{
 		// B7 (item 37): validation is memoized per (provider, role, settings-identity). Users that

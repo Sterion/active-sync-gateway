@@ -32,14 +32,17 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 	};
 
 	/// <summary>
-	///   Canonical (case-folded) form of a login. Logins are case-insensitive everywhere in memory
-	///   (the <see cref="LoadAllAsync" /> map uses <see cref="StringComparer.OrdinalIgnoreCase" />),
+	///   Canonical (case-folded, trimmed) form of a login. Logins are case-insensitive everywhere in
+	///   memory (the <see cref="LoadAllAsync" /> map uses <see cref="StringComparer.OrdinalIgnoreCase" />),
 	///   so <see cref="User.Login" /> is STORED in this form (B1/B8): the raw unique index
 	///   then enforces case-folded uniqueness on its own — two BINARY-distinct rows like `Phone1` and
 	///   `phone1` can no longer both exist — and every lookup is an exact index seek rather than a
-	///   non-sargable `LOWER()` scan.
+	///   non-sargable `LOWER()` scan. B13: also trimmed — Basic auth delivers leading/trailing
+	///   whitespace verbatim, and an untrimmed lookup (`" bob"` vs `"bob"`) would otherwise mint a
+	///   second, permanent identity that <see cref="UserResolver.ValidateLogin" /> now refuses at the
+	///   config-declared write surface but which pass-through auto-provisioning could still reach.
 	/// </summary>
-	public static string NormalizeLogin(string login) => login.ToLowerInvariant();
+	public static string NormalizeLogin(string login) => login.Trim().ToLowerInvariant();
 
 	/// <summary>The user id for a login, or null when no such user exists.</summary>
 	public async Task<int?> FindUserIdAsync(string login, CancellationToken ct)
