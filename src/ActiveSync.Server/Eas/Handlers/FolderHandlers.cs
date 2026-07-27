@@ -191,6 +191,22 @@ public abstract class FolderModifyHandlerBase(
 		string? newServerId = newBackendKey is null
 			? null
 			: registry.FirstOrDefault(f => f.BackendKey == newBackendKey)?.ServerId;
+
+		// F13: a backend just created the folder but its listing does not (yet) reflect it — e.g.
+		// Axigen's async indexing can lag a PUT/MKCALENDAR by up to ~a minute (AGENTS.md). Reporting
+		// success with no ServerId leaves the client caching a folder it can never address again; a
+		// retryable status makes it re-issue FolderCreate (or pick the folder up on the next
+		// FolderSync once the backend catches up) instead.
+		if (newBackendKey is not null && newServerId is null)
+		{
+			logger.LogWarning(
+				"{Command} \"{Folder}\" for {User}: backend created it but its own listing does not " +
+				"reflect it yet — reporting retryable Status 6 instead of a false success",
+				Command, RequestedFolderName(request.Root), context.UserName);
+			await WriteStatusAsync(context, "6", null);
+			return;
+		}
+
 		logger.LogInformation("{Command} \"{Folder}\" for {User}",
 			Command, RequestedFolderName(request.Root), context.UserName);
 		await WriteStatusAsync(context, "1", newKey.ToString(), newServerId);

@@ -100,6 +100,32 @@ public sealed class FolderConformanceTests : IDisposable
 
 	// ---- F27 -------------------------------------------------------------------------------
 
+	// ---- item 23 F13 -------------------------------------------------------------------------
+
+	// F13: a backend whose post-create listing does not yet reflect the new folder (Axigen's
+	// async indexing lag is the real-world trigger) must NOT be reported to the client as a
+	// success with no ServerId — the client would cache a folder it can never address again.
+	[Fact]
+	public async Task FolderCreate_NotVisibleInThePostCreateListing_IsRetryable_NotFalseSuccess()
+	{
+		// RecordingStore.Listing is left unset, so ListFoldersAsync throws (the harness default) —
+		// FolderService.RefreshAsync falls back to the previously-persisted registry, which cannot
+		// contain a folder the backend has not reported yet.
+		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
+			new XDocument(new XElement(FH + "FolderCreate",
+				new XElement(FH + "SyncKey", "0"),
+				new XElement(FH + "ParentId", "0"),
+				new XElement(FH + "Type", EasFolderType.UserMail.ToString()),
+				new XElement(FH + "DisplayName", "Projects"))));
+
+		// The backend genuinely created it...
+		Assert.Single(_harness.Session.Store.CreatedFolders);
+		// ...but the client must not be told this succeeded with no way to address the folder.
+		Assert.NotEqual("1", response?.Root?.Element(FH + "Status")?.Value);
+		Assert.Equal("6", response?.Root?.Element(FH + "Status")?.Value);
+		Assert.Null(response?.Root?.Element(FH + "ServerId"));
+	}
+
 	[Fact]
 	public async Task FolderCreate_CalendarType_WithNoCalendarStore_IsRefused_NotCreatedAsMail()
 	{
@@ -123,6 +149,9 @@ public sealed class FolderConformanceTests : IDisposable
 			KeyPrefix = "caldav:"
 		};
 		_harness.Session.SecondaryStore = calendar;
+		// F13: the post-create hierarchy refresh must find the new folder for the create to be
+		// reported as a success — simulate a calendar backend whose listing keeps up.
+		calendar.Listing = [new BackendFolder("caldav:MyCalendar", "MyCalendar", null, EasFolderType.UserCalendar, EasClass.Calendar)];
 
 		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
 			new XDocument(new XElement(FH + "FolderCreate",
@@ -132,6 +161,7 @@ public sealed class FolderConformanceTests : IDisposable
 				new XElement(FH + "DisplayName", "MyCalendar"))));
 
 		Assert.Equal("1", response?.Root?.Element(FH + "Status")?.Value);
+		Assert.NotNull(response?.Root?.Element(FH + "ServerId")); // F13: a real success carries a ServerId
 		Assert.Single(calendar.CreatedFolders);
 		Assert.Empty(_harness.Session.Store.CreatedFolders); // mail store left untouched
 	}
@@ -140,6 +170,10 @@ public sealed class FolderConformanceTests : IDisposable
 	public async Task FolderCreate_MailType_StillCreatesInTheMailStore()
 	{
 		// Regression guard: the default class (Email / Type 12) still routes to the mail store.
+		// F13: the post-create hierarchy refresh must find the new folder for this to be reported
+		// as a success — simulate a mail backend whose listing keeps up.
+		_harness.Session.Store.Listing = [new BackendFolder("imap:Projects", "Projects", null, EasFolderType.UserMail, EasClass.Email)];
+
 		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
 			new XDocument(new XElement(FH + "FolderCreate",
 				new XElement(FH + "SyncKey", "0"),
@@ -148,6 +182,7 @@ public sealed class FolderConformanceTests : IDisposable
 				new XElement(FH + "DisplayName", "Projects"))));
 
 		Assert.Equal("1", response?.Root?.Element(FH + "Status")?.Value);
+		Assert.NotNull(response?.Root?.Element(FH + "ServerId")); // F13: a real success carries a ServerId
 		Assert.Single(_harness.Session.Store.CreatedFolders);
 	}
 
@@ -157,6 +192,10 @@ public sealed class FolderConformanceTests : IDisposable
 	[Fact]
 	public async Task FolderCreate_EnumeratesTheHierarchyOnlyOnce()
 	{
+		// F13: without a listing that reflects the new folder, the create is retryable (Status 6) —
+		// give this test the same happy-path listing so it still measures what it is named for.
+		_harness.Session.Store.Listing = [new BackendFolder("imap:Projects", "Projects", null, EasFolderType.UserMail, EasClass.Email)];
+
 		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
 			new XDocument(new XElement(FH + "FolderCreate",
 				new XElement(FH + "SyncKey", "0"),

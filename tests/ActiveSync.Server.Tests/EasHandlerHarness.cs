@@ -258,9 +258,21 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>Number of hierarchy enumerations the handler drove (F28 asserts exactly one).</summary>
 		public int ListFoldersCalls { get; private set; }
 
+		/// <summary>
+		///   When set, <see cref="ListFoldersAsync" /> returns this instead of throwing
+		///   <see cref="NotSupportedException" /> — lets a test simulate a backend whose listing
+		///   genuinely reflects the current folder set (e.g. right after a create). Left null (the
+		///   default), the listing always fails, which is how a real backend's post-create
+		///   enumeration missing the just-created folder (Axigen's async indexing lag) is
+		///   reproduced — see F13.
+		/// </summary>
+		public IReadOnlyList<BackendFolder>? Listing { get; set; }
+
 		public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 		{
 			ListFoldersCalls++;
+			if (Listing is { } listing)
+				return Task.FromResult(listing);
 			throw new NotSupportedException();
 		}
 
