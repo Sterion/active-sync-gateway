@@ -24,6 +24,18 @@ public sealed class ManageSieveClient : IAsyncDisposable
 	/// </summary>
 	private const int MaxLiteralLength = 1024 * 1024;
 
+	/// <summary>
+	///   Per-operation I/O bound (G5): no read/write here ever had a timeout, so a half-dead
+	///   server hangs the caller's Settings→Oof request indefinitely.
+	/// </summary>
+	private static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(30);
+
+	/// <summary>
+	///   DisposeAsync's own short, standalone bound for its best-effort LOGOUT — it must never
+	///   wait as long as a real operation, and unlike one it has no caller token to link to.
+	/// </summary>
+	private static readonly TimeSpan DisposeTimeout = TimeSpan.FromSeconds(3);
+
 	private readonly SieveOptions _options;
 	private readonly BackendCredentials _credentials;
 	private readonly ILogger? _wireLogger;
@@ -38,9 +50,20 @@ public sealed class ManageSieveClient : IAsyncDisposable
 		_wireLogger = wireLogger is { } logger && logger.IsEnabled(LogLevel.Trace) ? wireLogger : null;
 	}
 
+	/// <summary>Bounds an operation to <see cref="OperationTimeout" />, linked to the caller's token.</summary>
+	private static CancellationTokenSource WithOperationTimeout(CancellationToken ct)
+	{
+		CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+		cts.CancelAfter(OperationTimeout);
+		return cts;
+	}
+
 	/// <summary>Connects, upgrades to TLS when configured, and authenticates.</summary>
 	public async Task ConnectAsync(CancellationToken ct)
 	{
+		using CancellationTokenSource timeoutCts = WithOperationTimeout(ct);
+		ct = timeoutCts.Token;
+
 		_tcp = new TcpClient();
 		try
 		{
@@ -93,6 +116,9 @@ public sealed class ManageSieveClient : IAsyncDisposable
 	/// <summary>Script names with the active one flagged. Names are unquoted.</summary>
 	public async Task<IReadOnlyList<(string Name, bool Active)>> ListScriptsAsync(CancellationToken ct)
 	{
+		using CancellationTokenSource timeoutCts = WithOperationTimeout(ct);
+		ct = timeoutCts.Token;
+
 		await SendLineAsync("LISTSCRIPTS", ct).ConfigureAwait(false);
 		SieveResponse response = await ReadResponseAsync(ct).ConfigureAwait(false);
 		response.ThrowUnlessOk("LISTSCRIPTS");
@@ -115,6 +141,9 @@ public sealed class ManageSieveClient : IAsyncDisposable
 
 	public async Task PutScriptAsync(string name, string script, CancellationToken ct)
 	{
+		using CancellationTokenSource timeoutCts = WithOperationTimeout(ct);
+		ct = timeoutCts.Token;
+
 		byte[] bytes = Encoding.UTF8.GetBytes(script);
 		// Non-synchronizing literal ({n+}): the script bytes follow immediately.
 		await SendLineAsync($"PUTSCRIPT {Quote(name)} {{{bytes.Length}+}}", ct).ConfigureAwait(false);
@@ -129,6 +158,9 @@ public sealed class ManageSieveClient : IAsyncDisposable
 	/// <summary>SETACTIVE; an empty name deactivates all scripts (RFC 5804 §2.8).</summary>
 	public async Task SetActiveAsync(string name, CancellationToken ct)
 	{
+		using CancellationTokenSource timeoutCts = WithOperationTimeout(ct);
+		ct = timeoutCts.Token;
+
 		await SendLineAsync($"SETACTIVE {Quote(name)}", ct).ConfigureAwait(false);
 		SieveResponse response = await ReadResponseAsync(ct).ConfigureAwait(false);
 		if (!response.IsOk)
@@ -138,6 +170,9 @@ public sealed class ManageSieveClient : IAsyncDisposable
 	/// <summary>DELETESCRIPT; a missing script is not an error for our callers.</summary>
 	public async Task DeleteScriptAsync(string name, CancellationToken ct)
 	{
+		using CancellationTokenSource timeoutCts = WithOperationTimeout(ct);
+		ct = timeoutCts.Token;
+
 		await SendLineAsync($"DELETESCRIPT {Quote(name)}", ct).ConfigureAwait(false);
 		await ReadResponseAsync(ct).ConfigureAwait(false); // NO (nonexistent) is fine
 	}
@@ -148,8 +183,12 @@ public sealed class ManageSieveClient : IAsyncDisposable
 		{
 			if (_stream is not null)
 			{
-				await SendLineAsync("LOGOUT", CancellationToken.None).ConfigureAwait(false);
-				await ReadResponseAsync(CancellationToken.None).ConfigureAwait(false);
+				// Own short standalone bound (G5): unlike a real operation there is no caller
+				// token to link to, and a best-effort goodbye must never hang the caller's
+				// `await using` forever waiting on a half-dead server.
+				using CancellationTokenSource logoutCts = new(DisposeTimeout);
+				await SendLineAsync("LOGOUT", logoutCts.Token).ConfigureAwait(false);
+				await ReadResponseAsync(logoutCts.Token).ConfigureAwait(false);
 			}
 		}
 		catch (Exception)

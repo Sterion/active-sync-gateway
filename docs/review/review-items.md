@@ -225,7 +225,7 @@ work. Every finding ID appears in exactly one item.
 > not need, breaking drafts on servers without it. `H9` submission never gates on the submission capability
 > and uses the mail account id.
 
-**6. ManageSieve protocol safety** [LIVE] — ~~`G1`~~ ~~`G2`~~ `G5` `G10` `G17` `G23` `G24`
+**6. ManageSieve protocol safety** [LIVE] — ~~`G1`~~ ~~`G2`~~ ~~`G5`~~ `G10` `G17` `G23` `G24`
 > `G1` literal-encoded script names lose their `ACTIVE` flag, so turning Oof off **deactivates the user's own
 > spam/forwarding rules**. `G2` a server-controlled literal length is used as an allocation size (OOM).
 > `G5` no I/O timeout anywhere, and an uncancellable LOGOUT. `G10`/`G17`/`G23`/`G24` SASL negotiation,
