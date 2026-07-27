@@ -116,12 +116,22 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 				fetched[(folderKey, itemKey)] = items.GetValueOrDefault(itemKey);
 		}
 
+		// Resolve every hit's OWN folder rather than the single optional CollectionId-scoped
+		// `searchFolder` — a mailbox-wide Find (the common case, no CollectionId/DeepTraversal
+		// narrowing) previously left this null for every result, so nothing came back with a
+		// ServerId/CollectionId to open (F4). One registry read serves the whole page, however
+		// many distinct folders its hits span, rather than a lookup per hit.
+		IReadOnlyDictionary<string, UserFolder> folderMap =
+			await folders.GetFolderMapAsync(context.UserId, ct);
+
 		List<XElement> results = new();
 		foreach ((string hitFolderKey, string itemKey) in page)
 		{
 			BackendItem? item = fetched.GetValueOrDefault((hitFolderKey, itemKey));
 			if (item is null)
 				continue;
+
+			UserFolder? hitFolder = folderMap.GetValueOrDefault(hitFolderKey);
 
 			// Preview and HasAttachments live in the Find namespace; the rest of the item
 			// rides along as its regular ApplicationData elements.
@@ -139,11 +149,11 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 			// MS-ASCMD Find Result child order: Class, ServerId, CollectionId, Properties. Build
 			// them in that order rather than prepending ServerId/CollectionId after the fact (F38).
 			List<XElement> children = [new XElement(AS + "Class", EasClass.Email)];
-			if (searchFolder is not null)
+			if (hitFolder is not null)
 			{
 				children.Add(new XElement(AS + "ServerId",
-					await folders.ComposeServerIdAsync(searchFolder, mailStore, itemKey, ct)));
-				children.Add(new XElement(AS + "CollectionId", searchFolder.ServerId));
+					await folders.ComposeServerIdAsync(hitFolder, mailStore, itemKey, ct)));
+				children.Add(new XElement(AS + "CollectionId", hitFolder.ServerId));
 			}
 
 			children.Add(new XElement(F + "Properties", properties.Elements()));

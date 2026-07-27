@@ -280,7 +280,7 @@ work. Every finding ID appears in exactly one item.
 > one defect found from both sides: `Metrics:PerUser` is catalogued and documented as live-tier but is read
 > once at startup, so `eas config set` reports success and changes nothing.
 
-**15. Find & ItemOperations conformance** [LIVE] — `F4` `F5` `F6` `F10` `F11`
+**15. Find & ItemOperations conformance** [LIVE] — ~~`F4`~~ `F5` `F6` `F10` `F11`
 > `F4` a mailbox-wide Find returns results with **no ServerId and no CollectionId**, so nothing the user taps
 > can be opened — a feature the README and the 16.1 checklist both mark done. `F6` ItemOperations and Search
 > never set `BodyPreference.Eas16`, so a 16.x client silently loses event locations and attachments.

@@ -49,6 +49,17 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 	}
 
 	/// <summary>
+	///   Returns the user's whole folder registry indexed by backend key, for resolving a batch of
+	///   hits that can span more than one folder (e.g. a mailbox-wide Find) back to their owning
+	///   folder in ONE query rather than one lookup per hit (F4).
+	/// </summary>
+	public async Task<IReadOnlyDictionary<string, UserFolder>> GetFolderMapAsync(int userId, CancellationToken ct)
+	{
+		List<UserFolder> registry = await state.GetFoldersAsync(userId, ct);
+		return registry.ToDictionary(f => f.BackendKey, f => f, StringComparer.Ordinal);
+	}
+
+	/// <summary>
 	///   Pre-resolves a whole window of DAV item keys to short ids in one query + one flush, so the
 	///   render loop can compose ServerIds without a per-item round trip (A3). Returns null for mail
 	///   collections (their sub IS the UID — no map) and for an empty window.

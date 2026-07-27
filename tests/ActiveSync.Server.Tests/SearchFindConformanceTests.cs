@@ -162,6 +162,42 @@ public sealed class SearchFindConformanceTests : IDisposable
 		Assert.Equal(new[] { "Class", "ServerId", "CollectionId", "Properties" }, order);
 	}
 
+	// F4 — a mailbox-wide Find (no CollectionId narrowing the search, or DeepTraversal) must still
+	// emit ServerId/CollectionId on every Result, resolved per-hit from the folder registry, not
+	// only when a single CollectionId happened to scope the search. Without them the client has
+	// nothing to hand to ItemOperations/Sync and the result cannot be opened.
+	[Fact]
+	public async Task Find_MailboxWide_ResultsCarryServerIdAndCollectionId_ResolvedPerHit()
+	{
+		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email),
+			new BackendFolder("imap:Archive", "Archive", null, EasFolderType.UserMail, EasClass.Email));
+		UserFolder inbox = registry.Single(f => f.BackendKey == "imap:INBOX");
+		UserFolder archive = registry.Single(f => f.BackendKey == "imap:Archive");
+
+		_harness.Session.Mail.SearchHits.Add(("imap:INBOX", "1"));
+		_harness.Session.Mail.SearchHits.Add(("imap:Archive", "2"));
+
+		// No CollectionId in the query — a mailbox-wide Find from the phone's search box.
+		XDocument? response = await _harness.RunAsync(NewFind(), "Find",
+			new XDocument(new XElement(F + "Find",
+				new XElement(F + "SearchId", "x"),
+				new XElement(F + "ExecuteSearch",
+					new XElement(F + "MailBoxSearchCriterion",
+						new XElement(F + "Query", new XElement(F + "FreeText", "hello")),
+						new XElement(F + "Options", new XElement(F + "Range", "0-1")))))));
+
+		List<XElement> results = response?.Root?.Element(F + "Response")?.Elements(F + "Result").ToList() ?? [];
+		Assert.Equal(2, results.Count);
+		foreach (XElement result in results)
+		{
+			Assert.False(string.IsNullOrEmpty(result.Element(AS + "ServerId")?.Value));
+			Assert.False(string.IsNullOrEmpty(result.Element(AS + "CollectionId")?.Value));
+		}
+		Assert.Equal(inbox.ServerId, results[0].Element(AS + "CollectionId")?.Value);
+		Assert.Equal(archive.ServerId, results[1].Element(AS + "CollectionId")?.Value);
+	}
+
 	// F41 — a request whose offset is at/beyond the fetch cap must be refused without hitting the
 	// backend (it would otherwise fetch the whole cap and Skip() it all away).
 	[Fact]
