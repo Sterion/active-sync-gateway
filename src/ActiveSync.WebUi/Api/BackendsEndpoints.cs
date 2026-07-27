@@ -283,6 +283,26 @@ internal static class BackendsEndpoints
 		IConfiguration config, GlobalSettingStore store, IBackendProvider? provider,
 		CancellationToken ct)
 	{
+		// C5: a provider SWITCH must not let the new provider silently adopt the old one's stored
+		// leaves — the SPA starts the new provider's form from its own defaults (drawBody's `keep`
+		// flag), but until now the server only ever touched the leaves the request actually
+		// mentioned. Any leaf name the two providers happen to share (e.g. both `caldav` and
+		// `jmap` have a `Password`) then rode along untouched and was bound by the new provider.
+		// Detect the switch against the CURRENTLY stored (pre-write) provider — exactly what the
+		// DELETE route resets — and drop the whole role prefix first, so the new provider always
+		// starts from the config file, matching what the UI already shows at switch time.
+		string? previousProviderName = CurrentProviderName(role, db, config);
+		if (request.Provider is { } requestedProvider &&
+		    !string.Equals(requestedProvider, previousProviderName, StringComparison.OrdinalIgnoreCase))
+		{
+			string rolePrefix = $"{SectionPrefix}:{role}:";
+			foreach (string key in db.Keys
+				         .Where(k => k.StartsWith(rolePrefix, StringComparison.OrdinalIgnoreCase))
+				         .ToList())
+				if (await store.DeleteAsync(key, ct))
+					db.Remove(key);
+		}
+
 		Dictionary<string, string?> configLeafs = new(ConfigLeafs(role, config), StringComparer.OrdinalIgnoreCase);
 		// Below the config file sits the provider's own default, which is just as much "not an
 		// override" — storing it would only pin a value that already applies.
@@ -312,6 +332,22 @@ internal static class BackendsEndpoints
 
 			await store.UpsertAsync(stored ?? key, value!, ct);
 		}
+	}
+
+	/// <summary>
+	///   The role's provider as config + database currently supply it — BEFORE any change in the
+	///   request being handled — so a caller can tell whether this write is a provider switch.
+	/// </summary>
+	private static string? CurrentProviderName(BackendRole role, Dictionary<string, string?> db, IConfiguration config)
+	{
+		Dictionary<string, string?> effective = new(StringComparer.OrdinalIgnoreCase);
+		foreach ((string leaf, string? value) in ConfigLeafs(role, config))
+			effective[leaf] = value;
+		foreach ((string leaf, string? value) in DbLeafs(role, db))
+			effective[leaf] = value;
+		return string.IsNullOrWhiteSpace(effective.GetValueOrDefault(BackendRolesConfig.ProviderKey))
+			? null
+			: effective[BackendRolesConfig.ProviderKey];
 	}
 
 	private static RoleDto Describe(
