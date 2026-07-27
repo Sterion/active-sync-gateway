@@ -42,6 +42,10 @@ function settingRow(setting) {
 			if (value === '' || value === null) {
 				const result = await api(`/admin/api/settings/${setting.key}`, { method: 'DELETE' });
 				toast(`${shortKey} reset to default (${result.tier}).`, 'ok');
+				// C18: badge from the source the DELETE response recomputed — the config file may
+				// still supply a value for this key, in which case the effective source is "config",
+				// not "default". Assuming "default" lied until the next page reload.
+				status.replaceChildren(sourceBadge(result.source ?? 'default'));
 			} else {
 				const result = await api(`/admin/api/settings/${setting.key}`, {
 					method: 'PUT', body: { value: String(value) },
@@ -49,8 +53,8 @@ function settingRow(setting) {
 				toast(result.tier === 'restart'
 					? `${shortKey} saved — restart the gateway to apply.`
 					: `${shortKey} saved (applies live).`, 'ok');
+				status.replaceChildren(sourceBadge('db'));
 			}
-			status.replaceChildren(sourceBadge(value === '' || value === null ? 'default' : 'db'));
 		} catch (e) {
 			toast(e.body?.error ?? `Saving ${shortKey} failed.`, 'error');
 		}

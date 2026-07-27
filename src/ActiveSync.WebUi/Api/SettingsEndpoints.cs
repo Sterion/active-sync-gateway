@@ -51,8 +51,21 @@ internal static class SettingsEndpoints
 			SortedSet<string> extra = new(db.Keys, StringComparer.OrdinalIgnoreCase);
 			extra.ExceptWith(shown);
 			foreach (string key in extra)
-				if (!IsBackendKey(key) && SettingKeys.Find(key) is { } definition)
-					entries.Add(Describe(definition, db, config));
+			{
+				if (IsBackendKey(key))
+					continue;
+				// C7: `SettingKeys.Find` can never return non-null here — `extra` already excludes
+				// every catalogue key, and its only other non-null shape (a backend leaf) is excluded
+				// above — so this used to be dead code: a row for a key the catalogue no longer
+				// recognizes (e.g. `ActiveSync:RequireDeclaredUsers`, dropped by the db-restructure)
+				// was invisible in the UI and clearable only by guessing the DELETE URL. Surface it as
+				// a synthetic, read-only-but-deletable entry instead.
+				entries.Add(SettingKeys.Find(key) is { } definition
+					? Describe(definition, db, config)
+					: new SettingDto(
+						key, "String", "live", null, "Unrecognized override — safe to clear.",
+						null, null, null, false, db[key], "db"));
+			}
 
 			return Results.Ok(entries);
 		});
@@ -125,7 +138,15 @@ internal static class SettingsEndpoints
 				return EndpointHelpers.BadRequest(error);
 
 			await store.DeleteAsync(stored, ct);
-			return Results.Ok(new { key = stored, tier = SettingKeys.Find(stored)?.Tier ?? "live", removed = true });
+			// C18: report the source the NEXT read would show rather than assuming "default" —
+			// `fileConfig` already excludes the database provider, so it IS what remains once this
+			// row is gone. Without this the UI badge lied whenever the config file still supplied a
+			// value for the same key (it showed "default" until the page was reloaded).
+			string source = fileConfig[stored] is not null ? "config" : "default";
+			return Results.Ok(new
+			{
+				key = stored, tier = SettingKeys.Find(stored)?.Tier ?? "live", removed = true, source
+			});
 		});
 	}
 
