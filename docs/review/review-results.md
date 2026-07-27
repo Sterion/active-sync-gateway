@@ -607,3 +607,50 @@ covering all five findings (F6 and F11 contribute two each), 18 pre-existing gre
   optional CollectionId-scoped folder; it now resolves each hit's own folder via a map. That is what makes
   results openable at all (they carried neither ServerId nor CollectionId before), so the cost is the price
   of the feature working — but it is a new per-page read on the search path.
+
+## Item 16 — WBXML untrusted-input hardening
+**Findings:** `W1` `W2` `W4` `W5`
+**Commits:** `e3001b8` (W1) · `f7cbb55` (W2) · `1c164ad` (W4) · `86fc870` (W5)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 17 ✓ · one commit per finding ✓ · strike shipped with each ✓ · build 0 warnings ✓ ·
+unit **1350 passed, 0 skipped** (Cli 16 · Protocol 99 · Core 818 · WebUi 105 · Server 312) ✓ ·
+live **143 passed, 0 skipped** ✓
+**Live suite run despite the item being unmarked and the worker declining it.** `WbxmlDecoder` and
+`EasContext` sit on the decode path of **every** EAS request — I could not show a live run was unnecessary,
+which is the test `fix-review.md` sets.
+**THE PROTOCOL HARD GATE WAS CHECKED DIRECTLY, not taken on report:**
+- `ContractSurface.approved.txt` and `Directory.Build.props` are both **unchanged** by this item — so the
+  published surface genuinely did not move and no `ContractVersionMinor` bump was owed.
+- `EasNamespaces.WbxmlInternal`, which W5's placeholder uses, is **pre-existing** (it already backed
+  `OpaqueAttribute`, the documented OPAQUE marker) — `EasNamespaces.cs` was not modified. W5's entry
+  prescribes that exact namespace, so this is the finding's own instruction, not an invention.
+- `WbxmlCodePages.cs` is **byte-for-byte untouched**, confirming W4's temporary duplicate-name injection
+  was fully reverted before committing. No code-page table changed, so the "every table change needs a
+  round-trip test" gate is not engaged.
+**Red-first re-proved independently:** `WbxmlDecoder.cs` and `EasContext.cs` reverted to `421475f` → **6
+failures** (W1 ×2, W2 ×2, W5 ×2 including the rewritten round-trip test), and **W4's two guard tests pass**
+— which is correct, not a gap: W4 guards a defect the tree does not currently have.
+**Notes:**
+- **`W4` deliberately lands NO source change.** Its entry asks only for a test ("add a `WbxmlCodePagesTests`
+  fact that iterates `Pages` and asserts …"), because the defect is that a one-line table slip becomes a
+  permanent `TypeInitializationException` with nothing to catch it. The worker proved the guard works by
+  temporarily injecting a duplicate name and a wrong `Index`, observing the exact described symptoms, then
+  reverting — verified above by diffing the source file. That is the right way to prove a guard test.
+- **A commit was AMENDED mid-item, and the reason matters.** W5's first implementation added an
+  `Action<string>? onUnknownTag` parameter to `WbxmlDecoder.Decode`/`DecodeAsync` — a public-member change
+  to the published, permanently-MIT `ActiveSync.Protocol` — which tripped `ContractSurfaceApprovalTests`.
+  Rather than bump the contract minor for a logging convenience, the worker reworked `EasContext` to
+  discover placeholders by walking for the marker namespace, and amended the (not-yet-verified, unpushed)
+  commit. The outcome is the right one: **the enforced gate caught it, and the response was to avoid the
+  surface change rather than to regenerate the snapshot.** Worth recording because the first instinct was
+  to widen a published API for a diagnostic.
+- **`W5` is a deliberate posture change on the Protocol layer.** An unrecognized *tag token* now decodes to
+  a placeholder element instead of 400-ing the whole document; an unknown *code page* still hard-fails. This
+  softens the fail-closed diagnostic AGENTS.md describes ("if a decode fails with 'unknown tag token', the
+  table is wrong or incomplete") — the finding argues for it explicitly, since that same mechanism turned a
+  historical missing `FileReference` token into a total outage. A pre-existing round-trip test encoding the
+  old throw was rewritten accordingly; the worker confirmed it green before the change.
+- **`W1`'s caps are fixed constants** (`MaxTextRuns = 200_000`, `MaxTextChars = 8 MB`), the values the
+  finding names. They are not configurable, so a legitimate client sending an unusually large single text
+  node would now get a parse error — 8 MB of text in one WBXML document is far outside any real EAS body,
+  but the bound is absolute.
