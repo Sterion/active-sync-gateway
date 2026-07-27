@@ -88,6 +88,18 @@ public class GatewayPasswordHasherTests
 	}
 
 	[Fact]
+	public void Hash_RejectsAnIterationCountItsOwnVerifyWouldReject()
+	{
+		// K21: Hash() enforced no bounds on `iterations`, while TryParse (and therefore Verify)
+		// enforces MinIterations..MaxIterations. Hash(pw, 1) returned a well-formed-looking
+		// "pbkdf2$1$..." value that Verify then silently rejects for EVERY password (IsHashed
+		// still returns true, so nothing upstream falls back) -- a caller can mint a permanently
+		// unusable credential with no error at write time.
+		Assert.Throws<ArgumentOutOfRangeException>(() => GatewayPasswordHasher.Hash("pw", iterations: 1));
+		Assert.Throws<ArgumentOutOfRangeException>(() => GatewayPasswordHasher.Hash("pw", iterations: 50_000_000));
+	}
+
+	[Fact]
 	public void Verify_PlaintextStoredValue_ComparesExactly()
 	{
 		Assert.True(GatewayPasswordHasher.Verify("plain-secret", "plain-secret"));

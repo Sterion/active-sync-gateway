@@ -30,6 +30,14 @@ public static class GatewayPasswordHasher
 
 	public static string Hash(string password, int iterations = DefaultIterations)
 	{
+		// K21: TryParse (and therefore Verify) enforces MinIterations..MaxIterations, but Hash
+		// itself enforced nothing — Hash(pw, 1) returned a well-formed-looking "pbkdf2$1$..."
+		// value that Verify then silently rejects for every password (a permanently unusable
+		// credential minted with no error), and Hash(pw, 0) or a negative value threw a
+		// differently-shaped exception straight out of Pbkdf2. Validate up front so the generator
+		// can never produce something the parser rejects.
+		ArgumentOutOfRangeException.ThrowIfLessThan(iterations, MinIterations);
+		ArgumentOutOfRangeException.ThrowIfGreaterThan(iterations, MaxIterations);
 		byte[] salt = RandomNumberGenerator.GetBytes(SaltSize);
 		byte[] hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, HashSize);
 		return $"{Prefix}{iterations}${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
