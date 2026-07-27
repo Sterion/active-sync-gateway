@@ -192,9 +192,12 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// Cache keys stay on the GATEWAY login (+device) deliberately: a rename lands on a NEW
 		// key, so the renamed user's next request builds a fresh session with fresh backend
 		// credentials while the stale one idles out — sessions embed login-derived pass-through
-		// credentials, so surviving a rename would be wrong. Durable identity (DB scoping, AAD)
-		// rides the UserId inside the session, never this ephemeral key.
-		string key = $"{credentials.UserName}\n{deviceId}";
+		// credentials, so surviving a rename would be wrong. A4: the UserId is included too — a
+		// login FREED by a rename and then reissued to a different person is a structurally
+		// different slot even though the login string is reused, so the new person can never be
+		// served the previous holder's session (DB scoping, AAD) just because both presented the
+		// same password.
+		string key = $"{userId}\n{credentials.UserName}\n{deviceId}";
 
 		// A10: bounds the faulted-build retry below to exactly one extra attempt, so a backend
 		// that is genuinely down fails this call once (with its real exception) rather than

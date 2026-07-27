@@ -189,6 +189,27 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	}
 
 	[Fact]
+	public async Task GetSession_KeyedOnLoginAlone_ServesAReissuedLoginTheOldHoldersSession()
+	{
+		// A4: the cache key was `$"{credentials.UserName}\n{deviceId}"` — no UserId. If a login is
+		// freed (rename) and reissued to a DIFFERENT person with the SAME presented password, the
+		// second GetSessionAsync for that login/device must build a session scoped to the NEW
+		// UserId, not reuse the stale entry still carrying the OLD UserId (DB scoping / AAD leak).
+		FakeMailProvider provider = new();
+		BackendSessionFactory factory = NewFactory(provider);
+
+		IBackendSession first = await factory.GetSessionAsync(Creds, userId: 1, "dev-1", CancellationToken.None);
+		Assert.Equal(1, first.UserId);
+		await first.DisposeAsync();
+
+		// Same login, same device, same presented password — but now a DIFFERENT UserId (the login
+		// was reissued to someone else).
+		IBackendSession second = await factory.GetSessionAsync(Creds, userId: 2, "dev-1", CancellationToken.None);
+		Assert.Equal(2, second.UserId);
+		await second.DisposeAsync();
+	}
+
+	[Fact]
 	public async Task IdleSweep_RemovesAFaultedSessionSlot()
 	{
 		// A10: a faulted slot is never IsBuilt, so the idle-timeout eviction (which only ever
@@ -197,7 +218,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		// doesn't leak.
 		FailingResourceOwnerProvider provider = new(); // CreateConnectionAsync always throws
 		BackendSessionFactory factory = NewFactory(provider);
-		string key = $"{Creds.UserName}\ndev-1";
+		string key = $"1\n{Creds.UserName}\ndev-1";
 
 		await Assert.ThrowsAsync<InvalidOperationException>(() =>
 			factory.GetSessionAsync(Creds, 1, "dev-1", CancellationToken.None));
