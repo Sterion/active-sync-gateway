@@ -58,6 +58,14 @@ public sealed partial class SyncHandler
 		}
 	}
 
+	/// <summary>
+	///   Upper bound on the post-cancellation drain — mirrors <see cref="LongPollWatchdog" />'s own
+	///   bound. A well-behaved store's wait unwinds within milliseconds of cancellation; a
+	///   misbehaving one must not pin the request (and the session lease it was called under) open
+	///   indefinitely (F15).
+	/// </summary>
+	private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(10);
+
 	private static async Task<bool> WaitForAnyChangeAsync(
 		List<WaitableCollection> collections,
 		TimeSpan timeout, CancellationToken ct)
@@ -69,22 +77,36 @@ public sealed partial class SyncHandler
 			.Select(g => g.Key.WaitForChangesAsync(
 				g.Select(c => c.Folder.BackendKey).Distinct().ToList(), timeout, cts.Token))
 			.ToList();
+		bool changed = false;
 		try
 		{
-			while (waits.Count > 0)
+			while (waits.Count > 0 && !changed)
 			{
 				Task<IReadOnlyList<string>> finished = await Task.WhenAny(waits);
 				waits.Remove(finished);
-				IReadOnlyList<string> changed = await finished;
-				if (changed.Count > 0)
-					return true;
+				IReadOnlyList<string> result = await finished;
+				if (result.Count > 0)
+					changed = true;
 			}
 
-			return false;
+			return changed;
 		}
 		finally
 		{
 			await cts.CancelAsync(); // stop the remaining pollers
+			// F15: drain every wait still running before returning, rather than abandoning it —
+			// the caller's IBackendSession lease is released the moment HandleAsync returns, so an
+			// abandoned wait keeps running (or later faults) against a session no longer valid, and
+			// nothing observes it. Bounded so a misbehaving store cannot hang the request forever.
+			try
+			{
+				await Task.WhenAll(waits).WaitAsync(DrainTimeout);
+			}
+			catch
+			{
+				// cancelled, timed out, or an already-logged watcher failure — same as
+				// LongPollWatchdog.RaceAsync's drain.
+			}
 		}
 	}
 }

@@ -238,6 +238,13 @@ public sealed class EasHandlerHarness : IDisposable
 		public Func<IReadOnlyList<string>, IReadOnlyList<string>>? WaitForChanges { get; set; }
 
 		/// <summary>
+		///   A genuinely async alternative to <see cref="WaitForChanges" />, for tests that need a
+		///   controllable delay (e.g. proving a losing per-store wait is drained rather than
+		///   abandoned — F15). Checked before <see cref="WaitForChanges" />.
+		/// </summary>
+		public Func<IReadOnlyList<string>, CancellationToken, Task<IReadOnlyList<string>>>? WaitForChangesAsyncOverride { get; set; }
+
+		/// <summary>
 		///   The EAS class and backend-key prefix this store claims. Default to the mail store
 		///   (Email / "imap:"); a test can retarget it to stand in for a calendar/contacts store.
 		/// </summary>
@@ -423,6 +430,8 @@ public sealed class EasHandlerHarness : IDisposable
 		public Task<IReadOnlyList<string>> WaitForChangesAsync(
 			IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
 		{
+			if (WaitForChangesAsyncOverride is { } asyncWait)
+				return asyncWait(folderBackendKeys, ct);
 			if (WaitForChanges is { } wait)
 				return Task.FromResult(wait(folderBackendKeys));
 			throw new NotSupportedException();
