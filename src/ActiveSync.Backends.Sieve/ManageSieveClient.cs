@@ -238,8 +238,16 @@ public sealed class ManageSieveClient : IAsyncDisposable
 	}
 
 	/// <summary>RFC 5804 quoted string: backslash-escape backslashes and double quotes.</summary>
+	/// <summary>
+	///   RFC 5804 quoted string: backslash-escape backslashes and double quotes. Also strips any
+	///   control character (G17) — RFC 5804's <c>quoted-string</c> forbids them, and a name arriving
+	///   with a raw CR/LF (e.g. via a literal) would otherwise inject a line break into whatever
+	///   command later re-quotes it (SETACTIVE, DELETESCRIPT).
+	/// </summary>
 	public static string Quote(string value)
 	{
+		if (value.Any(char.IsControl))
+			value = new string(value.Where(c => !char.IsControl(c)).ToArray());
 		return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 	}
 
@@ -306,7 +314,8 @@ public sealed class ManageSieveClient : IAsyncDisposable
 						read += n;
 					}
 
-					line = line[..open] + Quote(new string(buffer).Replace("\r\n", " ")) +
+					line = line[..open] +
+						       Quote(new string(buffer).Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ')) +
 						       (await _reader.ReadLineAsync(ct).ConfigureAwait(false) ?? "");
 				}
 			}
