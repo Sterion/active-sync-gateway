@@ -49,12 +49,16 @@ public sealed class GlobalSettingStoreTests : IDisposable
 		await _store.UpsertAsync("ActiveSync:Eas:DefaultWindowSize", "200", CancellationToken.None);
 		Assert.NotEqual(stamp1, await _store.ReadStampAsync(CancellationToken.None));
 
-		// Upsert overwrites in place (no duplicate row); the CLI writes canonical key casing.
+		// Upsert overwrites in place (no duplicate row).
 		await _store.UpsertAsync("ActiveSync:ReadOnly", "false", CancellationToken.None);
 		Assert.Equal("false", await _store.GetAsync("ActiveSync:ReadOnly", CancellationToken.None));
 
+		// B7 (behaviour change): the stored Key is normalized to lowercase — a sargable equality
+		// seek on the primary key needs the row itself normalized, not just the comparison — so a
+		// caller that reads rows directly (rather than through Find's canonical casing) sees
+		// lowercase. Case-insensitive lookup and single-row-per-key uniqueness are unaffected.
 		List<(string Key, string Value, DateTime UpdatedUtc)> all = await _store.ListAsync(CancellationToken.None);
-		Assert.Equal(["ActiveSync:Eas:DefaultWindowSize", "ActiveSync:ReadOnly"], all.Select(e => e.Key));
+		Assert.Equal(["activesync:eas:defaultwindowsize", "activesync:readonly"], all.Select(e => e.Key));
 
 		Assert.True(await _store.DeleteAsync("ActiveSync:ReadOnly", CancellationToken.None));
 		Assert.False(await _store.DeleteAsync("ActiveSync:ReadOnly", CancellationToken.None));
@@ -75,6 +79,52 @@ public sealed class GlobalSettingStoreTests : IDisposable
 
 		Assert.True(await _store.DeleteAsync("ACTIVESYNC:READONLY", CancellationToken.None));
 		Assert.Empty(await _store.ListAsync(CancellationToken.None));
+	}
+
+	// B7 — GlobalSetting.Key IS the primary key, and lookups matched it via
+	// `s.Key.ToLower() == key.ToLower()`: a function on the indexed column defeats the PK index
+	// (a full scan on every get/upsert/delete), and the PK itself stays case-SENSITIVE, so two rows
+	// differing only in case are representable (two replicas racing UpsertAsync, a restored dump).
+	// Normalizing the key on write, and matching the normalized value with a plain equality, fixes
+	// both: the comparison becomes a sargable index seek, and every write always targets the exact
+	// same row regardless of the casing presented.
+	[Fact]
+	public async Task Upsert_NormalizesKeyCasing_InTheStoredRow()
+	{
+		await _store.UpsertAsync("ActiveSync:ReadOnly", "true", CancellationToken.None);
+
+		List<(string Key, string Value, DateTime UpdatedUtc)> rows = await _store.ListAsync(CancellationToken.None);
+		Assert.Equal("activesync:readonly", Assert.Single(rows).Key);
+	}
+
+	[Fact]
+	public async Task GetAsync_UsesASargableEqualityComparison_NoFunctionOnTheIndexedColumn()
+	{
+		List<string> commands = [];
+		LoggingTestContextFactory loggingFactory = new(_connection, commands);
+		GlobalSettingStore store = new(loggingFactory);
+		await store.UpsertAsync("ActiveSync:ReadOnly", "true", CancellationToken.None);
+
+		commands.Clear();
+		await store.GetAsync("ActiveSync:ReadOnly", CancellationToken.None);
+
+		string sql = string.Join("\n", commands);
+		Assert.DoesNotContain("lower(", sql, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public async Task DeleteAsync_UsesASargableEqualityComparison_NoFunctionOnTheIndexedColumn()
+	{
+		List<string> commands = [];
+		LoggingTestContextFactory loggingFactory = new(_connection, commands);
+		GlobalSettingStore store = new(loggingFactory);
+		await store.UpsertAsync("ActiveSync:ReadOnly", "true", CancellationToken.None);
+
+		commands.Clear();
+		await store.DeleteAsync("ActiveSync:ReadOnly", CancellationToken.None);
+
+		string sql = string.Join("\n", commands);
+		Assert.DoesNotContain("lower(", sql, StringComparison.OrdinalIgnoreCase);
 	}
 
 	[Fact]
@@ -275,6 +325,21 @@ public sealed class GlobalSettingStoreTests : IDisposable
 		public ActiveSyncOptions CurrentValue => value;
 		public ActiveSyncOptions Get(string? name) => value;
 		public IDisposable? OnChange(Action<ActiveSyncOptions, string?> listener) => null;
+	}
+
+	/// <summary>Captures the SQL EF actually sends, to prove a lookup is (or is not) sargable.</summary>
+	private sealed class LoggingTestContextFactory(SqliteConnection connection, List<string> commands)
+		: ISyncDbContextFactory
+	{
+		public SyncDbContext CreateDbContext()
+		{
+			DbContextOptions<SqliteSyncDbContext> options = new DbContextOptionsBuilder<SqliteSyncDbContext>()
+				.UseSqlite(connection)
+				.LogTo(commands.Add, [Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.CommandExecuted])
+				.EnableSensitiveDataLogging()
+				.Options;
+			return new SqliteSyncDbContext(options);
+		}
 	}
 
 	private sealed class TestContextFactory(SqliteConnection connection) : ISyncDbContextFactory

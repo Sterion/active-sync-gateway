@@ -190,7 +190,11 @@ public sealed class CliConfigTests : IDisposable
 			.UseSqlite($"Data Source={_dbPath}")
 			.Options;
 		using SqliteSyncDbContext db = new(options);
-		return db.GlobalSettings.AsNoTracking().FirstOrDefault(g => g.Key == key)?.Value;
+		// B7 (behaviour change): GlobalSettingStore normalizes the stored Key to lowercase (a
+		// sargable equality seek on the primary key needs the row itself normalized) — match that
+		// here since this helper reads the row directly rather than through the store.
+		string normalized = key.ToLowerInvariant();
+		return db.GlobalSettings.AsNoTracking().FirstOrDefault(g => g.Key == normalized)?.Value;
 	}
 
 	[Fact]
@@ -201,8 +205,10 @@ public sealed class CliConfigTests : IDisposable
 		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:MailStore:ApiKey", "backend-api-secret").ExitCode);
 		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:Calendar:Token", "backend-token-secret").ExitCode);
 
+		// B7 (behaviour change): an "extra" (uncatalogued) key's displayed name now comes from the
+		// stored, lowercase-normalized row rather than the exact casing it was written with.
 		(_, _, string listOut) = Run("config", "list");
-		Assert.Contains("ActiveSync:Backends:MailStore:ApiKey", listOut);
+		Assert.Contains("activesync:backends:mailstore:apikey", listOut);
 		Assert.DoesNotContain("backend-api-secret", listOut);
 		Assert.DoesNotContain("backend-token-secret", listOut);
 
