@@ -508,4 +508,16 @@ HTTP round trip in `EasForwardingClient.RunAsync` still unexercised.
 have no entry in `review-items-detail.md` by design, so the definition-adequacy check is expected to list
 them under "missing detail".)*
 
-*(none yet)*
+`N1` **Low** The F1/F7 send-dedup claims (`SentCommandTokens` rows keyed on the fixed collection
+namespaces `"compose"`/`"meetingresponse"`, generation `0`) are never pruned. `SendDedupStore.PruneAsync`
+only runs from `CollectionStateStore.CommitCollectionStateAsync`, keyed to a REAL Sync collection's own
+new SyncKey (`SyncStateService.cs`, right after a Sync round commits) — it never touches rows whose
+`CollectionId` is one of these two fixed strings, because no Sync round ever commits under that
+collection id. Every ComposeMail send (`ComposeMailHandlers.cs`, keyed on `ClientId`) and every
+MeetingResponse (`MeetingResponseHandler.cs`, keyed on `CollectionId:RequestId:UserResponse`) therefore
+adds a permanent row that lives until the owning `Device` row is deleted (cascade) — unlike the Sync
+draft-submit claims this design was copied from, whose rows the collection's own commit reclaims within
+one generation. Over a device's lifetime this is one row per mail ever sent by reference and per meeting
+ever responded to, not just per retry. FIX: either give `SendDedupStore` a age-based sweep (e.g. delete
+completed claims older than N days, independent of a collection commit) or a small periodic purge command
+analogous to `FolderRetentionService`/`LogRetentionService`.
