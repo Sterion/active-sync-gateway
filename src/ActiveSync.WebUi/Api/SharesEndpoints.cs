@@ -60,9 +60,15 @@ internal static class SharesEndpoints
 		api.MapDelete("shares", async (
 			string user, string collectionHref, ShareAdminService shares, CancellationToken ct) =>
 		{
+			// C15: the create verb (above) validates the login's shape and trims both identifiers;
+			// this verb validated neither, which is what let a grant written for a malformed or
+			// whitespace-padded login become unremovable by its well-formed form.
+			if (AdminIdentifiers.LoginProblem(user) is { } loginError)
+				return EndpointHelpers.BadRequest(loginError);
+			string normalizedUser = user.Trim();
 			string href = collectionHref.Trim();
-			return await shares.RemoveAsync(user, href, ct)
-				? Results.Ok(new { user, collectionHref = href })
+			return await shares.RemoveAsync(normalizedUser, href, ct)
+				? Results.Ok(new { user = normalizedUser, collectionHref = href })
 				: Results.NotFound();
 		});
 	}

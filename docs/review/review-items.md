@@ -330,7 +330,7 @@ work. Every finding ID appears in exactly one item.
 > replay-cache entry can expire before the envelope it protects. `E18` an unvalidated caller-supplied render
 > width reaches Spectre's layout inside the long-lived gateway. `E19`/`E20` null args, unre-checked purge.
 
-**22. Identity normalization** — `A4` `B13` `B15` `B20` `C15`
+**22. Identity normalization** — ~~`A4`~~ ~~`B13`~~ ~~`B15`~~ ~~`B20`~~ ~~`C15`~~ **COMPLETE**
 > `B13` logins are never trimmed, so `" bob"` mints a **second permanent identity** with its own `UserId`,
 > folder registry and AAD-bound rows that the real user can never see. `C15` the admin API's create and
 > delete verbs disagree about trimming, so a grant can be unremovable. `A4` the session cache keys on the

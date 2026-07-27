@@ -123,6 +123,21 @@ public sealed class AdminIdentifierValidationTests
 	}
 
 	[Fact]
+	public async Task Share_Delete_RefusesAMalformedLogin()
+	{
+		// C15: the POST verb validates the login via AdminIdentifiers.LoginProblem (see
+		// Share_RefusesAMalformedLogin above); the DELETE verb validated neither shape nor
+		// whitespace, so the two write surfaces disagreed on what a storable login looks like.
+		await using WebUiHost host = await AdminHostAsync();
+		using HttpClient client = await host.SignInAsync("alice", admin: true);
+
+		HttpResponseMessage response = await client.DeleteAsync(
+			$"/admin/api/shares?user={Uri.EscapeDataString("bob:evil")}&collectionHref={Uri.EscapeDataString("/dav/cal/")}");
+
+		Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+	}
+
+	[Fact]
 	public async Task Share_AcceptsAnOrdinaryCollection()
 	{
 		await using WebUiHost host = await AdminHostAsync();
