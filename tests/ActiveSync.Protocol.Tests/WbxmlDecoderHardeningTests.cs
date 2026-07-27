@@ -1,3 +1,4 @@
+using System.Xml.Linq;
 using ActiveSync.Protocol.Wbxml;
 
 namespace ActiveSync.Protocol.Tests;
@@ -202,6 +203,39 @@ public class WbxmlDecoderHardeningTests
 		// Same illegal-XML-character gap (U+000B) reached via the inline-string path
 		// (ReadNullTerminatedString) instead of ENTITY.
 		byte[] doc = Doc([0x45], [0x03], [0x0B, 0x00], [0x01]);
+		Assert.Throws<WbxmlException>(() => WbxmlDecoder.Decode(doc));
+	}
+
+	[Fact]
+	public void UnknownTagToken_BecomesPlaceholderInsteadOfAbortingTheDocument()
+	{
+		// Token 0x2A on code page 0 (AirSync) is unassigned — every token 0x05-0x29 on that
+		// page is taken, so this really is "unknown", not a table gap. A single missing or
+		// newly-specified token must not abort the WHOLE document (W5); the sibling stream
+		// after it should still decode instead of the whole Sync/FolderSync 400ing.
+		byte[] doc = Doc(
+			[0x45], // Sync, with content
+			[0x2A], // unknown tag token, no content
+			[0x0B], // SyncKey, no content — a KNOWN sibling that comes AFTER the unknown one
+			[0x01]); // END Sync
+
+		System.Xml.Linq.XDocument result = WbxmlDecoder.Decode(doc);
+		Assert.Equal(2, result.Root!.Elements().Count());
+		XElement placeholder = result.Root!.Elements().First();
+		Assert.Equal("SyncKey", result.Root!.Elements().Last().Name.LocalName);
+		// The placeholder is tagged with the internal marker namespace (not the page's own),
+		// so a caller (EasContext) can find and log it without WbxmlDecoder needing a logging
+		// hook of its own — that would change ActiveSync.Protocol's published public surface.
+		Assert.Equal(EasNamespaces.WbxmlInternal, placeholder.Name.Namespace);
+		Assert.Equal("unknown-0-2a", placeholder.Name.LocalName);
+	}
+
+	[Fact]
+	public void UnknownCodePage_StillAbortsTheDocument()
+	{
+		// Unlike an unknown TAG, an unknown CODE PAGE means the following bytes are genuinely
+		// uninterpretable (no table to fall back on) — this stays a hard failure.
+		byte[] doc = Doc([0x00], [0x63], [0x45], [0x01]); // SWITCH_PAGE to page 99
 		Assert.Throws<WbxmlException>(() => WbxmlDecoder.Decode(doc));
 	}
 

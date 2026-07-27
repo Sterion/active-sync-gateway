@@ -83,6 +83,12 @@ public static class WbxmlDecoder
 		return Decode(buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
 	}
 
+	/// <summary>
+	///   Decodes a WBXML document. An unrecognized tag token (W5) decodes as a placeholder
+	///   element — namespace <see cref="EasNamespaces.WbxmlInternal" />, local name
+	///   <c>"unknown-{page}-{token}"</c> — instead of aborting the whole document; a caller
+	///   that wants to log the degradation can look for that namespace in the result.
+	/// </summary>
 	public static XDocument Decode(ReadOnlySpan<byte> data)
 	{
 		SpanReader reader = new(data);
@@ -182,15 +188,28 @@ public static class WbxmlDecoder
 					bool hasContent = (token & 0x40) != 0;
 					bool hasAttributes = (token & 0x80) != 0;
 					byte tagToken = (byte)(token & 0x3F);
-					if (!page.Tokens.TryGetValue(tagToken, out string? name))
-						throw new WbxmlException(
-							$"Unknown tag token 0x{tagToken:X2} on code page {page.Index} ({page.Namespace}).");
+					bool knownTag = page.Tokens.TryGetValue(tagToken, out string? name);
+					XNamespace elementNamespace = page.Namespace;
+					if (!knownTag)
+					{
+						// W5: the content bit is known even when the name is not, so an unknown
+						// tag CAN be parsed structurally — bound into a placeholder element in a
+						// private namespace and kept in the tree — without desynchronizing the
+						// stream. One missing or newly-specified token therefore degrades to one
+						// unrecognized element instead of 400ing the whole command. An unknown
+						// CODE PAGE (the SwitchPage branch above) stays a hard failure — there
+						// the following bytes really are uninterpretable.
+						name = $"unknown-{page.Index}-{tagToken:x2}";
+						elementNamespace = EasNamespaces.WbxmlInternal;
+					}
+
 					if (hasAttributes)
 						throw new WbxmlException("Attributes are not used by EAS.");
+					// Still charged against the hostile-input ceilings like any other element.
 					if (++elements > MaxElements)
 						throw new WbxmlException($"WBXML document exceeds {MaxElements} elements.");
 
-					XElement element = new(page.Namespace + name);
+					XElement element = new(elementNamespace + name!);
 					if (current is null)
 					{
 						if (doc.Root is not null)

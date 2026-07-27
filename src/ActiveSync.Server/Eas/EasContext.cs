@@ -73,6 +73,21 @@ public sealed class EasContext
 		if (buffer.Length == 0)
 			return null;
 		XDocument document = WbxmlDecoder.Decode(buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
+		// W5: an unrecognized tag token decodes as a placeholder (namespace WbxmlInternal,
+		// local name "unknown-{page}-{token}") rather than aborting the whole document — log it
+		// at Warning so the degradation is still visible instead of silent. Decode() doesn't
+		// take a logging hook itself (that would change ActiveSync.Protocol's published public
+		// surface); walking the result for the marker namespace keeps the fix entirely on the
+		// caller side.
+		foreach (XElement unknown in document.Descendants()
+			         .Where(e => e.Name.Namespace == EasNamespaces.WbxmlInternal &&
+			                     e.Name.LocalName.StartsWith("unknown-", StringComparison.Ordinal)))
+		{
+			WireLogger.LogWarning("{Cmd} {User} ({Device}) Unrecognized WBXML tag decoded as placeholder {Tag}",
+				LogText.Clean(Parameters.Command), LogText.Clean(Credentials.UserName),
+				LogText.Clean(Device.DeviceId), unknown.Name.LocalName);
+		}
+
 		if (WireLogger.IsEnabled(LogLevel.Trace))
 			TraceWire("request", document.ToString());
 		return document;

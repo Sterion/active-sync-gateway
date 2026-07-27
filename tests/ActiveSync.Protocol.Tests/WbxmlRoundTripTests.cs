@@ -121,11 +121,17 @@ public class WbxmlRoundTripTests
 	}
 
 	[Fact]
-	public void UnknownToken_Throws()
+	public void UnknownToken_BecomesAPlaceholderRatherThanThrowing()
 	{
-		// valid header, then token 0x3F (unknown on AirSync page)
+		// valid header, then token 0x3F (unknown on AirSync page). Behavior change (W5): an
+		// unrecognized TAG token no longer aborts the whole document — it decodes as a
+		// placeholder element in the internal namespace instead, so one missing or
+		// newly-specified token degrades to one unrecognized element rather than 400ing the
+		// entire command. (An unknown CODE PAGE is unaffected and still throws — see
+		// WbxmlDecoderHardeningTests.UnknownCodePage_StillAbortsTheDocument.)
 		byte[] wbxml = [0x03, 0x01, 0x6A, 0x00, 0x3F];
-		Assert.Throws<WbxmlException>(() => WbxmlDecoder.Decode(wbxml));
+		XDocument doc = WbxmlDecoder.Decode(wbxml);
+		Assert.Equal(EasNamespaces.WbxmlInternal + "unknown-0-3f", doc.Root!.Name);
 	}
 
 	[Fact]
