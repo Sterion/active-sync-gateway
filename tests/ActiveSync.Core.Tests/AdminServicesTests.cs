@@ -248,6 +248,30 @@ public sealed class AdminServicesTests : IDisposable
 	}
 
 	[Fact]
+	public async Task Logs_UserFilter_IsCaseInsensitive()
+	{
+		// B15: the User filter compared with ==, case-sensitively, while logins are
+		// case-insensitive everywhere else (UserStore.NormalizeLogin). A device that presented
+		// "Bob@x.com" writes rows an operator's `eas logs -u bob@x.com` must still find.
+		await SeedAsync(db =>
+		{
+			db.LogEntries.Add(new LogEntry
+			{
+				TimestampUtc = DateTime.UtcNow.AddMinutes(-1), Level = "Information",
+				Message = "from-bob", User = "Bob@x.com",
+			});
+		});
+		LogQueryService service = new(_factory);
+		DateTime since = DateTime.UtcNow.AddHours(-1);
+
+		LogQueryService.LogPage page = await service.QueryAsync(
+			new LogQueryService.LogQuery(since, null, null, "bob@x.com", null, null, null, 100),
+			CancellationToken.None);
+
+		Assert.Equal(["from-bob"], page.Entries.Select(e => e.Message));
+	}
+
+	[Fact]
 	public async Task Logs_TailMode_UsesCursorAndTimeFloor()
 	{
 		await SeedAsync(db =>

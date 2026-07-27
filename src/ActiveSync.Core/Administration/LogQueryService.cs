@@ -75,8 +75,15 @@ public sealed class LogQueryService(ISyncDbContextFactory contextFactory)
 			rows = rows.Where(e => accepted.Contains(e.Level));
 		}
 
+		// B15: logins are case-insensitive everywhere else (UserStore.NormalizeLogin); a device
+		// presenting "Bob@x.com" must still be found by `eas logs -u bob@x.com`. ToLower() on both
+		// sides translates to LOWER() (Sqlite/Npgsql), which is a scan rather than an index seek —
+		// accepted here, same trade-off the class comment already documents for the text filter.
 		if (!string.IsNullOrWhiteSpace(query.User))
-			rows = rows.Where(e => e.User == query.User);
+		{
+			string normalizedUser = query.User.Trim().ToLowerInvariant();
+			rows = rows.Where(e => e.User != null && e.User.ToLower() == normalizedUser);
+		}
 		if (!string.IsNullOrWhiteSpace(query.Machine))
 			rows = rows.Where(e => e.Machine == query.Machine);
 		if (!string.IsNullOrWhiteSpace(query.Source))
