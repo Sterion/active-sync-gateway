@@ -33,10 +33,13 @@ internal static class CliVerbs
 			.AddCommandLine(args);
 		IConfigurationRoot config = builder.Build();
 
-		string? usersFile = config["ActiveSync:UsersFile"];
-		if (!string.IsNullOrWhiteSpace(usersFile))
+		// E14: go through the same guard RunServerAsync uses (Program.ResolveUsersFilePath), so a
+		// typo'd mount path throws an actionable InvalidOperationException naming the setting and
+		// the resolved path — not a raw FileNotFoundException from deep inside the configuration
+		// builder. This is reached by every non-serve verb, including a forwarded one via /cli.
+		if (Program.ResolveUsersFilePath(config["ActiveSync:UsersFile"]) is { } usersFilePath)
 		{
-			builder.AddJsonFile(Path.GetFullPath(usersFile), false, false);
+			builder.AddJsonFile(usersFilePath, false, false);
 			config = builder.Build();
 		}
 
