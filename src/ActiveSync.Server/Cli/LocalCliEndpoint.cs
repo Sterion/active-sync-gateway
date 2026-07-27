@@ -109,10 +109,14 @@ internal static class LocalCliEndpoint
 		ILogger logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(LocalCliEndpoint));
 		ReplayCache replay = new(AuthWindowMs);
 
-		app.MapPost("/cli", async (HttpContext context, IOptionsMonitor<ActiveSyncOptions> options, CliRequest? request) =>
+		app.MapPost("/cli", async (HttpContext context, IOptionsMonitor<ActiveSyncOptions> options) =>
 		{
 			// Disabled or non-loopback: 404 so the endpoint is invisible. Loopback is a cheap
-			// pre-filter; the real auth is proof of the master key (see TryAuthorize).
+			// pre-filter; the real auth is proof of the master key (see TryAuthorize). E3: these
+			// gates MUST run before anything touches the body — CliRequest used to be bound as a
+			// complex parameter, so the request-delegate factory deserialized it before this
+			// lambda ever ran, and a malformed body (400) or wrong content type (415) from a
+			// non-loopback, unauthenticated caller was an existence oracle that defeated the 404.
 			if (!options.CurrentValue.Cli.Enabled)
 				return Results.NotFound();
 			if (!IsLoopback(context.Connection.RemoteIpAddress))
@@ -120,6 +124,21 @@ internal static class LocalCliEndpoint
 				AuditRefusal(logger, context.Connection.RemoteIpAddress, "the peer is not on the loopback interface");
 				return Results.NotFound();
 			}
+
+			CliRequest? request;
+			try
+			{
+				request = await context.Request.ReadFromJsonAsync<CliRequest>(context.RequestAborted);
+			}
+			catch (Exception)
+			{
+				// Any read failure — wrong/absent content type, malformed JSON — is indistinguishable
+				// from "no request at all" to a caller that hasn't proven anything yet: 404, same as
+				// every other refusal here.
+				AuditRefusal(logger, context.Connection.RemoteIpAddress, "the request body could not be read as JSON");
+				return Results.NotFound();
+			}
+
 			if (!TryAuthorize(request, key, allowPlaintext, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
 				    replay, out string[] args, out string stdin))
 			{

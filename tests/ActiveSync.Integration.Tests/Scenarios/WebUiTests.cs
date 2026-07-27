@@ -213,4 +213,23 @@ public sealed class WebUiTests(GatewayFixture gateway)
 			"/cli", new { args = new[] { "config", "list" }, stdin = (string?)null });
 		Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
 	}
+
+	[Fact]
+	public async Task CliEndpoint_Returns404ForAMalformedBody_BeforeEverParsingIt()
+	{
+		// E3: CliRequest used to be bound as a complex parameter on the MapPost delegate, so
+		// ASP.NET's request-delegate factory deserialized the body BEFORE the lambda ran the
+		// loopback pre-filter — a malformed body got 400 (and a wrong content type gets 415),
+		// both distinguishable from the 404 that is supposed to make the endpoint invisible to a
+		// caller that isn't even on the loopback interface (docs/cli.md: "requests that fail
+		// either check get a 404"). TestServer requests are never loopback, so a fixed endpoint
+		// must 404 here regardless of what garbage the body contains.
+		HttpClient client = gateway.CreateHttpClient();
+		using HttpRequestMessage request = new(HttpMethod.Post, "/cli")
+		{
+			Content = new StringContent("{ not valid json", System.Text.Encoding.UTF8, "application/json")
+		};
+		HttpResponseMessage response = await client.SendAsync(request);
+		Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+	}
 }
