@@ -881,3 +881,46 @@ finding's own line.
 - **`C5` changes stored-row behaviour**: switching a role's provider now deletes the previous provider's
   leaves rather than orphaning them for the new provider to bind. A bug fix, but it is destructive to rows
   that previously survived a switch.
+
+## Item 20 — CLI configuration & warm-host reuse
+**Findings:** `E4` `E5` `E6` `E7` `E10` `E14` `E17`
+**Commits:** `9379152` (E4) · `efcf36e` (E5) · `e329860` (E6) · `1d0cc15` (E7) · `640ba52` (E10) ·
+`41b26b3` (E14) · `600d2fa` (E17)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 21 ✓ · one commit per finding, strike shipped with each ✓ · build 0 warnings ✓ ·
+unit **1397 passed, 0 skipped** (Cli 16 · Protocol 99 · Core 842 · WebUi 119 · Server 321) ✓
+**Live suite run although the item is unmarked and the worker did not report one:** **143 passed,
+0 skipped** on a clean volume. `E7` edits `ProgramServer.InitializeAsync` and `E6`/`E10` edit `Program.cs`
+dispatch — and the integration fixture invokes that entry point directly (`WebApplicationFactory<Program>`
+with the `AS_TEST_FORCE_SERVE` module initializer), so a mistake there would break every integration test
+while the unit suites stayed green.
+**Red-first re-proved independently for 6 of 7:** `src/` reverted to `3d59935` → 8 failures —
+`UserSet_InheritsAGlobalMailStoreRoleThatOnlyExistsInTheDatabase` (E4),
+`{ConfigGet,Logs,Tls}_PrefersAmbientHostProvider_OverRebuildingFromEnv` (E5),
+`IsLocalOnlyVerb_NoArgs_ReturnsTrue` (E6), `ForwardedHelp_UsesTheSamePreCliAlias_AsTheLocalDispatcher`
+(E10), `BuildConfiguration_MissingUsersFile_ThrowsActionableError_NotRawFileNotFoundException` (E14),
+`UserSet_PickupNote_ReflectsALiveSettingsChange_NotTheFrozenIOptionsSnapshot` (E17). `E7` is correctly
+absent — see below.
+**Notes:**
+- **`E7` is the weakest strike in this item, and the worker labelled it honestly.** Its test
+  (`SettingsRefresherCancellationTests`) proves the *premise* — that one of the four rewired methods
+  genuinely honours a cancelled token — not the **wiring**, which is what the finding is about. There is no
+  seam: `InitializeAsync` is a private static resolving four sealed services, and the symptom needs I/O slow
+  enough to race a real shutdown against one of five awaits that complete in microseconds on a temp SQLite
+  DB. The diff is small and mechanical (one `stopping` token hoisted through five awaits) and I read it, but
+  **nothing automated proves those five call sites actually pass the token**.
+- **`E6` is a behaviour change**: bare `eas` inside a running container no longer forwards to the warm
+  gateway — it is now always-local, like `serve`/`protect`, so it pays a cold start to print the banner
+  instead of wrongly reporting "the gateway is NOT running". A pre-existing test
+  (`IsLocalOnlyVerb_NoArgs_ReturnsFalse`) encoded the old bug and was flipped; the rename to
+  `..._ReturnsTrue` makes the change visible in the test name rather than hiding it behind an edited
+  assertion.
+- **`E4` landed narrower than the finding's literal text, and the worker flagged it for exactly this
+  review.** The finding names `CliVerbs.BuildConfiguration`; the fix adds a separate
+  `BuildConfigurationWithDatabaseSettings` and routes only `CliServices.TryCreateAsync` through it, leaving
+  the settings commands' "config" vs "db" source labelling untouched. That labelling is real behaviour
+  (`eas config list` shows provenance), so narrowing it is defensible — but `eas user ...` now sees the DB
+  layer while other standalone verbs still do not, which is a subtler split than the finding envisaged.
+- **`E5` closes a real leak**, not just a slowdown: forwarded `config`/`logs`/`tls` each rebuilt a provider
+  and re-ran `PluginLoader.LoadInto`, leaking a non-collectible `AssemblyLoadContext` per invocation in any
+  plugin-bearing deployment.
