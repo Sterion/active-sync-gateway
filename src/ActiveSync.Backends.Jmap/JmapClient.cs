@@ -215,7 +215,12 @@ public sealed class JmapClient : IDisposable
 			["methodCalls"] = calls.Select(c => new object?[] { c.Name, c.Arguments, c.Id }).ToArray()
 		};
 		string json = JsonSerializer.Serialize(payload, SerializerOptions);
-		using HttpResponseMessage response = await SendAsync(() => new HttpRequestMessage(HttpMethod.Post, session.ApiUrl)
+		// H24: the other three credential-attaching call sites (download/upload/eventSource) all
+		// re-assert RequireSameOrigin even though Rebase already forces every advertised URL onto
+		// this client's own origin at session-parse time — pure defence in depth against a future
+		// Rebase regression. This call site is the api URL and was the one left unguarded.
+		using HttpResponseMessage response = await SendAsync(() => new HttpRequestMessage(
+			HttpMethod.Post, RequireSameOrigin(session.ApiUrl.ToString()))
 		{
 			Content = new StringContent(json, Encoding.UTF8, "application/json")
 		}, ct, idempotent: AllReadOnly(calls)).ConfigureAwait(false);

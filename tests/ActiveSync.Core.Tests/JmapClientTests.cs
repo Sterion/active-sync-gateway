@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using System.Text;
 using ActiveSync.Backends.Jmap;
 using ActiveSync.Contracts;
@@ -281,6 +282,52 @@ public class JmapClientTests
 		Uri result = client.RequireSameOrigin("http://localhost:5232/jmap/download/x");
 
 		Assert.Equal("http://localhost:5232/jmap/download/x", result.ToString());
+	}
+
+	// H24: InvokeAsync posted to session.ApiUrl directly, skipping the RequireSameOrigin guard that
+	// every other credential-attaching call site (download/upload/eventSource) applies. Rebase
+	// forces every advertised URL onto this client's own origin at session-parse time, so an
+	// off-origin ApiUrl cannot be produced through the public GetSessionAsync path — the cached
+	// session is injected via reflection to simulate what a future Rebase regression (or a template
+	// that smuggles an absolute URL) would hand InvokeAsync. This was proven red against the
+	// pristine baseline (no exception, the evil host was reached) before the H1/D26 fix landed;
+	// because both JmapClient and WebDavClient now route through RedirectingHttpSender's shared
+	// hop-0 guard, that fix alone already made this test pass structurally, before this call site's
+	// own RequireSameOrigin was ever added. This test is therefore COVERAGE for H24's own change
+	// (it pins the explicit, symmetric guard InvokeAsync is supposed to carry, matching the other
+	// three call sites) rather than a fresh red-to-green proof at this commit.
+	[Fact]
+	public async Task Invoke_WithOffOriginApiUrl_IsRefused_NotSent()
+	{
+		bool reachedEvilHost = false;
+		StubHandler stub = new((request, _) =>
+		{
+			if (request.RequestUri!.Host == "evil.example.com")
+			{
+				reachedEvilHost = true;
+				return Json("""{"methodResponses":[["Mailbox/get",{"list":[]},"0"]],"sessionState":"x"}""");
+			}
+			return Json(SessionJson);
+		});
+		using JmapClient client = new(Base, new HttpClient(stub));
+
+		JmapSessionResource maliciousSession = new(
+			new Uri("http://evil.example.com/jmap/"),
+			"http://localhost:5232/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
+			"http://localhost:5232/jmap/upload/{accountId}/",
+			null,
+			new Dictionary<string, string> { ["urn:ietf:params:jmap:core"] = "c" },
+			new HashSet<string> { JmapCapabilities.Core },
+			JmapCoreLimits.Unknown,
+			"x");
+		FieldInfo sessionField = typeof(JmapClient).GetField("_session", BindingFlags.NonPublic | BindingFlags.Instance)!;
+		sessionField.SetValue(client, maliciousSession);
+
+		await Assert.ThrowsAsync<BackendException>(() => client.CallAsync(
+			[JmapCapabilities.Core], "Mailbox/get", new Dictionary<string, object?> { ["accountId"] = "c" },
+			CancellationToken.None));
+
+		Assert.False(reachedEvilHost, "credentials must never be attached to an off-origin API URL");
 	}
 
 	private static HttpResponseMessage Json(string body)
