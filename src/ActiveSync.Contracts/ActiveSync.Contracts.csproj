@@ -35,6 +35,13 @@
 		<ProjectReference Include="..\ActiveSync.Protocol\ActiveSync.Protocol.csproj" />
 	</ItemGroup>
 
+	<!-- K19: lets ContractVersionTests exercise the internal ResolveAssemblyVersion fallback
+	     directly (with a null input) — the real assembly always has a version in a normal build,
+	     so there is no other way to observe that fallback deterministically. -->
+	<ItemGroup>
+		<InternalsVisibleTo Include="ActiveSync.Core.Tests" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Extensions.Configuration" />
 		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" />

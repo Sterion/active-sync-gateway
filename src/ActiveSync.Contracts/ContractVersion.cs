@@ -35,7 +35,24 @@ public static class ContractVersion
 	// reading it would report the contract it was built against while appearing to report the
 	// host's. Properties over a runtime-read value cannot lie about which one they are.
 	private static readonly Version Assembly =
-		typeof(ContractVersion).Assembly.GetName().Version ?? new Version(1, 0);
+		ResolveAssemblyVersion(typeof(ContractVersion).Assembly.GetName().Version);
+
+	/// <summary>
+	///   K19: this used to default to <c>new Version(1, 0)</c> when the assembly version was
+	///   unreadable — but 1.0 is not a placeholder, it is a version that once shipped with a
+	///   genuinely different surface (see <c>ContractSurface.approved.txt</c>), so defaulting to
+	///   it would make the loader's gate silently ADMIT a stale plugin instead of refusing it. A
+	///   defaulting security gate should default to refusing, so throw instead.
+	///   <para>
+	///     Unreachable in a normal build — the SDK always emits an <c>AssemblyVersion</c> — but
+	///     reachable in principle under single-file/ILMerge/trimmed hosting or a rewritten
+	///     assembly. Internal and parameterized so it can be exercised directly with a null input;
+	///     the real call site can never observe a null in an ordinary test run.
+	///   </para>
+	/// </summary>
+	internal static Version ResolveAssemblyVersion(Version? assemblyVersion) =>
+		assemblyVersion ?? throw new InvalidOperationException(
+			"ActiveSync.Contracts carries no assembly version; the plugin contract gate cannot be evaluated.");
 
 	/// <summary>Breaking-change component. A plugin must declare this exact value.</summary>
 	public static int Major => Assembly.Major;
