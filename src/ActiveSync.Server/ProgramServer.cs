@@ -64,7 +64,7 @@ public partial class Program
 		// (Activate in InitializeAsync), so it never writes before the table exists.
 		DatabaseLogSink databaseLogSink = new();
 
-		ConfigureHosting(builder, options, settingsSource, databaseLogSink, () => certificateHolder.Current);
+		ConfigureHosting(builder, options, settingsSource, databaseLogSink, certificateHolder);
 
 		WebApplication app = builder.Build();
 
@@ -206,13 +206,13 @@ public partial class Program
 	/// <summary>
 	///   Configures the host: service-provider validation, Serilog, options binding, Kestrel limits
 	///   and TLS listener, all DI registrations, and out-of-repo plugin loading. The Kestrel HTTPS
-	///   selector reads the certificate through <paramref name="certificateSelector" /> so the
+	///   selector reads the certificate through <paramref name="certificateHolder" /> so the
 	///   listener can bind before the certificate is loaded in <see cref="InitializeAsync" />.
 	/// </summary>
 	private static void ConfigureHosting(
 		WebApplicationBuilder builder, ActiveSyncOptions options,
 		DbSettingsConfigurationSource settingsSource, DatabaseLogSink databaseLogSink,
-		Func<X509Certificate2?> certificateSelector)
+		CertificateHolder certificateHolder)
 	{
 		// DI lifetime bugs must fail fast in every environment (Development-only scope validation
 		// once hid a scoped-from-root resolve that crashed real deployments at startup). The
@@ -253,7 +253,7 @@ public partial class Program
 				kestrel.ListenAnyIP(options.Tls.Port, listen =>
 					listen.UseHttps(new HttpsConnectionAdapterOptions
 					{
-						ServerCertificateSelector = (_, _) => certificateSelector(),
+						ServerCertificateSelector = (_, _) => certificateHolder.Current,
 					}));
 			// Dedicated scrape listener: /metrics only answers on this port (see the map
 			// in RunServerAsync), keeping the metric surface off the phone-facing listeners.
@@ -265,6 +265,11 @@ public partial class Program
 		builder.Services.AddLocalContentProtection();
 		builder.Services.AddSingleton<GatewayCertificateStore>();
 		builder.Services.AddSingleton<TlsCertificateResolver>();
+		// K1: the one instance InitializeAsync assigns and Kestrel's selector reads — registered so
+		// TlsCertificateRenewalService can swap it in place after a background renewal.
+		builder.Services.AddSingleton(certificateHolder);
+		if (tlsEnabled)
+			builder.Services.AddHostedService<TlsCertificateRenewalService>();
 
 		// Metrics: BCL Meter instruments (GatewayMetrics) exported via OpenTelemetry.
 		ActiveSync.Core.Observability.GatewayMetrics.PerUserLabels = options.Metrics.PerUser;
