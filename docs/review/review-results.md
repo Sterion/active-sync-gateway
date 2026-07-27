@@ -721,3 +721,51 @@ declared project-independent and "never changes", so it is not the orchestrator'
 8. **Where the cursor rests:** item **17** (`C2` `C4` `C8` `C11` `C12` `C13` — merged-view write-back),
    the first item of Phase 2. Items 17–22 are the db-restructure's unfinished edges; `review-items.md`'s
    own guidance calls these the ones an operator actually trips over.
+
+*(Phase 2 continues below in the same run — the handover at item 17 was not taken.)*
+
+---
+
+## Item 17 — Merged-view write-back
+**Findings:** `C2` `C4` `C8` `C11` `C12` `C13`
+**Commits:** `18800ce` (C2) · `ca9dac8` (C4) · `e77bfad` (C8, C11) · `730b5ef` (C12) · `65acf12` (C13)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 18 ✓ · strike shipped with each fix ✓ · build 0 warnings ✓ · unit **1358 passed, 0 skipped**
+(Cli 16 · Protocol 99 · Core 818 · WebUi 113 · Server 312) ✓ · live **143 passed, 0 skipped** on a clean
+volume ✓ (the worker ran it unprompted — correctly, per AGENTS.md's own warning that a WebUi-endpoint item
+once broke three integration tests with every unit suite green)
+**Read against `docs/design/db-restructure.md`, not just the findings.** That document's **deviation 2**
+records that `UserEditing.LoadStartingEntryAsync` deliberately *stopped* cloning config, because under
+per-field resolution cloning "would freeze config values as database overrides". `C2`/`C12` are that exact
+anti-pattern resurfacing one layer up, in the admin editor and the portal. The fixes restore the documented
+rule (`user DB → user config → global DB → global config → code default`, most specific wins, per field).
+**Red-first re-proved independently:** the three source files reverted to `7f6f650` → 6 failures
+(`Update_ResubmittingTheConfigValues_DoesNotFreezeThemAsADatabaseOverride`,
+`Meta_And_Put_AgreeOnTheProvider_WhenOnlyConfigDeclaresIt`, `Get_ReportsWhichLevelSuppliedEachField`,
+`Put_ResubmittingTheConfigSuppliedUserName_DoesNotFreezeItAsADatabaseOverride`,
+`Meta_ReflectsALiveProviderChange_WithoutATimeBasedWait`, plus the rewritten redaction test), 107
+pre-existing green. `C11` is documentation-only and correctly has no test.
+**Notes:**
+- **The elision compares against CONFIG ONLY — I checked this specifically, because eliding against the
+  merged view would have been a silent catastrophe.** `ElideIfMatchesConfig` takes the config value as its
+  second argument, and the callers pass `FindConfigUser(...)`/`configRole`. The merged view is threaded in
+  for exactly one purpose — unmasking a re-posted `"***"`, which requires knowing what the mask stands for —
+  and never for deciding what gets written. Had it been merged-vs-merged, every genuine database override
+  would have been erased on the next save.
+- **The design doc's "null clears" semantic survives.** `ElideSettingsMatchingConfig` keeps an explicit
+  null (the "clear the inherited global key" directive), which by construction never equals a present
+  config value. `db-restructure.md` flags this exact distinction as the one to carry forward "deliberately,
+  not by accident".
+- **A pre-existing test was rewritten, and it came out stronger.** `AdminUserApi_RePostedMask_KeepsTheStoredSecret`
+  asserted the secret was written into the database row — the freeze itself. It now asserts no row is
+  created *and* that the secret still resolves and still masks on a later GET, so the guarantee that
+  mattered (an unrelated edit must not wipe the ApiKey) is preserved. A **new sibling test** covers the
+  database-override case, proving elision drops only values matching config and never a real deviation.
+- **`C8`'s badge rendering is unverified.** The API/DTO provenance is red-first proven; the `users.js`
+  rendering has no automated coverage because the no-build SPA has no JS test harness anywhere in the repo.
+  Consistent with prior rounds, but it means "the admin can now see which values came from config" is
+  proven at the API and asserted-by-inspection at the UI.
+- **`C13`'s test had to defeat a masking effect**, which is worth knowing: `SessionValidation` gives every
+  cookie one free resolver refresh on its first post-login request, which hides the stale-snapshot bug
+  entirely in a naive harness. The test spends that refresh on a warm-up request first. A future test in
+  this area that "passes" without doing so proves nothing.
