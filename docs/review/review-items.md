@@ -218,7 +218,7 @@ work. Every finding ID appears in exactly one item.
 > next diff deletes. `H13` a replayed update-PUT surfaces a spurious ETag conflict. `H20` a missing ETag
 > falls back to a random GUID, guaranteeing a re-send.
 
-**5. JMAP listing & submission integrity** [LIVE] — ~~`H3`~~ ~~`H18`~~ `H8` `H9`
+**5. JMAP listing & submission integrity** [LIVE] — ~~`H3`~~ ~~`H18`~~ ~~`H8`~~ `H9`
 > `H3` position-based paging over a descending sort means a concurrent delete drops a live message from the
 > revision map, and the diff engine **deletes it from the phone**. `H18` the same loop can spin forever
 > against a server that reports `position: 0`. `H8` `Email/import` demands an RFC 9404 capability it does

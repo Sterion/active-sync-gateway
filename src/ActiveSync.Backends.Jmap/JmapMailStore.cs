@@ -33,7 +33,6 @@ public sealed partial class JmapMailStore(
 	public const string KeyPrefix = "jmap-mail:";
 
 	private static readonly string[] CapMail = [JmapCapabilities.Core, JmapCapabilities.Mail];
-	private static readonly string[] CapMailBlob = [JmapCapabilities.Core, JmapCapabilities.Mail, JmapCapabilities.Blob];
 
 	private static readonly XNamespace Email = EasNamespaces.Email;
 	private static readonly XNamespace Email2 = EasNamespaces.Email2;
@@ -427,7 +426,10 @@ public sealed partial class JmapMailStore(
 		string blobId = await client.UploadBlobAsync(account, mime, "message/rfc822", ct).ConfigureAwait(false);
 		// H10: dispose the response and surface an import failure — a dropped Save-to-Sent leaves
 		// the user's Sent folder missing the message they just sent.
-		using JmapResponse response = await client.CallAsync(CapMailBlob, "Email/import", new Dictionary<string, object?>
+		// H8: Email/import is a Mail-capability method (RFC 8621 §4.8) — no Blob capability
+		// needed. Requiring urn:ietf:params:jmap:blob (RFC 9404) here rejected the WHOLE request on
+		// any server that does not implement that separate extension.
+		using JmapResponse response = await client.CallAsync(CapMail, "Email/import", new Dictionary<string, object?>
 		{
 			["accountId"] = account,
 			["emails"] = new Dictionary<string, object?>
@@ -532,7 +534,10 @@ public sealed partial class JmapMailStore(
 		using MemoryStream stream = new();
 		await message.WriteToAsync(stream, ct).ConfigureAwait(false);
 		string blobId = await client.UploadBlobAsync(account, stream.ToArray(), "message/rfc822", ct).ConfigureAwait(false);
-		using JmapResponse response = await client.CallAsync(CapMailBlob, "Email/import", new Dictionary<string, object?>
+		// H8: Email/import is a Mail-capability method (RFC 8621 §4.8) — no Blob capability
+		// needed. Requiring urn:ietf:params:jmap:blob (RFC 9404) here rejected the WHOLE request on
+		// any server that does not implement that separate extension.
+		using JmapResponse response = await client.CallAsync(CapMail, "Email/import", new Dictionary<string, object?>
 		{
 			["accountId"] = account,
 			["emails"] = new Dictionary<string, object?>

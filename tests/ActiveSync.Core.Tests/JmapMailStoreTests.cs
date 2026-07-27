@@ -218,6 +218,22 @@ public sealed class JmapMailStoreTests
 		Assert.NotEmpty(map);
 	}
 
+	// H8: Email/import is defined under urn:ietf:params:jmap:mail (RFC 8621 §4.8) and needs no
+	// blob-management capability. Requiring urn:ietf:params:jmap:blob (RFC 9404) as well means a
+	// server that does not implement that separate extension rejects the WHOLE request (RFC 8620
+	// §3.6.1's `unknownCapability`) — breaking every Save-to-Sent and draft create/edit, not a
+	// blob-specific feature.
+	[Fact]
+	public async Task SaveToSent_DoesNotRequestTheBlobCapability()
+	{
+		UsingRejectingStub stub = new();
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		byte[] mime = Encoding.ASCII.GetBytes("From: a@example.test\r\nTo: b@example.test\r\nSubject: s\r\n\r\nbody\r\n");
+
+		await store.SaveToSentAsync(mime, CancellationToken.None);
+	}
+
 	private static HttpResponseMessage Json(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)
@@ -378,6 +394,47 @@ public sealed class JmapMailStoreTests
 				$"[\"Email/query\",{{\"accountId\":\"c\",\"queryState\":\"{state}\",\"position\":{position},\"ids\":[{idsJson}]}},\"{queryId}\"]";
 			string getResponse = $"[\"Email/get\",{{\"accountId\":\"c\",\"list\":[{listJson}]}},\"{getId}\"]";
 			return Json($"{{\"methodResponses\":[{queryResponse},{getResponse}],\"sessionState\":\"x\"}}");
+		}
+	}
+
+	/// <summary>
+	///   Models a JMAP server that does not implement RFC 9404: any request whose top-level
+	///   <c>using</c> names <see cref="JmapCapabilities.Blob" /> is rejected wholesale (RFC 8620
+	///   §3.6.1's <c>unknownCapability</c>), same as a real such server would.
+	/// </summary>
+	private sealed class UsingRejectingStub : HttpMessageHandler
+	{
+		protected override async Task<HttpResponseMessage> SendAsync(
+			HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			string path = request.RequestUri!.AbsolutePath;
+			if (path == "/.well-known/jmap")
+				return Json(SessionJson);
+			if (path.StartsWith("/jmap/upload/", StringComparison.Ordinal))
+				return Json("{\"blobId\":\"blob1\"}");
+
+			string body = await request.Content!.ReadAsStringAsync(cancellationToken);
+			using JsonDocument doc = JsonDocument.Parse(body);
+			bool requestsBlob = doc.RootElement.GetProperty("using").EnumerateArray()
+				.Any(u => u.GetString() == JmapCapabilities.Blob);
+			if (requestsBlob)
+				return new HttpResponseMessage(HttpStatusCode.BadRequest);
+
+			List<string> responses = new();
+			foreach (JsonElement call in doc.RootElement.GetProperty("methodCalls").EnumerateArray())
+			{
+				string name = call[0].GetString()!;
+				string id = call[2].GetString()!;
+				string argsJson = name switch
+				{
+					"Mailbox/get" => "\"list\":[{\"id\":\"SENTID\",\"role\":\"sent\"}]",
+					"Email/import" => "\"created\":{\"sent\":{\"id\":\"E1\"}}",
+					_ => "\"list\":[]"
+				};
+				responses.Add($"[\"{name}\",{{\"accountId\":\"c\",{argsJson}}},\"{id}\"]");
+			}
+
+			return Json($"{{\"methodResponses\":[{string.Join(",", responses)}],\"sessionState\":\"x\"}}");
 		}
 	}
 
