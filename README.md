@@ -379,9 +379,22 @@ invalid on the two mail roles.
 | # | Entry has | The phone's password is |
 |---|-----------|-------------------------|
 | 1 | `Password` (pbkdf2$ or plaintext) | verified against it locally — fully decoupled from the mail backend |
-| 2 | a stored MailStore backend password (`Backends:MailStore:Password`, else `DefaultBackendPassword`) | pinned: it must equal that password (timing-safe compare, no probe). Whenever the gateway knows a backend password it would authenticate with *that*, so the presented one has to be checked against it or it would mean nothing |
-| 3 | neither | the mail password — validated by the MailStore provider's login probe against the user's *effective* host/user name (overrides apply) |
-| 4 | *(no entry)* | same as 3 with the global MailStore section — classic pass-through |
+| 2 | no `Password` | the mail password — validated by the MailStore provider's login probe against the user's *effective* host/user name (overrides apply) |
+| 3 | *(no entry)* | same as 2 with the global MailStore section — classic pass-through |
+
+A backend password is **never** a phone password: the two are separate trust domains and the gateway
+never compares one against the other.
+
+> **The one rule that ties them together.** Row 2 works by asking the mail server, which is only an
+> answer while the password sent *is* the one the phone sent. So **storing a MailStore password
+> requires setting `Password` first** — `Backends:MailStore:Password` or `DefaultBackendPassword`,
+> which every role falls back to. Without it the gateway would sign in with its own stored copy and
+> get "yes" for whatever the phone typed, empty string included. The rule runs in both directions:
+> `Password` cannot be removed while such a secret remains. A *content*-role password (Calendar,
+> Contacts, ...) is unaffected — the probe still reads the presented credential.
+>
+> Setting them in the wrong order is refused with a message saying so, on the CLI, the admin API and
+> at startup for a configuration file; an already-stored combination fails closed until corrected.
 
 **Backend credentials resolve most-specific-first**, per role and per field:
 
@@ -459,7 +472,12 @@ Rules worth knowing:
 - **Two passwords, two trust domains.** `Password` authenticates the *device to the gateway* and
   is verified locally, never sent anywhere. `DefaultBackendPassword` (and the per-role ones)
   authenticate the *gateway to the backends*. The CLI keeps them apart: `user password` hashes,
-  `user secret` seals.
+  `user secret` seals. Neither is ever checked against the other — which is why the **order in
+  the example above is required**: a stored MailStore secret (`DefaultBackendPassword`, or
+  `Backends:MailStore:Password`) needs `Password` set first, and refuses to be added without it.
+  Otherwise the login could only be settled by a probe using the secret just stored, which
+  succeeds whatever the device sends. The same rule blocks `user unset <login> Password` while
+  such a secret is present — drop the secret first.
 - **Secrets**: backend passwords may be plaintext (put the file in a Secret) or
   `enc:v1:...` values sealed with the `Encryption` master key (file can then live in a
   ConfigMap): `echo -n 'imap-password' | ActiveSync.Server protect`. Gateway password
@@ -706,9 +724,9 @@ dotnet ef migrations add <Name> --context NpgsqlSyncDbContext \
   https too — the gateway forwards the user's credentials there on every request (it
   refuses redirects that would downgrade an https DAV base URL to http, or leave the host).
 - **Brute force**: see the `Auth` options above; defaults throttle per client address and
-  shield the mail server from repeated bad-password attempts. Users with a local password
-  rule (gateway `Password` or pinned `Backends:MailStore:Password`) are verified without a
-  backend round-trip, so the throttle is the primary brute-force defense for them.
+  shield the mail server from repeated bad-password attempts. Users with a gateway `Password` are
+  verified without a backend round-trip, so the throttle is the primary brute-force defense for
+  them.
 - **Data at rest**: locally-stored item content (Notes always; Contacts/Calendar/Tasks
   without a DAV backend) is encrypted with AES-256-GCM under the `Encryption` key, bound
   to the owning user + collection so rows cannot be swapped between users. What stays

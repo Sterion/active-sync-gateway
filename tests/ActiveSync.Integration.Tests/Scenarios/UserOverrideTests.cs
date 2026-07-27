@@ -41,9 +41,6 @@ public class UserOverrideTests(GatewayFixture gateway) : IDisposable
 			// phone3: only a user-name override — the phone must present the real IMAP
 			// password, validated by a probe against the overridden identity (rule 3).
 			["ActiveSync:Users:phone3@gw.local:Backends:MailStore:UserName"] = TestBackend.User2,
-			// pinned: a configured Imap:Password pins the phone password to it (rule 2).
-			["ActiveSync:Users:pinned@gw.local:Backends:MailStore:UserName"] = TestBackend.User1,
-			["ActiveSync:Users:pinned@gw.local:Backends:MailStore:Password"] = TestBackend.Password
 		});
 
 	public void Dispose()
@@ -108,14 +105,36 @@ public class UserOverrideTests(GatewayFixture gateway) : IDisposable
 	}
 
 	[BackendFact]
-	public async Task ConfiguredImapPassword_PinsThePhonePassword()
+	public void AMailStorePasswordWithoutAGatewayPassword_StopsTheGatewayStarting()
 	{
-		// Rule 2: presented password must equal the configured Imap:Password.
-		await AssertSyncsInboxAsync(CreateClient("pinned@gw.local", TestBackend.Password));
+		// BEHAVIOUR CHANGE. This shape used to be legal and was "rule 2": a configured MailStore
+		// password PINNED the phone password to itself, so the device typed the mail password. The
+		// pin is gone — a backend credential must never decide a device login — and the state it
+		// protected is refused instead, because the only other way to settle such a login is a
+		// probe carrying the stored secret, which succeeds for any password at all.
+		//
+		// It fails at STARTUP rather than at the login: a configuration user that does not validate
+		// has always been fatal (a database row fails closed per-user instead). Upgrading with this
+		// shape in appsettings therefore stops the gateway, loudly, rather than quietly leaving the
+		// account open — which is the intended migration signal.
+		using WebApplicationFactory<Program> broken = gateway.CreateIsolatedFactory(
+			new Dictionary<string, string?>
+			{
+				["ActiveSync:Users:pinned@gw.local:Backends:MailStore:UserName"] = TestBackend.User1,
+				["ActiveSync:Users:pinned@gw.local:Backends:MailStore:Password"] = TestBackend.Password
+			});
 
-		EasTestClient wrong = CreateClient("pinned@gw.local", "anything-else");
-		using HttpResponseMessage denied = await wrong.PostRawAsync("FolderSync", null);
-		Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+		Exception error = Assert.ThrowsAny<Exception>(() => broken.CreateClient());
+		Assert.Contains("no gateway Password", Messages(error));
+	}
+
+	/// <summary>Every message down the inner-exception chain — host startup wraps.</summary>
+	private static string Messages(Exception error)
+	{
+		System.Text.StringBuilder all = new();
+		for (Exception? current = error; current is not null; current = current.InnerException)
+			all.AppendLine(current.Message);
+		return all.ToString();
 	}
 
 	[BackendFact]

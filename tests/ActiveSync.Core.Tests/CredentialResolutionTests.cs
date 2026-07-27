@@ -26,6 +26,14 @@ public sealed class CredentialResolutionTests : IDisposable
 	private const string GatewayLogin = "anna";
 	private const string Presented = "presented-eas-password";
 
+	/// <summary>
+	///   A stored MailStore secret REQUIRES a gateway password (see the probe invariant in
+	///   UserResolver): without one the login could only be decided by a probe that signs in with
+	///   the gateway's own copy, which succeeds whatever the device sent. So every declaration
+	///   below that stores a backend secret carries this too.
+	/// </summary>
+	private const string PhonePassword = "phone-password";
+
 	private readonly SqliteConnection _connection;
 	private readonly TestContextFactory _factory;
 	private readonly UserStore _store;
@@ -120,7 +128,10 @@ public sealed class CredentialResolutionTests : IDisposable
 	[Fact]
 	public async Task UnsetDefaultBackendLogin_UsesTheGatewayLogin()
 	{
-		ResolvedUser resolved = await ResolveAsync(new UserOptions { DefaultBackendPassword = "backend-secret" });
+		ResolvedUser resolved = await ResolveAsync(new UserOptions
+		{
+			Password = PhonePassword, DefaultBackendPassword = "backend-secret",
+		});
 
 		Assert.Equal(GatewayLogin, resolved.Roles[BackendRole.MailStore].Credentials.UserName);
 		Assert.Equal("backend-secret", resolved.Roles[BackendRole.MailStore].Credentials.Password);
@@ -133,6 +144,7 @@ public sealed class CredentialResolutionTests : IDisposable
 	{
 		ResolvedUser resolved = await ResolveAsync(new UserOptions
 		{
+			Password = PhonePassword,
 			DefaultBackendLogin = "backend-anna",
 			DefaultBackendPassword = "backend-secret",
 		});
@@ -149,6 +161,7 @@ public sealed class CredentialResolutionTests : IDisposable
 	{
 		ResolvedUser resolved = await ResolveAsync(new UserOptions
 		{
+			Password = PhonePassword,
 			DefaultBackendLogin = "backend-anna",
 			DefaultBackendPassword = "backend-secret",
 			Backends = new Dictionary<string, BackendRoleOverride>
@@ -178,6 +191,7 @@ public sealed class CredentialResolutionTests : IDisposable
 		// credential WAS the mail password. Other roles now fall back to the explicit defaults.
 		ResolvedUser resolved = await ResolveAsync(new UserOptions
 		{
+			Password = PhonePassword,
 			Backends = new Dictionary<string, BackendRoleOverride>
 			{
 				["MailStore"] = new() { UserName = "imap-only", Password = "imap-only-secret" },
@@ -248,56 +262,77 @@ public sealed class CredentialResolutionTests : IDisposable
 		}
 	}
 
-	[Fact]
-	public async Task AConfiguredDefaultBackendPassword_PinsThePresentedCredential()
+	// ---- the probe invariant: a stored MailStore secret requires a gateway password ----
+
+	[Theory]
+	[InlineData("DefaultBackendPassword")]
+	[InlineData("MailStore")]
+	public async Task AStoredMailSecret_WithoutAGatewayPassword_IsRefused_NotUsedToAuthenticate(string where)
 	{
-		// Whenever the gateway holds a backend password for a user, the probe would authenticate
-		// with THAT password and therefore accept anything the device presented. The presented
-		// value must be pinned against it, exactly as a configured MailStore password is —
-		// otherwise setting a default silently turns the account into an open door.
+		// A BACKEND secret must never become a DEVICE credential. The write paths refuse this
+		// combination outright, so reaching the resolver with it means the row was written around
+		// them (a hand-edited database, an older CLI): it fails closed, and — the point — the
+		// stored secret does NOT authenticate. Compare it against the presented value and a
+		// GATEWAY → BACKENDS credential silently becomes a DEVICE → GATEWAY one.
+		UserOptions declaration = where == "DefaultBackendPassword"
+			? new UserOptions { DefaultBackendPassword = "backend-secret" }
+			: new UserOptions
+			{
+				Backends = new Dictionary<string, BackendRoleOverride>
+				{
+					["MailStore"] = new() { Password = "backend-secret" },
+				},
+			};
+
 		ActiveSyncOptions options = Options();
 		UserResolver resolver = Resolver(options);
-		await _store.UpsertAsync(GatewayLogin,
-			new UserOptions { DefaultBackendPassword = "backend-secret" }, CancellationToken.None);
+		await _store.UpsertAsync(GatewayLogin, declaration, CancellationToken.None);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
-		Assert.True(resolver.VerifyLocally(GatewayLogin, "backend-secret"));
+		Assert.False(resolver.VerifyLocally(GatewayLogin, "backend-secret"));
 		Assert.False(resolver.VerifyLocally(GatewayLogin, "anything-else"));
+		// Definitively false, never null: a null verdict would hand the login to the probe, which
+		// is the open door the rule exists to close.
+		Assert.NotNull(resolver.VerifyLocally(GatewayLogin, Presented));
+		Assert.Throws<InvalidOperationException>(
+			() => resolver.Resolve(new BackendCredentials(GatewayLogin, Presented)));
 	}
 
 	[Fact]
-	public async Task AGatewayPassword_StillOutranksTheBackendPin()
+	public async Task AGatewayPassword_MakesTheStoredSecretLegal_AndStillNeverAuthenticates()
 	{
-		// Auth precedence is unchanged: the gateway password decides first when present.
 		ActiveSyncOptions options = Options();
 		UserResolver resolver = Resolver(options);
 		await _store.UpsertAsync(GatewayLogin, new UserOptions
 		{
-			Password = "phone-password",
+			Password = PhonePassword,
 			DefaultBackendPassword = "backend-secret",
 		}, CancellationToken.None);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
-		Assert.True(resolver.VerifyLocally(GatewayLogin, "phone-password"));
+		Assert.True(resolver.VerifyLocally(GatewayLogin, PhonePassword));
 		Assert.False(resolver.VerifyLocally(GatewayLogin, "backend-secret"));
+		// ...and it is still the secret the backend gets.
+		ResolvedUser resolved = resolver.Resolve(new BackendCredentials(GatewayLogin, PhonePassword));
+		Assert.Equal("backend-secret", resolved.Roles[BackendRole.MailStore].Credentials.Password);
 	}
 
 	[Fact]
-	public async Task ARoleLevelMailStorePassword_StillPins_AsBefore()
+	public async Task AContentRoleSecret_NeedsNoGatewayPassword()
 	{
-		ActiveSyncOptions options = Options();
-		UserResolver resolver = Resolver(options);
-		await _store.UpsertAsync(GatewayLogin, new UserOptions
+		// The rule is about the PROBE, so it is about MailStore alone. A Calendar credential leaves
+		// the probe reading the presented password, so the login stays honestly pass-through and
+		// forcing a gateway password on it would be cargo cult.
+		ResolvedUser resolved = await ResolveAsync(new UserOptions
 		{
 			Backends = new Dictionary<string, BackendRoleOverride>
 			{
-				["MailStore"] = new() { Password = "imap-secret" },
+				["Calendar"] = new() { Password = "dav-secret" },
 			},
-		}, CancellationToken.None);
-		await resolver.EnsureFreshAsync(true, CancellationToken.None);
+		});
 
-		Assert.True(resolver.VerifyLocally(GatewayLogin, "imap-secret"));
-		Assert.False(resolver.VerifyLocally(GatewayLogin, "anything-else"));
+		Assert.Equal(Presented, resolved.Roles[BackendRole.MailStore].Credentials.Password);
+		Assert.Equal("dav-secret", resolved.Roles[BackendRole.Calendar].Credentials.Password);
 	}
 
 	[Fact]

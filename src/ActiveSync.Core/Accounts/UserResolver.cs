@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.Security;
@@ -238,19 +239,16 @@ public sealed class UserResolver
 
 	/// <summary>
 	///   Local gateway-password verdict, or null when only a backend login probe can decide.
-	///   Precedence: explicit gateway Password (hash/plaintext) → a CONFIGURED MailStore backend
-	///   password (presented must equal it, timing-safe) → null (probe). Undeclared logins:
+	///   Precedence: explicit gateway Password (hash/plaintext) → null (probe). Undeclared logins:
 	///   definitive false when <see cref="ActiveSyncOptions.AutoProvisionUsers" /> is OFF — the
 	///   refusal lands here, BEFORE any backend probe, so undeclared logins never reach the mail
 	///   server (a brute-force shield, not just policy); else null.
 	///   <para>
-	///     The pinned compare covers the EFFECTIVE MailStore password — the role override, or
-	///     <see cref="UserOptions.DefaultBackendPassword" /> when the role does not set one. That
-	///     generalization is load-bearing, not tidiness: whenever the gateway holds a backend
-	///     password for a user, the probe would authenticate with THAT password and therefore
-	///     accept anything the device presented. Pinning is what keeps the presented credential
-	///     meaningful. It is also why the two chains stay separate — this reads a BACKEND
-	///     credential purely to compare it, and never sends the gateway password anywhere.
+	///     A BACKEND credential is never consulted here, by design: the two chains are separate
+	///     trust domains and a GATEWAY → BACKENDS secret must never become a DEVICE → GATEWAY one.
+	///     The reason this is safe — that the probe can only ever be reached when it sends the
+	///     PRESENTED password — is enforced upstream at validation; see
+	///     <see cref="RequireGatewayPasswordForStoredMailSecret" /> for why the two are the same rule.
 	///   </para>
 	/// </summary>
 	public bool? VerifyLocally(string login, string presented)
@@ -260,14 +258,13 @@ public sealed class UserResolver
 			return _options.CurrentValue.AutoProvisionUsers ? null : false;
 		// B3: an invalid stored row fails closed — it never authenticates and never falls through to
 		// the backend probe (which would admit it as pass-through with the presented credentials).
+		// This is also what catches a user whose stored MailStore secret has no gateway password:
+		// the combination is refused at validation, so it lands here as a definitive false rather
+		// than reaching the probe.
 		if (template.Invalid)
 			return false;
 		if (template.GatewayPassword is not null)
 			return GatewayPasswordHasher.Verify(template.GatewayPassword, presented);
-		if (template.Roles.GetValueOrDefault(BackendRole.MailStore)?.Password is { } mailPassword)
-			return TimingSafeEquals(mailPassword, presented);
-		if (template.DefaultBackendPassword is { } defaultPassword)
-			return TimingSafeEquals(defaultPassword, presented);
 		return null;
 	}
 
@@ -337,8 +334,20 @@ public sealed class UserResolver
 	}
 
 	/// <summary>
-	///   Validates one would-be entry (CLI writes) against the global role sections —
+	///   Validates one would-be entry (CLI/web writes) against the global role sections —
 	///   identical rules to config entries. Returns the failure messages; empty = valid.
+	///   <para>
+	///     The row is judged AS MERGED over any configuration entry for the same login, because
+	///     that merge is what will actually take effect (<see cref="BuildSnapshot" /> validates the
+	///     same shape). Cross-field rules make the difference load-bearing rather than cosmetic:
+	///     <see cref="RequireGatewayPasswordForStoredMailSecret" /> reads a gateway Password and a
+	///     stored MailStore secret that may arrive from DIFFERENT levels, so judging the row alone
+	///     would refuse a legitimate write whose partner field lives in config — and, worse, would
+	///     pass a write that completes a refused combination already half-declared there. It also
+	///     gives the removal half its meaning: scalar fields cannot be cleared by a database null
+	///     (<see cref="UserMerge" />), so "unset the gateway Password" means "fall back to the
+	///     config one", and only the merge knows whether one exists.
+	///   </para>
 	/// </summary>
 	public static List<string> ValidateEntry(
 		ActiveSyncOptions options, BackendRolesConfig roles, BackendProviderRegistry registry,
@@ -349,7 +358,11 @@ public sealed class UserResolver
 		if (keyError is not null)
 			failures.Add(keyError);
 		ValidateLogin(login, failures);
-		BuildOne(roles, registry, login, entry, key, failures, new ValidationMemo());
+		// B8: the case-insensitive lookup — ActiveSyncOptions.Users binds with the ordinal comparer
+		// while logins are case-insensitive everywhere else, so an indexer miss here would validate
+		// a differently-cased edit against no config at all.
+		UserOptions effective = UserMerge.Merge(UserEditing.FindConfigUser(options, login), entry).Options;
+		BuildOne(roles, registry, login, effective, key, failures, new ValidationMemo());
 		if (key is not null)
 			CryptographicOperations.ZeroMemory(key);
 		return failures;
@@ -567,6 +580,8 @@ public sealed class UserResolver
 		string? defaultBackendPassword = ResolveSecret(
 			account.DefaultBackendPassword, encryptionKey, $"{login}:DefaultBackendPassword", failures);
 
+		RequireGatewayPasswordForStoredMailSecret(login, account, overrides, failures);
+
 		return new UserTemplate(
 			string.IsNullOrWhiteSpace(account.Password) ? null : account.Password,
 			string.IsNullOrWhiteSpace(account.MailAddress) ? null : account.MailAddress.Trim(),
@@ -574,6 +589,51 @@ public sealed class UserResolver
 			Invalid: false,
 			string.IsNullOrWhiteSpace(account.DefaultBackendLogin) ? null : account.DefaultBackendLogin.Trim(),
 			defaultBackendPassword);
+	}
+
+	/// <summary>
+	///   THE PROBE INVARIANT: a login may only be decided by the MailStore probe when the password
+	///   that probe sends is the one the DEVICE presented. Authentication otherwise stops meaning
+	///   anything — the probe would sign in with the gateway's own stored copy and return success
+	///   for whatever the device typed, empty string included.
+	///   <para>
+	///     So a stored MailStore secret (the role override, or <see cref="UserOptions.DefaultBackendPassword" />
+	///     which every role falls back to) REQUIRES a gateway <see cref="UserOptions.Password" />,
+	///     and the two halves are one rule: adding the backend secret without a gateway password is
+	///     refused, and so is removing the gateway password while one is present. Only MailStore
+	///     matters here — it is the probe target. A Calendar- or MailSubmit-only secret leaves the
+	///     probe reading the presented credential, so it needs no gateway password.
+	///   </para>
+	///   <para>
+	///     Refusing the combination outright is what lets the two credential chains stay genuinely
+	///     separate: a backend secret is never compared against a device password, anywhere. The
+	///     alternative — comparing the presented value against the stored backend secret — closes
+	///     the same hole but silently promotes a GATEWAY → BACKENDS credential into a
+	///     DEVICE → GATEWAY one, and has to be re-derived correctly every time a credential tier is
+	///     added. This cannot rot: the state is simply unrepresentable.
+	///   </para>
+	/// </summary>
+	private static void RequireGatewayPasswordForStoredMailSecret(
+		string login, UserOptions account,
+		Dictionary<BackendRole, BackendRoleOverride> overrides, List<string> failures)
+	{
+		if (!string.IsNullOrWhiteSpace(account.Password))
+			return;
+
+		// The DECLARED value, not the unsealed one: a secret that failed to unseal has already
+		// reported itself, and presence is what decides the hazard either way.
+		bool roleSecret = !string.IsNullOrWhiteSpace(
+			overrides.GetValueOrDefault(BackendRole.MailStore)?.Password);
+		bool defaultSecret = !string.IsNullOrWhiteSpace(account.DefaultBackendPassword);
+		if (!roleSecret && !defaultSecret)
+			return;
+
+		string stored = roleSecret ? $"Backends:{BackendRole.MailStore}:Password" : "DefaultBackendPassword";
+		failures.Add(
+			$"ActiveSync:Users:{login}: {stored} is set but no gateway Password is — the gateway would " +
+			"then authenticate the device by signing in to the mail server with its OWN stored password, " +
+			"which succeeds whatever the device sends. Set a gateway password first " +
+			$"(eas user password {login}), or remove {stored} to go back to pass-through.");
 	}
 
 	/// <summary>
@@ -677,14 +737,6 @@ public sealed class UserResolver
 		}
 
 		return plaintext;
-	}
-
-	/// <summary>Length-independent comparison via fixed-size digests.</summary>
-	private static bool TimingSafeEquals(string expected, string presented)
-	{
-		byte[] expectedDigest = SHA256.HashData(Encoding.UTF8.GetBytes(expected));
-		byte[] presentedDigest = SHA256.HashData(Encoding.UTF8.GetBytes(presented));
-		return CryptographicOperations.FixedTimeEquals(expectedDigest, presentedDigest);
 	}
 
 	/// <summary>

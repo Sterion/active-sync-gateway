@@ -176,11 +176,46 @@ public sealed class CliUserTests : IDisposable
 	[Fact]
 	public void Set_PlaintextBackendPassword_IsSealed_WithWarning()
 	{
+		// The gateway password comes FIRST: a stored MailStore secret without one is refused (see
+		// Set_MailStoreSecret_BeforeAGatewayPassword_IsRefused).
+		Assert.Equal(0, Run("phone-pw", "user", "password", "u4").ExitCode);
+
 		(int exitCode, string stderr, string output) = Run(null, "user", "set", "u4", "Backends:MailStore:Password", "imap-pw");
 		Assert.Equal(0, exitCode);
 		Assert.Contains("shell history", stderr);
 		Assert.Contains("pw=***(sealed)", output);
 		Assert.DoesNotContain("imap-pw", output);
+	}
+
+	[Theory]
+	[InlineData("Backends:MailStore:Password")]
+	[InlineData("DefaultBackendPassword")]
+	public void Set_MailStoreSecret_BeforeAGatewayPassword_IsRefused(string key)
+	{
+		// Ordering is the whole point: with no gateway password the only thing that could decide
+		// this login is a probe using the secret just stored, which would admit any password at all.
+		(int exitCode, string stderr, _) = Run(null, "user", "set", "u9", key, "imap-pw");
+
+		Assert.Equal(1, exitCode);
+		Assert.Contains("no gateway Password", stderr);
+		Assert.Contains("eas user password u9", stderr);
+	}
+
+	[Fact]
+	public void Unset_TheGatewayPassword_IsRefused_WhileAMailStoreSecretRemains()
+	{
+		// The other half of the same rule — otherwise the account could be walked back into the
+		// refused state one field at a time.
+		Assert.Equal(0, Run("phone-pw", "user", "password", "u10").ExitCode);
+		Assert.Equal(0, Run(null, "user", "set", "u10", "DefaultBackendPassword", "imap-pw").ExitCode);
+
+		(int exitCode, string stderr, _) = Run(null, "user", "unset", "u10", "Password");
+		Assert.Equal(1, exitCode);
+		Assert.Contains("no gateway Password", stderr);
+
+		// Dropping the backend secret first is the way out, and then it is allowed.
+		Assert.Equal(0, Run(null, "user", "unset", "u10", "DefaultBackendPassword").ExitCode);
+		Assert.Equal(0, Run(null, "user", "unset", "u10", "Password").ExitCode);
 	}
 
 	[Fact]

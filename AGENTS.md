@@ -448,9 +448,19 @@ Password / free-form Settings per role); unset passwords inherit the presented E
 password, every non-MailStore role's credentials default to the effective MailStore pair,
 and the merge/unseal rules live ONCE (shared with the validator via `ValidateUsers`). Auth
 precedence per login: explicit gateway `Password` (`GatewayPasswordHasher`,
-pbkdf2$/plaintext, local verify) → configured MailStore `Password` (presented must equal
-it, timing-safe) → MailStore provider probe against the user's EFFECTIVE endpoint+username
-→ undeclared = global probe.
+pbkdf2$/plaintext, local verify) → MailStore provider probe against the user's EFFECTIVE
+endpoint+username → undeclared = global probe.
+**THE PROBE INVARIANT**: a backend credential NEVER decides a device login — the two chains are
+separate trust domains. The probe is honest only while the password it sends is the PRESENTED one,
+so a stored MailStore secret (`Backends:MailStore:Password`, or `DefaultBackendPassword` which every
+role falls back to) **requires** a gateway `Password`, and that password cannot be removed while one
+remains — one rule, both directions, in `UserResolver.RequireGatewayPasswordForStoredMailSecret`.
+It runs on the MERGED user (config ⊕ database), because the two halves may arrive from different
+levels; `ValidateEntry` merges before validating for the same reason. Violating rows fail closed
+(`Invalid`), and `BackendSessionFactory` probes with the presented password explicitly as a second
+line. Content-role secrets are exempt — MailStore is the probe target. Do NOT "fix" a future gap
+here by comparing the presented password against a stored backend secret: that is the pin this rule
+deliberately replaced (see `docs/design/db-restructure.md`, deviation 1).
 **`AutoProvisionUsers` (default true) is the single switch over undeclared logins** — it absorbed
 the deleted `RequireDeclaredUsers`, keeping its name but sharpening its meaning. `true`: any login
 that authenticates gets a user row on first sign-in (a fresh immutable `UserId` plus an

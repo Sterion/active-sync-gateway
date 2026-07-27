@@ -128,6 +128,16 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// apply. A provider without verification support cannot admit pass-through logins.
 		ResolvedUser probeAccount = _resolver.Resolve(credentials);
 		ResolvedRole mailRole = probeAccount.Roles[BackendRole.MailStore];
+		// The PRESENTED password, explicitly — never the resolved one. Resolve() substitutes a
+		// stored MailStore secret when the user has one, and probing with that asks the mail server
+		// "is the gateway's own password correct?", which is true regardless of what the device
+		// sent: every password would authenticate. Validation already refuses that combination
+		// without a gateway password (RequireGatewayPasswordForStoredMailSecret), so in a valid
+		// configuration this substitution is a no-op — it is here so the probe cannot be turned
+		// into an open door by a future credential tier, or by a row written around the write path.
+		// The user name stays EFFECTIVE: probing "does this password work for backend user X" is
+		// still a real test of the presented credential.
+		mailRole = mailRole with { Credentials = mailRole.Credentials with { Password = credentials.Password } };
 		if (_registry.GetFor(mailRole.ProviderName, BackendRole.MailStore) is not ICredentialVerifier verifier)
 		{
 			_logger.LogWarning(

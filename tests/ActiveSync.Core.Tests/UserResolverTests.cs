@@ -381,7 +381,7 @@ public class UserResolverTests
 	}
 
 	[Fact]
-	public void SealedMailStorePassword_IsUnsealed_AndComparableForAuth()
+	public void SealedMailStorePassword_IsUnsealedForTheBackend_ButNeverAuthenticatesTheDevice()
 	{
 		byte[] key = new byte[32];
 		Array.Fill(key, (byte)9);
@@ -389,8 +389,11 @@ public class UserResolverTests
 		options.Encryption = new EncryptionOptions { Key = Convert.ToBase64String(key) };
 		options.Users = new Dictionary<string, UserOptions>
 		{
+			// The gateway password is REQUIRED alongside a stored MailStore secret (the probe
+			// invariant); without it this entry would not validate at all.
 			["u"] = new()
 			{
+				Password = "phone-pw",
 				Backends = new Dictionary<string, BackendRoleOverride>
 					{ ["MailStore"] = new() { Password = SecretValue.Seal("real-mail-pw", key) } }
 			}
@@ -399,8 +402,9 @@ public class UserResolverTests
 
 		Assert.Equal("real-mail-pw", resolver.Resolve(new BackendCredentials("u", "ignored"))
 			.Roles[BackendRole.MailStore].Credentials.Password);
-		Assert.True(resolver.VerifyLocally("u", "real-mail-pw"));
-		Assert.False(resolver.VerifyLocally("u", "wrong"));
+		Assert.True(resolver.VerifyLocally("u", "phone-pw"));
+		// The unsealed BACKEND secret is not a device credential, sealed or not.
+		Assert.False(resolver.VerifyLocally("u", "real-mail-pw"));
 	}
 
 	// ---------- local auth rules ----------
@@ -413,15 +417,11 @@ public class UserResolverTests
 		{
 			["hashed"] = new() { Password = GatewayPasswordHasher.Hash("gw-secret") },
 			["plain"] = new() { Password = "gw-plain" },
-			// Gateway Password wins over the MailStore password when both are set.
+			// A stored MailStore password REQUIRES this gateway password (the probe invariant), and
+			// only the gateway password ever authenticates a device.
 			["both"] = new()
 			{
 				Password = "gateway-wins",
-				Backends = new Dictionary<string, BackendRoleOverride>
-					{ ["MailStore"] = new() { Password = "mail-pw" } }
-			},
-			["mail-pinned"] = new()
-			{
 				Backends = new Dictionary<string, BackendRoleOverride>
 					{ ["MailStore"] = new() { Password = "mail-pw" } }
 			},
@@ -438,8 +438,6 @@ public class UserResolverTests
 		Assert.True(resolver.VerifyLocally("plain", "gw-plain"));
 		Assert.True(resolver.VerifyLocally("both", "gateway-wins"));
 		Assert.False(resolver.VerifyLocally("both", "mail-pw")); // backend pw is not the phone pw
-		Assert.True(resolver.VerifyLocally("mail-pinned", "mail-pw"));
-		Assert.False(resolver.VerifyLocally("mail-pinned", "nope"));
 		Assert.Null(resolver.VerifyLocally("probe-me", "anything")); // no local rule → probe
 		Assert.Null(resolver.VerifyLocally("undeclared", "anything"));
 		// Case-insensitive lookup.
@@ -583,6 +581,109 @@ public class UserResolverTests
 		Assert.Contains("no global MailStore role is configured", joined);
 		Assert.DoesNotContain("does not support the MailStore role", joined);
 	}
+
+	// ---------- the probe invariant, at the write paths ----------
+
+	[Theory]
+	[InlineData("DefaultBackendPassword")]
+	[InlineData("MailStore")]
+	public void ValidateEntry_AStoredMailSecret_WithoutAGatewayPassword_IsRefused(string where)
+	{
+		// Setting the backend secret first is the refused half of the rule. Without it the account
+		// could only be decided by a probe that signs in with the gateway's own stored password,
+		// which succeeds whatever the device sends.
+		ActiveSyncOptions options = HostOptions();
+		UserOptions entry = Storing(where);
+
+		List<string> failures = UserResolver.ValidateEntry(options, Roles(BaseConfig()), Registry(), "u", entry);
+
+		string joined = string.Join(";", failures);
+		Assert.Contains("no gateway Password", joined);
+		Assert.Contains("eas user password u", joined);
+	}
+
+	[Theory]
+	[InlineData("DefaultBackendPassword")]
+	[InlineData("MailStore")]
+	public void ValidateEntry_AStoredMailSecret_IsAccepted_AlongsideAGatewayPassword(string where)
+	{
+		ActiveSyncOptions options = HostOptions();
+		UserOptions entry = Storing(where);
+		entry.Password = "phone-pw";
+
+		Assert.Empty(UserResolver.ValidateEntry(options, Roles(BaseConfig()), Registry(), "u", entry));
+	}
+
+	[Fact]
+	public void ValidateEntry_TheGatewayPasswordMayCome_FromTheOtherLevel()
+	{
+		// The two halves of the rule can live at DIFFERENT levels, which is why the row is judged as
+		// merged over config rather than alone. Judged alone this write looks like a bare backend
+		// secret and would be refused, though what takes effect is perfectly safe.
+		ActiveSyncOptions options = HostOptions();
+		options.Users = new Dictionary<string, UserOptions> { ["u"] = new() { Password = "phone-pw" } };
+
+		Assert.Empty(UserResolver.ValidateEntry(
+			options, Roles(BaseConfig()), Registry(), "u",
+			new UserOptions { DefaultBackendPassword = "backend-secret" }));
+	}
+
+	[Fact]
+	public void ValidateEntry_ABareRowCannotComplete_ARefusedCombinationHalfDeclaredInConfig()
+	{
+		// The inverse, and the reason judging the row alone would not just misfire but MISS: config
+		// already supplies the backend secret, so a row that merely adds an unrelated field would
+		// slip through while the merged account is exactly the refused shape. (Such a config entry
+		// cannot start the gateway either — this is the second line.)
+		ActiveSyncOptions options = HostOptions();
+		options.Users = new Dictionary<string, UserOptions>
+		{
+			["u"] = new() { DefaultBackendPassword = "backend-secret" }
+		};
+
+		List<string> failures = UserResolver.ValidateEntry(
+			options, Roles(BaseConfig()), Registry(), "u", new UserOptions { MailAddress = "u@example.com" });
+
+		Assert.Contains("no gateway Password", string.Join(";", failures));
+	}
+
+	[Fact]
+	public void ValidateEntry_RemovingTheGatewayPassword_IsRefusedWhileASecretRemains()
+	{
+		// The other half of one rule. A database null does not CLEAR a scalar — it falls through to
+		// config (UserMerge) — so "remove the gateway password" is only really a removal when config
+		// has none either, and only the merge can tell.
+		ActiveSyncOptions options = HostOptions();
+		UserOptions entry = new() { Password = null, DefaultBackendPassword = "backend-secret" };
+
+		Assert.Contains("no gateway Password", string.Join(";",
+			UserResolver.ValidateEntry(options, Roles(BaseConfig()), Registry(), "u", entry)));
+
+		options.Users = new Dictionary<string, UserOptions> { ["u"] = new() { Password = "config-pw" } };
+		Assert.Empty(UserResolver.ValidateEntry(options, Roles(BaseConfig()), Registry(), "u", entry));
+	}
+
+	[Fact]
+	public void ValidateEntry_AContentRoleSecret_NeedsNoGatewayPassword()
+	{
+		// MailStore is the probe target, so it is the only role the rule concerns.
+		ActiveSyncOptions options = HostOptions();
+		UserOptions entry = new()
+		{
+			Backends = new Dictionary<string, BackendRoleOverride>
+				{ ["Calendar"] = new() { Password = "dav-secret" } }
+		};
+
+		Assert.Empty(UserResolver.ValidateEntry(options, Roles(BaseConfig()), Registry(), "u", entry));
+	}
+
+	private static UserOptions Storing(string where) => where == "DefaultBackendPassword"
+		? new UserOptions { DefaultBackendPassword = "backend-secret" }
+		: new UserOptions
+		{
+			Backends = new Dictionary<string, BackendRoleOverride>
+				{ ["MailStore"] = new() { Password = "backend-secret" } }
+		};
 
 	[Fact]
 	public void ValidateUsers_MalformedGatewayPasswordHash_IsReported()

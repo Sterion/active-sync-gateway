@@ -7,11 +7,26 @@
 >
 > Deviations from the brief as written, all deliberate and each argued at its commit:
 >
-> 1. **The pinned-password rule generalised** (item 5). The brief left auth precedence "unchanged",
->    naming the *configured MailStore* password as the pinned compare. With user-wide backend
->    defaults added, the pin had to cover the EFFECTIVE MailStore password — role override, else
->    `DefaultBackendPassword` — because whenever the gateway holds a backend password the probe
->    authenticates with *that*, so an unpinned default would make any presented password work.
+> 1. **The pinned-password rule was deleted, not generalised** (item 5). The brief left auth
+>    precedence "unchanged", naming the *configured MailStore* password as a pinned compare: the
+>    presented device password had to equal it. That pin existed because whenever the gateway holds
+>    a backend password, the probe authenticates with *that* password and so returns success for
+>    anything the device sent — with `DefaultBackendPassword` added, leaving the pin on the role
+>    password alone would have made setting a default an open door.
+>
+>    Pinning closes the hole but pays for it by promoting a GATEWAY → BACKENDS credential into a
+>    DEVICE → GATEWAY one, and it only stays correct while `VerifyLocally`'s chain mirrors
+>    `Resolve`'s MailStore chain term for term — a correspondence nothing enforces, and exactly what
+>    the new field broke. So the pin is **gone**, and the state that needed it is refused instead: a
+>    stored MailStore secret (role override or `DefaultBackendPassword`) **requires** a gateway
+>    `Password`, which also means the gateway password cannot be removed while one is present.
+>    `VerifyLocally` is now *gateway password → probe*, and a backend credential is never compared
+>    against a device password anywhere. Enforced on the MERGED user in `UserResolver.BuildOne`, so a
+>    row hand-written around the write paths fails closed rather than authenticating everything;
+>    `BackendSessionFactory` additionally probes with the PRESENTED password explicitly, so the door
+>    stays shut even if a future credential tier escapes the rule. **Breaking:** a user with a
+>    MailStore password and no gateway password was legal before (the pin made the device type the
+>    mail password) and now fails closed until a gateway password is set.
 > 2. **`UserEditing.LoadStartingEntryAsync` stopped cloning config** (item 6). Cloning was right
 >    under whole-entry replacement; under per-field resolution it would freeze config values as
 >    database overrides, so later config changes would stop reaching the user.
@@ -318,6 +333,25 @@ it must survive:
 
 So an undeclared, unconfigured user behaves exactly as it does now, and a decoupled user is one
 field instead of N.
+
+**The probe invariant — the one rule that binds the two credentials together.** Pass-through
+authenticates by *probing*: the gateway signs in to the mail server with what the device presented,
+and the mail server's verdict is the answer. That is only an answer while the password being sent
+**is** the presented one. A stored MailStore secret breaks it — the probe would sign in with the
+gateway's own copy and succeed for any password at all, including an empty one.
+
+So the two credentials are not fully independent after all: **a stored MailStore secret requires a
+gateway `Password`**, and equally the gateway password cannot be removed while such a secret remains
+(one rule, two directions). `Backends:MailStore:Password` and `DefaultBackendPassword` are the two
+ways to store one, since every role falls back to the default; a *content*-role secret is exempt,
+because MailStore is what the probe targets and it still receives the presented credential.
+
+The alternative was to compare the presented password against the stored backend secret. That closes
+the same hole, but it promotes a GATEWAY → BACKENDS credential into a DEVICE → GATEWAY one — the
+exact conflation this section calls the current model's weak point — and it stays correct only while
+the local-verdict chain mirrors the resolution chain term for term, which is precisely what adding
+`DefaultBackendPassword` broke. Refusing the combination cannot rot the same way: the dangerous state
+is simply not representable.
 
 ### THE RESOLUTION RULE — one order, every setting, per field
 
@@ -888,8 +922,12 @@ Violating any of these is a stop-and-report.
    sync state and bricks encrypted rows. True today; removed by this design. **Update both in item
    2** — until then they contradict this document. What survives unchanged: **a per-backend user name
    is still never an identity**. The new hard rule: `UserId` is immutable and never reused.
-2. **Auth precedence is unchanged:** gateway `Password` → configured MailStore `Password`
-   (timing-safe pinned compare) → MailStore provider probe → undeclared global probe.
+2. **Auth precedence — REVISED as implemented (deviation 1):** gateway `Password` → MailStore
+   provider probe → undeclared global probe. The brief's middle term, a timing-safe pinned compare
+   against the configured MailStore `Password`, is gone: a backend credential never decides a device
+   login. What preserves the property that pin was protecting is the **probe invariant** — a stored
+   MailStore secret requires a gateway `Password`, so the probe is only ever reachable when it sends
+   the presented credential.
 3. **Fail closed.** An invalid/malformed user is kept visible but refused; one bad row never
    breaks auth for everyone.
 4. **Live pickup (~1 s) survives** — the stamp point-read plus atomic snapshot swap, and
