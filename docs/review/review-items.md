@@ -231,7 +231,7 @@ work. Every finding ID appears in exactly one item.
 > `G5` no I/O timeout anywhere, and an uncancellable LOGOUT. `G10`/`G17`/`G23`/`G24` SASL negotiation,
 > control-character injection, orphaned scripts, a dead guard.
 
-**7. Calendar & draft data corruption** [LIVE] — ~~`D1`~~ ~~`D2`~~ ~~`D3`~~ `D5`
+**7. Calendar & draft data corruption** [LIVE] — ~~`D1`~~ ~~`D2`~~ ~~`D3`~~ ~~`D5`~~ **COMPLETE**
 > `D1` meeting-request times are read from VTIMEZONE, so every zoned invitation shows a 1970 start. `D2` a
 > draft with two or more recipients loses **all** of them. `D3` all-day events land a day early for half the
 > year (DST ignored in the MS-ASTZ read-back). `D5` `AllDayEvent` is the one calendar field with no

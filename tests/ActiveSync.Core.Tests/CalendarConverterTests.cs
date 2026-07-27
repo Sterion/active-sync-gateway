@@ -153,6 +153,34 @@ public class CalendarConverterTests
 		Assert.Contains("DTEND;VALUE=DATE:20260717", ics);
 	}
 
+	// D5 — AllDayEvent is the one calendar field read back without a presence guard: a partial
+	// 16.x Change that carries StartTime/EndTime but omits AllDayEvent must keep the stored
+	// event's all-day-ness (ghosting), not silently convert it to a timed event.
+	[Fact]
+	public void Change_OmittingAllDayEvent_PreservesStoredAllDayness()
+	{
+		const string existingAllDay = """
+		                              BEGIN:VCALENDAR
+		                              VERSION:2.0
+		                              BEGIN:VEVENT
+		                              UID:allday-ghost
+		                              DTSTART;VALUE=DATE:20260716
+		                              DTEND;VALUE=DATE:20260717
+		                              SUMMARY:Summer trip
+		                              END:VEVENT
+		                              END:VCALENDAR
+		                              """;
+
+		// A partial Change moving the trip by a day, as a 16.x client would send it: new
+		// StartTime/EndTime, no AllDayEvent element at all.
+		string updated = CalendarConverter.FromApplicationData(AppData(
+			new XElement(Cal + "StartTime", "20260716T220000Z"),
+			new XElement(Cal + "EndTime", "20260717T220000Z")), "allday-ghost", existingAllDay);
+
+		Assert.Contains("DTSTART;VALUE=DATE:", updated);
+		Assert.DoesNotContain("DTSTART:", updated); // must not become a timed DATE-TIME value
+	}
+
 	[Fact]
 	public void SetPartStat_MatchesExactMailboxOnly()
 	{

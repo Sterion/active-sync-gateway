@@ -233,7 +233,11 @@ public static class CalendarConverter
 		if (location is not null)
 			evt.Location = location;
 
-		bool allDay = V("AllDayEvent") == "1";
+		// D5: presence-guarded like every neighbouring field (Sensitivity, BusyStatus,
+		// Recurrence, Attendees, Reminder) below — an omitted AllDayEvent must keep whatever the
+		// stored event already is, not silently evaluate to false and convert an all-day event to
+		// a timed one on a partial 16.x Change that carries only StartTime/EndTime.
+		bool allDay = V("AllDayEvent") is { } ad ? ad == "1" : evt.Start is { HasTime: false };
 		string? startRaw = V("StartTime");
 		string? endRaw = V("EndTime");
 		// D3: the effective offset (base bias + daylight bias when applicable) is read per
