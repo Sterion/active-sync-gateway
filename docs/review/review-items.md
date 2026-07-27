@@ -532,3 +532,16 @@ is unaffected. H9's own remedy text named only the `Email/import`/`EmailSubmissi
 left as `AccountAsync` (mail) for both calls in the batch rather than widened without a finding backing it.
 FIX: route `Identity/get` through `SubmissionAccountAsync` alongside `EmailSubmission/set`, keeping
 `Mailbox/get` on the mail account.
+
+`N3` **Low** `TlsCertificateRenewalServiceTests.NearExpiryCertificate_IsRenewedOnATick_AndTheHolderIsSwapped`
+(`tests/ActiveSync.Server.Tests/TlsCertificateRenewalServiceTests.cs:71`, landed under item 9's K1) is
+flaky under a full parallel unit-suite run — observed failing ~1 run in 8 of `dotnet test ActiveSync.slnx
+--filter "Category!=Integration"`, but green every time (5+ runs) when run in isolation
+(`--filter "FullyQualifiedName~TlsCertificateRenewalServiceTests"`). The test drives a real
+`TlsCertificateRenewalService` with a 20 ms tick interval and polls `WaitUntilAsync` for up to 5 seconds
+for the holder to swap to a renewed (freshly RSA-2048-generated) certificate; under the CPU contention of
+the full parallel suite, cert generation plus scheduler jitter can apparently exceed the 5 s budget.
+Discovered incidentally while verifying item 11's unit-suite baseline — not caused by, or related to, any
+change in item 11 (K5/K6/K7/K21 touch only `GatewayPasswordHasher`, `AuthThrottle`, and the WebUi login
+endpoint). FIX: widen the timeout and/or shorten the tick interval further, or seed a pre-generated
+certificate/key pair so the test does not pay RSA key generation under load.
