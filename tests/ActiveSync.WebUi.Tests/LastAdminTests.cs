@@ -68,6 +68,23 @@ public sealed class LastAdminTests
 	}
 
 	[Fact]
+	public async Task DeletingTheLastAdminThroughTheDeleteRoute_IsRefused()
+	{
+		// C3: unlike PUT/DELETE/disable, POST /delete (the confirm-and-cascade route) ran no
+		// LastAdminProblemAsync check at all, so the sole admin could destroy their own account
+		// outright and lock every operator out of /admin — recovery from there is CLI-only.
+		await using WebUiHost host = await WebUiHost.StartAsync(OneAdmin());
+		using HttpClient client = await host.SignInAsync("alice", admin: true);
+
+		HttpResponseMessage response = await client.PostAsJsonAsync(
+			"/admin/api/users/alice/delete", new { confirm = "alice" });
+
+		Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+		// ...and the account is still there.
+		Assert.NotNull(await new UserStore(host.Factory).FindUserIdAsync("alice", CancellationToken.None));
+	}
+
+	[Fact]
 	public async Task DeletingARowThatShadowsAnAdminConfigEntry_IsAllowed()
 	{
 		await using WebUiHost host = await WebUiHost.StartAsync(

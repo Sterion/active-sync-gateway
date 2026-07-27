@@ -261,7 +261,7 @@ work. Every finding ID appears in exactly one item.
 > for every other address. `K7` the WebUi login clears the per-address ceiling, voiding the class's own
 > guarantee. `K21` `Hash` can mint a value `Verify` rejects.
 
-**12. WebUi session, authorization & OIDC** — ~~`C1`~~ `C3` `C9` `C16`
+**12. WebUi session, authorization & OIDC** — ~~`C1`~~ ~~`C3`~~ `C9` `C16`
 > `C1` a portal password change signs the user out on their very next request (second-truncated session stamp
 > vs. sub-second revocation cut-off) — the feature is documented as doing the opposite. `C3` the user-delete
 > route can destroy the last enabled administrator, bypassing the 409 guard every weaker verb enforces.

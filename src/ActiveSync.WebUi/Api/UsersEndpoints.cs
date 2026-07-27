@@ -254,6 +254,12 @@ internal static class UsersEndpoints
 			if (await store.FindUserIdAsync(login, ct) is null)
 				return Results.NotFound();
 
+			// Unlike PUT/DELETE/disable, this cascade-deletes the account outright rather than
+			// merely dropping a database override, so it needs the same last-admin guard: the
+			// deleted account never "stays admin" afterward.
+			if (await LastAdminProblemAsync(resolver, login, staysAdmin: false, ct) is { } conflict)
+				return conflict;
+
 			// Typed echo, the same idiom wipe/purge already use. Graduated: content-owning users
 			// get the counts in the refusal so the dialog can name what is at stake.
 			DeviceAdminService.DeletionImpact impact = await devices.CountDeletionImpactAsync(login, null, ct);
