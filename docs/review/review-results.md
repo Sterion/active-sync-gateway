@@ -485,3 +485,51 @@ run; live output is now captured to a file, and unit output is too from here on.
   parameter and the `blocked` term from the guard and the log line").
 - `C1`'s fix is the finding's first option (round the stamp up). The alternative — millisecond precision —
   would have invalidated every existing ticket once; not taken, correctly.
+
+## Item 13 — User-resolution resilience
+**Findings:** `B1` `B11` `B17`
+**Commits:** `248acad` (B1) · `bc99f8c` (B11) · `47ab9c5` (B17)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 14 ✓ · one commit per finding ✓ · strike shipped with each ✓ · scope confined to
+`UserResolver.cs`, `SettingsRefresher.cs` and three test files ✓ · build 0 warnings ✓ ·
+unit **1337 passed** ✓ · live **141 passed, 0 skipped** on a clean volume ✓ (run because `UserResolver`
+sits on every authenticated request — the worker ran it too, unprompted, for the same reason)
+**Red-first re-proved independently for B1 and BOTH halves of B11:** `UserResolver.cs` and
+`SettingsRefresher.cs` reverted to `8bf2a03` → `LiveBackendsEditInvalidatingAConfigUser_DoesNotFreezeDatabaseUserPickup`,
+`SnapshotChangedSubscriberThrows_OthersStillRun_AndDoesNotSuppressALaterGenuineFailure` and
+`Refresher_ChangedSubscriberThrows_OthersStillRun_AndDoesNotSuppressALaterGenuineFailure` all fail.
+**`B17` could NOT be independently re-proved** — its test passes the new `config:` constructor argument, so
+reverting `UserResolver.cs` fails compilation (`CS1739`) instead of producing a red test. Same structural
+limitation as `K6` in item 11. Verified by reading the diff against the entry instead.
+**PROTOCOL DEVIATION — B11's UserResolver test was authored fix-first, and the worker disclosed it.**
+Its own words: the fix "had briefly gone in ahead of the test", so it applied, reverted to observe red, then
+reapplied. That is verbatim the sequence `fix-review.md` bans and says "does **not** count as proof". I did
+not simply accept the disclosure:
+1. I re-ran the test against genuinely unmodified source myself — it fails there (above), so the "revert
+   didn't cleanly reproduce" failure mode the rule guards against does not apply here.
+2. I read the test against the finding. It asserts B11's **three enumerated symptoms** — the later
+   subscriber still runs, no false "could not refresh" log despite the data being applied, and a later
+   genuine failure still warns (the `_refreshErrorLogged` suppression). It asserts nothing about the fix's
+   internals (no reference to `GetInvocationList`), which is exactly the "shaped by the fix" hazard the
+   ordering rule exists to prevent.
+On that basis the strike stands. Recorded prominently because the rule was broken, the disclosure was
+voluntary, and a future reader should be able to weigh the evidence rather than assume clean provenance.
+**Notes:**
+- **B11 was applied more broadly than its text.** The finding names `EnsureFreshAsync`'s
+  `SnapshotChanged?.Invoke()`; the worker also routed `OnRolesChanged`'s identical call through the same
+  new helper. The defect is the same at both sites and the fix is shared, so this is in-scope widening
+  rather than creep — disclosed by the worker.
+- **B1 reclassifies a previously fatal condition.** A config-declared user invalidated by a live `Backends`
+  edit is now marked `Invalid` individually instead of aborting the whole snapshot rebuild — matching how a
+  bad *database* row was already handled. The strictness is retained for the constructor's first build, so
+  a genuinely broken configuration still fails fast at startup.
+- **The intermittent Server.Tests failure is now NAMED and diagnosed** (it recurred here, and I captured the
+  log this time): `TlsCertificateRenewalServiceTests.NearExpiryCertificate_IsRenewedOnATick_AndTheHolderIsSwapped`
+  — item 9's headline K1 test — failing with
+  `CryptographicException: m_safeCertContext is an invalid handle` from `GetCertHashString()` inside the
+  test's polling predicate. Cause: K1's `DisposeAfterGraceAsync` frees the previous certificate while a
+  reader still holds the reference it took from `CertificateHolder.Current`. **In production this is
+  bounded by the 30 s grace period**, so the window is effectively shut and Kestrel's selector is safe; the
+  test shortens the grace to milliseconds and hits it readily. So: a test-configuration artefact rather
+  than a shipped defect — but it is the same race the grace period exists to mitigate, and it makes K1's
+  only behavioural test unreliable under parallel load. This supersedes the vaguer `N3` filed in item 11.
