@@ -706,7 +706,7 @@ them a stamp would have meant another table.
 State this plainly so nobody "fixes" it later believing it an oversight.
 
 - **It does not close `C5`** (portal echoes an admin-set backend username). `C5` is closed **`N/A`**
-  in `docs/review/review-items.md` and stays closed. With one slot per field there is no provenance
+  in `docs/review/round2/review-items.md` and stays closed. With one slot per field there is no provenance
   to gate a read on, and none is wanted: the holder can already change the value, and seeing it is
   what stops them changing it blind. Do **not** re-introduce a settings-surface gate — that was tried
   (review item 12, `7f0c73b`) and reverted (`fec1cfe`).

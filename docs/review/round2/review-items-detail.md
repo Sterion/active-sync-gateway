@@ -16,7 +16,7 @@ index — start there. The execution protocol is [`fix-review.md`](fix-review.md
 Severity legend: Critical / High / Medium / Low / Nit
 
 > **Context: this is round 2, on a codebase already hardened by round 1** (365 findings, all 56 items
-> landed — archived under [`round1/`](round1/)). The classic data-loss / process-death / privilege
+> landed — archived under [`../round1/`](../round1/)). The classic data-loss / process-death / privilege
 > defects were fixed there and re-verified here (see each area's *Verified correct* list). Round 2 is
 > a fresh full pass: it finds what exists **now** — 0 Critical, 9 High, and a large body of Medium
 > correctness/robustness issues plus the structural work (Area S) that a hardened codebase makes

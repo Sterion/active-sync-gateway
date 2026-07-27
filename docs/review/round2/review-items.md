@@ -17,7 +17,7 @@ JMAP/DAV · K security/crypto/plugins/contracts · W WBXML/protocol) plus a cros
 pass (S).
 
 **This is round 2.** Round 1 (365 findings, all 56 items landed) is archived under
-[`round1/`](round1/); its fixes were re-verified here and appear in each area's *Verified correct*
+[`../round1/`](../round1/); its fixes were re-verified here and appear in each area's *Verified correct*
 notes. Round 2 finds what exists **now** on the hardened tree: fewer Criticals, a handful of residual
 Highs, a large body of Medium correctness/robustness issues, and the structural work a mature codebase
 makes worthwhile.
@@ -65,11 +65,11 @@ carry constraints the code does not state and a reasonable change will violate s
 
 | Document | Read before touching | Contains |
 |---|---|---|
-| [`AGENTS.md`](../../AGENTS.md) | **any structural work** (items 14–18) and any backend/sync change | Solution layout and the dependency rule; per-layer invariants; coding conventions; decisions already taken and why |
-| [`README.md`](../../README.md) | first item in an unfamiliar area | what the project is, how the pieces fit |
-| [`docs/testing.md`](../testing.md) | any [LIVE] item | backend stacks, how the suites skip, which runner to use |
-| [`docs/plugins.md`](../plugins.md) | items 14–15, 17 | the published plugin contract |
-| [`round1/`](round1/) | when a finding touches a round-1 area | what was already fixed and why — do not re-litigate a settled decision without cause |
+| [`AGENTS.md`](../../../AGENTS.md) | **any structural work** (items 14–18) and any backend/sync change | Solution layout and the dependency rule; per-layer invariants; coding conventions; decisions already taken and why |
+| [`README.md`](../../../README.md) | first item in an unfamiliar area | what the project is, how the pieces fit |
+| [`docs/testing.md`](../../testing.md) | any [LIVE] item | backend stacks, how the suites skip, which runner to use |
+| [`docs/plugins.md`](../../plugins.md) | items 14–15, 17 | the published plugin contract |
+| [`round1/`](../round1/) | when a finding touches a round-1 area | what was already fixed and why — do not re-litigate a settled decision without cause |
 
 **Hard gates:**
 
