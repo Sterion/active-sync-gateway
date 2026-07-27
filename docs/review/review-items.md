@@ -218,7 +218,7 @@ work. Every finding ID appears in exactly one item.
 > next diff deletes. `H13` a replayed update-PUT surfaces a spurious ETag conflict. `H20` a missing ETag
 > falls back to a random GUID, guaranteeing a re-send.
 
-**5. JMAP listing & submission integrity** [LIVE] — ~~`H3`~~ ~~`H18`~~ ~~`H8`~~ `H9`
+**5. JMAP listing & submission integrity** [LIVE] — ~~`H3`~~ ~~`H18`~~ ~~`H8`~~ ~~`H9`~~ **COMPLETE**
 > `H3` position-based paging over a descending sort means a concurrent delete drops a live message from the
 > revision map, and the diff engine **deletes it from the phone**. `H18` the same loop can spin forever
 > against a server that reports `position: 0`. `H8` `Email/import` demands an RFC 9404 capability it does
@@ -521,3 +521,14 @@ one generation. Over a device's lifetime this is one row per mail ever sent by r
 ever responded to, not just per retry. FIX: either give `SendDedupStore` a age-based sweep (e.g. delete
 completed claims older than N days, independent of a collection commit) or a small periodic purge command
 analogous to `FolderRetentionService`/`LogRetentionService`.
+
+`N2` **Low** `JmapMailSubmit.ResolvePrerequisitesAsync` (`src/ActiveSync.Backends.Jmap/JmapMailSubmit.cs`)
+issues `Identity/get` under the MAIL primary account, not the submission one, even after H9 gave
+`EmailSubmission/set` its own submission-capability account. RFC 8621 §7.1 defines `Identity` under
+`urn:ietf:params:jmap:submission`, same as `EmailSubmission`, so on a server where the mail and submission
+primary accounts genuinely differ, `Identity/get` may return the wrong (or an empty) identity list for the
+account actually used to submit. `Mailbox/get` in the same batch is correctly a Mail-capability call and
+is unaffected. H9's own remedy text named only the `Email/import`/`EmailSubmission/set` split, so this was
+left as `AccountAsync` (mail) for both calls in the batch rather than widened without a finding backing it.
+FIX: route `Identity/get` through `SubmissionAccountAsync` alongside `EmailSubmission/set`, keeping
+`Mailbox/get` on the mail account.

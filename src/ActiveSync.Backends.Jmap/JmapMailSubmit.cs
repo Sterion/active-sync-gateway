@@ -22,10 +22,14 @@ public sealed class JmapMailSubmit(
 		[JmapCapabilities.Core, JmapCapabilities.Mail, JmapCapabilities.Submission];
 
 	private string? _account;
+	private string? _submissionAccount;
 
 	public async Task SendAsync(byte[] mime, CancellationToken ct)
 	{
 		string accountId = await AccountAsync(ct).ConfigureAwait(false);
+		// H9: fail fast with a named error if the server does not advertise submission, rather
+		// than sending a request it cannot honour and surfacing the opaque "400" back.
+		string submissionAccountId = await SubmissionAccountAsync(ct).ConfigureAwait(false);
 		using MemoryStream input = new(mime);
 		MimeMessage message = await MimeMessage.LoadAsync(input, ct).ConfigureAwait(false);
 
@@ -71,7 +75,10 @@ public sealed class JmapMailSubmit(
 		}, "0");
 		JmapCall submit = new("EmailSubmission/set", new Dictionary<string, object?>
 		{
-			["accountId"] = accountId,
+			// H9: EmailSubmission is gated on its own primaryAccounts entry (RFC 8621 §7),
+			// distinct from Mail's — on a server where the two differ, submitting under the mail
+			// account fails with accountNotFound. Email/import above still uses the mail account.
+			["accountId"] = submissionAccountId,
 			["onSuccessDestroyEmail"] = new[] { "#s" },
 			["create"] = new Dictionary<string, object?>
 			{
@@ -134,6 +141,22 @@ public sealed class JmapMailSubmit(
 	{
 		return _account ??= (await client.GetSessionAsync(ct).ConfigureAwait(false))
 			.PrimaryAccount(JmapCapabilities.Mail);
+	}
+
+	/// <summary>
+	///   The submission-capability primary account (H9): EmailSubmission/set requires
+	///   <c>urn:ietf:params:jmap:submission</c>, not Mail, and RFC 8621 §7 gives it its own
+	///   <c>primaryAccounts</c> entry. Checking the capability here, before any I/O, means a server
+	///   that doesn't support submission fails with a named error instead of an opaque 400 from
+	///   the batched request below.
+	/// </summary>
+	private async Task<string> SubmissionAccountAsync(CancellationToken ct)
+	{
+		if (_submissionAccount is not null)
+			return _submissionAccount;
+		JmapSessionResource session = await client.GetSessionAsync(ct).ConfigureAwait(false);
+		session.RequireCapability(JmapCapabilities.Submission);
+		return _submissionAccount = session.PrimaryAccount(JmapCapabilities.Submission);
 	}
 
 	/// <summary>Fetches the sending identity (matching the From address if possible) and the Drafts mailbox.</summary>

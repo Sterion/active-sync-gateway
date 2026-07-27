@@ -39,6 +39,40 @@ public sealed class JmapMailSubmitTests
 	private const string Mime =
 		"From: sender@example.test\r\nTo: rcpt@example.test\r\nSubject: hi\r\n\r\nbody\r\n";
 
+	// H9: no submission capability advertised at all.
+	private const string SessionJsonNoSubmission = """
+	{
+	  "capabilities": {
+	    "urn:ietf:params:jmap:core": {}, "urn:ietf:params:jmap:mail": {}
+	  },
+	  "primaryAccounts": {
+	    "urn:ietf:params:jmap:core": "c", "urn:ietf:params:jmap:mail": "c"
+	  },
+	  "apiUrl": "http://localhost:5232/jmap/",
+	  "downloadUrl": "http://localhost:5232/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
+	  "uploadUrl": "http://localhost:5232/jmap/upload/{accountId}/",
+	  "state": "abc"
+	}
+	""";
+
+	// H9: mail and submission resolve to DIFFERENT primary accounts.
+	private const string SessionJsonDualAccounts = """
+	{
+	  "capabilities": {
+	    "urn:ietf:params:jmap:core": {}, "urn:ietf:params:jmap:mail": {},
+	    "urn:ietf:params:jmap:submission": {}
+	  },
+	  "primaryAccounts": {
+	    "urn:ietf:params:jmap:core": "mailAcct", "urn:ietf:params:jmap:mail": "mailAcct",
+	    "urn:ietf:params:jmap:submission": "subAcct"
+	  },
+	  "apiUrl": "http://localhost:5232/jmap/",
+	  "downloadUrl": "http://localhost:5232/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
+	  "uploadUrl": "http://localhost:5232/jmap/upload/{accountId}/",
+	  "state": "abc"
+	}
+	""";
+
 	// H1: a rejected submission (EmailSubmission/set returns the submission in notCreated) must not
 	// leave the staged draft behind — the store must issue an Email/set destroy for the imported
 	// email's id before throwing. Red-first: the unmodified store only throws and never destroys.
@@ -87,6 +121,82 @@ public sealed class JmapMailSubmitTests
 		await Assert.ThrowsAsync<BackendException>(() =>
 			submit.SendAsync(Encoding.ASCII.GetBytes(Mime), CancellationToken.None));
 		Assert.True(destroyedStaged, "the staged draft STAGED1 must be destroyed after a submission failure");
+	}
+
+	// H9: EmailSubmission never gated on urn:ietf:params:jmap:submission before issuing the
+	// request. A server without it rejects the whole batch (RFC 8620 §3.6.1 unknownCapability),
+	// which reaches the caller as an opaque "JMAP POST api failed: 400" — indistinguishable from
+	// any other failure. Red-first: the unmodified store lets the request go out and surfaces
+	// exactly that opaque message; the fix must name the missing capability before the API call.
+	[Fact]
+	public async Task Send_ServerLacksSubmissionCapability_ThrowsNamedError()
+	{
+		StubHandler stub = new(request =>
+		{
+			string path = request.RequestUri!.AbsolutePath;
+			if (path == "/.well-known/jmap")
+				return Json(SessionJsonNoSubmission);
+			if (path.StartsWith("/jmap/upload/", StringComparison.Ordinal))
+				return Json("{\"blobId\":\"blob1\"}");
+			// A real server rejects the whole request outright; this must never be reached once
+			// the store checks the capability first.
+			return new HttpResponseMessage(HttpStatusCode.BadRequest);
+		});
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailSubmit submit = new(client, "sender@example.test", NullLogger.Instance);
+
+		BackendException ex = await Assert.ThrowsAsync<BackendException>(() =>
+			submit.SendAsync(Encoding.ASCII.GetBytes(Mime), CancellationToken.None));
+
+		Assert.Contains("submission", ex.Message, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain("400", ex.Message);
+	}
+
+	// H9: the account id for EmailSubmission/set was taken from primaryAccounts["...:mail"], but
+	// RFC 8621 §7 gives submission its own primaryAccounts entry — on a server where the two
+	// differ, submitting under the mail account fails with accountNotFound. The Email/import call
+	// (a Mail-capability method) must still use the mail account.
+	[Fact]
+	public async Task Send_AccountsDiffer_UsesSubmissionAccountForEmailSubmissionSet()
+	{
+		Dictionary<string, string> accountIdByMethod = new();
+		StubHandler stub = new(request =>
+		{
+			string path = request.RequestUri!.AbsolutePath;
+			if (path == "/.well-known/jmap")
+				return Json(SessionJsonDualAccounts);
+			if (path.StartsWith("/jmap/upload/", StringComparison.Ordinal))
+				return Json("{\"blobId\":\"blob1\"}");
+
+			string body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+			using JsonDocument doc = JsonDocument.Parse(body);
+			List<string> responses = new();
+			foreach (JsonElement call in doc.RootElement.GetProperty("methodCalls").EnumerateArray())
+			{
+				string name = call[0].GetString()!;
+				JsonElement args = call[1];
+				string id = call[2].GetString()!;
+				accountIdByMethod[name] = args.GetProperty("accountId").GetString()!;
+				string argsJson = name switch
+				{
+					"Identity/get" => "\"list\":[{\"id\":\"id1\",\"email\":\"sender@example.test\"}]",
+					"Mailbox/get" => "\"list\":[{\"id\":\"mb1\",\"role\":\"drafts\"}]",
+					"Email/import" => "\"created\":{\"m\":{\"id\":\"STAGED1\"}}",
+					"EmailSubmission/set" => "\"created\":{\"s\":{\"id\":\"sub1\"}}",
+					_ => "\"list\":[]"
+				};
+				responses.Add($"[\"{name}\",{{{argsJson}}},\"{id}\"]");
+			}
+
+			return Json($"{{\"methodResponses\":[{string.Join(",", responses)}],\"sessionState\":\"x\"}}");
+		});
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailSubmit submit = new(client, "sender@example.test", NullLogger.Instance);
+
+		await submit.SendAsync(Encoding.ASCII.GetBytes(Mime), CancellationToken.None);
+
+		Assert.Equal("subAcct", accountIdByMethod["EmailSubmission/set"]);
+		Assert.Equal("mailAcct", accountIdByMethod["Email/import"]);
 	}
 
 	private static HttpResponseMessage Json(string body)
