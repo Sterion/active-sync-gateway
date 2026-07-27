@@ -165,6 +165,83 @@ public sealed class BackendKeyValidatorTests
 		Assert.False(BackendKeyValidator.IsSecretLeaf(registry, effective, "ActiveSync:Backends:MailStore:Folder"));
 	}
 
+	// B5 — a backend-section WRITE is never re-validated against the declared users. Here, a config
+	// user (bob) has NO Oof provider override of his own, only a per-role Settings entry ("Legacy")
+	// that is merged onto whichever provider the GLOBAL Oof role currently names (UserResolver's
+	// "inherit global settings only when the provider is unchanged" rule ties inheritance to the
+	// override, not the value — with no override, the merge always follows the current global
+	// provider). Reassigning the global Oof provider from one that tolerates "Legacy" to one that
+	// rejects it is accepted today by the per-field/per-provider-shape check alone, even though the
+	// user's own merged settings are now invalid under the new provider.
+	[Fact]
+	public void WritingAGlobalProviderChange_ThatBreaksADeclaredUsersMergedSettings_IsRejected()
+	{
+		BackendProviderRegistry registry = new(
+			[new OldOofProvider(), new NewOofProvider()], NullLogger<BackendProviderRegistry>.Instance);
+
+		IConfiguration effective = Config(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:Oof:Provider"] = "old-oof",
+			["ActiveSync:Users:bob:Backends:Oof:Settings:Legacy"] = "1",
+		});
+
+		// Sanity: the configuration as it stands today is valid — old-oof tolerates "Legacy".
+		Assert.Null(BackendKeyValidator.Validate(registry, effective, "ActiveSync:Backends:Oof:Provider", "old-oof"));
+
+		string? error = BackendKeyValidator.Validate(registry, effective, "ActiveSync:Backends:Oof:Provider", "new-oof");
+		Assert.NotNull(error);
+		Assert.Contains("Legacy", error);
+	}
+
+	// The same write must still be accepted for a user who never touches the field the new
+	// provider rejects — the check must not become a blanket "any user exists" refusal.
+	[Fact]
+	public void WritingAGlobalProviderChange_ThatDoesNotAffectAnyDeclaredUser_IsAccepted()
+	{
+		BackendProviderRegistry registry = new(
+			[new OldOofProvider(), new NewOofProvider()], NullLogger<BackendProviderRegistry>.Instance);
+
+		IConfiguration effective = Config(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:Oof:Provider"] = "old-oof",
+			["ActiveSync:Users:bob:Backends:Oof:Settings:Modern"] = "1",
+		});
+
+		Assert.Null(BackendKeyValidator.Validate(registry, effective, "ActiveSync:Backends:Oof:Provider", "new-oof"));
+	}
+
+	/// <summary>Tolerates any settings — the "before" side of the B5 scenario.</summary>
+	private sealed class OldOofProvider : IBackendProvider
+	{
+		public string Name => "old-oof";
+		public IReadOnlySet<BackendRole> SupportedRoles { get; } = new HashSet<BackendRole> { BackendRole.Oof };
+		public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role) => [];
+		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures) { }
+		public string DescribeRole(BackendRole role, ProviderSettings settings) => "old-oof";
+
+		public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct) =>
+			throw new NotSupportedException();
+	}
+
+	/// <summary>Rejects the "Legacy" setting the old provider tolerated — the "after" side.</summary>
+	private sealed class NewOofProvider : IBackendProvider
+	{
+		public string Name => "new-oof";
+		public IReadOnlySet<BackendRole> SupportedRoles { get; } = new HashSet<BackendRole> { BackendRole.Oof };
+		public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role) => [];
+
+		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures)
+		{
+			if (settings.Section["Legacy"] is not null)
+				failures.Add($"new-oof ({role}): Legacy is not supported by new-oof.");
+		}
+
+		public string DescribeRole(BackendRole role, ProviderSettings settings) => "new-oof";
+
+		public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct) =>
+			throw new NotSupportedException();
+	}
+
 	/// <summary>A minimal provider whose only interesting surface is a self-describing schema.</summary>
 	private sealed class SchemaProvider(string name, params BackendRole[] roles) : IBackendProvider
 	{

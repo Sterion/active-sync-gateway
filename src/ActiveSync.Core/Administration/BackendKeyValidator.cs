@@ -1,6 +1,9 @@
+using System.Security.Cryptography;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
+using ActiveSync.Crypto;
 using Microsoft.Extensions.Configuration;
 
 namespace ActiveSync.Core.Administration;
@@ -29,6 +32,23 @@ internal static class BackendKeyValidator
 		    !Enum.TryParse(parts[2], true, out BackendRole role))
 			return null;
 
+		string? shapeError = ValidateShape(registry, effective, role, parts, value);
+		if (shapeError is not null)
+			return shapeError;
+
+		// B5: the shape check above only judges the leaf/provider in isolation — it does not know
+		// that a config-declared user's OWN settings (BackendRoleOverride.Settings, merged onto
+		// whichever provider a role currently names) can become invalid under a NEW provider even
+		// though nothing about the write itself looks wrong. UserResolver.ValidateUsers is the
+		// OTHER thing BackendConfigurationValidator.Validate runs at startup — simulate the write
+		// and surface only failures it NEWLY introduces (same before/after diff shape as
+		// SettingKeys.ValidateStartupImpact).
+		return ValidateAgainstDeclaredUsers(registry, effective, key, value);
+	}
+
+	private static string? ValidateShape(
+		BackendProviderRegistry registry, IConfiguration effective, BackendRole role, string[] parts, string value)
+	{
 		string leaf = string.Join(':', parts[3..]);
 		if (leaf.Equals(BackendRolesConfig.ProviderKey, StringComparison.OrdinalIgnoreCase))
 			return ProviderError(registry, effective, role, value);
@@ -58,6 +78,47 @@ internal static class BackendKeyValidator
 
 		return BackendConfigValidation.CheckValue(field, value)?.Message;
 	}
+
+	/// <summary>
+	///   Simulates the pending write against every config-declared user and reports only the
+	///   failures it introduces — a gateway already sitting on an unrelated invalid user entry must
+	///   not have every unrelated write blocked by it.
+	/// </summary>
+	private static string? ValidateAgainstDeclaredUsers(
+		BackendProviderRegistry registry, IConfiguration effective, string key, string value)
+	{
+		ActiveSyncOptions options = Bind(effective);
+		if (options.Users is not { Count: > 0 })
+			return null; // nothing declared for this write to invalidate
+
+		byte[]? encryptionKey = EncryptionKeyLoader.TryLoadKey(options.Encryption, out _);
+		try
+		{
+			List<string> before = new();
+			UserResolver.ValidateUsers(options, BackendRolesConfig.Load(effective, new List<string>()),
+				registry, encryptionKey, before);
+
+			IConfiguration candidate = new ConfigurationBuilder()
+				.AddConfiguration(effective)
+				.AddInMemoryCollection(new Dictionary<string, string?> { [key] = value })
+				.Build();
+			ActiveSyncOptions candidateOptions = Bind(candidate);
+			List<string> after = new();
+			UserResolver.ValidateUsers(candidateOptions, BackendRolesConfig.Load(candidate, new List<string>()),
+				registry, encryptionKey, after);
+
+			List<string> introduced = after.Where(failure => !before.Contains(failure)).ToList();
+			return introduced.Count > 0 ? string.Join(" ", introduced) : null;
+		}
+		finally
+		{
+			if (encryptionKey is not null)
+				CryptographicOperations.ZeroMemory(encryptionKey);
+		}
+	}
+
+	private static ActiveSyncOptions Bind(IConfiguration config) =>
+		config.GetSection("ActiveSync").Get<ActiveSyncOptions>() ?? new ActiveSyncOptions();
 
 	/// <summary>
 	///   Backend credentials never come from settings — they are RESOLVED per user (the role

@@ -303,7 +303,7 @@ work. Every finding ID appears in exactly one item.
 > provenance it does not carry, which is what makes the freeze invisible. `C4`/`C13` the portal's permission
 > gate and its form are computed from two different views of the user.
 
-**18. Settings validation & catalogue** — ~~`B2`~~ ~~`B4`~~ `B5` `B6` `B7` `B12` `B14` `E8`
+**18. Settings validation & catalogue** — ~~`B2`~~ ~~`B4`~~ ~~`B5`~~ `B6` `B7` `B12` `B14` `E8`
 > `B2` the OIDC admin-claim pair can never be configured through either write surface — both orders are
 > rejected by a substring test. `B4` setting *removal* is validated by nothing, so `unset` can persist a
 > configuration the next start refuses to boot on; `E8` a port collision does the same. `B5` a backend write
@@ -545,3 +545,18 @@ Discovered incidentally while verifying item 11's unit-suite baseline — not ca
 change in item 11 (K5/K6/K7/K21 touch only `GatewayPasswordHasher`, `AuthThrottle`, and the WebUi login
 endpoint). FIX: widen the timeout and/or shorten the tick interval further, or seed a pre-generated
 certificate/key pair so the test does not pay RSA key generation under load.
+
+`N4` **Low** A backend-section REMOVAL is still never re-validated against declared users, even after
+B4/B5 (item 18). B4 gave `SettingKeys.ValidateRemovalImpact` a check against
+`BackendRolesConfig.Load` + each assigned provider's `ValidateConfiguration`, and B5 gave
+`BackendKeyValidator.Validate` (the WRITE path) a check against `UserResolver.ValidateUsers` — but
+`ValidateRemovalImpact`'s own `BackendSectionFailures` helper (`SettingKeys.cs`) does not call
+`UserResolver.ValidateUsers` at all. So `eas config unset ActiveSync:Backends:Oof:Provider` (or the
+web DELETE) while a config user declares `ActiveSync:Users:bob:Backends:Oof:{UserName:…}` is
+accepted — `BackendRolesConfig.Load` treats an absent Oof role as simply "the feature is off" (no
+failure recorded), so the section-only check sees nothing wrong — yet the very scenario B5's own
+prose names ("`eas config set`/`unset` that drops the global Oof role assignment") produces
+`UserResolver`'s `"ActiveSync:Users:bob:Backends:Oof: no global Oof role is configured"` at the next
+boot. FIX: have `ValidateRemovalImpact`'s before/after diff also run `UserResolver.ValidateUsers`
+over the candidate `BackendRolesConfig` (mirroring what B5 added to the write path), the same way it
+already runs `BackendSectionFailures`.
