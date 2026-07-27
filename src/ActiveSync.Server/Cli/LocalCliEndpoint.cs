@@ -51,7 +51,18 @@ internal static class LocalCliEndpoint
 		///   Claims <paramref name="nonce" /> for this execution: true the first time it is seen,
 		///   false for every repeat while the nonce is still within the replay window.
 		/// </summary>
-		public bool TryClaim(string nonce, long nowUnixMs)
+		/// <param name="nonce">The envelope's nonce.</param>
+		/// <param name="envelopeTimestampUnixMs">
+		///   The envelope's OWN <see cref="LocalCliEnvelope.TimestampUnixMs" /> — E11: this used to be
+		///   the receipt clock (<paramref name="nowUnixMs" />), so an envelope received early (within
+		///   <see cref="LocalCliEnvelope.FutureSkewMs" /> of forward clock skew) got its entry pruned
+		///   up to that same skew BEFORE the envelope itself stopped being acceptable under
+		///   <see cref="LocalCliEnvelope.TryOpen(string?, byte[], long, long, out LocalCliEnvelope?, ISet{string}?)" />'s
+		///   own window check — reopening single-use for that gap. Keying the entry on the envelope's
+		///   declared timestamp instead makes the two expiries agree exactly.
+		/// </param>
+		/// <param name="nowUnixMs">The current wall-clock time, used only to prune stale entries.</param>
+		public bool TryClaim(string nonce, long envelopeTimestampUnixMs, long nowUnixMs)
 		{
 			lock (_gate)
 			{
@@ -62,7 +73,7 @@ internal static class LocalCliEndpoint
 
 				if (_seen.ContainsKey(nonce))
 					return false;
-				_seen[nonce] = nowUnixMs;
+				_seen[nonce] = envelopeTimestampUnixMs;
 				return true;
 			}
 		}
@@ -236,7 +247,7 @@ internal static class LocalCliEndpoint
 
 		if (!LocalCliEnvelope.TryOpen(request?.Sealed, key, nowUnixMs, AuthWindowMs, out LocalCliEnvelope? envelope)
 			|| envelope is null
-			|| !replay.TryClaim(envelope.Nonce, nowUnixMs))
+			|| !replay.TryClaim(envelope.Nonce, envelope.TimestampUnixMs, nowUnixMs))
 		{
 			args = [];
 			stdin = "";

@@ -396,6 +396,34 @@ public sealed class CliLocalEndpointTests : IDisposable
 	}
 
 	[Fact]
+	public void ReplayCache_CannotBeReopened_WhenClaimedEarlyByAnEnvelopeReceivedUnderClockSkew()
+	{
+		// E11: TryClaim recorded the CLAIM time (the receipt clock), not the envelope's own
+		// TimestampUnixMs, so an envelope received right at the earliest allowed instant (T minus
+		// the forward clock-skew allowance) had its replay-cache entry pruned up to FutureSkewMs
+		// BEFORE the envelope itself stopped being acceptable under TryOpen's own window check —
+		// reopening single-use for that gap. Claim the envelope at its earliest accepted receipt
+		// time, then replay the identical sealed request still inside the envelope's own 60s
+		// window but past the receipt-clock-keyed retention: it must stay refused.
+		byte[] key = NewKey();
+		long t = 1_000_000_000L;
+		string sealed_ =
+			LocalCliEnvelope.Create(["purge", "user", "alice@example.com", "--yes"], null, t).Seal(key);
+		LocalCliEndpoint.CliRequest request = new(null, null, sealed_);
+		LocalCliEndpoint.ReplayCache replay = new(LocalCliEndpoint.AuthWindowMs);
+
+		long earliestReceipt = t - LocalCliEnvelope.FutureSkewMs;
+		Assert.True(LocalCliEndpoint.TryAuthorize(
+			request, key, allowPlaintext: false, earliestReceipt, replay, out _, out _));
+
+		// Still within the envelope's own acceptance window (t + 58s <= t + AuthWindowMs), but more
+		// than AuthWindowMs after the receipt-clock timestamp the buggy cache keyed its entry on.
+		long replayedAt = t + LocalCliEndpoint.AuthWindowMs - 2_000;
+		Assert.False(LocalCliEndpoint.TryAuthorize(
+			request, key, allowPlaintext: false, replayedAt, replay, out _, out _));
+	}
+
+	[Fact]
 	public void Envelope_RejectsAFutureTimestamp_SoTheWindowIsNotDoubled()
 	{
 		// K54: Math.Abs treated a timestamp 60s in the FUTURE as acceptable as one 60s in the past,
