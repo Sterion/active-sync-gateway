@@ -159,6 +159,11 @@ public sealed partial class SyncHandler
 		List<XElement> serverCommands = new();
 		bool moreAvailable = false;
 		Dictionary<string, string> newSnapshot = snapshot;
+		// F2: set when an Add or Change was skipped this round (its render failed). Backend state
+		// genuinely differs from the (rolled-back) persisted snapshot for that item, so offering this
+		// collection to the long-poll wait would have the watchdog re-check spin against the same
+		// permanently-failing item every interval.
+		bool anyItemSkipped = false;
 
 		if (getChanges)
 		{
@@ -237,7 +242,10 @@ public sealed partial class SyncHandler
 				if (element is not null)
 					serverCommands.Add(element);
 				else
+				{
 					newSnapshot.Remove(add.ServerId); // vanished mid-sync; retry next round
+					anyItemSkipped = true;
+				}
 			}
 
 			foreach (ItemChange change in diff.Changes)
@@ -246,6 +254,18 @@ public sealed partial class SyncHandler
 					AS + "Change", context, folder, store, change.ServerId, bodyPreference, ct, davIds, prefetched);
 				if (element is not null)
 					serverCommands.Add(element);
+				else
+				{
+					// F3/K2: CollectionDiff.Compute already wrote the NEW backend revision into
+					// newSnapshot when it charged this item to the window. Mirror the Add loop above:
+					// revert to the revision the client last acked (or the sentinel that never matches
+					// a real backend revision) so the round does NOT record this Change as delivered —
+					// the next diff must re-offer it, exactly as the contract's null convention promises.
+					newSnapshot[change.ServerId] = snapshot.TryGetValue(change.ServerId, out string? old)
+						? old
+						: ReadOnlyRevertRevision;
+					anyItemSkipped = true;
+				}
 			}
 
 			foreach (string deletedKey in diff.Deletes)
@@ -285,8 +305,12 @@ public sealed partial class SyncHandler
 
 		bool hasPayload = clientResponses.Count > 0 || serverCommands.Count > 0;
 		if (!hasPayload && !snapshotDirty)
-			// Nothing to say for this collection; it is a candidate for the long-poll wait.
-			return new CollectionResult(null, false, new WaitableCollection(collectionElement, folder, store));
+			// Nothing to say for this collection; it is a candidate for the long-poll wait — UNLESS an
+			// item was skipped this round (F2), in which case the backend genuinely still differs from
+			// what's stored and re-waiting would just spin the watchdog against the same permanently-
+			// failing item on every interval.
+			return new CollectionResult(
+				null, false, anyItemSkipped ? null : new WaitableCollection(collectionElement, folder, store));
 
 		state.OptionsJson = collectionOptions.ToJson();
 		int newKey = await context.State.CommitCollectionStateAsync(

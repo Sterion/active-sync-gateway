@@ -41,8 +41,11 @@ public interface IContentStore
 	///   the per-fetch overhead — for IMAP, one session lease + one folder open + one FETCH set
 	///   rather than N of each (F13). The returned map is keyed by item key; a key mapped to
 	///   <c>null</c> (or absent) vanished or could not be fetched and is skipped, exactly as a
-	///   <c>null</c> from <see cref="GetItemAsync" /> is. The DEFAULT implementation loops
-	///   <see cref="GetItemAsync" /> — a per-item failure becomes a <c>null</c> entry so one bad
+	///   <c>null</c> from <see cref="GetItemAsync" /> is. <c>null</c> means "not fetched" — the
+	///   caller MUST NOT advance the persisted snapshot for that item (neither recording it as a
+	///   delivered Add nor recording a Change's new revision), so it is retried on the next Sync
+	///   round instead of being silently and permanently dropped (F3/K2). The DEFAULT implementation
+	///   loops <see cref="GetItemAsync" /> — a per-item failure becomes a <c>null</c> entry so one bad
 	///   item never fails the batch — so existing stores keep working unchanged; a store overrides
 	///   it to batch at the protocol level.
 	/// </summary>

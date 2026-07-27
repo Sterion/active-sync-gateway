@@ -191,7 +191,7 @@ work. Every finding ID appears in exactly one item.
 ## Phase 1 — Data loss, silent corruption, and security
 *The Highs and the Mediums that ride with them. Start here.*
 
-**1. Lost server-to-client changes** [LIVE] — `F3` `F2` `K2`
+**1. Lost server-to-client changes** [LIVE] — ~~`F3`~~ ~~`F2`~~ ~~`K2`~~ **COMPLETE**
 > The single worst family in this round. `F3`: a `Change` whose render fails is recorded in the snapshot as
 > delivered, so the edit **never reaches the phone and no later diff re-offers it** — the sibling `Add` loop
 > three lines above has the rollback this one lacks. `K2` is the same defect stated at the contract
