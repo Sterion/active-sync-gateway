@@ -87,4 +87,28 @@ public class MailConverterMeetingRequestTests
 
 		Assert.Equal("2025-06-01T09:00:00.000Z", mr.Element(Email + "StartTime")!.Value);
 	}
+
+	// D1 — Outlook/Google/Exchange all emit BEGIN:VTIMEZONE before BEGIN:VEVENT, and its
+	// STANDARD/DAYLIGHT subcomponents each carry a bare (no-Z, no-TZID) DTSTART for the 1970
+	// DST transition. Prop() scanned the whole ICS from the top and returned that line instead
+	// of the real VEVENT DTSTART, showing the phone a meeting starting in 1970.
+	[Fact]
+	public void MeetingRequest_LeadingVTimezone_DoesNotShadowVeventDtstart()
+	{
+		string ics =
+			"BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\n" +
+			"BEGIN:VTIMEZONE\r\nTZID:Europe/Copenhagen\r\n" +
+			"BEGIN:DAYLIGHT\r\nDTSTART:19700329T020000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nEND:DAYLIGHT\r\n" +
+			"BEGIN:STANDARD\r\nDTSTART:19701025T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\n" +
+			"END:VTIMEZONE\r\n" +
+			"BEGIN:VEVENT\r\nUID:abc\r\n" +
+			"DTSTART;TZID=Europe/Copenhagen:20250601T090000\r\n" +
+			"DTEND;TZID=Europe/Copenhagen:20250601T100000\r\n" +
+			"SUMMARY:Sync\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+		XElement mr = Convert(MeetingMessage(ics));
+
+		Assert.Equal("2025-06-01T07:00:00.000Z", mr.Element(Email + "StartTime")!.Value);
+		Assert.Equal("2025-06-01T08:00:00.000Z", mr.Element(Email + "EndTime")!.Value);
+	}
 }

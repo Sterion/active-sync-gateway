@@ -217,11 +217,23 @@ public static class MailConverter
 			.Replace("\r\n ", "").Replace("\r\n\t", "")
 			.Replace("\n ", "").Replace("\n\t", "");
 
+		// D1: Outlook/Google/Exchange all emit BEGIN:VTIMEZONE before BEGIN:VEVENT, and its
+		// STANDARD/DAYLIGHT subcomponents each carry a bare (no-Z, no-TZID) DTSTART for the
+		// 1970 DST transition. Scanning the whole ICS from the top let that line be mistaken
+		// for the real VEVENT DTSTART, so restrict every property lookup to the VEVENT block.
+		int veventStart = unfolded.IndexOf("BEGIN:VEVENT", StringComparison.OrdinalIgnoreCase);
+		int veventEnd = veventStart >= 0
+			? unfolded.IndexOf("END:VEVENT", veventStart, StringComparison.OrdinalIgnoreCase)
+			: -1;
+		string scanText = veventStart >= 0 && veventEnd > veventStart
+			? unfolded[veventStart..veventEnd]
+			: unfolded;
+
 		// Returns the property's parameter segment (everything between the name and the first
 		// colon, e.g. ";TZID=Europe/Copenhagen") and its value (after the colon).
 		(string Parameters, string Value)? Prop(string name)
 		{
-			foreach (string rawLine in unfolded.Split('\n'))
+			foreach (string rawLine in scanText.Split('\n'))
 			{
 				string line = rawLine.TrimEnd('\r');
 				if (line.StartsWith(name, StringComparison.OrdinalIgnoreCase) &&
