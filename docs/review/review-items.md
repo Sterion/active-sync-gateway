@@ -199,7 +199,7 @@ work. Every finding ID appears in exactly one item.
 > round fails to render the round never commits, so Ping/Sync hot-loop forever. Touches Contracts — mind the
 > version gate.
 
-**2. Send-once integrity** [LIVE] — ~~`F1`~~ ~~`G4`~~ `F7` `F8` `F9` `F12`
+**2. Send-once integrity** [LIVE] — ~~`F1`~~ ~~`G4`~~ ~~`F7`~~ ~~`F8`~~ ~~`F9`~~ `F12`
 > Every irreversible-send path that lacks a guard. `F1` SendMail/SmartReply/SmartForward ignore
 > `composemail:ClientId`, so a lost 200 duplicates the mail. `G4` the SMTP DATA phase observes
 > `RequestAborted`, so a dropped connection reports failure on an accepted message. `F7` MeetingResponse has

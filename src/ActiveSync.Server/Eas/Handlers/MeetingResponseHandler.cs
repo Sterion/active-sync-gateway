@@ -31,7 +31,13 @@ public sealed class MeetingResponseHandler(
 		{
 			string? requestId = req.Element(MR + "RequestId")?.Value;
 			string? collectionId = req.Element(MR + "CollectionId")?.Value;
-			int userResponse = int.TryParse(req.Element(MR + "UserResponse")?.Value, out int ur) ? ur : 1;
+			// F9: UserResponse is a required child of Request in MS-ASCMD; defaulting a missing or
+			// unparsable value to 1 (Accept) means a client bug or truncated request accepts a
+			// meeting on the user's behalf and tells the organizer so — the most-committing possible
+			// answer to a malformed input. Only 1/2/3 (Accept/Tentative/Decline) are valid.
+			int? parsedUserResponse =
+				int.TryParse(req.Element(MR + "UserResponse")?.Value, out int ur) ? ur : null;
+			string? instanceId = req.Element(MR + "InstanceId")?.Value;
 
 			XElement Result(string status, string? calendarId = null)
 			{
@@ -54,6 +60,26 @@ public sealed class MeetingResponseHandler(
 				}
 
 				if (requestId is null || collectionId is null)
+				{
+					results.Add(Result("2"));
+					continue;
+				}
+
+				// F9: reject rather than silently accept on the user's behalf.
+				if (parsedUserResponse is not (1 or 2 or 3))
+				{
+					results.Add(Result("2"));
+					continue;
+				}
+				int userResponse = parsedUserResponse.Value;
+
+				// F8: an InstanceId scopes the response to ONE occurrence, but RespondToMeetingAsync
+				// (ICalendarOperations) has no occurrence-level entry point — only a whole-series UID.
+				// Silently responding for the whole series (writing PARTSTAT on the master and mailing
+				// the organizer a series-wide REPLY) when the client asked to respond to a single
+				// occurrence would be wrong, and extending the store contract to carry an occurrence is
+				// a Contracts-surface change out of scope here — fail honestly instead.
+				if (instanceId is not null)
 				{
 					results.Add(Result("2"));
 					continue;
@@ -164,7 +190,26 @@ public sealed class MeetingResponseHandler(
 				// failure. A Status 4 here would make the client retry the WHOLE MeetingResponse and the
 				// organizer would receive a SECOND reply (and PARTSTAT would be written twice) — the
 				// "post-send failure must not report failure" rule ComposeMail already follows (F1).
+				//
+				// F7: the client may never see THIS response either (the same lost-200 hazard F1 closes
+				// for ComposeMail) and resend the identical MeetingResponse. "meetingresponse" is a fixed
+				// collection namespace and 0 a fixed generation (this path has no Sync collection/SyncKey
+				// of its own); the key embeds the request's own CollectionId/RequestId/UserResponse so a
+				// resend of the SAME request recognizes itself. A claim that was never marked complete
+				// (SendReplyAsync threw on a prior attempt) is NOT proof the mail went out, so this falls
+				// through and retries rather than silently skipping the reply.
+				string meetingResponseClaimKey = $"meetingresponse:{collectionId}:{requestId}:{userResponse}";
+				if (await context.State.TryClaimSendAsync(
+					    context.Device, "meetingresponse", 0, meetingResponseClaimKey, ct) ==
+				    SendClaimOutcome.AlreadySent)
+				{
+					results.Add(Result("1", calendarId));
+					continue;
+				}
+
 				await SendReplyAsync(context, ics, organizerFallback, subject, userResponse, ct);
+				await context.State.MarkSendCompletedAsync(
+					context.Device, "meetingresponse", 0, meetingResponseClaimKey, ct);
 
 				// Past the send everything is best-effort. Exchange removes the meeting-request mail from
 				// the Inbox after a response (that is why CalendarId points the client at the surviving

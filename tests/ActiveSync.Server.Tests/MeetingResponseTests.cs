@@ -13,7 +13,11 @@ namespace ActiveSync.Server.Tests;
 ///   MeetingResponse (MS-ASCMD 2.2.1.11): a transient backend failure must read as retryable
 ///   status 4, not status 2 "invalid meeting request" (F34); the invitation mail is removed after
 ///   a successful response (F35); a calendar-collection CollectionId reads the event instead of
-///   handing a calendar backend key to the mail store (F33).
+///   handing a calendar backend key to the mail store (F33); a retry after the iTIP REPLY already
+///   went out must not send a second one (F7); an InstanceId (occurrence-scoped response) must not
+///   silently respond for the whole series, since RespondToMeetingAsync has no occurrence-level
+///   entry point (F8); an absent/unparsable UserResponse must not default to the most-committing
+///   answer, Accept (F9).
 /// </summary>
 public sealed class MeetingResponseTests : IDisposable
 {
@@ -52,6 +56,22 @@ public sealed class MeetingResponseTests : IDisposable
 	private static string? StatusOf(XDocument? response)
 	{
 		return response?.Root?.Element(MR + "Result")?.Element(MR + "Status")?.Value;
+	}
+
+	/// <summary>Builds a MeetingResponse Request with full control over UserResponse/InstanceId.</summary>
+	private Task<XDocument?> RunCustomAsync(
+		string requestId, string collectionId, string? userResponse, string? instanceId = null)
+	{
+		XElement request = new(MR + "Request",
+			new XElement(MR + "RequestId", requestId),
+			new XElement(MR + "CollectionId", collectionId));
+		if (userResponse is not null)
+			request.Add(new XElement(MR + "UserResponse", userResponse));
+		if (instanceId is not null)
+			request.Add(new XElement(MR + "InstanceId", instanceId));
+
+		return _harness.RunAsync(NewHandler(), "MeetingResponse",
+			new XDocument(new XElement(MR + "MeetingResponse", request)));
 	}
 
 	// F34 — a backend failure while loading the invite must be status 4 (retryable server error),
@@ -138,6 +158,74 @@ public sealed class MeetingResponseTests : IDisposable
 		// PARTSTAT applied to the request's own calendar, and the iTIP reply went out.
 		Assert.Equal(["caldav:Cal/evt-cal/1"], calendar.Responded);
 		Assert.Single(_harness.Session.Submit.Sent);
+	}
+
+	// F7 — a resent MeetingResponse (the client never saw our response) must not re-send the iTIP
+	// REPLY: the organizer must not receive a second reply for the same request.
+	[Fact]
+	public async Task ResentMeetingResponse_DoesNotSendASecondReply()
+	{
+		string ics =
+			"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:evt-f7\r\n" +
+			"ORGANIZER:mailto:organizer@example.test\r\nSUMMARY:Weekly sync\r\n" +
+			"DTSTART:20260801T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+		EasHandlerHarness.RecordingStore calendar = new()
+		{
+			EasClass = EasClass.Calendar, KeyPrefix = "caldav:", RawEvent = ics, RespondHref = "event-href"
+		};
+		_harness.Session.SecondaryStore = calendar;
+		_harness.Session.Calendar = calendar;
+
+		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
+			new BackendFolder("caldav:Cal", "Calendar", null, EasFolderType.Calendar, EasClass.Calendar));
+		UserFolder calFolder = registry.Single();
+		string serverId = await _harness.Folders.ComposeServerIdAsync(
+			calFolder, calendar, "event-href", CancellationToken.None);
+
+		XDocument? first = await RunCustomAsync(serverId, calFolder.ServerId, "1");
+		Assert.Equal("1", StatusOf(first));
+
+		// The client never saw the first response and resends the IDENTICAL request.
+		XDocument? second = await RunCustomAsync(serverId, calFolder.ServerId, "1");
+		Assert.Equal("1", StatusOf(second));
+
+		// The organizer must receive exactly ONE reply, not one per attempt.
+		Assert.Single(_harness.Session.Submit.Sent);
+	}
+
+	// F8 — RespondToMeetingAsync has no occurrence-level entry point (only a whole-series UID), so
+	// an InstanceId-scoped response must fail rather than silently respond (and mail the organizer)
+	// for the WHOLE series.
+	[Fact]
+	public async Task InstanceIdScopedResponse_FailsInsteadOfRespondingForTheWholeSeries()
+	{
+		UserFolder inbox = await InboxAsync();
+		_harness.Session.Mail.RawMessage = InviteMime("evt-f8", "organizer@example.test");
+
+		XDocument? response = await RunCustomAsync(
+			$"{inbox.ServerId}:42", inbox.ServerId, "3", instanceId: "20260804T100000Z");
+
+		Assert.Equal("2", StatusOf(response));
+		// Neither the PARTSTAT write nor the iTIP reply may happen for an occurrence the gateway
+		// cannot actually target.
+		Assert.Empty(_harness.Session.Submit.Sent);
+	}
+
+	// F9 — an absent/unparsable UserResponse must not default to Accept, the most-committing (and
+	// irreversible-mail-triggering) answer.
+	[Theory]
+	[InlineData(null)] // element omitted entirely
+	[InlineData("bogus")] // present but not an integer
+	[InlineData("9")] // present, parses, but out of the 1/2/3 range
+	public async Task InvalidUserResponse_FailsInsteadOfDefaultingToAccept(string? userResponse)
+	{
+		UserFolder inbox = await InboxAsync();
+		_harness.Session.Mail.RawMessage = InviteMime("evt-f9", "organizer@example.test");
+
+		XDocument? response = await RunCustomAsync($"{inbox.ServerId}:42", inbox.ServerId, userResponse);
+
+		Assert.Equal("2", StatusOf(response));
+		Assert.Empty(_harness.Session.Submit.Sent);
 	}
 
 	private static byte[] InviteMime(string uid, string organizer)
