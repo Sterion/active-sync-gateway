@@ -296,7 +296,7 @@ work. Every finding ID appears in exactly one item.
 ## Phase 2 — The merged user model and the admin surface
 *Mostly drift between the landed db-restructure and what the UI/CLI/validators do with it.*
 
-**17. Merged-view write-back** — ~~`C2`~~ `C4` `C8` `C11` `C12` `C13`
+**17. Merged-view write-back** — ~~`C2`~~ ~~`C4`~~ `C8` `C11` `C12` `C13`
 > `C2` the admin Users editor round-trips the **merged** (config ⊕ db) view back into the database row,
 > freezing every config-supplied field as a permanent override — precisely the trap `db-restructure.md`
 > deviation 2 says was designed out. `C12` the portal does the same. `C8` the API advertises per-field

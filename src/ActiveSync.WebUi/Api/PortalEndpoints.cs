@@ -209,10 +209,16 @@ internal static class PortalEndpoints
 			// non-admin point their own role at any host and collect the credential the gateway
 			// presents there. Only fields the provider marks SelfServiceEditable are writable;
 			// everything else keeps whatever an administrator put on the account.
-			string? effectiveProvider = @override.Provider
-				?? (roles.Assignments.TryGetValue(role, out RoleAssignment? assignment)
-					? assignment.ProviderName
-					: null);
+			//
+			// C4: resolved from the MERGED (config over database) view — exactly what `GET
+			// backends/meta` used to render the form — rather than `@override.Provider` (the
+			// database row alone, via LoadStartingEntryAsync). A provider set only in the user's
+			// own CONFIGURATION override never reaches the database row, so resolving from the row
+			// alone fell back to the global assignment and refused every field the GET had just
+			// rendered as editable.
+			await resolver.EnsureFreshAsync(false, ct);
+			resolver.MergedUsers.TryGetValue(login, out MergedUser? account);
+			string? effectiveProvider = ResolveEffectiveProvider(account, roles, role);
 			HashSet<string> editable = new(
 				SelfServiceFields(registry, effectiveProvider, role).Select(f => f.Name),
 				StringComparer.OrdinalIgnoreCase);
@@ -275,6 +281,27 @@ internal static class PortalEndpoints
 			await resolver.EnsureFreshAsync(true, ct);
 			return Results.Ok(new { login, role = role.ToString() });
 		});
+	}
+
+	/// <summary>
+	///   C4: the single place that decides who serves a role for a user — the user's own provider
+	///   override wins, exactly as <see cref="UserResolver" /> resolves it, else the global role
+	///   assignment. Shared by <c>GET backends/meta</c> (what the form renders) and
+	///   <c>PUT backends/{roleName}</c> (what the save allows), so the two can never disagree about
+	///   which provider — and therefore which fields — are in play. <paramref name="account" /> MUST
+	///   be the MERGED (config over database) view: a user's provider override can live in either
+	///   level, and only the merge sees both.
+	/// </summary>
+	private static string? ResolveEffectiveProvider(MergedUser? account, BackendRolesConfig roles, BackendRole role)
+	{
+		string? provider = null;
+		if (account?.Options.Backends?.TryGetValue(role.ToString(), out BackendRoleOverride? own) == true)
+			provider = own.Provider;
+		if (string.IsNullOrWhiteSpace(provider))
+			provider = roles.Assignments.TryGetValue(role, out RoleAssignment? assignment)
+				? assignment.ProviderName
+				: null;
+		return provider;
 	}
 
 	/// <summary>
