@@ -77,12 +77,26 @@ internal static class UsersEndpoints
 				? effective.Options
 				: await UserEditing.LoadStartingEntryAsync(store, current, login, ct);
 
+			// Fields this DTO does not model are CARRIED FORWARD from the database row, not dropped:
+			// the PUT replaces the row wholesale, so anything the admin screen cannot see would
+			// otherwise be silently destroyed by an unrelated edit — a stored DefaultBackendPassword
+			// (breaking every backend for that user), the OIDC subject binding that stops the login
+			// being claimed by someone else, or the auto-provisioned provenance marker.
+			// Deliberately the DATABASE ROW and not `starting`: `starting` is the db-over-config
+			// merge, and copying a config-supplied value into the row would freeze it there, so
+			// later config edits would stop taking effect (UserEditing: a row is never a copy of
+			// config). A field that lives only in config keeps living only in config.
+			UserOptions? storedRow = await store.GetAsync(login, ct);
 			UserOptions entry = new()
 			{
 				MailAddress = string.IsNullOrWhiteSpace(request.MailAddress) ? null : request.MailAddress.Trim(),
 				Admin = request.Admin == true ? true : null,
 				// Store the disabled flag only when explicitly off; enabled is the default (no flag).
-				Enabled = request.Enabled == false ? false : null
+				Enabled = request.Enabled == false ? false : null,
+				DefaultBackendLogin = storedRow?.DefaultBackendLogin,
+				DefaultBackendPassword = storedRow?.DefaultBackendPassword,
+				OidcSubject = storedRow?.OidcSubject,
+				AutoProvisioned = storedRow?.AutoProvisioned
 			};
 
 			string? gatewayPassword = MergeSecret(request.Password, starting.Password,

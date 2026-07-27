@@ -44,6 +44,41 @@ public sealed class UserLifecycleApiTests
 		return userId;
 	}
 
+	// ---- full-replacement update ----
+
+	[Fact]
+	public async Task Update_PreservesTheFieldsTheAdminScreenCannotSee()
+	{
+		// The PUT replaces the row wholesale from a DTO that does not model every column, so an
+		// edit to something unrelated (here: the mail address) used to silently destroy the rest —
+		// a stored DefaultBackendPassword, breaking every backend for that user; the OIDC subject
+		// binding that stops the login being claimed by someone else; the auto-provisioned marker.
+		await using WebUiHost host = await WebUiHost.StartAsync(Admin());
+		UserStore store = new(host.Factory);
+		await store.UpsertAsync("erin", new UserOptions
+		{
+			Password = "phone-pw",                       // required alongside the backend secret
+			MailAddress = "erin@example.com",
+			DefaultBackendLogin = "backend-erin",
+			DefaultBackendPassword = "backend-secret",
+			OidcSubject = "idp-subject-123",
+			AutoProvisioned = true,
+		}, CancellationToken.None);
+
+		using HttpClient client = await host.SignInAsync("alice", admin: true);
+		HttpResponseMessage response = await client.PutAsJsonAsync(
+			"/admin/api/users/erin", new { mailAddress = "erin.new@example.com" });
+		Assert.True(response.IsSuccessStatusCode, $"update failed: {response.StatusCode}");
+
+		UserOptions? row = await store.GetAsync("erin", CancellationToken.None);
+		Assert.NotNull(row);
+		Assert.Equal("erin.new@example.com", row!.MailAddress);   // the edit landed
+		Assert.Equal("backend-erin", row.DefaultBackendLogin);    // ...and nothing else was lost
+		Assert.Equal("backend-secret", row.DefaultBackendPassword);
+		Assert.Equal("idp-subject-123", row.OidcSubject);
+		Assert.True(row.AutoProvisioned);
+	}
+
 	// ---- rename ----
 
 	[Fact]
