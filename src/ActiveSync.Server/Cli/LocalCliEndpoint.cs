@@ -431,7 +431,11 @@ internal static class LocalCliEndpoint
 				Interactive = InteractionSupport.No,
 				Out = new AnsiConsoleOutput(syncedOut),
 			});
-			captured.Profile.Width = width > 0 ? width : 200;
+			// E18: width is a caller-supplied rendering hint that rides OUTSIDE the sealed envelope
+			// (see the CliRequest doc above) — clamp it rather than trusting it, so an arbitrary or
+			// enormous value from any loopback caller can never drive Spectre's layout with an
+			// unbounded width inside this long-lived process.
+			captured.Profile.Width = width is > 0 and <= 1000 ? width : 200;
 			captured.Profile.Height = 100;
 			// Static AnsiConsole.* helpers write here; commands that take an injected IAnsiConsole
 			// get the same instance via CapturingRegistrar (Spectre's DEFAULT registrar caches the

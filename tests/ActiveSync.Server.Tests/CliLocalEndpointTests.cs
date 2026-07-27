@@ -301,6 +301,60 @@ public sealed class CliLocalEndpointTests : IDisposable
 		Assert.False(LocalCliEndpoint.IsLoopback(IPAddress.Parse("10.0.0.1")));
 	}
 
+	// E18 — COVERAGE, NOT PROOF. The finding's concern is that an unclamped, caller-supplied `width`
+	// reaches Spectre's layout engine unbounded, and "at worst" could drive an expensive allocation
+	// inside the long-lived gateway. Tried end-to-end first: driving every actual /cli command this
+	// tree exposes (via ExecuteAsync) with width values from 1 up to int.MaxValue produced no
+	// measurable time or memory difference and no exception — none of today's commands render a
+	// construct (Table.Expand(), Grid, Rule, Canvas) whose COST is driven by Profile.Width, only ones
+	// sized to their own content. So the described symptom cannot be exhibited through this app's
+	// current command surface, and there is nothing to watch fail red on unmodified code. What CAN be
+	// shown is the underlying mechanism: a Spectre construct that genuinely sizes itself to the full
+	// profile width (a horizontal Rule is the simplest — it draws exactly Profile.Width characters)
+	// turns an unclamped caller-supplied width directly into proportional output. This reproduces that
+	// mechanism standalone, under the exact assignment RunCapturedAsync used before the fix
+	// (`width > 0 ? width : 200`, with no upper bound) versus the fixed one
+	// (`width is > 0 and <= 1000 ? width : 200`), so the clamp is proven correct even though no
+	// current in-repo command can be driven to reproduce the allocation itself.
+	[Fact]
+	public void UnfixedWidthExpression_LetsAnUnboundedCallerValue_DriveRuleOutputProportionally()
+	{
+		int attackerWidth = 200_000;
+		StringWriter sw = new();
+		IAnsiConsole console = AnsiConsole.Create(new AnsiConsoleSettings
+		{
+			Ansi = AnsiSupport.No, ColorSystem = ColorSystemSupport.NoColors, Interactive = InteractionSupport.No,
+			Out = new AnsiConsoleOutput(sw),
+		});
+		// The UNFIXED expression from LocalCliEndpoint.RunCapturedAsync before E18.
+		console.Profile.Width = attackerWidth > 0 ? attackerWidth : 200;
+		console.Write(new Rule());
+
+		Assert.True(sw.ToString().Length > 100_000,
+			$"expected the unclamped width ({attackerWidth}) to drive Rule's output size " +
+			$"proportionally; got {sw.ToString().Length} chars");
+	}
+
+	[Fact]
+	public void FixedWidthExpression_BoundsRuleOutput_ForAnyCallerSuppliedValue()
+	{
+		// The FIXED expression (E18): whatever the caller sends, Profile.Width never exceeds 1000.
+		foreach (int attackerWidth in new[] { 200_000, int.MaxValue - 1, -7, 0, 1 })
+		{
+			StringWriter sw = new();
+			IAnsiConsole console = AnsiConsole.Create(new AnsiConsoleSettings
+			{
+				Ansi = AnsiSupport.No, ColorSystem = ColorSystemSupport.NoColors, Interactive = InteractionSupport.No,
+				Out = new AnsiConsoleOutput(sw),
+			});
+			console.Profile.Width = attackerWidth is > 0 and <= 1000 ? attackerWidth : 200;
+			console.Write(new Rule());
+
+			Assert.True(sw.ToString().Length <= 1100,
+				$"width={attackerWidth} produced {sw.ToString().Length} chars — the clamp must bound it");
+		}
+	}
+
 	/* ---- Envelope auth: proof of the master key, so a keyless co-located caller is refused ------ */
 
 	private static byte[] NewKey() => RandomNumberGenerator.GetBytes(32);

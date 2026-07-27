@@ -324,7 +324,7 @@ work. Every finding ID appears in exactly one item.
 > time. `E6` bare `eas` inside a running container reports the gateway is not running. `E7` four startup
 > awaits ignore `ApplicationStopping`. `E10` `eas help` does not work when forwarded.
 
-**21. `/cli` endpoint hardening** — ~~`E3`~~ ~~`E11`~~ `E18` `E19` `E20`
+**21. `/cli` endpoint hardening** — ~~`E3`~~ ~~`E11`~~ ~~`E18`~~ `E19` `E20`
 > `E3` the body — up to 64 MB — is deserialized **before** the loopback pre-filter, and the 415/400 it
 > produces is an existence oracle that defeats the documented "404 so the endpoint is invisible". `E11` a
 > replay-cache entry can expire before the envelope it protects. `E18` an unvalidated caller-supplied render
