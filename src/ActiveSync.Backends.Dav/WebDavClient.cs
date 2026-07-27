@@ -149,15 +149,31 @@ public sealed class WebDavClient : IDisposable
 		// created though it was; instead treat it as success and let the caller (CreateItemAsync ->
 		// ResolveStoredHrefAsync, which re-reads the collection) adopt the stored href/ETag.
 		// Servers disagree on the status for a failed If-None-Match:*: Stalwart answers 412
-		// Precondition Failed (RFC 7232), Axigen answers 409 Conflict — accept both. An update-PUT
-		// uses If-Match, so its 412/409 (a real ETag conflict / lost update) still surfaces below;
-		// this reinterpretation is gated on ifNoneMatch (create-only). (H18)
-		if (ifNoneMatch &&
-			response.StatusCode is HttpStatusCode.PreconditionFailed or HttpStatusCode.Conflict)
+		// Precondition Failed (RFC 7232) — unambiguously the If-* precondition itself, so no further
+		// check is needed. An update-PUT uses If-Match, so its 412 (a real ETag conflict / lost
+		// update) still surfaces below; this reinterpretation is gated on ifNoneMatch (create-only).
+		// (H18)
+		if (ifNoneMatch && response.StatusCode is HttpStatusCode.PreconditionFailed)
 		{
 			_wireLogger?.LogDebug(
 				"DAV create-PUT {Href} returned {Status} (already exists — a replayed create); treating as success",
 				href, (int)response.StatusCode);
+			return null;
+		}
+
+		// Axigen answers the identical replayed-create condition with 409 Conflict instead of 412.
+		// Unlike 412, RFC 4918 §9.7.1 defines 409 on PUT as "the parent collection does not exist" —
+		// it is NOT inherently "already exists", so blindly reinterpreting every create-PUT 409 as
+		// success (as H18 originally did) hid a genuine failure: a collection deleted/renamed
+		// server-side while the session was cached. Narrow it: only accept the replay reading when a
+		// GET confirms the target is actually there (H10).
+		if (ifNoneMatch && response.StatusCode is HttpStatusCode.Conflict &&
+			await GetAsync(href, ct).ConfigureAwait(false) is not null)
+		{
+			_wireLogger?.LogDebug(
+				"DAV create-PUT {Href} returned 409 Conflict and the target exists (a replayed create); " +
+				"treating as success",
+				href);
 			return null;
 		}
 

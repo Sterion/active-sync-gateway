@@ -157,16 +157,53 @@ public sealed class WebDavClientTests
 	}
 
 	// H18: a create-PUT (If-None-Match:*) whose response was lost gets replayed by the transient
-	// retry and lands on the resource it just created. Stalwart signals "already exists" with 412;
-	// Axigen signals the identical condition with 409 Conflict. Both must be treated as success (the
-	// create landed) so a replay never tells the client the item was not stored. The 409 arm was the
-	// gap that failed the Axigen CI leg (DavCreatePutReplayTests) while Stalwart stayed green.
-	[Theory]
-	[InlineData(HttpStatusCode.PreconditionFailed)] // 412 — Stalwart
-	[InlineData(HttpStatusCode.Conflict)]           // 409 — Axigen
-	public async Task CreatePut_WhenServerReportsAlreadyExists_IsTreatedAsSuccess(HttpStatusCode status)
+	// retry and lands on the resource it just created. Stalwart signals "already exists" with 412 —
+	// RFC 7232 ties 412 unambiguously to the If-* precondition itself, so it is treated as success
+	// with no further check needed (unlike 409 below, which is a genuine RFC 4918 conflict code and
+	// gets narrowed by H10).
+	[Fact]
+	public async Task CreatePut_WhenServerReports412AlreadyExists_IsTreatedAsSuccess()
 	{
-		RecordingHandler stub = new(_ => new HttpResponseMessage(status));
+		RecordingHandler stub = new(_ => new HttpResponseMessage(HttpStatusCode.PreconditionFailed));
+		using WebDavClient client = new(Base, new HttpClient(stub));
+
+		string? etag = await client.PutAsync(
+			"/dav/cal/replayed.ics", "BODY", "text/calendar", etag: null, ifNoneMatch: true,
+			CancellationToken.None);
+
+		Assert.Null(etag); // success sentinel — caller re-resolves the stored href/ETag
+	}
+
+	// H10: RFC 4918 §9.7.1 defines 409 Conflict on PUT as "the parent collection does not exist" —
+	// NOT "already exists" the way 412 does. Axigen answers a replayed create-PUT with 409 rather
+	// than 412 (the case H18 above widened for), but blindly treating EVERY create-PUT 409 as
+	// success (the old, unnarrowed H18 fix) hid a genuine failure: a collection deleted/renamed
+	// server-side while the session was cached. The gateway would report Sync Add Status 1,
+	// ResolveStoredHrefAsync could never find the item, and the snapshot's phantom entry gets
+	// deleted by the very next diff — the create the client was told succeeded silently vanishes. A
+	// 409 must only be treated as success once the target is confirmed actually present.
+	[Fact]
+	public async Task CreatePut_When409AndTargetNotPresent_ThrowsInsteadOfSilentlySucceeding()
+	{
+		RecordingHandler stub = new(request => request.Method == HttpMethod.Put
+			? new HttpResponseMessage(HttpStatusCode.Conflict)
+			: new HttpResponseMessage(HttpStatusCode.NotFound)); // the verifying GET: truly not there
+		using WebDavClient client = new(Base, new HttpClient(stub));
+
+		await Assert.ThrowsAsync<ActiveSync.Contracts.BackendException>(() =>
+			client.PutAsync("/dav/cal/gone.ics", "BODY", "text/calendar", etag: null, ifNoneMatch: true,
+				CancellationToken.None));
+	}
+
+	// H10 (continued): when the verifying GET confirms the target really is present, the 409 IS a
+	// safe replay (Axigen's genuine "already exists" signal) and must still be treated as success —
+	// this is the case H18 exists for and must keep working.
+	[Fact]
+	public async Task CreatePut_When409AndTargetPresent_IsTreatedAsSuccess()
+	{
+		RecordingHandler stub = new(request => request.Method == HttpMethod.Put
+			? new HttpResponseMessage(HttpStatusCode.Conflict)
+			: Ok("BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")); // the verifying GET: it's really there
 		using WebDavClient client = new(Base, new HttpClient(stub));
 
 		string? etag = await client.PutAsync(
