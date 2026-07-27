@@ -311,3 +311,43 @@ the "can I show it cannot need a live run?" case `fix-review.md` says to resolve
 - `A10` clears the static observer **only if it is still the exact delegate this factory installed**, so a
   disposed factory cannot clobber a live one's gauge. That is the finding's own preferred wording, and the
   test verifies delegate-target identity by reflection rather than just "not null".
+
+## Item 9 — TLS certificate lifecycle
+**Findings:** `K1` `K11` `K13` `K18`
+**Commits:** `273c1a0` (K1) · `a09218b` (K11) · `ab1cf3a` (K13) · `14dab2b` (K18)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 10 ✓ · one commit per finding ✓ · strike shipped with each ✓ · scope confined to the two
+Core/Security files, `ProgramServer.cs`, one new service file and three test files ✓ · build 0 warnings ✓ ·
+unit **1318 passed, 0 skipped** (Cli 16 · Protocol 91 · Core 805 · WebUi 101 · Server 305) ✓
+**Live suite run although item 9 is NOT marked [LIVE]:** **141 passed, 0 skipped**. K1 rewires
+`ConfigureHosting` and Kestrel's `ServerCertificateSelector` — a hosting-path change, so the unit suites
+cannot speak to the assembled listener.
+**Red-first re-proved independently:** the two Core/Security files reverted to `473fdd7` → **2 failures**
+(`LoadExternal_NotYetValidCertificate_ThrowsInsteadOfLoadingSilently` for K11,
+`GenuineDatabaseFailure_WithNoWinnerRowWritten_SurfacesTheOriginalError` for K18) and K13's test **green**,
+confirming its declared coverage-not-proof status.
+**Notes:**
+- **`K1`'s red-first is a compile failure, not a runtime assertion — a real departure, disclosed by the
+  worker, and I accept it here.** The fix is an entirely new type (`TlsCertificateRenewalService`), so on
+  unmodified code the test cannot fail *at runtime*; there was no seam to fail against, which is precisely
+  the defect. What matters is that the test pins the finding's own symptom behaviourally:
+  `NearExpiryCertificate_IsRenewedOnATick_AndTheHolderIsSwapped` seeds a near-expiry certificate, ticks the
+  service, and asserts the holder now carries a **different thumbprint** with validity beyond 300 days.
+  That is the property K1 says was missing. The protocol's purpose — preventing a test shaped by the fix or
+  a faked revert — is met by ordinary TDD ordering here.
+- **`K1` is deliberately scoped to self-signed serving.** An operator-supplied `Tls:CertificatePath` makes
+  the service no-op entirely, because AGENTS.md documents external certs as restart-tier ("a rotated mount
+  takes effect on restart"). So this closes the "gateway with >367 days uptime serves an expired leaf" case
+  for the *generated* certificate only; an operator whose mounted cert expires in place still needs a
+  restart. Correct per the docs, but it is half the space of "TLS certificate lifecycle".
+- **New always-on background service and a detached task.** The renewal loop runs daily whenever TLS is on
+  with no `CertificatePath`, and the previous certificate is disposed by a fire-and-forget
+  `Task.Delay(30 s)` continuation deliberately *not* tied to the stopping token (so a shutdown cannot
+  dispose a certificate a lingering handshake is still reading). Both are reasonable; both are new
+  process-lifetime behaviour that did not exist before.
+- **`K18` improves a diagnostic, it does not change the happy or race path.** A genuine DB failure during
+  certificate storage now surfaces the original `DbUpdateException` wrapped with context instead of
+  `InvalidOperationException("Sequence contains no elements")`. Worth knowing if any operator tooling
+  matched on that old message.
+- `K13` is unprovable by construction — there is no external handle on the pre-fix anonymous buffer to
+  assert it was wiped. Struck on the fix's merit, matching the file's existing K9 coverage precedent.
