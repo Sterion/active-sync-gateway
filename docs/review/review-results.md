@@ -165,3 +165,34 @@ per finding (`CreateItem_WhenListingLagsThePut_VerifiesPutHrefDirectly_WithoutSc
   not theirs. It passed in every one of my own full-suite runs. The test deliberately provokes a concurrent-
   write corruption, so intermittency is plausible by design — but a suite that fails ~1-in-N obscures real
   regressions for every later item. Worth a human deciding whether to make it deterministic.
+
+## Item 5 — JMAP listing & submission integrity [LIVE]
+**Findings:** `H3` `H18` `H8` `H9`
+**Commits:** `a30c2eb` (H3, H18 — tight cluster: one `while` loop, shared state variables; the whole commit
+was read against both IDs) · `41d9a8d` (H8) · `6d766d5` (H9)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 6 ✓ · strike shipped inside all three fix commits ✓ · scope confined to `JmapMailStore.cs`,
+`JmapMailSubmit.cs` and their two test files ✓ · build 0 warnings ✓ · unit **1295 passed, 0 skipped**
+(Cli 16 · Protocol 91 · Core 785 · WebUi 101 · Server 302) ✓ · live **141 passed, 0 skipped** ✓
+**Red-first re-proved independently:** both source files reverted to `4dda8af` → 5 failures, exactly the 5
+new tests (`GetItemRevisions_QueryStateChangesMidEnumeration_RecoversTheShiftedItem`,
+`GetItemRevisions_ServerNeverAdvancesPosition_Terminates`, `SaveToSent_DoesNotRequestTheBlobCapability`,
+`Send_ServerLacksSubmissionCapability_ThrowsNamedError`,
+`Send_AccountsDiffer_UsesSubmissionAccountForEmailSubmissionSet`), 8 pre-existing tests still green.
+**Notes:**
+- **H3's restart is bounded at 3 attempts, then falls back to the best-effort map — the old behaviour.** On
+  a mailbox mutating faster than one enumeration completes, the partial-map hazard the finding describes
+  therefore still exists; it is narrowed, not eliminated. That is the finding's own instruction ("bounded to
+  2–3 attempts, then fall back"). The alternative it also offers — `anchor`/`anchorOffset` paging, which is
+  stable under concurrent mutation rather than merely retried — would close it properly and was not taken.
+- **H18's warning log was not added.** The finding asks to `break` "logging once at Warning"; the break is
+  implemented, the log is not. A server that ignores `position` now terminates the loop silently, so the
+  condition is invisible in operation. Trivial to add, worth doing if anyone touches this loop again.
+- **`N2` filed, and it is the honest edge of H9.** `Identity/get` still runs under the mail account while
+  `EmailSubmission/set` now runs under the submission account; RFC 8621 §7.1 puts `Identity` under the
+  submission capability too. The worker deliberately did not widen past H9's literal remedy — correct call
+  under step 8 — but on a server where the two primary accounts differ, H9 is only half fixed. `N2` is
+  unassigned to any queue item.
+- H8 and H9 have no behaviour change on a compliant server (Stalwart advertises blob and uses one account
+  for both, which is exactly why CI never caught either). Their value only appears on servers the test
+  matrix does not include — so the live suite's green is consistency evidence, not proof of the fix.
