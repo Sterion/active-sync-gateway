@@ -1,5 +1,6 @@
 using System.Net;
 using ActiveSync.Integration.Tests.Infrastructure;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace ActiveSync.Integration.Tests.Scenarios;
@@ -66,5 +67,38 @@ public sealed class MetricsTests(GatewayFixture gateway)
 
 		using HttpResponseMessage health = await http.GetAsync("/healthz");
 		Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+	}
+
+	// ---------- E1: the dedicated metrics listener must serve ONLY /metrics ----------
+
+	[Fact]
+	public async Task DedicatedMetricsPort_AnswersOnlyMetrics_EverythingElseIs404()
+	{
+		// No mail backend needed: the leak is at the pipeline level, not the content.
+		const int metricsPort = 19273;
+		await using WebApplicationFactory<Program> factory = gateway.CreateUnconfiguredFactory(
+			new Dictionary<string, string?>
+			{
+				["ActiveSync:Metrics:Enabled"] = "true",
+				["ActiveSync:Metrics:Port"] = metricsPort.ToString(),
+			});
+
+		// TestServer never binds a real socket, so the "dedicated port" is simulated by stamping
+		// Connection.LocalPort on every request before it enters the pipeline — exactly the value
+		// Kestrel's real listener would report for a connection accepted on that port.
+		using HttpMessageHandler handler = factory.Server.CreateHandler(
+			context => context.Connection.LocalPort = metricsPort);
+		using HttpClient client = new(handler) { BaseAddress = factory.Server.BaseAddress };
+
+		using HttpResponseMessage metrics = await client.GetAsync("/metrics");
+		Assert.Equal(HttpStatusCode.OK, metrics.StatusCode);
+
+		// The leak: on unmodified code these answer normally (200/401/400) instead of 404, so the
+		// metrics port also serves liveness and the EAS Basic-auth surface in plaintext.
+		using HttpResponseMessage healthz = await client.GetAsync("/healthz");
+		Assert.Equal(HttpStatusCode.NotFound, healthz.StatusCode);
+
+		using HttpResponseMessage eas = await client.GetAsync("/Microsoft-Server-ActiveSync");
+		Assert.Equal(HttpStatusCode.NotFound, eas.StatusCode);
 	}
 }

@@ -97,6 +97,14 @@ public partial class Program
 		// render stack traces and request headers to an unauthenticated caller.
 		app.UseUnhandledExceptionShield();
 
+		// E1: give the dedicated metrics listener its own filter BEFORE anything else runs, so a
+		// request arriving on that port for any path but /metrics never reaches the scheme
+		// correction, EAS auth, or the WebUi — the port filter added below only ever gated the
+		// Prometheus endpoint itself, leaving every other endpoint reachable in plaintext on
+		// whatever port an operator opens to a monitoring network.
+		if (options.Metrics is { Enabled: true, Port: { } metricsPortFilter })
+			app.UseMetricsPortFilter(metricsPortFilter);
+
 		// Correct the request scheme (behind a TLS-terminating proxy the gateway is hit on
 		// HTTP), so every downstream absolute URL — notably the OIDC redirect_uri — is https.
 		app.UsePublicScheme();

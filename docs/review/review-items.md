@@ -274,7 +274,7 @@ work. Every finding ID appears in exactly one item.
 > replica. `B11` a throwing subscriber is mislogged as a refresh failure and aborts the remaining handlers.
 > `B17` an `ActiveSync:Users` edit in a reloadable file lands at an arbitrary unrelated moment.
 
-**14. Metrics listener exposure & tier** — `E1` `E2` `B3`
+**14. Metrics listener exposure & tier** — ~~`E1`~~ `E2` `B3`
 > `E1` the dedicated metrics listener serves the **entire application** — opening `Metrics:Port` to a
 > monitoring network also exposes `/admin`, `/user` and the EAS endpoint over cleartext HTTP. `E2`/`B3` are
 > one defect found from both sides: `Metrics:PerUser` is catalogued and documented as live-tier but is read

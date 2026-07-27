@@ -174,6 +174,42 @@ public static class WebApplicationExtensions
 	}
 
 	/// <summary>
+	///   E1: when a dedicated metrics listener is configured, every path other than <c>/metrics</c>
+	///   answers 404 on that listener's port — otherwise the plain-HTTP metrics port an operator
+	///   opens to a monitoring network also serves the EAS Basic-auth surface and the admin/user
+	///   portals, since <c>EasEndpoint.Map</c>/<c>AutodiscoverEndpoint.Map</c>/<c>MapWebUi</c>/
+	///   <c>/cli</c> are all mapped globally with no listener restriction of their own. Registered
+	///   before anything else in the pipeline (right after the exception shield) so it terminates
+	///   the request ahead of every endpoint mapped further down, and mirrors the inverse check the
+	///   Prometheus endpoint filter already applies (<c>Connection.LocalPort == metricsPort</c>).
+	/// </summary>
+	public static WebApplication UseMetricsPortFilter(this WebApplication app, int metricsPort)
+	{
+		app.Use(async (context, next) =>
+		{
+			if (IsBlockedOnMetricsPort(metricsPort, context))
+			{
+				context.Response.StatusCode = StatusCodes.Status404NotFound;
+				return;
+			}
+
+			await next();
+		});
+		return app;
+	}
+
+	/// <summary>
+	///   True when the request arrived on the dedicated metrics port for any path other than
+	///   <c>/metrics</c> itself. Extracted from <see cref="UseMetricsPortFilter" /> so the decision
+	///   is unit-testable without standing up a full pipeline.
+	/// </summary>
+	internal static bool IsBlockedOnMetricsPort(int metricsPort, HttpContext context)
+	{
+		return context.Connection.LocalPort == metricsPort &&
+		       !context.Request.Path.StartsWithSegments("/metrics");
+	}
+
+	/// <summary>
 	///   Adds <c>X-Content-Type-Options: nosniff</c> to every response. Attachments are served
 	///   with the Content-Type declared inside the (untrusted) email, so browsers must not
 	///   second-guess content types.
