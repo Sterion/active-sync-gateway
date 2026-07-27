@@ -225,7 +225,20 @@ public sealed class CliLocalEndpointTests : IDisposable
 			foreach (Thread th in pool) th.Start();
 			foreach (Thread th in pool) th.Join();
 
-			corrupted = caught is not null || outWriter.ToString().Length != expectedLength;
+			// A torn StringBuilder can throw from ToString() itself (observed:
+			// ArgumentOutOfRangeException out of StringBuilder.ToString) rather than merely returning a
+			// short buffer — the race corrupts the chunk pointers, not just the content. That throw IS
+			// the corruption this test is looking for, so treat it as the positive signal instead of
+			// letting it escape as a spurious failure; leaking it made this test flake ~1-in-N and
+			// obscured real regressions for every later item.
+			try
+			{
+				corrupted = caught is not null || outWriter.ToString().Length != expectedLength;
+			}
+			catch (Exception)
+			{
+				corrupted = true;
+			}
 		}
 
 		Assert.True(corrupted,

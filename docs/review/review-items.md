@@ -533,7 +533,9 @@ left as `AccountAsync` (mail) for both calls in the batch rather than widened wi
 FIX: route `Identity/get` through `SubmissionAccountAsync` alongside `EmailSubmission/set`, keeping
 `Mailbox/get` on the mail account.
 
-`N3` **Low** `TlsCertificateRenewalServiceTests.NearExpiryCertificate_IsRenewedOnATick_AndTheHolderIsSwapped`
+~~`N3`~~ **Low — FIXED** (see the resolution note at the end of this entry; the mechanism recorded below is
+**wrong**, and the FIX it proposes would not have worked).
+`TlsCertificateRenewalServiceTests.NearExpiryCertificate_IsRenewedOnATick_AndTheHolderIsSwapped`
 (`tests/ActiveSync.Server.Tests/TlsCertificateRenewalServiceTests.cs:71`, landed under item 9's K1) is
 flaky under a full parallel unit-suite run — observed failing ~1 run in 8 of `dotnet test ActiveSync.slnx
 --filter "Category!=Integration"`, but green every time (5+ runs) when run in isolation
@@ -545,6 +547,19 @@ Discovered incidentally while verifying item 11's unit-suite baseline — not ca
 change in item 11 (K5/K6/K7/K21 touch only `GatewayPasswordHasher`, `AuthThrottle`, and the WebUi login
 endpoint). FIX: widen the timeout and/or shorten the tick interval further, or seed a pre-generated
 certificate/key pair so the test does not pay RSA key generation under load.
+**RESOLUTION (fixed — the diagnosis above is superseded).** The failure was never the 5-second budget: it
+is a **use-after-dispose**. `TlsCertificateRenewalService.DisposeAfterGraceAsync` frees the PREVIOUS
+certificate once the grace period elapses (20 ms in the test, 30 s in production), and the test kept
+reading `stale.Thumbprint` afterwards — in the poll predicate AND in the assertion — so both had to run
+inside a 20 ms window to win the race, and under parallel load they often did not. It surfaced as
+`CryptographicException: m_safeCertContext is an invalid handle` from `GetCertHashString()`, not as a
+timeout. Item 13's results entry had already named this mechanism and noted it superseded this finding;
+this entry's own text was never corrected, so the wrong FIX (widen the timeout) stayed on the record.
+The test now captures the thumbprint as a `string` BEFORE the service starts, so nothing touches a handle
+the service is entitled to close — the race is eliminated structurally, not made less likely. The timeout
+was widened to 30 s as well, which costs nothing (the wait returns as soon as the swap is observed) and
+covers `N3`'s original RSA-under-load theory in case it was ever a second contributor. **Production is
+untouched** — the grace-period disposal is correct, and it is what the 30 s window exists to bound.
 
 `N4` **Low** A backend-section REMOVAL is still never re-validated against declared users, even after
 B4/B5 (item 18). B4 gave `SettingKeys.ValidateRemovalImpact` a check against

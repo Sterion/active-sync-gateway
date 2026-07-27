@@ -1076,5 +1076,58 @@ unit **1409 passed, 0 skipped** ✓ · live **144 passed, 0 skipped** on a clean
   commit-shaped — interleaving the two builds flipped the result entirely, so it tracks machine load.
   Both items' suites were green on re-run. **Someone should correct `N3`'s text**; a fix aimed at the
   timeout will not stop this.
+  *Correction, added after the run:* this mechanism was **not** newly found here — item 13's entry had
+  already named it (`m_safeCertContext`, grace-period disposal) and said it superseded `N3`. What this run
+  added is a third and fourth recurrence, and the observation that `N3`'s own text in `review-items.md` had
+  never been corrected, so the wrong FIX stayed on the record. Both are now fixed — see the flaky-test
+  entry below.
 - **The cursor rests at item 23** (`F13` `F14` `F15` `F16` `F17` `F18` `F23` `F27`) — `[LIVE]`, and the
   first item of Phase 3. A natural seam: a fresh orchestrator should take it.
+
+## Out-of-queue — the two flaky tests, fixed
+**Not a queue item.** Requested directly after the items 21–22 run. Test-only: **no `src/` file is
+touched**, and both production races the tests provoke are correct as they stand.
+
+**Commit:** `<this commit>` (both tests)
+
+**1. `TlsCertificateRenewalServiceTests.NearExpiryCertificate_IsRenewedOnATick_AndTheHolderIsSwapped`**
+— the `N3` / item-13 flake, recurring in both of this run's items.
+
+`TlsCertificateRenewalService.DisposeAfterGraceAsync` frees the PREVIOUS certificate once the grace period
+elapses (20 ms in the test, 30 s in production). The test kept reading `stale.Thumbprint` afterwards, in
+**two** places — the poll predicate and the assertion — so both had to complete inside a 20 ms window to
+win the race. Under parallel load they often did not, and it surfaced as `CryptographicException:
+m_safeCertContext is an invalid handle`. The test now captures the thumbprint as a `string` before the
+service is constructed, so nothing touches a handle the service owns; the timeout also went 5 s → 30 s,
+which costs nothing (the wait returns as soon as the swap is observed) and covers `N3`'s original
+RSA-under-load theory in case it was ever a second contributor.
+
+**This is a structural elimination, not a widened window** — verified by grep that the only access to
+`stale` now precedes `StartAsync`. That distinction is the whole point: widening the timeout, which is what
+`N3` proposed, would not have fixed a use-after-dispose at all.
+
+**2. `CliLocalEndpointTests.UnfixedPattern_TwoIndependentWrappersOverOneStringWriter_CorruptsUnderConcurrentWrites`**
+— the flake carried forward from item 4's entry ("worth a human deciding whether to make it deterministic").
+
+The test deliberately provokes a data race over a shared `StringWriter` and asserts corruption occurred. But
+the race corrupts the `StringBuilder`'s chunk pointers, not just its content, so `ToString()` can **throw**
+(`ArgumentOutOfRangeException`) instead of returning a short buffer — and that throw escaped as a test
+failure even though it is precisely the corruption the test is hunting for. It now catches it and records
+it as the positive signal.
+
+**Verification:** build 0 warnings · full unit suite **4/4 runs green at 1409 passed, 0 skipped** · both
+tests looped **10× under concurrent load** (three full unit suites running in parallel as the load
+generator) → **0 failures**. For comparison, the TLS test failed the first full unit run of *both* items
+earlier in the same session, on the same machine.
+
+**Notes:**
+- **Neither fix weakens an assertion.** The TLS test still compares thumbprints and still requires the
+  renewed certificate to outlive 300 days; the CLI test still requires corruption to be observed within 10
+  attempts. The changes are to what the tests *read*, not to what they prove.
+- **`N3` is struck in `review-items.md`** with a RESOLUTION note, because its recorded mechanism was wrong
+  and its FIX would not have worked. The original text is preserved rather than rewritten — it is the
+  historical record of what was believed — with the correction appended. `N3` has no queue line, so the
+  invariants are unaffected: items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓
+- **The second test was never filed as a finding**, only mentioned in item 4's notes. It is fixed here, so
+  nothing needs filing now — but it is worth knowing that a flake can live for eighteen items in a notes
+  paragraph without ever becoming a tracked item.
