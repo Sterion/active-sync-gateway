@@ -1,7 +1,9 @@
+using ActiveSync.Backends.Sieve;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
+using ActiveSync.Core.Settings;
 using ActiveSync.Core.State;
 using ActiveSync.Crypto;
 using Microsoft.Data.Sqlite;
@@ -190,6 +192,68 @@ public sealed class UserFieldResolutionTests : IDisposable
 		// A user with no declaration at all is pass-through and inherits it too.
 		Assert.Equal("imap.moved",
 			MailSettings(resolver.Resolve(new BackendCredentials("undeclared", "pw"))).Section["Host"]);
+	}
+
+	[Fact]
+	public async Task LiveBackendsEditInvalidatingAConfigUser_DoesNotFreezeDatabaseUserPickup()
+	{
+		// B1: a config-declared user ("u") overrides the Oof role and inherits the global sieve
+		// provider — valid at construction. A LIVE `ActiveSync:Backends` edit then removes the
+		// global Oof role (an `eas config unset`), which BackendRolesProvider applies (Oof is
+		// optional, so the edit is itself shape-valid) and propagates through OnRolesChanged —
+		// already guarded (B6) — leaving u's Oof override unable to inherit a provider.
+		//
+		// The bug: EnsureFreshAsync's OWN BuildSnapshot call has no equivalent guard. The very next
+		// completely unrelated database user pickup (an `eas user set bob`) re-runs BuildSnapshot
+		// with the now-broken roles, which throws for "u" (config users are strict) — the exception
+		// escapes to EnsureFreshAsync's outer catch, which never advances _lastStamp/_snapshot. So
+		// "bob" never appears, and neither will any later database change: every subsequent poll
+		// re-throws the same way, forever, until restart.
+		BackendProviderRegistry registry = new(
+		[
+			new ActiveSync.Backends.Imap.ImapBackendProvider(
+				TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
+			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
+			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!),
+			new SieveBackendProvider(NullLoggerFactory.Instance),
+		], NullLogger<BackendProviderRegistry>.Instance);
+
+		DbSettingsConfigurationSource dbSource = new();
+		dbSource.Provider.SetData(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:Oof:Provider"] = "sieve",
+			["ActiveSync:Backends:Oof:Host"] = "sieve.global",
+		});
+		IConfigurationRoot root = new ConfigurationBuilder()
+			.AddInMemoryCollection(new Dictionary<string, string?>
+			{
+				["ActiveSync:Backends:MailStore:Provider"] = "imap",
+				["ActiveSync:Backends:MailStore:Host"] = "imap.global",
+				["ActiveSync:Backends:MailSubmit:Provider"] = "smtp",
+				["ActiveSync:Backends:MailSubmit:Host"] = "smtp.global",
+			})
+			.Add(dbSource)
+			.Build();
+		BackendRolesProvider rolesProvider = new(root, registry);
+
+		ActiveSyncOptions options = Options();
+		options.Users = new Dictionary<string, UserOptions>
+		{
+			["u"] = new() { Backends = new Dictionary<string, BackendRoleOverride> { ["Oof"] = new() } },
+		};
+		UserResolver resolver = new(TestOptionsMonitor.Of(options), rolesProvider, registry, _store);
+		Assert.Contains("u", resolver.MergedUsers.Keys);
+
+		// Live edit: remove the global Oof role. u's override can no longer inherit a provider.
+		dbSource.Provider.SetData(new Dictionary<string, string?>());
+
+		// A wholly unrelated database change — must still reach every replica within
+		// Auth:UsersRefreshSeconds (db-restructure.md invariant 4).
+		await _store.UpsertAsync("bob", new UserOptions(), CancellationToken.None);
+		await resolver.EnsureFreshAsync(true, CancellationToken.None);
+
+		Assert.Contains("bob", resolver.MergedUsers.Keys); // database pickup must not freeze
+		Assert.True(resolver.MergedUsers["u"].Invalid);    // the bad config user is refused, not fatal
 	}
 
 	[Fact]

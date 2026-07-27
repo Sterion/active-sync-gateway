@@ -108,8 +108,10 @@ public sealed class UserResolver
 		_store = store;
 		_logger = logger;
 		// Config-only snapshot first; database entries arrive with the first EnsureFreshAsync
-		// (the server forces one right after migrations, before any request).
-		_snapshot = BuildSnapshot(_options.CurrentValue, _rolesProvider.Current, _registry, null, logger);
+		// (the server forces one right after migrations, before any request). Strict: startup
+		// validation (ValidateUsers) already rejected a bad config entry before the host ever
+		// reaches here, so a throw here is a last-resort safety net, not the common case.
+		_snapshot = BuildSnapshot(_options.CurrentValue, _rolesProvider.Current, _registry, null, logger, strict: true);
 		// A live backend-settings change (eas config set Backends:...) rebuilds the snapshot so
 		// declared users pick up the new global role settings; pass-through reads Current directly.
 		_rolesProvider.Changed += OnRolesChanged;
@@ -170,7 +172,11 @@ public sealed class UserResolver
 				lock (_snapshotSwapLock)
 				{
 					_lastDbUsers = dbUsers;
-					built = BuildSnapshot(_options.CurrentValue, _rolesProvider.Current, _registry, dbUsers, _logger);
+					// B1: non-strict — a config user invalidated since startup (typically by a live
+					// Backends edit removing a role it inherited from) must not throw here and abort
+					// this and every later database-user rebuild. See BuildSnapshot's `strict` doc.
+					built = BuildSnapshot(
+						_options.CurrentValue, _rolesProvider.Current, _registry, dbUsers, _logger, strict: false);
 					_snapshot = built;
 					_lastStamp = stamp;
 					Interlocked.Increment(ref _snapshotVersion);
@@ -213,17 +219,19 @@ public sealed class UserResolver
 		{
 			try
 			{
+				// B1/B6: non-strict — a live backend edit can newly invalidate a config user's merge
+				// (a role it inherited from just disappeared); BuildSnapshot now marks that entry
+				// Invalid instead of throwing (see its `strict` doc), so this rebuild — and every
+				// following EnsureFreshAsync rebuild — keeps working for every OTHER user. The
+				// try/catch stays as defence in depth against a genuinely unexpected failure (e.g. the
+				// encryption key vanishing under a live edit), which must still keep the previous
+				// snapshot rather than propagate through this Changed handler and out of the settings
+				// reload that fired it (mislogged as a settings-refresh failure).
 				rebuilt = BuildSnapshot(
-					_options.CurrentValue, _rolesProvider.Current, _registry, _lastDbUsers, _logger);
+					_options.CurrentValue, _rolesProvider.Current, _registry, _lastDbUsers, _logger, strict: false);
 			}
 			catch (Exception ex)
 			{
-				// B6: config entries are treated as strict (startup already validated them), but a LIVE
-				// backend edit can newly invalidate a config user's merge — and BuildSnapshot then throws.
-				// Left uncaught the throw escaped through this Changed handler and out of the settings
-				// reload that fired it, mislogged as a settings-refresh failure, and left the snapshot
-				// stale forever (the roles provider had already committed the new signature, so it never
-				// fired again). Keep the previous (last-good) snapshot and log against the resolver.
 				_logger?.LogWarning(ex,
 					"Backend configuration change left one or more declared users invalid; " +
 					"keeping the previous account snapshot until the configuration is corrected");
@@ -371,14 +379,26 @@ public sealed class UserResolver
 	/// <summary>
 	///   Compiles the immutable snapshot, resolving each user PER FIELD across the two user
 	///   levels — database over configuration (<see cref="UserMerge" />) — before compiling the
-	///   result against the global role sections. A config-only user is strict (invalid config
-	///   already failed startup validation; direct construction throws); anything a database
-	///   declaration contributed is lenient — an invalid merge is kept visible but refused, so a
-	///   bad row written by an older/newer CLI can never take authentication down.
+	///   result against the global role sections.
+	///   <para>
+	///     <paramref name="strict" /> governs a CONFIG-only failure (nothing from the database
+	///     contributed to this entry): when true it is collected and the whole build throws, which
+	///     is correct only while config is known-valid — the constructor's very first build, right
+	///     after <c>ValidateUsers</c> already passed at startup. Every LATER rebuild
+	///     (<see cref="EnsureFreshAsync" />, <see cref="OnRolesChanged" />) passes false: a config
+	///     entry that validated at startup can be invalidated later by nothing the operator touched
+	///     in <c>ActiveSync:Users</c> itself — a LIVE <c>ActiveSync:Backends</c> edit removing a role
+	///     it inherited from (B1) — and a config user is otherwise ordinary input at that point, not
+	///     a startup precondition. Strict would make ONE stale config entry throw out of every
+	///     later rebuild, including ones with nothing to do with it — freezing database user pickup
+	///     (disables, new accounts, everything) until restart. Non-strict instead marks it Invalid,
+	///     exactly like a bad database row (B3): visible, refused, and no longer fatal to anyone else's
+	///     refresh.
+	///   </para>
 	/// </summary>
 	private static Snapshot BuildSnapshot(
 		ActiveSyncOptions options, BackendRolesConfig roles, BackendProviderRegistry registry,
-		Dictionary<string, UserOptions>? dbUsers, ILogger? logger)
+		Dictionary<string, UserOptions>? dbUsers, ILogger? logger, bool strict)
 	{
 		Dictionary<string, UserTemplate> templates = new(StringComparer.OrdinalIgnoreCase);
 		Dictionary<string, MergedUser> merged = new(StringComparer.OrdinalIgnoreCase);
@@ -430,31 +450,35 @@ public sealed class UserResolver
 					continue;
 				}
 
-				if (!fromDatabase)
+				if (!fromDatabase && strict)
 				{
-					// Pure config: startup validation already rejected these, so reaching here means
-					// direct construction (tests). Collect and throw, as before.
+					// Pure config, strict build: startup validation already rejected these, so
+					// reaching here means direct construction (tests) or the constructor's first
+					// build. Collect and throw, as before.
 					configOnlyFailures.AddRange(failures);
 					continue;
 				}
 
-				// B3: fail closed. Skipping the entry left NO template, so Resolve degraded to
-				// pass-through (presented credentials forwarded verbatim, the overrides discarded)
-				// and — with no merged entry — IsLoginDisabled UN-disabled an Enabled=false user.
-				// Register an invalid sentinel that refuses resolution and keep the entry in the
-				// merged view: operators still see it, and IsLoginDisabled still honours
-				// Enabled==false (evaluated on the merged values, before validation), while the
-				// login is refused until the declaration is corrected.
+				// B1/B3: fail closed rather than fatal. Skipping the entry left NO template, so
+				// Resolve degraded to pass-through (presented credentials forwarded verbatim, the
+				// overrides discarded) and — with no merged entry — IsLoginDisabled UN-disabled an
+				// Enabled=false user. Register an invalid sentinel that refuses resolution and keep
+				// the entry in the merged view: operators still see it, and IsLoginDisabled still
+				// honours Enabled==false (evaluated on the merged values, before validation), while
+				// the login is refused until the declaration is corrected. A non-strict rebuild
+				// treats a config-only failure exactly the same way a database one always was — the
+				// bad entry no longer aborts every OTHER user's rebuild (B1: a config user invalidated
+				// by a later live Backends edit must not freeze database user pickup).
 				logger?.LogWarning(
-					"Refusing invalid database account entry for {User} (fail-closed) until corrected: {Failures}",
-					login, string.Join("; ", failures));
+					"Refusing invalid {Source} account entry for {User} (fail-closed) until corrected: {Failures}",
+					fromDatabase ? "database" : "config", login, string.Join("; ", failures));
 				templates[login] = new UserTemplate(
 					null, null, new Dictionary<BackendRole, RoleTemplate>(), Invalid: true);
 				merged[login] = new MergedUser(
-					effective.Options, true, shadows, Invalid: true, effective.Sources);
+					effective.Options, fromDatabase, shadows, Invalid: true, effective.Sources);
 			}
 
-			if (configOnlyFailures.Count > 0)
+			if (strict && configOnlyFailures.Count > 0)
 				throw new InvalidOperationException(string.Join(Environment.NewLine, configOnlyFailures));
 		}
 		finally
