@@ -12,6 +12,7 @@ using ActiveSync.Core.Settings;
 using ActiveSync.Crypto;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Core.Tests;
 
@@ -762,6 +763,64 @@ public class UserResolverTests
 
 		Assert.Null(ex);                              // the throw must not escape the reload
 		Assert.Contains("u", resolver.MergedUsers.Keys); // previous snapshot kept
+	}
+
+	[Fact]
+	public void LiveUsersFileEdit_TakesEffectImmediately_NotAtAnUnrelatedLaterMoment()
+	{
+		// B17: ActiveSyncOptions.UsersFile is loaded with reloadOnChange:false (a restart is required
+		// to pick up its own edits), but appsettings.json — where ActiveSync:Users can equally be
+		// declared — reloads live by default. That live edit used to mutate
+		// _options.CurrentValue.Users immediately while UserResolver kept resolving against the OLD
+		// compiled snapshot until some UNRELATED trigger (a "users" DB-stamp poll or a Backends edit)
+		// happened to rebuild it — landing on an arbitrary later request instead of "restart to
+		// change" (the documented contract) or "takes effect live" (what actually happened to the
+		// bound option). FIX: subscribe to IOptionsMonitor.OnChange and rebuild as soon as the
+		// ActiveSync:Users subtree itself moves (mirroring BackendRolesProvider's Signature idiom), so
+		// the edit takes effect on ITS OWN, with nothing else required.
+		Dictionary<string, string?> config = BaseConfig();
+		IConfigurationRoot root = new ConfigurationBuilder().AddInMemoryCollection(config).Build();
+		FiringOptionsMonitor<ActiveSyncOptions> monitor = new(HostOptions());
+		UserResolver resolver = new(monitor, new BackendRolesProvider(root), Registry(), config: root);
+
+		Assert.DoesNotContain("phone", resolver.MergedUsers.Keys);
+
+		// The live file edit: a new ActiveSync:Users:phone entry appears in the reloadable config...
+		root["ActiveSync:Users:phone:Password"] = "phone-secret";
+		// ...and the real IOptionsMonitor<ActiveSyncOptions> (simulated here) recomputes and fires.
+		ActiveSyncOptions updated = HostOptions();
+		updated.Users = new Dictionary<string, UserOptions> { ["phone"] = new() { Password = "phone-secret" } };
+		monitor.Set(updated);
+
+		// No EnsureFreshAsync, no Backends edit, no other trigger — the Users edit must be visible now.
+		Assert.Contains("phone", resolver.MergedUsers.Keys);
+	}
+
+	/// <summary>
+	///   Unlike <see cref="TestOptionsMonitor" />'s fixed monitor, this one actually invokes its
+	///   registered listeners on <see cref="Set" /> — needed to exercise a consumer's OnChange
+	///   subscription (B17).
+	/// </summary>
+	private sealed class FiringOptionsMonitor<T>(T initial) : IOptionsMonitor<T>
+	{
+		private T _value = initial;
+		private readonly List<Action<T, string?>> _listeners = new();
+
+		public T CurrentValue => _value;
+		public T Get(string? name) => _value;
+
+		public IDisposable? OnChange(Action<T, string?> listener)
+		{
+			_listeners.Add(listener);
+			return null;
+		}
+
+		public void Set(T value)
+		{
+			_value = value;
+			foreach (Action<T, string?> listener in _listeners.ToArray())
+				listener(value, null);
+		}
 	}
 
 	[Fact]

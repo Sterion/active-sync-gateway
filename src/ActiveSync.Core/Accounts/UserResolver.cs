@@ -63,6 +63,15 @@ public sealed class UserResolver
 	private readonly BackendProviderRegistry _registry;
 	private readonly UserStore? _store;
 	private readonly ILogger<UserResolver>? _logger;
+	// B17: optional — only the host's real DI graph supplies IConfiguration; most tests construct
+	// this class directly and never touch ActiveSync:Users through a reloadable file, so the live
+	// re-check below is simply inert (never subscribed) when null.
+	private readonly IConfiguration? _config;
+	// Guards the SAME thing _signature guards in BackendRolesProvider: changes exactly when the
+	// ActiveSync:Users subtree does, so an IOptionsMonitor recompute triggered by an unrelated key
+	// (anywhere else in the reloadable file) is a no-op instead of a wasted rebuild. Only ever read
+	// and written inside _snapshotSwapLock (OnUsersConfigChanged), so it needs no volatile.
+	private string? _usersSignature;
 	private readonly SemaphoreSlim _refreshGate = new(1, 1);
 	private readonly Settings.ChangeStampRefreshGate _gate = new();
 	// B4: serializes the BUILD-AND-SWAP of _snapshot between the two independent writers —
@@ -100,13 +109,15 @@ public sealed class UserResolver
 		BackendRolesProvider rolesProvider,
 		BackendProviderRegistry registry,
 		UserStore? store = null,
-		ILogger<UserResolver>? logger = null)
+		ILogger<UserResolver>? logger = null,
+		IConfiguration? config = null)
 	{
 		_options = options;
 		_rolesProvider = rolesProvider;
 		_registry = registry;
 		_store = store;
 		_logger = logger;
+		_config = config;
 		// Config-only snapshot first; database entries arrive with the first EnsureFreshAsync
 		// (the server forces one right after migrations, before any request). Strict: startup
 		// validation (ValidateUsers) already rejected a bad config entry before the host ever
@@ -115,6 +126,18 @@ public sealed class UserResolver
 		// A live backend-settings change (eas config set Backends:...) rebuilds the snapshot so
 		// declared users pick up the new global role settings; pass-through reads Current directly.
 		_rolesProvider.Changed += OnRolesChanged;
+		// B17: ActiveSync:Users can be declared in a RELOADABLE file (appsettings.json — reload is on
+		// by default) even though UsersFile itself loads with reloadOnChange:false. Without this, an
+		// edit there mutated _options.CurrentValue.Users immediately but the compiled snapshot kept
+		// resolving against the OLD one until some UNRELATED trigger (a "users" DB-stamp poll, a
+		// Backends edit) happened to rebuild it — landing at an arbitrary later moment instead of
+		// either documented contract ("restart to change" or "takes effect live"). Subscribe so the
+		// edit takes effect on ITS OWN, as soon as the Users subtree itself moves.
+		if (_config is not null)
+		{
+			_usersSignature = UsersSignature(_config);
+			_options.OnChange((_, _) => OnUsersConfigChanged());
+		}
 	}
 
 	/// <summary>The global role assignments (for banners, readiness probes and the CLI).</summary>
@@ -185,24 +208,7 @@ public sealed class UserResolver
 				_logger?.LogInformation(
 					"Accounts snapshot rebuilt: {Count} declared user(s) ({Db} from database)",
 					built.Users.Count, built.Users.Count(u => u.Value.FromDatabase));
-				// B11: invoke each subscriber independently rather than `SnapshotChanged?.Invoke()`. A
-				// bare multicast Invoke stops at the first throwing handler — silently skipping every
-				// subscriber registered after it (e.g. BackendSessionFactory's auth-cache clear) — and
-				// because this call sits inside the outer try/catch below, a throw here escaped to the
-				// generic failure branch: mislogged an already-applied rebuild as "could not refresh"
-				// and skipped the `_refreshErrorLogged = false` reset just below, permanently
-				// suppressing the warning for the next GENUINE failure.
-				foreach (Delegate handler in SnapshotChanged?.GetInvocationList() ?? [])
-					try
-					{
-						((Action)handler)();
-					}
-					catch (Exception ex) when (ex is not OperationCanceledException)
-					{
-						_logger?.LogWarning(ex,
-							"A SnapshotChanged subscriber threw; the accounts snapshot was still updated and " +
-							"the remaining subscribers still ran");
-					}
+				RaiseSnapshotChanged();
 			}
 
 			_refreshErrorLogged = false;
@@ -259,8 +265,99 @@ public sealed class UserResolver
 			Interlocked.Increment(ref _snapshotVersion);
 		}
 
-		SnapshotChanged?.Invoke();
+		// B11: same isolation as EnsureFreshAsync's rebuild — see RaiseSnapshotChanged.
+		RaiseSnapshotChanged();
 	}
+
+	/// <summary>
+	///   B17: reacts to a live <see cref="IOptionsMonitor{TOptions}" /> recompute — most commonly
+	///   an appsettings.json reload wholly unrelated to <c>ActiveSync:Users</c> — and rebuilds the
+	///   snapshot ONLY when the Users subtree itself moved (the <see cref="UsersSignature" />
+	///   idiom, mirroring <see cref="BackendRolesProvider" />'s <c>Signature</c>), so a live edit
+	///   there takes effect on its own instead of waiting for the next unrelated database poll or
+	///   Backends edit to happen to rebuild the snapshot.
+	/// </summary>
+	private void OnUsersConfigChanged()
+	{
+		if (_config is null)
+			return;
+
+		Snapshot rebuilt;
+		int userCount;
+		lock (_snapshotSwapLock)
+		{
+			// Re-check inside the lock: another OnChange firing (IOptionsMonitor can call back more
+			// than once per reload) or a concurrent EnsureFreshAsync/OnRolesChanged rebuild may
+			// already have observed and applied this exact Users text.
+			string signature = UsersSignature(_config);
+			if (signature == _usersSignature)
+				return;
+
+			try
+			{
+				// B1: non-strict for the same reason as EnsureFreshAsync/OnRolesChanged — a config
+				// user THIS very edit invalidates must be refused (Invalid), not fatal to everyone
+				// else's rebuild.
+				rebuilt = BuildSnapshot(
+					_options.CurrentValue, _rolesProvider.Current, _registry, _lastDbUsers, _logger,
+					strict: false);
+			}
+			catch (Exception ex)
+			{
+				_logger?.LogWarning(ex,
+					"A live ActiveSync:Users configuration change could not be applied; keeping the " +
+					"previous account snapshot until it is corrected");
+				return;
+			}
+
+			_usersSignature = signature;
+			_snapshot = rebuilt;
+			userCount = rebuilt.Users.Count;
+			Interlocked.Increment(ref _snapshotVersion);
+		}
+
+		_logger?.LogInformation(
+			"Accounts snapshot rebuilt from a live ActiveSync:Users configuration change: " +
+			"{Count} declared user(s)", userCount);
+		RaiseSnapshotChanged();
+	}
+
+	/// <summary>
+	///   B11: invokes each <see cref="SnapshotChanged" /> subscriber independently rather than a
+	///   bare <c>SnapshotChanged?.Invoke()</c>. A multicast <see cref="Delegate.Invoke" /> stops at
+	///   the first throwing handler — silently skipping every subscriber registered after it (e.g.
+	///   <c>BackendSessionFactory</c>'s auth-cache clear) — and, called from inside
+	///   <see cref="EnsureFreshAsync" />'s outer try/catch, a throw here used to escape to the
+	///   generic failure branch: mislogging an already-applied rebuild as "could not refresh" and
+	///   skipping the <c>_refreshErrorLogged = false</c> reset that follows, permanently
+	///   suppressing the warning for the next GENUINELY different failure.
+	/// </summary>
+	private void RaiseSnapshotChanged()
+	{
+		foreach (Delegate handler in SnapshotChanged?.GetInvocationList() ?? [])
+			try
+			{
+				((Action)handler)();
+			}
+			catch (Exception ex) when (ex is not OperationCanceledException)
+			{
+				_logger?.LogWarning(ex,
+					"A SnapshotChanged subscriber threw; the accounts snapshot was still updated and " +
+					"the remaining subscribers still ran");
+			}
+	}
+
+	/// <summary>
+	///   Flattened, sorted <c>ActiveSync:Users</c> subtree — changes exactly when a declared user
+	///   does. Mirrors <see cref="BackendRolesProvider" />'s private <c>Signature</c> so an
+	///   IOptionsMonitor recompute triggered by an edit ELSEWHERE in the same reloadable file is a
+	///   no-op here instead of a wasted rebuild.
+	/// </summary>
+	private static string UsersSignature(IConfiguration config) =>
+		string.Join("\n", config.GetSection("ActiveSync:Users").AsEnumerable(true)
+			.Where(pair => pair.Value is not null)
+			.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+			.Select(pair => $"{pair.Key}={pair.Value}"));
 
 	/// <summary>
 	///   Local gateway-password verdict, or null when only a backend login probe can decide.
