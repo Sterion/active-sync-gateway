@@ -769,3 +769,68 @@ pre-existing green. `C11` is documentation-only and correctly has no test.
   cookie one free resolver refresh on its first post-login request, which hides the stale-snapshot bug
   entirely in a naive harness. The test spends that refresh on a warm-up request first. A future test in
   this area that "passes" without doing so proves nothing.
+
+## Item 18 — Settings validation & catalogue
+**Findings:** `B2` `B4` `B5` `B6` `B7` `B12` `B14` `E8`
+**Commits:** `bc7d1ba` (B2) · `02417f5` (B4) · `39774d6` (B5) · `083e7a5` (B6) · `583fec7` (B7) ·
+`0b7f2e5` (B12) · `21c9461` (B14) · `19709f7` (E8) · **`9b2b2ed` (scoped repair of B7 — see below)**
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 19 ✓ · one commit per finding, strike shipped with each ✓ · build 0 warnings ✓ ·
+unit **1385 passed, 0 skipped** (Cli 16 · Protocol 99 · Core 841 · WebUi 115 · Server 314) ✓ ·
+live **143 passed, 0 skipped** on a clean volume ✓
+
+### ⚠ THIS ITEM SHIPPED A REGRESSION. The worker declined the live suite; the live suite is what caught it.
+The worker's reasoning for skipping was that nothing touches "a migration, an HTTP handler/DTO, or
+auth/cookie policy". I ran it anyway, because `B12` can now **abort startup** and the integration suite is
+the only thing that actually boots the host. It came back **141 passed / 2 failed**:
+`WebUiBackendsApiTests.StoredSecretsAreNeverEchoed` (expected `"***"`, got `null`) and
+`Save_ElidesTheProvidersOwnDefault` (expected `"db"`, got `null`).
+
+**Established whose failure it was rather than assuming** — item 18 modified no integration test
+(`git diff --name-only` over `tests/ActiveSync.Integration.Tests/` is empty), and reverting only `src/` to
+item 17's HEAD made both pass (10/10). Bisected within the item: **green at `083e7a5` (B6), red at
+`583fec7` (B7)**.
+
+**Root cause:** `BackendsEndpoints.DbLeafs` derives a role's leaf name by stripping the role prefix off the
+**raw stored key**. Once `B7` normalized `GlobalSetting.Key` to lowercase on write, any leaf whose *only*
+source is the database surfaced as `password`/`forcefrom` instead of `Password`/`ForceFrom`, and the API's
+case-sensitive callers found nothing. Leaves that also exist in the config file kept their canonical casing
+from the case-insensitive merge, which is why only two tests broke — a partial failure that is easy to
+misread as a flake.
+
+**Repair (`9b2b2ed`, spawned as a scoped subagent — the orchestrator does not author fixes):** restores
+canonical casing at the display layer in `BackendsEndpoints.Describe()` for every field the provider's
+schema declares, plus the two blanket credential leaves `Password`/`UserName`. Verified independently that
+it touches **only** `BackendsEndpoints.cs` — `GlobalSettingStore` is untouched, so B7's normalization and
+sargable equality lookups are fully preserved — and that it did not touch `review-items.md` (B7's strike
+was already correctly landed with its own fix; the repair is not a new finding).
+
+**Residual from the repair, worth knowing:** casing is restored only for schema-declared fields and
+`Password`/`UserName`. A key that **no schema claims** — the "Advanced" section AGENTS.md says must survive
+full-replacement PUTs — will still round-trip to lowercase. That is cosmetic rather than lossy (the value
+is preserved and `IConfiguration` binding is case-insensitive), but an operator who types `MyCustomKey`
+will see `mycustomkey` afterwards.
+
+**Red-first re-proved independently for 6 of 8:** reverting `src/` → `WritingAdminClaimAlone_IsNotRejectedByTheOtherKeysFailure`
+(B2), `DeletingABackendBaseUrl_ThatWouldBreakTheNextStart_IsRejected` (B4),
+`WritingAGlobalProviderChange_ThatBreaksADeclaredUsersMergedSettings_IsRejected` (B5),
+`TrustedProxies_IndexedElement_IsSettableThroughTheCatalogue` ×2 (B6), four B7 tests, and
+`AGlobalPasswordLeaf_FromAConfigFile_FailsStartup_EvenThoughItNeverWentThroughAWriteSurface` (B12) all fail.
+**`B14` and `E8` could not be re-proved independently** — both their tests live in
+`ActiveSyncOptionsValidatorTests.cs`, and their sources also carry `B4`'s and `E8`'s new APIs, so every
+selective revert breaks the test assembly's compilation. Judged by diff instead: B14's three literals
+(65535, 3650, 86400) are the catalogue's own, and E8's check correctly gates on whether each listener is
+actually enabled. Same limitation as `K6` (item 11) and `B17` (item 13).
+**Notes:**
+- **`B12` is a new hard startup failure.** A gateway whose config file carries an inert
+  `Backends:<Role>:Password`/`UserName` now refuses to boot. The finding offers "a startup **failure** (or
+  at minimum a Warning)" and standing context prefers breaking changes, so this is sanctioned — but it will
+  stop an existing deployment that has one of those keys lying around, and the key was previously a silent
+  no-op.
+- **`B7` changes stored key casing.** Rows are now written lowercase; three pre-existing tests were updated
+  to match. Combined with the repair above, the display casing operators see is reconstructed rather than
+  stored — so the canonical name now comes from the provider schema, not from what was typed.
+- **`N4` filed, and it is an honest admission of a gap this item leaves.** `B5` added user-impact
+  re-validation to the *write* path only; the **unset** path still validates only the role's own schema, so
+  the "drops the Oof role" scenario B5's own prose describes is still reachable via `eas config unset`. The
+  worker split it that way because each finding's fix text is write-scoped. Unassigned to any queue item.
