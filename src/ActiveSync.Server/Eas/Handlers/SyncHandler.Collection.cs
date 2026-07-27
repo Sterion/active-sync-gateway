@@ -313,9 +313,24 @@ public sealed partial class SyncHandler
 				null, false, anyItemSkipped ? null : new WaitableCollection(collectionElement, folder, store));
 
 		state.OptionsJson = collectionOptions.ToJson();
-		int newKey = await context.State.CommitCollectionStateAsync(
-			state, newSnapshot, collectionOptions.FilterType, validation, ct,
-			ledger.AppliedAdds, ledger.AppliedChanges);
+		int newKey;
+		try
+		{
+			newKey = await context.State.CommitCollectionStateAsync(
+				state, newSnapshot, collectionOptions.FilterType, validation, ct,
+				ledger.AppliedAdds, ledger.AppliedChanges);
+		}
+		catch (BackendException ex)
+		{
+			// F16: a pipelined sibling request already won the commit race on this collection's
+			// CollectionState row. This must not escape as an unhandled exception (an HTTP 500 that
+			// discards every OTHER collection's already-computed response in the same request) —
+			// FolderModifyHandlerBase and FolderSyncHandler both catch this exact exception and
+			// answer a status; Sync did not. The client keeps its current key and retries.
+			logger.LogWarning(ex, "Concurrent sync commit for {CollectionId}; asking the client to retry",
+				collectionId);
+			return new CollectionResult(Error("5"), true, null);
+		}
 
 		XElement response = new(AS + "Collection",
 			new XElement(AS + "SyncKey", newKey.ToString()),
