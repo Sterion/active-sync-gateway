@@ -332,8 +332,20 @@ internal static class BackendsEndpoints
 		HashSet<string> secrets = new(StringComparer.OrdinalIgnoreCase);
 		if (providerName is not null && Resolve(registry, providerName, role, out _) is { } resolved)
 			foreach (BackendConfigField field in resolved.DescribeConfiguration(role))
+			{
 				if (field.Type == BackendFieldType.Secret)
 					secrets.Add(field.Name);
+				RestoreCanonicalCasing(leafs, field.Name);
+			}
+
+		// B7 normalizes GlobalSetting.Key to lowercase on write (sargable PK lookups), so a leaf
+		// whose ONLY source is the database now surfaces under the row's stored lowercase case —
+		// e.g. "password" instead of "Password" — rather than the case it was saved under, which
+		// the UI and this API's own callers key on case-sensitively. The provider schema fields are
+		// restored above; "Password"/"UserName" are the two blanket leaf names recognized (and
+		// masked, see IsSecret below) even for a provider that describes neither — restore those too.
+		RestoreCanonicalCasing(leafs, "Password");
+		RestoreCanonicalCasing(leafs, "UserName");
 
 		return new RoleDto(
 			role.ToString(), providerName, provider.Source ?? "default", providerName is not null,
@@ -354,6 +366,22 @@ internal static class BackendsEndpoints
 		// also covers password/token/apikey/clientsecret leaves a schema-less plugin never declares.
 		return declared.Contains(BackendConfigValidation.ListRoot(leaf)) ||
 		       SecretRedaction.IsSecretName(leaf);
+	}
+
+	/// <summary>
+	///   Renames a <paramref name="leafs" /> entry to <paramref name="canonicalName" />'s exact
+	///   casing when present under any case, a no-op otherwise. <see cref="Dictionary{TKey,TValue}" />
+	///   here is built with <see cref="StringComparer.OrdinalIgnoreCase" />, so both the lookup and
+	///   the <c>Remove</c> match regardless of which case the entry currently carries — only the
+	///   re-<c>Add</c> pins the key's display casing back to <paramref name="canonicalName" />.
+	/// </summary>
+	private static void RestoreCanonicalCasing(
+		Dictionary<string, (string? Value, string Source)> leafs, string canonicalName)
+	{
+		if (!leafs.TryGetValue(canonicalName, out (string? Value, string Source) entry))
+			return;
+		leafs.Remove(canonicalName);
+		leafs[canonicalName] = entry;
 	}
 
 	/// <summary>
