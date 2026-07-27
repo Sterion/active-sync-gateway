@@ -186,6 +186,26 @@ public class WbxmlDecoderHardeningTests
 	}
 
 	[Fact]
+	public void EntityWithIllegalXmlControlCharacter_IsAParseError()
+	{
+		// ENTITY for U+000B (vertical tab) — a valid Unicode scalar value, so the old guard
+		// (out-of-range / surrogate only) let it through into an XText; it is NOT a legal
+		// XML 1.0 Char, so XNode.ToString() (wire-trace logging) throws ArgumentException —
+		// turning a 400 into an uncontrolled 500 on any Trace-enabled gateway (W2).
+		byte[] doc = Doc([0x45], [0x02], [0x0B], [0x01]);
+		Assert.Throws<WbxmlException>(() => WbxmlDecoder.Decode(doc));
+	}
+
+	[Fact]
+	public void StrIWithIllegalXmlControlCharacter_IsAParseError()
+	{
+		// Same illegal-XML-character gap (U+000B) reached via the inline-string path
+		// (ReadNullTerminatedString) instead of ENTITY.
+		byte[] doc = Doc([0x45], [0x03], [0x0B, 0x00], [0x01]);
+		Assert.Throws<WbxmlException>(() => WbxmlDecoder.Decode(doc));
+	}
+
+	[Fact]
 	public void TooManyTextCharacters_IsAParseError()
 	{
 		// One STR_I run whose decoded length alone exceeds the 8 MB text-character ceiling —

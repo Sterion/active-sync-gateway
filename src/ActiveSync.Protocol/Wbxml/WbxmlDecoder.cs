@@ -141,9 +141,12 @@ public static class WbxmlDecoder
 				case Entity:
 					uint code = reader.ReadMultiByteUInt();
 					// Guard before ConvertFromUtf32, which throws ArgumentOutOfRangeException
-					// (→ uncontrolled 500) for out-of-range or surrogate code points.
-					if (code > 0x10FFFF || code is >= 0xD800 and <= 0xDFFF)
-						throw new WbxmlException($"Invalid ENTITY code point U+{code:X}.");
+					// (→ uncontrolled 500) for out-of-range or surrogate code points — AND
+					// reject any valid-Unicode-but-illegal-XML-1.0 code point (e.g. U+000B):
+					// ConvertFromUtf32 accepts it, but XNode.ToString() (wire-trace logging)
+					// throws when it later hits an XmlWriter with CheckCharacters (W2).
+					if (code > 0x10FFFF || !IsValidXmlChar((int)code))
+						throw new WbxmlException($"Invalid or illegal-XML ENTITY code point U+{code:X}.");
 					AppendText(current, char.ConvertFromUtf32((int)code), ref textRuns, ref textChars);
 					break;
 
@@ -221,6 +224,7 @@ public static class WbxmlDecoder
 	{
 		if (current is null)
 			throw new WbxmlException("Text content outside of an element.");
+		ValidateXmlText(text);
 		if (++textRuns > MaxTextRuns)
 			throw new WbxmlException($"WBXML document exceeds {MaxTextRuns} text runs.");
 		// Checked after the addition so a single oversized run (the common attack shape) is
@@ -236,6 +240,38 @@ public static class WbxmlDecoder
 			tail.Value += text;
 		else
 			current.Add(new XText(text));
+	}
+
+	// W2: STR_I/ENTITY admit any valid Unicode scalar value, but LINQ-to-XML validates
+	// characters only on WRITE (via XmlWriter's CheckCharacters), not on XText construction —
+	// so a control character other than TAB/LF/CR (or U+FFFE/U+FFFF) survives decode and then
+	// throws ArgumentException the first time the document is serialized (wire-trace logging,
+	// or a decoded control character echoed back in a response).
+	private static void ValidateXmlText(string text)
+	{
+		for (int i = 0; i < text.Length; i++)
+		{
+			char c = text[i];
+			if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+			{
+				// A well-formed surrogate pair always decodes into U+10000-U+10FFFF, which is
+				// entirely inside the XML 1.0 Char range — nothing further to check.
+				i++;
+				continue;
+			}
+
+			if (!IsValidXmlChar(c))
+				throw new WbxmlException($"Illegal XML 1.0 character U+{(int)c:X4} in text content.");
+		}
+	}
+
+	/// <summary>The XML 1.0 §2.2 <c>Char</c> production.</summary>
+	private static bool IsValidXmlChar(int c)
+	{
+		return c is 0x9 or 0xA or 0xD
+		       || c is >= 0x20 and <= 0xD7FF
+		       || c is >= 0xE000 and <= 0xFFFD
+		       || c is >= 0x10000 and <= 0x10FFFF;
 	}
 
 	private ref struct SpanReader(ReadOnlySpan<byte> data)
