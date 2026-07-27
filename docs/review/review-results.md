@@ -925,47 +925,156 @@ absent — see below.
   and re-ran `PluginLoader.LoadInto`, leaking a non-collectible `AssemblyLoadContext` per invocation in any
   plugin-bearing deployment.
 
-## Item 21 — `/cli` endpoint hardening — ⚠ PARTIAL, NOT COMPLETE
-**This entry describes an item that is still in progress.** Two of five findings landed before the
-session running them was killed (the host OOM-killed the process twice). The tree is consistent and safe:
-each landed finding was committed with its own strike, so the cursor is accurate and nothing is lost.
-**Whoever picks this up should replace this entry with a normal one when the item finishes.**
+## Item 21 — `/cli` endpoint hardening
+**Findings:** `E3` `E11` `E18` `E19` `E20`
+**Commits:** `d53bb8d` (E3) · `b10cee3` (E11) · `95fd2c8` (E18) · `4978877` (E19) · `1102a4a` (E20)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 22 ✓ · one commit per finding, strike shipped with each ✓ · build 0 warnings ✓ ·
+unit **1403 passed, 0 skipped** (Cli 16 · Protocol 99 · Core 842 · WebUi 119 · Server 327) ✓ ·
+live **144 passed, 0 skipped** on a clean-volume Stalwart ✓
 
-**Landed:** `E3` — `d53bb8d` · `E11` — `b10cee3`
-**Remaining (un-struck on the queue line):** `E18` `E19` `E20`
+**This entry replaces the ⚠ PARTIAL entry** written after two interrupted sessions. `E3` and `E11` landed
+in those sessions; `E18`/`E19`/`E20` landed here. Both debts the partial entry recorded are now paid:
 
-**What I verified (orchestrator, after the fact — I did not run these workers):**
-- Both commits carry `review-items.md` in their diffstat, so each strike shipped **with** its fix; there is
-  no trailing bookkeeping commit and the cursor is honest ✓
-- Queue integrity at this state: items=37 live=14 assigned=245 unique=245 dupes=0 ✓
-- Working tree clean at `b10cee3` ✓
-- **`E3` read against its entry:** the handler no longer takes `CliRequest` as a bound parameter; in the
-  current file the gates run first — `Cli.Enabled` (`LocalCliEndpoint.cs:131`) and `IsLoopback` (`:133`) —
-  and the body is read at `:142` inside a try/catch that returns `Results.NotFound()` on any failure. That
-  is the finding's FIX exactly, and the ordering (which is the entire point) holds. Every refusal on this
-  path now returns 404, closing the 415/400 existence oracle.
-- **`E11` read against its entry:** `TryClaim` now records `envelope.TimestampUnixMs` rather than the claim
-  time — the first of the two remedies its entry offers, so a nonce can no longer be pruned before the
-  envelope it protects expires.
-- **`E11` red-first re-proved independently:** reverting `LocalCliEndpoint.cs` to `5c600c1` makes
-  `ReplayCache_CannotBeReopened_WhenClaimedEarlyByAnEnvelopeReceivedUnderClockSkew` fail.
+- **`E3` red-first re-proved independently.** `src/` reverted to `5c600c1` (E3's parent) →
+  `CliEndpoint_Returns404ForAMalformedBody_BeforeEverParsingIt` fails with `Expected: NotFound / Actual:
+  BadRequest` — the 400 existence oracle the finding names, exactly.
+- **The live suite was run**, which the partial entry flagged as owed because `E3` alters the `/cli`
+  request pipeline: 144 passed, 0 skipped (item 20's figure was 143; `E3`'s test is the extra).
 
-**What is NOT verified — do not read this entry as a clean bill of health:**
-- **`E3`'s red-first was not independently re-proved.** Its test lives in the integration suite
-  (`tests/ActiveSync.Integration.Tests/Scenarios/WebUiTests.cs`), which needs a live backend; I did not
-  start one, so it was neither run nor confirmed red on unmodified source.
-- **No full unit suite run at this HEAD**, and **no live suite run at all** for this item. `E3` changes the
-  `/cli` request pipeline, which is HTTP-reachable — under this document's own rule that is an item whose
-  live suite must be run before it is called done.
-- No worker report exists for these two findings in this transcript; the session that produced them did not
-  survive to report.
+**Red-first re-proved independently for `E19` and `E20`:** `src/` reverted to `595ff67` → 3 failures —
+`TryOpen_RejectsASealedEnvelope_WhoseArgsArrayContainsANullElement`,
+`TryAuthorize_PlaintextMode_RejectsArgsContainingANullElement` (E19), and
+`ConfirmedPurge_ReRunsTheImpactCount_AndNamesWhatItDestroys` (E20). `E18`'s two tests **passed** on that
+same unmodified source — see the note below, which is the finding to read in this entry.
 
-**For whoever continues:**
-1. Spawn a worker on item 21 with the constant brief. It will read the cursor, see `E3`/`E11` struck, and
-   work `E18`/`E19`/`E20`. Add one situational line noting the previous session was killed mid-item.
-2. When it returns, verify the whole item — including a red-first re-proof of **`E3`** and a **live suite
-   run**, both of which this partial state still owes.
-3. Replace this entry with a normal item entry covering all five findings.
-4. The last recorded full-suite figures were item 20's: unit **1397 passed, 0 skipped**
-   (Cli 16 · Protocol 99 · Core 842 · WebUi 119 · Server 321), live **143 passed, 0 skipped**. Item 21's two
-   landed findings add tests beyond that, so expect higher counts, not equal ones.
+**Notes:**
+- **`E18`'s fix is right and its tests guard nothing.** The source change is the finding's FIX verbatim
+  (`captured.Profile.Width = width is > 0 and <= 1000 ? width : 200` at `LocalCliEndpoint.cs:442`), and
+  the worker labelled the tests "COVERAGE, NOT PROOF" honestly in the test comment, the commit message and
+  its report. But the two tests do not exercise the production code **at all**: they re-declare the unfixed
+  and fixed expressions as literals inside the test body and assert about a `Rule` they construct
+  themselves. I confirmed the consequence rather than inferring it — with `src/` reverted to before the fix,
+  both tests still pass. **Deleting the clamp from `LocalCliEndpoint.cs` leaves the suite green.** That is a
+  step below what "coverage" normally buys: a coverage test still pins the shipped code path, and this one
+  pins a copy of it. Worth knowing: `ExecuteAsync` already takes `width` as an optional parameter
+  (`LocalCliEndpoint.cs:355`), so the production path *was* reachable from a test — the worker's stated
+  reason for not using it is that no command in today's tree renders a construct whose cost is driven by
+  `Profile.Width` (only `Table`s, which size to content), so an end-to-end test would have been green
+  before and after and proved nothing either. That reasoning is sound as far as it goes; the gap it leaves
+  is a regression guard, not a correctness claim.
+- **`E19` extends past the finding's letter, correctly.** The entry names `TryOpen` and the plaintext
+  branch of `TryAuthorize`; the fix does both. Note the plaintext-branch refusal reuses the
+  `IsCredentialBearingVerb` arm, so a null element now yields `return false` → 404 via `E3`'s path,
+  i.e. nothing runs server-side and the client falls back to local execution. That is the existing
+  documented contract, not a new behaviour.
+- **`E20` now counts unconditionally.** `CountDeletionImpactAsync` moved above the `if (!settings.Yes)`
+  block, so the confirmed path pays one extra query it did not before — deliberate, and the point of the
+  finding. Behaviour change: `eas purge ... --yes` prints `Deleting <impact> along with <target>.` before
+  deleting when content is at risk. The worker flagged the wording as reading awkwardly for
+  `PurgeUserCommand` ("Deleting 3 contacts along with ALL gateway state of user 'anna'.") and kept it
+  shared in the base rather than special-casing per subclass — a defensible call, and cosmetic.
+- **`E18` is also a behaviour change**, minor: a `/cli` caller-supplied width outside `(0, 1000]` now
+  falls back to 200 columns instead of being honoured.
+- **`N3`'s flaky test failed the first full unit run, and `N3`'s recorded mechanism is wrong.**
+  `TlsCertificateRenewalServiceTests.NearExpiryCertificate_IsRenewedOnATick_AndTheHolderIsSwapped` failed
+  with `CryptographicException: m_safeCertContext is an invalid handle` — **not** the 5-second timeout
+  `N3` describes. The real mechanism is visible at
+  `TlsCertificateRenewalServiceTests.cs:91`: the test reads `stale.Thumbprint` after the service's
+  `disposeGracePeriod` (20 ms) may already have disposed the old certificate, so the race is
+  use-after-dispose, not slow key generation. I established ownership rather than assuming it: it failed
+  3/3 in isolation at HEAD and passed 3/3 at `595ff67`, which looked commit-shaped — but interleaving the
+  two builds flipped the result completely (pre-run 3/3 failing, HEAD 3/3 passing), so it tracks machine
+  load, not the commit, and item 21 touches no file this test loads. A re-run of the full unit suite was
+  clean at 1403. **`N3`'s FIX text should be updated** — widening the timeout, which is what it currently
+  proposes, does not address a use-after-dispose.
+
+## Item 22 — Identity normalization
+**Findings:** `A4` `B13` `B15` `B20` `C15`
+**Commits:** `2d643bd` (A4) · `db7928e` (B13) · `608d2c6` (B15) · `df3fcc0` (B20) · `ce110f8` (C15)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 23 ✓ · one commit per finding, ID in each subject ✓ · **strike NOT shipped with the fix —
+see below** ✗ · build 0 warnings ✓ · unit **1409 passed, 0 skipped**
+(Cli 16 · Protocol 99 · Core 847 · WebUi 120 · Server 327) ✓ · live **144 passed, 0 skipped** on a
+clean-volume Stalwart ✓
+
+**Red-first re-proved independently:** `src/` reverted to `1102a4a` → 5 failures —
+`GetSession_KeyedOnLoginAlone_ServesAReissuedLoginTheOldHoldersSession` (A4),
+`ValidateUsers_RejectsALoginWithLeadingOrTrailingWhitespace` + `Upsert_IsWhitespaceInsensitive_NoDuplicateRow`
+(B13), `Logs_UserFilter_IsCaseInsensitive` (B15), `Share_Delete_RefusesAMalformedLogin` (C15). `B20` is
+correctly absent — it is coverage, not proof.
+
+**The live suite was run although the item is unmarked**, because `A4` re-keys the backend **session
+cache** and `B13` changes login normalization at `UserStore.NormalizeLogin`, the funnel every lookup and
+write passes through — that is "changes authentication or session policy" under the standing rule, whatever
+the item's marking says. 144 passed, 0 skipped.
+
+**Notes:**
+- **Protocol violation, self-disclosed by the worker and confirmed here: the strike did not ship with the
+  fix for four of five findings.** `2d643bd`, `db7928e`, `608d2c6` and `df3fcc0` carry no
+  `review-items.md`; all five strikes landed together in `ce110f8` (C15). I verified this against the
+  per-commit diffstats rather than taking the report's word for it. The end state is correct — cursor
+  honest, one commit per finding, no dangling work — but between `2d643bd` and `ce110f8` the tree held
+  four finished findings the document said were not done, which is exactly the interruption window
+  `fix-review.md` describes. The worker caught it only after four commits had landed on top, so the cheap
+  in-the-moment `--amend` was gone. Worth noting for the programme's own record: this remains the
+  most-repeated deviation, and the worker disclosing it honestly (rather than quietly rewriting history)
+  is the behaviour the protocol wants.
+- **`B20` is coverage, not proof, and the worker's stated reason is a good one.** It tried to force a
+  lower-`UserId` row to enumerate last via an out-of-band INSERT and the test stayed green against the
+  unfixed query, because on SQLite the rowid *is* `UserId`, so a table scan already enumerates ascending.
+  The symptom needs a provider that gives no such ordering guarantee (Postgres), which the local unit
+  suite does not run. The fix (`.OrderBy(u => u.UserId)`) is the finding's FIX verbatim, and the warning
+  now names the winning `UserId` as the finding also asks.
+- **An existing test was edited to accommodate `A4`, and the worker did not disclose it.**
+  `IdleSweep_RemovesAFaultedSessionSlot` hard-codes the cache key to assert on the factory's internal
+  `_sessions` dictionary, so the new key format forced `$"{Creds.UserName}\ndev-1"` →
+  `$"1\n{Creds.UserName}\ndev-1"`. I read it: it is a mechanical accommodation, not a weakening — same
+  assertion, and `1` is the same `userId` the test already passed to `GetSessionAsync`. It is legitimate
+  under the protocol's "a test harness your change legitimately broke" clause, but that clause requires
+  saying so explicitly, and the report did not.
+- **`C15` landed narrower than the finding's prose, correctly.** The entry cites three further asymmetric
+  routes (`DevicesEndpoints` unblock/wipe/purge, `PUT users/{login}`) but its FIX offers two *alternatives*:
+  validate on every admin route, **or** make `NormalizeLogin` trim because "it is the single funnel for
+  every lookup and write". `B13` took the second, which covers those routes at the funnel; `C15` then added
+  shape validation to the one route the finding actually quotes. The worker flagged this as a judgment call
+  a reviewer might want widened — I read it as within the finding, not a narrowing of it.
+- **`B15` accepts a scan, deliberately.** `e.User.ToLower() == normalizedUser` translates to `LOWER()`,
+  which is non-sargable — the same trade-off the class already documents for its text filter, and the
+  finding explicitly sanctions it ("accepting the scan on an already-scanned query").
+- **`B13` is a behaviour change worth an operator's attention.** A config-declared login with leading or
+  trailing whitespace is now a startup validation **failure** rather than a silently-provisioned second
+  identity, and `NormalizeLogin` trimming changes the stored canonical form. Nothing is deployed outside
+  testing, so no migration concern — but on a tree that had already minted a whitespace-padded row, that
+  row's login would now normalize onto the real user's.
+
+## Run summary — items 21–22
+**Swept:** `git log 595ff67..HEAD` — 8 commits, one per finding, ID in every subject · every claimed
+finding (`E18` `E19` `E20` `A4` `B13` `B15` `B20` `C15`) struck exactly once in the queue and present in
+exactly one commit subject, reconciled mechanically rather than by eye ✓ · no changes outside the two
+items' file clusters (`/cli` + Crypto envelope + purge; Core accounts/administration/backend + WebUi
+shares) ✓
+**At HEAD:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ · build 0 warnings ✓ ·
+unit **1409 passed, 0 skipped** ✓ · live **144 passed, 0 skipped** on a clean-volume Stalwart ✓
+**Carried forward:**
+- **Item 21 is no longer PARTIAL.** Its entry was replaced in full; both debts the partial recorded
+  (`E3`'s red-first re-proof, the live suite) were paid this run.
+- **Two strikes in this run rest on tests that do not guard their fix**, for different reasons, and they
+  read differently side by side now than they did individually. `E18`'s tests re-implement the clamp
+  expression inside the test body and pass with the production fix reverted — deleting the clamp leaves the
+  suite green. `B20`'s test cannot exhibit its symptom on SQLite at all. Both are honestly labelled;
+  neither is a correctness problem; but the queue now carries two clamps whose only protection is that
+  someone read the diff. If a future round wants one thing from this run, it is a Postgres-backed unit leg,
+  which would convert `B20` into a real test and is a precondition for several remaining findings too.
+- **`N3` is wrong about its own mechanism, and it bit twice this run.**
+  `TlsCertificateRenewalServiceTests.NearExpiryCertificate_IsRenewedOnATick_AndTheHolderIsSwapped` failed
+  the first full unit run of *both* items with `CryptographicException: m_safeCertContext is an invalid
+  handle` — a use-after-dispose at line 91 (the test reads `stale.Thumbprint` after the service's 20 ms
+  `disposeGracePeriod` may have disposed it), not the 5-second timeout `N3` records. `N3`'s proposed FIX
+  (widen the timeout / pre-generate the key) does not address that. I confirmed it is environmental, not
+  ours: at one point it failed 3/3 at HEAD and passed 3/3 at the pre-run commit, which looked
+  commit-shaped — interleaving the two builds flipped the result entirely, so it tracks machine load.
+  Both items' suites were green on re-run. **Someone should correct `N3`'s text**; a fix aimed at the
+  timeout will not stop this.
+- **The cursor rests at item 23** (`F13` `F14` `F15` `F16` `F17` `F18` `F23` `F27`) — `[LIVE]`, and the
+  first item of Phase 3. A natural seam: a fresh orchestrator should take it.
