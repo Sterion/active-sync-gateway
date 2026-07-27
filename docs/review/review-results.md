@@ -392,3 +392,54 @@ transient failure can be named rather than inferred.
   either way), and it added no public surface. But it does ship in the package irrevocably, and it was
   taken on to make one Low/Nit finding testable. A reasonable person could have left `K19` as a
   comment-documented fix with no test; worth knowing the trade was made.
+
+## Item 11 — Password & throttle hardening
+**Findings:** `K5` `K6` `K7` `K21`
+**Commits:** `7ff8b33` (K5) · `e6b11a3` (K6) · `bd0058a` (K7) · `23ed57e` (K21) · `0f99649` (K7 test
+fallout) · `8080fc7` (docs: new finding `N3`)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 12 ✓ · one commit per finding ✓ · strike shipped with each fix ✓ · scope confined to
+`AuthThrottle.cs`, `GatewayPasswordHasher.cs`, `AuthEndpoints.cs` and three test files ✓ ·
+build 0 warnings ✓ · unit **1329 passed, 0 skipped** (Cli 16 · Protocol 91 · Core 814 · WebUi 101 ·
+Server 307) ✓
+**Live suite run — and here I overrode the worker's judgment.** The worker declined it, reasoning that no
+endpoint shape or DTO changed. But `fix-review.md` requires a live run for any item that "changes
+authentication or session policy", marked or not, and K7 changes throttling behaviour on the WebUi login
+path. Result on a clean-volume Stalwart: **141 passed, 0 failed, 0 skipped**, full output captured.
+**No branch was created.** Checked explicitly, since the worker mentioned using a scratch `git worktree`:
+`git worktree list` shows only the main tree, and the two other branches in the repo
+(`feature/schema-driven-backends`, `review/item-29`) are dated 2026-07-20/22 and have **0 commits not in
+`main`** — pre-existing, not this run's.
+**Red-first re-proved independently for K5, K21 and K7:** reverting `GatewayPasswordHasher.cs` and
+`AuthEndpoints.cs` to `37555a0` → `TryParse_OversizedHash_IsRejected`,
+`Hash_RejectsAnIterationCountItsOwnVerifyWouldReject` and — at runtime, not merely at compile time —
+`SuccessfulLogin_DoesNotClearTheAddressWideCeiling` all fail.
+**`K6`'s red was NOT independently re-proved, and here is why:** `AuthThrottle.cs` also carries K7's new
+`RecordSuccess(key, isAddressKey)` overload, which K6's own test file references, so reverting that file
+breaks the test assembly's compilation rather than producing a red test. I verified K6 by reading the diff
+against its entry instead (bounded eviction-under-pressure in `RecordFailure`, matching the finding's
+"evict … drop the entry with the oldest `WindowStartUtc`" remedy). Its red-first status rests on the
+worker's report alone — the one finding in this run where that is true.
+**Notes:**
+- **`K7` is the consequential change, and it is an operational trade, not a pure win.** A successful web
+  login no longer clears the shared per-address ceiling. That closes the hole (anyone holding one valid
+  credential could reset the address-wide counter after each batch of guesses and rotate usernames
+  indefinitely) — but it means **a shared NAT/proxy egress address can now 429 legitimate users** until the
+  failure window drains, where previously any success forgave it. On a corporate egress IP this is
+  user-visible.
+- **A pre-existing test was rewritten, and it came out stronger.** `WebLoginThrottleTests` (from an earlier
+  round, labelled `C1`) asserted exactly the behaviour K7 removes. The replacement interleaves nine
+  successful logins with ghost failures, then proves the tenth failure locks out even the continuously
+  successful user — a harder assertion than the original, at the HTTP layer. The worker confirmed the old
+  test was green pre-K7 and red after before replacing it, which is the step-9 procedure.
+- **`K5` fails closed on over-long stored hashes.** Nothing but a hand-crafted or malicious write could
+  have produced one, but any such row must now be re-set — flagged as intentionally breaking in Standing
+  context.
+- **`K6`'s eviction is an approximate LRU** (32-entry sample), not an exact global-oldest scan, to keep
+  insertion O(1) under sustained attack. Under a crafted load an attacker could in principle keep a
+  slightly-older entry alive; the property that matters — a new address can always mint a key — holds.
+- **`N3` filed, and it concerns item 9's own work:**
+  `TlsCertificateRenewalServiceTests.NearExpiryCertificate_IsRenewedOnATick_AndTheHolderIsSwapped` flakes
+  roughly 1 run in 8 under full parallel suite load, green in isolation. That is the headline test for K1 —
+  the one I accepted a compile-failure red for — so its reliability matters more than a typical flake.
+  It passed in every full-suite run I made, including this item's.
