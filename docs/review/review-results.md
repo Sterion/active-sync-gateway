@@ -654,3 +654,70 @@ failures** (W1 ×2, W2 ×2, W5 ×2 including the rewritten round-trip test), and
   finding names. They are not configurable, so a legitimate client sending an unusually large single text
   node would now get a parse error — 8 MB of text in one WBXML document is far outside any real EAS body,
   but the bound is absolute.
+
+---
+
+## Run summary — items 1–16 (Phase 1 complete)
+
+**Swept:** `f9eccb6..d989ba5` — 78 commits (57 `fix`, 21 `docs`/`test`), 91 files, +5310/−282.
+
+**Reconciled mechanically, not eyeballed:** the findings struck on items 1–16's queue lines and the finding
+IDs appearing in commit subjects were extracted into two lists and compared with `comm`. **65 struck, 65
+committed, both difference sets empty.** One ID (`K7`) appears in two subjects — its fix `bd0058a` and the
+disclosed test-rewrite `0f99649` — which is the documented step-9 fallout, not a double claim. (Note for
+future sweeps: item 14's subject separates IDs with `/` rather than `,`; a reconciliation regex assuming
+commas silently reports `B3` and `E2` as missing.)
+
+**Scope:** nothing landed outside `src/`, `tests/`, `docs/` except `AGENTS.md` and `README.md`, both changed
+by item 14 because they documented the behaviour `E1`/`E2`/`B3` corrected. **An orientation document
+therefore changed mid-run** — anyone re-reading items 1–13's entries should know AGENTS.md's Metrics
+paragraph now describes the post-fix world.
+
+**At HEAD (`d989ba5`):** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+definition adequacy: orphan empty, missing empty ✓ (see the caveat below) · build **0 warnings** ✓ ·
+unit **1350 passed, 0 skipped** (Cli 16 · Protocol 99 · Core 818 · WebUi 105 · Server 312) ✓ ·
+live **143 passed, 0 failed, 0 skipped** on a clean-volume Stalwart ✓ · working tree clean.
+Baseline moved 1270 → 1350 unit and 141 → 143 live over the run.
+
+**⚠ A DEFECT IN THE PROTOCOL TOOLING ITSELF — `fix-review.md:556`.** The definition-adequacy check's
+character class is `[ABCDEFHKLSW]`: it **omits area `G`** (30 real findings) and includes an area `L` that
+does not exist. Run exactly as documented it reports all 30 G findings as "orphan detail", which the doc
+says "MUST be empty" and which reads as data loss. `review-items.md:62` carries the correct class
+(`[ABCDEFGHKSW]`). With `G` restored the check is clean. This is a **human decision** — `fix-review.md` is
+declared project-independent and "never changes", so it is not the orchestrator's to edit.
+
+**Carried forward — what the next orchestrator most needs to know:**
+1. **Upgrade-breaking changes landed.** `K3` (every plugin pin covering a non-`.dll` file must be re-pinned
+   or startup fails), `K4` (`RequirePinned=1`/`yes`/`on` now aborts startup), `C9` (config-declared OIDC
+   accounts are locked out of the portal until a subject is bound or `Oidc:AllowUnboundLoginMatch` is set),
+   `K5` (over-long stored password hashes now fail closed).
+2. **Client-visible protocol changes.** `F11` (read-only `EmptyFolderContents` 3 → 2, partially reversing
+   round 2's `F45`), `F8` (occurrence-scoped MeetingResponse now Status 2 instead of silently answering for
+   the whole series), `W5` (an unknown WBXML tag token degrades to a placeholder instead of 400-ing the
+   document).
+3. **Operational trade:** `K7` — a shared NAT/proxy address can now be throttled to 429 until the window
+   drains, where any success previously forgave it.
+4. **Findings closed only in part, by design:** `H3` (bounded restart, still falls back to a partial map),
+   `H20` (cosmetic — the spurious resend it names still occurs), `G2` (literal capped; the line reader is
+   still unbounded in allocation), `K1` (renews the self-signed cert only — a mounted operator cert
+   expiring in place still needs a restart), `F2` (long-poll spin removed; a permanently-unrenderable item
+   still reports pending every round).
+5. **Unassigned debt filed during the run:** `N1` (send-dedup rows under `compose`/`meetingresponse` are
+   never pruned — created by item 2's own fixes), `N2` (`Identity/get` still uses the mail account, so `H9`
+   is half-done where mail and submission accounts differ), `N3` (superseded — see 6).
+6. **A known flake, now diagnosed:**
+   `TlsCertificateRenewalServiceTests.NearExpiryCertificate_IsRenewedOnATick_AndTheHolderIsSwapped`
+   (item 9's headline `K1` test) fails intermittently under full parallel load with
+   `CryptographicException: m_safeCertContext is an invalid handle` — K1's grace-period disposal freeing a
+   certificate the test's polling predicate still holds. Production is protected by the 30 s grace; the
+   test shortens it to milliseconds. Test artefact, but it is `K1`'s only behavioural test.
+7. **Proof-quality exceptions, all disclosed and all judged individually:** `K1`, `K19` and one `K7` test
+   proved red by **compile failure** rather than runtime assertion (each a new seam that could not fail at
+   runtime on old code); `B11`'s UserResolver test was authored **fix-first** (banned ordering — I re-proved
+   it red on unmodified source and confirmed it asserts the finding's symptoms, not the fix's internals);
+   `F4` added an inert production helper before its red observation; `K13`, `G24` and `K19` are labelled
+   coverage-not-proof. `K6` and `B17` could not be re-proved independently at all, because reverting their
+   source file breaks the test assembly's compilation — their red-first status rests on the worker reports.
+8. **Where the cursor rests:** item **17** (`C2` `C4` `C8` `C11` `C12` `C13` — merged-view write-back),
+   the first item of Phase 2. Items 17–22 are the db-restructure's unfinished edges; `review-items.md`'s
+   own guidance calls these the ones an operator actually trips over.
