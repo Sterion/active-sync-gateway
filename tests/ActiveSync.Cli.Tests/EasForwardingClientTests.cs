@@ -26,8 +26,15 @@ public sealed class EasForwardingClientTests
 		Assert.False(EasForwardingClient.IsLocalOnlyVerb(["users", "list"]));
 
 	[Fact]
-	public void IsLocalOnlyVerb_NoArgs_ReturnsFalse() =>
-		Assert.False(EasForwardingClient.IsLocalOnlyVerb([]));
+	public void IsLocalOnlyVerb_NoArgs_ReturnsTrue()
+	{
+		// E6: a bare `eas` invocation forwarded to a running gateway ran BannerCommand inside the
+		// live process, which then told the operator "The gateway is NOT running" — true only when
+		// nothing answered /cli. Bare eas must always run locally, matching docs/cli.md's "the
+		// config that WOULD run" framing, which is only meaningful against a process that is not
+		// already serving.
+		Assert.True(EasForwardingClient.IsLocalOnlyVerb([]));
+	}
 
 	[Fact]
 	public void ShouldForceLocal_EasNoForwardIsOne_ReturnsTrue() =>

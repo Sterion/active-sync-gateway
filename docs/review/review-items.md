@@ -317,7 +317,7 @@ work. Every finding ID appears in exactly one item.
 > omits `UserName` silently clears it. `C7`/`C17`/`C18`/`C19` casing, stale docs, wrong badges, unhandled
 > errors.
 
-**20. CLI configuration & warm-host reuse** — ~~`E4`~~ ~~`E5`~~ `E6` `E7` `E10` `E14` `E17`
+**20. CLI configuration & warm-host reuse** — ~~`E4`~~ ~~`E5`~~ ~~`E6`~~ `E7` `E10` `E14` `E17`
 > `E4` the standalone CLI builds configuration **without** the database layer, so a locally-run `eas user set`
 > validates against a backend view that is empty in the documented deployment. `E5` forwarded
 > `config`/`logs`/`tls` rebuild the container per call and leak a non-collectible `AssemblyLoadContext` each

@@ -15,9 +15,15 @@ namespace ActiveSync.Cli;
 /// </summary>
 internal static class EasForwardingClient
 {
-	/// <summary><c>serve</c>/<c>protect</c> are the full app's pre-parse specials and always run locally.</summary>
+	/// <summary>
+	///   <c>serve</c>/<c>protect</c> are the full app's pre-parse specials and always run locally. A
+	///   BARE invocation (no arguments) also always runs locally (E6): it prints the banner for "the
+	///   configuration the gateway WOULD start with", which is only meaningful against a process
+	///   that is not already serving — forwarded to a running gateway, the same command ran inside
+	///   the live process and then told the operator "The gateway is NOT running".
+	/// </summary>
 	internal static bool IsLocalOnlyVerb(string[] arguments) =>
-		arguments.Length > 0 && (Eq(arguments[0], "serve") || Eq(arguments[0], "protect"));
+		arguments.Length == 0 || Eq(arguments[0], "serve") || Eq(arguments[0], "protect");
 
 	/// <summary><c>EAS_NO_FORWARD=1</c> forces every command to run locally.</summary>
 	internal static bool ShouldForceLocal(Func<string, string?> getEnvironmentVariable) =>
