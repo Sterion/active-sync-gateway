@@ -69,7 +69,7 @@ internal static class CliVerbs
 			return 1;
 		}
 
-		ValidateOptionsResult validation = new ActiveSyncOptionsValidator().Validate(null, options);
+		ValidateOptionsResult validation = new ActiveSyncOptionsValidator(config).Validate(null, options);
 		if (validation.Failed)
 		{
 			await Console.Error.WriteLineAsync("The gateway would refuse to start with this configuration:");

@@ -1,5 +1,6 @@
 using ActiveSync.Core.Options;
 using ActiveSync.Crypto;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Core.Tests;
@@ -459,5 +460,73 @@ public class ActiveSyncOptionsValidatorTests
 		ValidateOptionsResult result = Validator.Validate(null, options);
 		Assert.True(result.Failed);
 		Assert.Contains("UsersRefreshSeconds", string.Join(";", result.Failures!));
+	}
+
+	// E8 — `eas config set`/the web PUT accept a Tls:Port or Metrics:Port that collides with
+	// another listener, and the NEXT start dies on bind (IOException: Failed to bind to address).
+	// Nothing compared Tls:Port, Metrics:Port and the base Kestrel HTTP endpoint against each other.
+	[Fact]
+	public void TlsPort_EqualToMetricsPort_Fails()
+	{
+		ActiveSyncOptions options = Valid();
+		options.Tls.Port = 9000;
+		options.Metrics = new MetricsOptions { Enabled = true, Port = 9000 };
+		ValidateOptionsResult result = Validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains("Tls:Port", string.Join(";", result.Failures!));
+		Assert.Contains("Metrics:Port", string.Join(";", result.Failures!));
+	}
+
+	[Fact]
+	public void TlsPort_EqualToTheBaseHttpListenerPort_Fails()
+	{
+		IConfiguration configuration = new ConfigurationBuilder()
+			.AddInMemoryCollection(new Dictionary<string, string?>
+			{
+				["Kestrel:Endpoints:Http:Url"] = "http://0.0.0.0:5080",
+			})
+			.Build();
+		ActiveSyncOptionsValidator validator = new(configuration);
+		ActiveSyncOptions options = Valid();
+		options.Tls.Port = 5080;
+
+		ValidateOptionsResult result = validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains("Tls:Port", string.Join(";", result.Failures!));
+	}
+
+	[Fact]
+	public void MetricsPort_EqualToTheBaseHttpListenerPort_Fails()
+	{
+		IConfiguration configuration = new ConfigurationBuilder()
+			.AddInMemoryCollection(new Dictionary<string, string?>
+			{
+				["Kestrel:Endpoints:Http:Url"] = "http://0.0.0.0:5080",
+			})
+			.Build();
+		ActiveSyncOptionsValidator validator = new(configuration);
+		ActiveSyncOptions options = Valid();
+		options.Metrics = new MetricsOptions { Enabled = true, Port = 5080 };
+
+		ValidateOptionsResult result = validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains("Metrics:Port", string.Join(";", result.Failures!));
+	}
+
+	[Fact]
+	public void DistinctListenerPorts_Pass()
+	{
+		IConfiguration configuration = new ConfigurationBuilder()
+			.AddInMemoryCollection(new Dictionary<string, string?>
+			{
+				["Kestrel:Endpoints:Http:Url"] = "http://0.0.0.0:5080",
+			})
+			.Build();
+		ActiveSyncOptionsValidator validator = new(configuration);
+		ActiveSyncOptions options = Valid();
+		options.Tls.Port = 5443;
+		options.Metrics = new MetricsOptions { Enabled = true, Port = 9090 };
+
+		Assert.True(validator.Validate(null, options).Succeeded);
 	}
 }

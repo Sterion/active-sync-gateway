@@ -25,7 +25,7 @@ internal static class CliServices
 			return null;
 		}
 
-		ValidateOptionsResult validation = new ActiveSyncOptionsValidator().Validate(null, options);
+		ValidateOptionsResult validation = new ActiveSyncOptionsValidator(config).Validate(null, options);
 		if (validation.Failed)
 		{
 			await Console.Error.WriteLineAsync("Configuration is invalid:");

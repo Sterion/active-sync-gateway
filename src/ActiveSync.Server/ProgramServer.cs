@@ -338,7 +338,7 @@ public partial class Program
 		// live-reloadable from the database, and a bad live value must never make IOptionsMonitor /
 		// IOptionsSnapshot throw on read and take a running gateway down (`eas config set` validates
 		// before storing). Runs after Build so it sees the final configuration.
-		ValidateOptionsResult startupValidation = new ActiveSyncOptionsValidator()
+		ValidateOptionsResult startupValidation = new ActiveSyncOptionsValidator(app.Configuration)
 			.Validate(null, app.Services.GetRequiredService<IOptions<ActiveSyncOptions>>().Value);
 		if (startupValidation.Failed)
 			throw new InvalidOperationException("Invalid ActiveSync configuration:" + Environment.NewLine +

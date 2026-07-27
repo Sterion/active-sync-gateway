@@ -296,7 +296,10 @@ internal static class SettingKeys
 	/// </summary>
 	internal static string? ValidateStartupImpact(IConfiguration effective, string key, string? value)
 	{
-		ActiveSyncOptionsValidator validator = new();
+		// E8: pass `effective` through so the cross-listener port check (Tls:Port/Metrics:Port vs.
+		// the base Kestrel HTTP endpoint) can actually see Kestrel:Endpoints:Http:Url/ASPNETCORE_URLS
+		// — both live in the SAME file/env layer this method already has.
+		ActiveSyncOptionsValidator validator = new(effective);
 		IReadOnlyList<string> before = Failures(validator, Bind(effective));
 
 		IConfiguration candidate = new ConfigurationBuilder()

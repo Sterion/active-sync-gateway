@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using ActiveSync.Core.Administration;
 using ActiveSync.Core.Security;
 using ActiveSync.Crypto;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Core.Options;
@@ -12,7 +13,14 @@ namespace ActiveSync.Core.Options;
 ///   <see cref="BackendConfigurationValidator" /> after the service provider is built — it
 ///   needs the provider registry so each provider can validate its own settings.
 /// </summary>
-public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOptions>
+/// <param name="configuration">
+///   Optional — only needed for the E8 cross-listener port check, which compares
+///   <see cref="TlsOptions.Port" />/<see cref="MetricsOptions.Port" /> against the base Kestrel
+///   HTTP endpoint (<c>Kestrel:Endpoints:Http:Url</c> / <c>ASPNETCORE_URLS</c>), neither of which
+///   is part of <see cref="ActiveSyncOptions" /> itself. Null (every call site historically
+///   constructed this parameterlessly) simply skips that one check.
+/// </param>
+public sealed class ActiveSyncOptionsValidator(IConfiguration? configuration = null) : IValidateOptions<ActiveSyncOptions>
 {
 	public ValidateOptionsResult Validate(string? name, ActiveSyncOptions options)
 	{
@@ -73,6 +81,7 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 
 		ValidatePolicy(options.Policy, failures);
 		ValidateMetrics(options.Metrics, failures);
+		ValidateListeners(options.Tls, options.Metrics, failures);
 		ValidateWebUi(options.WebUi, failures);
 
 		if (options.Log.Mode.ToLowerInvariant() is not ("simple" or "standard" or "extended"))
@@ -142,6 +151,56 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 	{
 		if (metrics.Port is { } port and (< 1 or > 65535))
 			failures.Add($"ActiveSync:Metrics:Port {port} is out of range (1-65535).");
+	}
+
+	/// <summary>
+	///   E8: `eas config set` accepted a Tls:Port/Metrics:Port that collides with another listener,
+	///   and the NEXT start died on bind (Kestrel's ListenAnyIP calls in
+	///   Program.ConfigureHosting) — nothing compared the two dedicated ports against EACH OTHER or
+	///   against the base HTTP endpoint every deployment already has. Tls:Port is only a real
+	///   listener while Tls is Enabled (see ConfigureHosting); Metrics:Port only while Metrics is
+	///   Enabled with a Port actually set (unset shares the main listeners instead).
+	/// </summary>
+	private void ValidateListeners(TlsOptions tls, MetricsOptions metrics, List<string> failures)
+	{
+		bool tlsListens = tls.Enabled;
+		int? metricsListenPort = metrics is { Enabled: true, Port: { } p } ? p : null;
+
+		if (tlsListens && metricsListenPort == tls.Port)
+			failures.Add(
+				$"ActiveSync:Tls:Port and ActiveSync:Metrics:Port are both {tls.Port} — two dedicated " +
+				"listeners cannot share one port; the next start will fail to bind.");
+
+		if (BaseHttpPort() is not { } httpPort)
+			return;
+
+		if (tlsListens && tls.Port == httpPort)
+			failures.Add(
+				$"ActiveSync:Tls:Port {tls.Port} collides with the base HTTP listener port {httpPort} " +
+				"(Kestrel:Endpoints:Http:Url / ASPNETCORE_URLS) — the next start will fail to bind.");
+		if (metricsListenPort == httpPort)
+			failures.Add(
+				$"ActiveSync:Metrics:Port {metricsListenPort} collides with the base HTTP listener port " +
+				$"{httpPort} (Kestrel:Endpoints:Http:Url / ASPNETCORE_URLS) — the next start will fail to bind.");
+	}
+
+	/// <summary>
+	///   The port Kestrel binds its plain-HTTP endpoint on, read the same way the container
+	///   healthcheck derives it (<see cref="ActiveSync.Server.Cli.CliVerbs" />): the
+	///   <c>Kestrel:Endpoints:Http:Url</c> configuration key (set by the shipped appsettings.json,
+	///   or an operator override) or the <c>ASPNETCORE_URLS</c> variable — both visible through
+	///   <see cref="configuration" /> when it carries the environment-variables provider, which
+	///   every real caller's does. Deliberately does NOT fall back to reading the process
+	///   environment directly when no <see cref="configuration" /> was supplied: every existing
+	///   caller of the parameterless constructor must stay fully unaffected by whatever
+	///   ASPNETCORE_URLS happens to be set to in that process (a test runner's, for one) — no
+	///   configuration means this one check is skipped, not guessed at.
+	/// </summary>
+	private int? BaseHttpPort()
+	{
+		string? url = configuration?["Kestrel:Endpoints:Http:Url"]
+		              ?? configuration?["ASPNETCORE_URLS"]?.Split(';')[0];
+		return url is not null && Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) ? uri.Port : null;
 	}
 
 	private static void ValidateTls(TlsOptions tls, List<string> failures)
