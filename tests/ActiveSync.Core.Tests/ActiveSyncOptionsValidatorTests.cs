@@ -421,4 +421,43 @@ public class ActiveSyncOptionsValidatorTests
 		options.WebUi.Oidc = new WebUiOidcOptions { Enabled = false, Authority = "https://id.example.com" };
 		Assert.True(Validator.Validate(null, options).Succeeded);
 	}
+
+	// B14 — ActiveSyncOptionsValidator mirrors only part of the SettingKeys catalogue's bounds, so a
+	// file/env value starts clean where the identical `eas config set` write is refused.
+	[Theory]
+	[InlineData(-1)]
+	[InlineData(65536)]
+	public void Eas_MaxPingFolders_OutOfCatalogueRange_Fails(int value)
+	{
+		// Catalogue: Min 0, Max 65535 (0 disables the cap — a valid, non-failing value).
+		ActiveSyncOptions options = Valid();
+		options.Eas.MaxPingFolders = value;
+		ValidateOptionsResult result = Validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains("MaxPingFolders", string.Join(";", result.Failures!));
+	}
+
+	[Fact]
+	public void Eas_FolderRetentionDays_AboveCatalogueMax_Fails()
+	{
+		// Catalogue caps at 3650; only the "< 0" floor was ever checked here.
+		ActiveSyncOptions options = Valid();
+		options.Eas.FolderRetentionDays = 3651;
+		ValidateOptionsResult result = Validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains("FolderRetentionDays", string.Join(";", result.Failures!));
+	}
+
+	[Theory]
+	[InlineData(-1)]
+	[InlineData(86401)]
+	public void Auth_UsersRefreshSeconds_OutOfCatalogueRange_Fails(double value)
+	{
+		// Catalogue: 0…86400 — this field was not checked here at all.
+		ActiveSyncOptions options = Valid();
+		options.Auth.UsersRefreshSeconds = value;
+		ValidateOptionsResult result = Validator.Validate(null, options);
+		Assert.True(result.Failed);
+		Assert.Contains("UsersRefreshSeconds", string.Join(";", result.Failures!));
+	}
 }

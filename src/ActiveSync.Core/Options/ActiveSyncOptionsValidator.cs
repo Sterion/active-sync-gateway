@@ -32,8 +32,13 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 
 		if (options.Eas.WatchdogSeconds is < 0 or > 0 and < 15)
 			failures.Add("ActiveSync:Eas:WatchdogSeconds must be 0 (disabled) or at least 15.");
-		if (options.Eas.FolderRetentionDays < 0)
-			failures.Add("ActiveSync:Eas:FolderRetentionDays must be 0 (disabled) or greater.");
+		if (options.Eas.FolderRetentionDays is < 0 or > 3650)
+			failures.Add("ActiveSync:Eas:FolderRetentionDays must be between 0 (disabled) and 3650.");
+
+		// B14: mirror the three SettingKeys catalogue bounds this validator never checked, so a
+		// file/env typo is held to the same range the identical `eas config set` write already is.
+		if (options.Eas.MaxPingFolders is < 0 or > 65535)
+			failures.Add("ActiveSync:Eas:MaxPingFolders must be between 0 (disabled) and 65535.");
 
 		// B26: mirror the SettingKeys catalogue bounds so file/env values are held to the same range a
 		// CLI/web write is — otherwise a typo (DefaultWindowSize=0 → empty Sync responses) starts clean.
@@ -56,6 +61,8 @@ public sealed class ActiveSyncOptionsValidator : IValidateOptions<ActiveSyncOpti
 			failures.Add("ActiveSync:Auth:NegativeCacheSeconds must be between 0 (disabled) and 86400.");
 		if (options.Auth.SuccessCacheMinutes is < 0 or > 1440)
 			failures.Add("ActiveSync:Auth:SuccessCacheMinutes must be between 0 (disabled) and 1440.");
+		if (options.Auth.UsersRefreshSeconds is < 0 or > 86400)
+			failures.Add("ActiveSync:Auth:UsersRefreshSeconds must be between 0 and 86400.");
 
 		if (!string.IsNullOrWhiteSpace(options.PublicUrl) &&
 		    (!Uri.TryCreate(options.PublicUrl, UriKind.Absolute, out Uri? publicUri) ||
