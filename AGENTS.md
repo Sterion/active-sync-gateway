@@ -343,9 +343,13 @@ licence is held.
   name carries the `activesync_` prefix (e.g. `activesync_eas_requests`). eas_requests
   ride a tiny middleware reading the (command, user) tuple EasEndpoint stashes in
   HttpContext.Items — NOT the Serilog middleware. Per-user labels collapse to "-" when
-  `Metrics:PerUser=false` (set once into `GatewayMetrics.PerUserLabels` at startup —
-  ALWAYS emit the user tag so Prometheus series shapes stay consistent). With
-  `Metrics:Port` set, /metrics is gated on `Connection.LocalPort` (not Host headers).
+  `Metrics:PerUser=false` (read live through `GatewayMetrics.PerUserLabels`, wired in
+  `ProgramServer` to `IOptionsMonitor<ActiveSyncOptions>` — B3/E2: a live setting must be
+  re-read on every emission, not captured once at startup — ALWAYS emit the user tag so
+  Prometheus series shapes stay consistent). With `Metrics:Port` set, the ENTIRE listener
+  (not just /metrics) is gated on `Connection.LocalPort` (E1: every other endpoint —
+  EAS, Autodiscover, WebUi, /cli — 404s on that port via `UseMetricsPortFilter`, registered
+  first in the pipeline) rather than Host headers.
   /readyz = cached ReadinessProbe (DB SELECT 1, IMAP TCP, DAV OPTIONS where any HTTP
   status counts); the `configured` component is REPORTED but never gates the verdict.
   /healthz stays trivial liveness — the container healthcheck depends on

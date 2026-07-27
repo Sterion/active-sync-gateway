@@ -9,8 +9,11 @@ namespace ActiveSync.Core.Observability;
 ///   The gateway's Meter and instruments ("metric everything"). Static on purpose: the
 ///   increments happen deep in handlers and backends where DI plumbing would be pure
 ///   ceremony — the OpenTelemetry provider in the Server project subscribes by meter name.
-///   Per-user labels are on by default and gated by <see cref="PerUserLabels" /> (set once
-///   at startup from Metrics:PerUser); when off, the user tag value collapses to "-".
+///   Per-user labels are on by default and gated by <see cref="PerUserLabels" />; when off,
+///   the user tag value collapses to "-". Metrics:PerUser is a LIVE-tier setting (B3/E2), so
+///   <see cref="PerUserLabels" /> reads through a provider wired by
+///   <see cref="SetPerUserLabelsProvider" /> — the same live <c>IOptionsMonitor</c> snapshot
+///   every other live setting reads, rather than a value captured once at startup.
 /// </summary>
 public static class GatewayMetrics
 {
@@ -86,7 +89,29 @@ public static class GatewayMetrics
 			"s", "Seconds until the serving TLS certificate expires (negative if already expired).");
 	}
 
-	public static bool PerUserLabels { get; set; } = true;
+	// B3/E2: last-write-wins, same rationale as the observer slots above — a fresh test host's
+	// wiring must win over a previous one's, and the two only ever race benignly.
+	private static volatile Func<bool>? _perUserLabelsProvider;
+
+	/// <summary>
+	///   Whether metric label values include the per-account identity, or collapse to "-".
+	///   Reads through <see cref="_perUserLabelsProvider" /> so a live <c>Metrics:PerUser</c>
+	///   change (`eas config set`, the admin Settings page) takes effect on the very next
+	///   metric emission — no restart, matching the setting's catalogued live tier. Defaults to
+	///   true when nothing has wired a provider yet (unit tests that call GatewayMetrics
+	///   directly, before ProgramServer's startup wiring runs).
+	/// </summary>
+	public static bool PerUserLabels => _perUserLabelsProvider?.Invoke() ?? true;
+
+	/// <summary>
+	///   Wires <see cref="PerUserLabels" /> to a live source — call once at startup with a
+	///   delegate that re-reads <c>IOptionsMonitor&lt;ActiveSyncOptions&gt;.CurrentValue</c> (or
+	///   equivalent) rather than a value snapshotted once.
+	/// </summary>
+	public static void SetPerUserLabelsProvider(Func<bool> read)
+	{
+		_perUserLabelsProvider = read;
+	}
 
 	// A3: bounds any future call site that hands User() an unauthenticated, attacker-controlled
 	// value directly — the same 128-char budget EndpointAuth's LogText.Clean uses for the same

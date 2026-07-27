@@ -1,7 +1,11 @@
 using System.Net;
+using ActiveSync.Core.Options;
+using ActiveSync.Core.Settings;
 using ActiveSync.Integration.Tests.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Integration.Tests.Scenarios;
 
@@ -100,5 +104,55 @@ public sealed class MetricsTests(GatewayFixture gateway)
 
 		using HttpResponseMessage eas = await client.GetAsync("/Microsoft-Server-ActiveSync");
 		Assert.Equal(HttpStatusCode.NotFound, eas.StatusCode);
+	}
+
+	// ---------- B3/E2: Metrics:PerUser is catalogued live-tier and must actually apply live ----------
+
+	[BackendFact]
+	public async Task PerUserLabels_AppliesLive_WithoutRestart()
+	{
+		await using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(
+			new Dictionary<string, string?> { ["ActiveSync:Metrics:Enabled"] = "true" });
+		using HttpClient http = factory.CreateClient(
+			new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+		// Baseline: PerUser defaults to true, so a handshake's user label carries the real login.
+		EasTestClient before = new(http, TestBackend.User1, TestBackend.Password,
+			$"DEV{Guid.NewGuid():N}"[..16].ToUpperInvariant());
+		await before.HandshakeAsync();
+		Assert.Contains(TestBackend.User1,
+			await (await http.GetAsync("/metrics")).Content.ReadAsStringAsync());
+
+		// The Prometheus exporter caches a scrape response for 300 ms
+		// (ScrapeResponseCacheDurationMilliseconds) — stay clear of it so the next scrape
+		// reflects fresh state rather than the response just read above.
+		await Task.Delay(TimeSpan.FromMilliseconds(400));
+
+		// Flip PerUser off the live way — the exact write path `eas config set`/the admin Settings
+		// page use, both of which report this key as live, no-restart-needed.
+		GlobalSettingStore store = factory.Services.GetRequiredService<GlobalSettingStore>();
+		await store.UpsertAsync("ActiveSync:Metrics:PerUser", "false", CancellationToken.None);
+
+		// Wait for the live PICKUP itself (SettingsRefresher polls Auth:UsersRefreshSeconds, ~1s)
+		// before making the one request that proves the label collapsed — retrying the SAME login
+		// while racing the flip would otherwise create one permanent "real login" series on
+		// whichever attempt lands first, poisoning every later check of the same cumulative counter.
+		IOptionsMonitor<ActiveSyncOptions> optionsMonitor =
+			factory.Services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>();
+		await WaitUntil.TrueAsync(
+			() => Task.FromResult(!optionsMonitor.CurrentValue.Metrics.PerUser),
+			"Metrics:PerUser=false to reach IOptionsMonitor", TimeSpan.FromSeconds(15));
+
+		// TestBackend.User2 is used for the FIRST time here, strictly after the flip has reached
+		// IOptionsMonitor: if PerUser=false actually gates metric emission (not just
+		// configuration), its series collapses to "-" and the literal login never appears in
+		// /metrics. B3/E2: on unmodified code GatewayMetrics.PerUserLabels was assigned once at
+		// startup and never re-read, so it stays true regardless of this live change.
+		EasTestClient after = new(http, TestBackend.User2, TestBackend.Password,
+			$"DEV{Guid.NewGuid():N}"[..16].ToUpperInvariant());
+		await after.HandshakeAsync();
+		await Task.Delay(TimeSpan.FromMilliseconds(400)); // clear the 300 ms Prometheus scrape cache
+		string afterBody = await (await http.GetAsync("/metrics")).Content.ReadAsStringAsync();
+		Assert.DoesNotContain(TestBackend.User2, afterBody);
 	}
 }

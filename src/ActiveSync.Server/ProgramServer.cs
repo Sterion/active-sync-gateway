@@ -75,6 +75,15 @@ public partial class Program
 		ActiveSync.Core.Observability.GatewayMetrics.SetCertificateExpiryObserver(
 			() => certificateHolder.Current is { } cert ? new DateTimeOffset(cert.NotAfter.ToUniversalTime()) : null);
 
+		// B3/E2: Metrics:PerUser is catalogued live-tier, so read it through the live
+		// IOptionsMonitor snapshot on every metric emission rather than a value captured once
+		// (the previous "assign GatewayMetrics.PerUserLabels once at startup" never picked up a
+		// later `eas config set`/admin Settings change despite both claiming it applies live).
+		IOptionsMonitor<ActiveSyncOptions> metricsOptionsMonitor =
+			app.Services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>();
+		ActiveSync.Core.Observability.GatewayMetrics.SetPerUserLabelsProvider(
+			() => metricsOptionsMonitor.CurrentValue.Metrics.PerUser);
+
 		LogStartupBanner(app, options, init);
 
 		// Report the bound addresses and public endpoints once the server is listening.
@@ -280,7 +289,7 @@ public partial class Program
 			builder.Services.AddHostedService<TlsCertificateRenewalService>();
 
 		// Metrics: BCL Meter instruments (GatewayMetrics) exported via OpenTelemetry.
-		ActiveSync.Core.Observability.GatewayMetrics.PerUserLabels = options.Metrics.PerUser;
+		// PerUserLabels is wired live in RunServerAsync (B3/E2), once IOptionsMonitor is available.
 		if (options.Metrics.Enabled)
 			builder.Services.AddOpenTelemetry().WithMetrics(metrics => metrics
 				.AddMeter(ActiveSync.Core.Observability.GatewayMetrics.MeterName)

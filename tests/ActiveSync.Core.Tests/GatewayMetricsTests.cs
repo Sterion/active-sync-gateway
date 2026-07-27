@@ -173,7 +173,7 @@ public sealed class GatewayMetricsTests
 	[Fact]
 	public void RecordAuthOutcome_NonSuccess_NeverEmitsTheRawUsername()
 	{
-		GatewayMetrics.PerUserLabels = true;
+		GatewayMetrics.SetPerUserLabelsProvider(() => true);
 		const string attacker = "attacker-controlled-name";
 		List<string?> users = [];
 		using MeterListener listener = new();
@@ -205,7 +205,7 @@ public sealed class GatewayMetricsTests
 	[Fact]
 	public void RecordSyncItems_UserLabel_IsLengthClampedAndControlCharsNeutralized()
 	{
-		GatewayMetrics.PerUserLabels = true;
+		GatewayMetrics.SetPerUserLabelsProvider(() => true);
 		string evil = "user\u0007\r\nname" + new string('x', 500);
 		string? user = null;
 		using MeterListener listener = new();
@@ -261,7 +261,7 @@ public sealed class GatewayMetricsTests
 		IDictionary dict = (IDictionary)typeof(GatewayMetrics)
 			.GetField("ActiveLongPolls", BindingFlags.NonPublic | BindingFlags.Static)!
 			.GetValue(null)!;
-		GatewayMetrics.PerUserLabels = true;
+		GatewayMetrics.SetPerUserLabelsProvider(() => true);
 		string user = "k2-" + Guid.NewGuid().ToString("N");
 
 		IDisposable scope = GatewayMetrics.TrackLongPoll(user);

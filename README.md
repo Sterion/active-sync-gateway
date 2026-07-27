@@ -632,8 +632,11 @@ docker run ... \
 ```
 
 `/metrics` then answers **only** on that port (gated on the connection's local port, not
-spoofable headers); without `Port` it shares the main listeners — protect it via ingress
-or network policy then. Everything is labeled **per account** by default (`user=...` on
+spoofable headers) — and, conversely, that port answers **only** `/metrics`: every other
+endpoint (the EAS surface, Autodiscover, the admin/user portals, `/cli`) 404s there, so
+opening the metrics port to a monitoring network exposes nothing but the metrics text.
+Without `Port` it shares the main listeners — protect it via ingress or network policy
+then. Everything is labeled **per account** by default (`user=...` on
 request counts, synced-item counts by class/direction/operation, sent-mail counts by
 kind, live session/IDLE-watcher/long-poll gauges); set `Metrics:PerUser=false` on large
 multi-tenant fleets where that label cardinality would hurt. Backend errors count by
