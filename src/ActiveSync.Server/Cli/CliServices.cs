@@ -16,7 +16,12 @@ internal static class CliServices
 {
 	internal static async Task<ServiceProvider?> TryCreateAsync()
 	{
-		IConfigurationRoot config = CliVerbs.BuildConfiguration([]);
+		// E4: layer the database-stored global settings on top of file/env — the backend role
+		// sections + declared users validated below (BackendConfigurationValidator, and every
+		// `eas user` command's UserResolver.ValidateEntry) must see the SAME effective configuration
+		// the running gateway does, and the documented setup path stores backend roles in the
+		// database (`eas config set ActiveSync:Backends:...`), not a file.
+		IConfigurationRoot config = CliVerbs.BuildConfigurationWithDatabaseSettings([]);
 		ActiveSyncOptions? options = config.GetSection("ActiveSync").Get<ActiveSyncOptions>();
 		if (options is null)
 		{

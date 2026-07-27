@@ -44,6 +44,32 @@ internal static class CliVerbs
 	}
 
 	/// <summary>
+	///   Same as <see cref="BuildConfiguration" />, plus the database-stored global settings layered
+	///   on top — the same three lines <see cref="ShowBannerAsync" /> already uses, and the same
+	///   layering <c>ProgramServer.ConfigureConfiguration</c> does for the running gateway. E4: the
+	///   documented setup path stores backend role assignments in the database
+	///   (<c>eas config set ActiveSync:Backends:...</c>), so any CLI path that validates against the
+	///   EFFECTIVE role/user configuration (not just labels a value's source) needs this layer —
+	///   otherwise it sees "no roles configured" for a role the running gateway serves just fine.
+	///   Deliberately a separate method rather than folded into <see cref="BuildConfiguration" />
+	///   itself: the settings commands (<see cref="SettingsCommandBase{TSettings}" />) rely on the
+	///   PLAIN file/env root to label a value's source as "config" vs "db", and merge the database
+	///   layer in themselves where it matters (<c>ConfigSetCommand</c>'s <c>effective</c> view).
+	/// </summary>
+	internal static IConfigurationRoot BuildConfigurationWithDatabaseSettings(string[] args)
+	{
+		IConfigurationRoot fileConfig = BuildConfiguration(args);
+		DatabaseOptions bootstrapDatabase =
+			fileConfig.GetSection("ActiveSync:Database").Get<DatabaseOptions>() ?? new DatabaseOptions();
+		DbSettingsConfigurationSource settingsSource = new();
+		settingsSource.Provider.SetData(DbSettingsLoader.TryLoad(bootstrapDatabase, null));
+		return new ConfigurationBuilder()
+			.AddConfiguration(fileConfig)
+			.Add(settingsSource)
+			.Build();
+	}
+
+	/// <summary>
 	///   Bare invocation: print the banner for the configuration the gateway WOULD start with
 	///   (or the validation errors serve would die with), without starting anything. Database
 	///   users are merged in when the state database is reachable.
