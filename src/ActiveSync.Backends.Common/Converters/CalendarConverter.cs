@@ -236,7 +236,11 @@ public static class CalendarConverter
 		bool allDay = V("AllDayEvent") == "1";
 		string? startRaw = V("StartTime");
 		string? endRaw = V("EndTime");
-		TimeSpan? tzOffset = TimeZoneBlob.ReadBaseOffset(V("TimeZone"));
+		// D3: the effective offset (base bias + daylight bias when applicable) is read per
+		// instant, not once — a multi-day all-day event can straddle a DST transition, and
+		// reading only the standard bias rolls the nominal date back a day for roughly half
+		// the year in any zone that observes DST.
+		string? tzBlob = V("TimeZone");
 
 		// D12: capture the stored zone BEFORE overwriting so an update keeps a real (non-UTC)
 		// TZID instead of re-anchoring the event — and its recurrences — to a fixed UTC offset.
@@ -245,12 +249,12 @@ public static class CalendarConverter
 
 		if (startRaw is not null && EasDateTime.TryParse(startRaw, out DateTime startUtc))
 			evt.Start = allDay
-				? new CalDateTime(DateOnly.FromDateTime(LocalDate(startUtc, tzOffset)))
+				? new CalDateTime(DateOnly.FromDateTime(LocalDate(startUtc, TimeZoneBlob.ReadEffectiveOffset(tzBlob, startUtc))))
 				: InStoredZone(startUtc, storedStartTz);
 
 		if (endRaw is not null && EasDateTime.TryParse(endRaw, out DateTime endUtc))
 			evt.End = allDay
-				? new CalDateTime(DateOnly.FromDateTime(LocalDate(endUtc, tzOffset)))
+				? new CalDateTime(DateOnly.FromDateTime(LocalDate(endUtc, TimeZoneBlob.ReadEffectiveOffset(tzBlob, endUtc))))
 				: InStoredZone(endUtc, storedEndTz);
 
 		// Presence-guarded: an omitted element means "leave as is", never "reset to default" —
@@ -660,7 +664,10 @@ public static class CalendarConverter
 
 	private static DateTime LocalDate(DateTime utc, TimeSpan? offset)
 	{
-		return (offset is { } o ? utc + o : utc).Date;
+		// Anchor at local noon before taking .Date: a cheap belt-and-braces guard so a residual
+		// offset error (an unparsable/short/foreign TimeZone blob falling back to a coarser
+		// reading) of up to +-11h still cannot cross midnight and land on the wrong nominal day.
+		return (offset is { } o ? utc + o : utc).AddHours(12).Date;
 	}
 
 	/// <summary>Updates the user's PARTSTAT for a MeetingResponse (1=accept, 2=tentative, 3=decline).</summary>

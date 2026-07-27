@@ -131,6 +131,28 @@ public class CalendarConverterTests
 		Assert.Equal("20260402T000000Z", end);
 	}
 
+	// D3 — a client-created all-day event lands one day early for half the year, because
+	// TimeZoneBlob.ReadBaseOffset returns only the STANDARD bias (Copenhagen +1h) while the
+	// wire value for a DST-season all-day event is anchored on the actual CEST (+2h) local
+	// midnight. Verified against a real MS-ASTZ blob for Europe/Copenhagen: on 2026-07-16
+	// (daylight time), local midnight is 2026-07-15T22:00:00Z, and reading only the +1h base
+	// offset rolls the .Date computation back to 2026-07-15.
+	[Fact]
+	public void AllDayEvent_CreatedDuringDst_LandsOnTheCorrectNominalDate()
+	{
+		string tzBlob = TimeZoneBlob.ToBase64(TimeZoneInfo.FindSystemTimeZoneById("Europe/Copenhagen"));
+
+		string ics = CalendarConverter.FromApplicationData(AppData(
+			new XElement(Cal + "Subject", "Summer trip"),
+			new XElement(Cal + "AllDayEvent", "1"),
+			new XElement(Cal + "StartTime", "20260715T220000Z"), // local midnight, CEST = UTC+2
+			new XElement(Cal + "EndTime", "20260716T220000Z"),
+			new XElement(Cal + "TimeZone", tzBlob)), "allday-dst", null);
+
+		Assert.Contains("DTSTART;VALUE=DATE:20260716", ics);
+		Assert.Contains("DTEND;VALUE=DATE:20260717", ics);
+	}
+
 	[Fact]
 	public void SetPartStat_MatchesExactMailboxOnly()
 	{
