@@ -11,8 +11,9 @@ namespace ActiveSync.WebUi.Api;
 /// <summary>
 ///   Device management — the web face of `eas devices/block/unblock/device wipe/purge`.
 ///   Destructive actions (wipe, purge) demand a typed confirmation echo instead of the CLI's
-///   --yes flag; blocks mirror the CLI exactly (user-level when deviceId is omitted). The DB work
-///   lives in <see cref="DeviceAdminService" />, shared with the CLI.
+///   --yes flag; blocks are per-device (decision 19) — a request without a deviceId is refused
+///   400, pointing at disabling the whole user instead. The DB work lives in
+///   <see cref="DeviceAdminService" />, shared with the CLI.
 /// </summary>
 internal static class DevicesEndpoints
 {
@@ -66,8 +67,7 @@ internal static class DevicesEndpoints
 			bool knownUser = resolver.MergedUsers.ContainsKey(user);
 
 			// Blocks are DEVICE-scoped (decision 19). The shared service decides — the API and
-			// the CLI must not drift on what a bare user means (the endpoint summary used to
-			// promise "user-level when deviceId is omitted"; that shape no longer exists).
+			// the CLI must not drift on what a bare user means.
 			DeviceAdminService.BlockOutcome outcome = await devices.BlockAsync(user, request.DeviceId, ct);
 			return outcome switch
 			{

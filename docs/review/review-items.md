@@ -310,7 +310,7 @@ work. Every finding ID appears in exactly one item.
 > is never re-validated against declared users. `B6` `TrustedProxies` is documented as DB-settable and is not
 > in the catalogue. `B7` global settings are non-sargable and case-collidable.
 
-**19. Admin UI gaps & coherence** — ~~`C5`~~ ~~`C6`~~ ~~`C7`~~ ~~`C10`~~ ~~`C14`~~ `C17` ~~`C18`~~ `C19`
+**19. Admin UI gaps & coherence** — ~~`C5`~~ ~~`C6`~~ ~~`C7`~~ ~~`C10`~~ ~~`C14`~~ ~~`C17`~~ ~~`C18`~~ `C19`
 > `C10` rename, delete-user and deletion-impact have **no path in the SPA** at all, though the API and the
 > design doc both treat them as UI features. `C5` switching a role's provider leaves the old provider's rows
 > behind for the new one to bind. `C6` a stored backend secret can never be cleared. `C14` a portal PUT that
