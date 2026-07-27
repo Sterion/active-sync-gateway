@@ -108,18 +108,25 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 				host, Fingerprint(certificate));
 			return certificate;
 		}
-		catch (DbUpdateException)
+		catch (DbUpdateException dbEx)
 		{
-			// Another replica won the race — either the first-boot INSERT (unique PK conflict)
-			// or, since ServerCertificate.ConcurrencyToken is a concurrency token (K6), the
-			// UPDATE that replaces an unreadable/expiring row (DbUpdateConcurrencyException, a
+			// Another replica winning the race — either the first-boot INSERT (unique PK conflict)
+			// or, since ServerCertificate.ConcurrencyToken is a concurrency token (K6), the UPDATE
+			// that replaces an unreadable/expiring row (DbUpdateConcurrencyException, a
 			// DbUpdateException subtype: the WHERE clause's stale token no longer matches, so a
-			// losing replica's replace can no longer silently overwrite the winner's). Either
-			// way: serve the winner's certificate instead of flip-flopping the served fingerprint.
+			// losing replica's replace can no longer silently overwrite the winner's) — is only ONE
+			// cause of DbUpdateException, the base type. A full disk, a permission failure, a
+			// truncated column, or a provider-level constraint violation all throw the same type and
+			// leave no row behind (K18). Use FirstOrDefaultAsync rather than assuming a winner row
+			// exists, and — when it genuinely doesn't — rethrow the real failure with context instead
+			// of letting FirstAsync's "Sequence contains no elements" discard its diagnosis.
 			certificate.Dispose();
 			await using SyncDbContext retry = contextFactory.CreateDbContext();
-			ServerCertificate winner = await retry.ServerCertificates.AsNoTracking()
-				.FirstAsync(c => c.Id == 1, ct).ConfigureAwait(false);
+			ServerCertificate? winner = await retry.ServerCertificates.AsNoTracking()
+				.FirstOrDefaultAsync(c => c.Id == 1, ct).ConfigureAwait(false);
+			if (winner is null)
+				throw new InvalidOperationException(
+					"Could not store or read back the gateway TLS certificate.", dbEx);
 			return TryLoad(winner.PfxProtected, logger)
 			       ?? throw new InvalidOperationException(
 				       "The concurrently stored gateway TLS certificate cannot be read back.");

@@ -164,6 +164,29 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 	}
 
 	[Fact]
+	public async Task GenuineDatabaseFailure_WithNoWinnerRowWritten_SurfacesTheOriginalError()
+	{
+		// K18: the catch(DbUpdateException) fallback assumes the exception always means "another
+		// replica won the race", so it re-queries for the winner's row. DbUpdateException is the
+		// base type: it also covers a full disk, a permission failure, a truncated column, or a
+		// provider-level constraint violation — none of which leave a row behind. In that case
+		// FirstAsync throws "Sequence contains no elements", discarding the real DbUpdateException's
+		// diagnosis and reporting a confusing, wrong error to the operator instead.
+		using LocalContentProtector protector = Protector();
+		ThrowingFactory factory = new(_connection);
+		GatewayCertificateStore store = new(factory, protector);
+
+		InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+			store.GetOrCreateAsync("eas.example.com", NullLogger.Instance, CancellationToken.None));
+
+		Assert.IsType<DbUpdateException>(ex.InnerException);
+		Assert.DoesNotContain("Sequence contains no elements", ex.Message);
+
+		await using SyncDbContext db = _factory.CreateDbContext();
+		Assert.Equal(0, await db.ServerCertificates.CountAsync());
+	}
+
+	[Fact]
 	public async Task GeneratedCertificate_ValidityIsCappedForAppleCompatibility()
 	{
 		// K4: iOS/macOS refuse server certs valid for more than 398 days (Apple's ≤825/≤398-day
@@ -264,5 +287,25 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 				.Options;
 			return new SqliteSyncDbContext(options);
 		}
+	}
+
+	/// <summary>K18: stands in for a genuine database failure — SaveChangesAsync always throws
+	/// DbUpdateException without ever writing a row, so a caller that assumes the exception means
+	/// "a race, go find the winner" finds nothing.</summary>
+	private sealed class ThrowingFactory(SqliteConnection connection) : ISyncDbContextFactory
+	{
+		public SyncDbContext CreateDbContext()
+		{
+			DbContextOptions<ThrowingSyncDbContext> options = new DbContextOptionsBuilder<ThrowingSyncDbContext>()
+				.UseSqlite(connection)
+				.Options;
+			return new ThrowingSyncDbContext(options);
+		}
+	}
+
+	private sealed class ThrowingSyncDbContext(DbContextOptions<ThrowingSyncDbContext> options) : SyncDbContext(options)
+	{
+		public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
+			throw new DbUpdateException("simulated database failure", new InvalidOperationException("disk full"));
 	}
 }
