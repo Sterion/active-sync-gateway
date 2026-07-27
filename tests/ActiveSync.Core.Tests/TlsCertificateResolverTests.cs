@@ -86,6 +86,26 @@ public sealed class TlsCertificateResolverTests : IDisposable
 	}
 
 	[Fact]
+	public void LoadExternal_PemPair_PrivateKeyStaysUsable_AfterPfxIsZeroed()
+	{
+		// K13 COVERAGE (not proof): the PEM path re-exports through PKCS#12 into an anonymous
+		// temporary handed straight to LoadPkcs12 — unlike GatewayCertificateStore.Generate, which
+		// hoists the identical export into a named local and zeroes it in a finally. There is no
+		// external handle onto that anonymous buffer to assert it was wiped (the whole point of the
+		// finding is that nothing holds a reference to zero); this is a regression guard, in the same
+		// spirit as GatewayCertificateStoreTests' K9 test, that hoisting it into a zeroed local does
+		// not corrupt the loaded private key. A sign/verify round-trip proves the key survived.
+		TlsOptions tls = new() { CertificatePath = _pemCert, CertificateKeyPath = _pemKey };
+		using X509Certificate2 cert = TlsCertificateResolver.LoadExternal(tls, null);
+
+		using RSA priv = cert.GetRSAPrivateKey()!;
+		using RSA pub = cert.GetRSAPublicKey()!;
+		byte[] data = [1, 2, 3, 4, 5];
+		byte[] signature = priv.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+		Assert.True(pub.VerifyData(data, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+	}
+
+	[Fact]
 	public void LoadExternal_Pfx_HasPrivateKey()
 	{
 		TlsOptions tls = new() { CertificatePath = _pfx };

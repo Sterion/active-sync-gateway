@@ -155,7 +155,19 @@ public sealed class TlsCertificateResolver(
 			using X509Certificate2 pem = string.IsNullOrEmpty(password)
 				? X509Certificate2.CreateFromPemFile(certPath, tls.CertificateKeyPath)
 				: X509Certificate2.CreateFromEncryptedPemFile(certPath, password, tls.CertificateKeyPath);
-			certificate = X509CertificateLoader.LoadPkcs12(pem.Export(X509ContentType.Pkcs12), null);
+			// K13: the exported PKCS#12 carries the unencrypted private key — hoist it into a named
+			// local and zero it once LoadPkcs12 has parsed it, matching the discipline
+			// GatewayCertificateStore.Generate already applies to the identical export. Left as an
+			// anonymous temporary it survives until GC and can land in a core dump or a swapped page.
+			byte[] pfx = pem.Export(X509ContentType.Pkcs12);
+			try
+			{
+				certificate = X509CertificateLoader.LoadPkcs12(pfx, null);
+			}
+			finally
+			{
+				CryptographicOperations.ZeroMemory(pfx);
+			}
 		}
 		else
 		{
