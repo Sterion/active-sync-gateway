@@ -104,8 +104,11 @@ async function wipe(d, container, cancel) {
 	}
 }
 
-/** Destructive confirm: the user must type the expected value back. */
-function confirmTyped(message, expected, onConfirmed) {
+/**
+ * Destructive confirm: the user must type the expected value back. Exported (C10) so the Users
+ * page can reuse it for the "Delete user" flow instead of a bespoke dialog.
+ */
+export function confirmTyped(message, expected, onConfirmed) {
 	const input = h('input', { placeholder: expected, spellcheck: 'false' });
 	const dialog = h('dialog', { class: 'card' },
 		h('p', {}, message),

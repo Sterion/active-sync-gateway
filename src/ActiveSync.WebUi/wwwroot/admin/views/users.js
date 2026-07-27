@@ -6,6 +6,7 @@
 import { api } from '/shared/api.js';
 import { h, render as renderInto, table, toast, confirmDialog } from '/shared/ui.js';
 import { schemaForm, schemaKeys, listRoot, sourceBadge } from '/shared/schema-form.js';
+import { confirmTyped } from '/admin/views/devices.js';
 
 const ROLES = ['MailStore', 'MailSubmit', 'Calendar', 'Tasks', 'Contacts', 'Notes', 'Oof'];
 
@@ -106,7 +107,14 @@ export async function render(container) {
 				? h('div', { class: 'notice' },
 					'This entry comes from configuration — a database value overrides configuration for that field only; clearing a field falls back to the config value.')
 				: null,
-			h('label', {}, 'Login'), login,
+			h('label', {}, 'Login'),
+			h('div', { style: 'display:flex; gap:8px' }, login,
+				// C10: renaming is possible at all only because identity is a surrogate key — but a
+				// config-declared login is immutable (the CLI refuses it too), so the control is
+				// simply not offered rather than round-tripping to a 400.
+				!isNew && user?.origin !== 'config'
+					? h('button', { onclick: () => renameDialog(user.login, container) }, 'Rename')
+					: null),
 			h('label', {}, 'Mail address',
 				(user?.mailAddress ?? '') === '' ? h('span', { class: 'badge default', style: 'margin-left:8px' }, 'default') : null,
 				fieldBadge('MailAddress')),
@@ -129,6 +137,10 @@ export async function render(container) {
 				user?.origin?.startsWith('db')
 					? h('button', { class: 'danger', onclick: remove }, 'Delete database entry')
 					: null,
+				// C10: distinct from "Delete database entry" above (which only drops the DECLARATION
+				// and falls back to config) — this cascade-deletes the identity itself, exactly like
+				// `eas user delete`. No SPA path existed for it at all.
+				!isNew ? h('button', { class: 'danger', onclick: deleteUser }, 'Delete user') : null,
 				h('button', { onclick: () => renderInto(editor) }, 'Close'))));
 		editor.scrollIntoView({ behavior: 'smooth' });
 
@@ -173,6 +185,38 @@ export async function render(container) {
 			} catch (e) {
 				toast(e.body?.error ?? 'Delete failed.', 'error');
 			}
+		}
+
+		// C10: confirm-and-cascade, mirroring `eas user delete` — GET the impact first so the typed
+		// dialog can name exactly what is at stake (content-owning users get the counts), then POST
+		// the login back as the confirmation echo.
+		async function deleteUser() {
+			let impact;
+			try {
+				impact = await api(`/admin/api/users/${encodeURIComponent(user.login)}/deletion-impact`);
+			} catch (e) {
+				toast(e.body?.error ?? 'Could not check what this would delete.', 'error');
+				return;
+			}
+			confirmTyped(
+				(impact.destroysContent
+					? `Permanently delete user '${user.login}'? This destroys ${impact.summary}, which exist nowhere else. `
+					: `Permanently delete user '${user.login}' and all of its gateway state? `) +
+				'Type the login to confirm:',
+				user.login,
+				async confirm => {
+					try {
+						const result = await api(`/admin/api/users/${encodeURIComponent(user.login)}/delete`, {
+							method: 'POST', body: { confirm },
+						});
+						toast(result.configFallback
+							? `Deleted — configuration still declares ${user.login}; it is re-created (empty) on next sign-in.`
+							: `Deleted ${user.login}.`, 'ok');
+						refresh(container);
+					} catch (e) {
+						toast(e.body?.error ?? 'Delete failed.', 'error');
+					}
+				});
 		}
 	}
 }
@@ -322,4 +366,38 @@ function rawEditor(existing, collapsed) {
 
 function refresh(container) {
 	import('/admin/views/users.js').then(m => m.render(container));
+}
+
+/**
+ * C10: the login is a mutable attribute (identity is the surrogate UserId) — renaming is a
+ * single-row update that leaves sync state and locally-stored items untouched. No SPA path
+ * existed for `POST users/{login}/rename` at all.
+ */
+function renameDialog(currentLogin, container) {
+	const input = h('input', { value: currentLogin, spellcheck: 'false' });
+	const dialog = h('dialog', { class: 'card' },
+		h('p', {}, `Rename '${currentLogin}' to:`),
+		input,
+		h('div', { style: 'display:flex; gap:8px; justify-content:flex-end; margin-top:12px' },
+			h('button', { onclick: () => dialog.close() }, 'Cancel'),
+			h('button', {
+				class: 'primary',
+				onclick: async () => {
+					const newLogin = input.value.trim();
+					if (!newLogin || newLogin === currentLogin) { dialog.close(); return; }
+					dialog.close();
+					try {
+						const result = await api(`/admin/api/users/${encodeURIComponent(currentLogin)}/rename`, {
+							method: 'POST', body: { newLogin },
+						});
+						toast(`Renamed to ${result.login}. ${result.note}`, 'ok');
+						refresh(container);
+					} catch (e) {
+						toast(e.body?.error ?? 'Rename failed.', 'error');
+					}
+				},
+			}, 'Rename')));
+	dialog.addEventListener('close', () => dialog.remove());
+	document.body.append(dialog);
+	dialog.showModal();
 }
