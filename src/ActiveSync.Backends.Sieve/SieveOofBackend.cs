@@ -26,7 +26,28 @@ public sealed class SieveOofBackend(
 		string previousActive = scripts.FirstOrDefault(s => s.Active).Name ?? "";
 
 		await client.PutScriptAsync(SieveVacationScript.ScriptName, script, ct).ConfigureAwait(false);
-		await client.SetActiveAsync(SieveVacationScript.ScriptName, ct).ConfigureAwait(false);
+		try
+		{
+			await client.SetActiveAsync(SieveVacationScript.ScriptName, ct).ConfigureAwait(false);
+		}
+		catch (BackendException)
+		{
+			// SETACTIVE was refused after PUTSCRIPT already landed (quota, an extension the
+			// server doesn't support, ...): the DB row is correctly never written by the caller,
+			// but without this the gateway's own script would otherwise sit on the user's server
+			// forever — DisableAsync only ever runs when the row says Oof was actually armed.
+			try
+			{
+				await client.DeleteScriptAsync(SieveVacationScript.ScriptName, ct).ConfigureAwait(false);
+			}
+			catch (BackendException)
+			{
+				// best-effort cleanup only — the SETACTIVE failure is what the caller needs to see
+			}
+
+			throw;
+		}
+
 		// Re-arm: our own script was already active — the caller's stored token still
 		// names the right thing to restore.
 		return previousActive == SieveVacationScript.ScriptName ? null : previousActive;
