@@ -79,6 +79,23 @@ public abstract class ComposeMailHandlerBase(
 			return;
 		}
 
+		// F1: MS-ASCMD makes ClientId a required child of SendMail/SmartForward/SmartReply
+		// precisely so a lost 200 (Wi-Fi→LTE handover, a proxy timeout, the gateway restarting
+		// between SendAsync and the response write) can be retried without duplicating the mail —
+		// this is the same durable claim-before/mark-after shape the Sync draft-submit path already
+		// uses (TryClaimSendAsync/MarkSendCompletedAsync). "compose" is a fixed collection namespace
+		// (this path has no Sync collection/SyncKey of its own) and 0 a fixed generation, so the key
+		// is just (device, Command, ClientId). A request with no ClientId (the 12.x raw form, which
+		// carries dedup information nowhere) always falls through to a real send.
+		string? clientId = request.ClientId;
+		if (clientId is { Length: > 0 } &&
+		    await context.State.TryClaimSendAsync(
+			    context.Device, "compose", 0, $"{Command}:{clientId}", ct) == SendClaimOutcome.AlreadySent)
+		{
+			await context.WriteEmptyAsync(); // already sent on a prior attempt — acknowledge, don't resend
+			return;
+		}
+
 		try
 		{
 			await context.Session.MailSubmit.SendAsync(outgoing, ct);
@@ -89,6 +106,9 @@ public abstract class ComposeMailHandlerBase(
 			await WriteErrorAsync(context, "120"); // mail submission failed
 			return;
 		}
+
+		if (clientId is { Length: > 0 })
+			await context.State.MarkSendCompletedAsync(context.Device, "compose", 0, $"{Command}:{clientId}", ct);
 
 		Core.Observability.GatewayMetrics.RecordMailSent(context.UserName, Command switch
 		{
@@ -164,6 +184,8 @@ public abstract class ComposeMailHandlerBase(
 				false,
 				context.Parameters.CollectionId,
 				context.Parameters.ItemId);
+			// 12.x carries no ClientId anywhere (options ride the query string) — the record's
+			// ClientId stays null, so the F1 dedup guard above always falls through to a real send.
 		}
 
 		XDocument? doc = await context.ReadRequestAsync();
@@ -202,7 +224,8 @@ public abstract class ComposeMailHandlerBase(
 			root.Element(CM + "ReplaceMime") is not null,
 			source?.Element(CM + "FolderId")?.Value,
 			source?.Element(CM + "ItemId")?.Value,
-			forwardees);
+			forwardees,
+			root.Element(CM + "ClientId")?.Value);
 	}
 
 	private static bool TryDecodeBase64(string value, out byte[] decoded)
@@ -257,7 +280,10 @@ public abstract class ComposeMailHandlerBase(
 		bool ReplaceMime,
 		string? SourceFolderId,
 		string? SourceItemId,
-		IReadOnlyList<(string Name, string Email)> Forwardees)
+		IReadOnlyList<(string Name, string Email)> Forwardees,
+		// F1: null on the 12.x raw wire form (which carries no ClientId anywhere) — the dedup guard
+		// in HandleAsync always falls through to a real send in that case.
+		string? ClientId = null)
 	{
 		public ComposeRequest(
 			byte[] mime, bool saveInSent, bool replaceMime, string? sourceFolderId, string? sourceItemId)

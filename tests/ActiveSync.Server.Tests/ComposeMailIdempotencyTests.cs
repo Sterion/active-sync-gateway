@@ -19,6 +19,9 @@ namespace ActiveSync.Server.Tests;
 ///     <item>F4 — SmartReply/SmartForward must resolve the referenced source item ONCE per send:
 ///       <c>BuildOutgoingAsync</c> resolves it to build the quote/attachment, and
 ///       <c>MarkSourceAsync</c> must reuse that resolution to flag it, not resolve it again.</item>
+///     <item>F1 — SendMail/SmartReply/SmartForward must dedup on <c>composemail:ClientId</c>: a
+///       retried submit (the phone resending after it lost the 200) must not send the mail a second
+///       time. A request with no ClientId (the 12.x raw form) always falls through to a real send.</item>
 ///   </list>
 /// </summary>
 public sealed class ComposeMailIdempotencyTests : IDisposable
@@ -135,6 +138,51 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		await _harness.RunAsync(handler, "SmartReply", request);
 
 		Assert.Equal(1, _harness.FolderResolutionQueries - before);
+	}
+
+	// F1 — MS-ASCMD makes ClientId a required child of SendMail precisely so a lost 200 can be
+	// retried without duplicating the mail: the server recognizes the resend and suppresses it.
+	[Fact]
+	public async Task SendMail_RetriedWithSameClientId_SendsOnlyOnce()
+	{
+		XDocument RequestWithClientId() => new(new XElement(CM + "SendMail",
+			new XElement(CM + "ClientId", "phone-cid-1"),
+			OpaqueMime("From: u@example.test\r\nTo: dest@example.com\r\nSubject: hi\r\n\r\nbody\r\n")));
+
+		SendMailHandler NewHandler() => new(
+			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<SendMailHandler>.Instance);
+
+		// Attempt 1: the mail goes out, but (in this scenario) the phone never sees the 200 —
+		// Wi-Fi→LTE handover, a proxy timeout, the gateway restarting between SendAsync and the
+		// response write.
+		XDocument? first = await _harness.RunAsync(NewHandler(), "SendMail", RequestWithClientId());
+		Assert.Null(first); // success = empty 200
+
+		// Attempt 2: the phone resends the IDENTICAL request (same ClientId) because it never saw
+		// attempt 1's response. The recipient must NOT receive the message twice.
+		XDocument? second = await _harness.RunAsync(NewHandler(), "SendMail", RequestWithClientId());
+		Assert.Null(second); // still reports success — the client must not treat the resend as a failure
+
+		Assert.Single(_harness.Session.Submit.Sent);
+	}
+
+	// F1 — the 12.x raw wire form (message/rfc822 body, no WBXML ClientId element at all) has
+	// nothing to dedup on; it must keep sending normally rather than being silently swallowed.
+	[Fact]
+	public async Task SendMail_WithoutClientId_AlwaysSends()
+	{
+		XDocument RequestWithoutClientId() => new(new XElement(CM + "SendMail",
+			OpaqueMime("From: u@example.test\r\nTo: dest@example.com\r\nSubject: hi\r\n\r\nbody\r\n")));
+
+		SendMailHandler NewHandler() => new(
+			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<SendMailHandler>.Instance);
+
+		await _harness.RunAsync(NewHandler(), "SendMail", RequestWithoutClientId());
+		await _harness.RunAsync(NewHandler(), "SendMail", RequestWithoutClientId());
+
+		Assert.Equal(2, _harness.Session.Submit.Sent.Count);
 	}
 
 	private static XElement OpaqueMime(string mime)
