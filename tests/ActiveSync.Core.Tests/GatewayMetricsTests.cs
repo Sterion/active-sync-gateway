@@ -165,6 +165,73 @@ public sealed class GatewayMetricsTests
 		Assert.Contains(("eas", "failure"), seen);
 	}
 
+	// A3: `user` on RecordAuthOutcome's throttled/failure/error paths is the RAW HTTP Basic
+	// username — fully attacker-controlled, unlike Command() which already folds every
+	// out-of-set value to "other". Only a successful outcome has actually verified the
+	// identity; every other outcome must collapse to the same sentinel PerUserLabels=false uses,
+	// so an unauthenticated caller cannot mint arbitrary activesync_auth_outcomes series.
+	[Fact]
+	public void RecordAuthOutcome_NonSuccess_NeverEmitsTheRawUsername()
+	{
+		GatewayMetrics.PerUserLabels = true;
+		const string attacker = "attacker-controlled-name";
+		List<string?> users = [];
+		using MeterListener listener = new();
+		listener.InstrumentPublished = (instrument, l) =>
+		{
+			if (instrument.Meter.Name == GatewayMetrics.MeterName &&
+			    instrument.Name == "activesync_auth_outcomes")
+				l.EnableMeasurementEvents(instrument);
+		};
+		listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+		{
+			foreach (KeyValuePair<string, object?> tag in tags)
+				if (tag.Key == "user")
+					users.Add(tag.Value?.ToString());
+		});
+		listener.Start();
+
+		GatewayMetrics.RecordAuthOutcome("eas", "throttled", attacker);
+		GatewayMetrics.RecordAuthOutcome("eas", "failure", attacker);
+		GatewayMetrics.RecordAuthOutcome("eas", "error", attacker);
+
+		Assert.DoesNotContain(attacker, users);
+		Assert.All(users, u => Assert.Equal("-", u));
+	}
+
+	// A3: independent of the RecordAuthOutcome sentinel above — User() itself must bound length
+	// and neutralize control characters, so ANY future call site handed an unauthenticated value
+	// directly cannot reintroduce an unbounded or log-injecting label value.
+	[Fact]
+	public void RecordSyncItems_UserLabel_IsLengthClampedAndControlCharsNeutralized()
+	{
+		GatewayMetrics.PerUserLabels = true;
+		string evil = "user\u0007\r\nname" + new string('x', 500);
+		string? user = null;
+		using MeterListener listener = new();
+		listener.InstrumentPublished = (instrument, l) =>
+		{
+			if (instrument.Meter.Name == GatewayMetrics.MeterName &&
+			    instrument.Name == "activesync_sync_items")
+				l.EnableMeasurementEvents(instrument);
+		};
+		listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+		{
+			foreach (KeyValuePair<string, object?> tag in tags)
+				if (tag.Key == "user")
+					user = tag.Value?.ToString();
+		});
+		listener.Start();
+
+		GatewayMetrics.RecordSyncItems(evil, "Email", "server_to_client", "add", 1);
+
+		Assert.NotNull(user);
+		Assert.True(user!.Length <= 128, $"expected <= 128 chars, was {user.Length}");
+		Assert.DoesNotContain('\u0007', user);
+		Assert.DoesNotContain('\r', user);
+		Assert.DoesNotContain('\n', user);
+	}
+
 	// K5 (coverage — additive capability): the TLS-expiry gauge reflects the wired observer.
 	[Fact]
 	public void CertificateExpiryGauge_ReflectsTheObserver()

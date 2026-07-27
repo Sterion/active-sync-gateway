@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using ActiveSync.Protocol;
 using ActiveSync.Protocol.Http;
 
 namespace ActiveSync.Core.Observability;
@@ -87,9 +88,38 @@ public static class GatewayMetrics
 
 	public static bool PerUserLabels { get; set; } = true;
 
+	// A3: bounds any future call site that hands User() an unauthenticated, attacker-controlled
+	// value directly — the same 128-char budget EndpointAuth's LogText.Clean uses for the same
+	// field.
+	private const int MaxUserLabelLength = 128;
+
 	private static string User(string user)
 	{
-		return PerUserLabels ? user : "-";
+		return PerUserLabels ? Sanitize(user) : "-";
+	}
+
+	/// <summary>
+	///   Clamps length and neutralizes control characters (incl. the bidi-override smuggling
+	///   <see cref="WireLog.IsUnsafe" /> also guards against) — defence in depth for a Prometheus
+	///   label value, independent of whichever call site decided a raw value was safe to pass in.
+	/// </summary>
+	private static string Sanitize(string value)
+	{
+		string text = value.Length > MaxUserLabelLength ? value[..MaxUserLabelLength] : value;
+		bool unsafeFound = false;
+		foreach (char c in text)
+			if (WireLog.IsUnsafe(c, allowLineStructure: false))
+			{
+				unsafeFound = true;
+				break;
+			}
+		if (!unsafeFound)
+			return text;
+		return string.Create(text.Length, text, static (dest, source) =>
+		{
+			for (int i = 0; i < source.Length; i++)
+				dest[i] = WireLog.IsUnsafe(source[i], allowLineStructure: false) ? '?' : source[i];
+		});
 	}
 
 	/// <summary>
@@ -121,10 +151,16 @@ public static class GatewayMetrics
 	/// </summary>
 	public static void RecordAuthOutcome(string source, string outcome, string user)
 	{
+		// A3: `user` on every non-success path is the raw HTTP Basic username — an unauthenticated
+		// caller controls it outright (a throttled/rejected/errored request never proved the
+		// identity), so it becomes its own Prometheus series for any distinct string a sprayer
+		// cares to send. Only "success" has actually verified the login; every other outcome
+		// collapses to the same sentinel PerUserLabels=false uses, independent of that switch.
+		string label = outcome == "success" ? User(user) : "-";
 		AuthOutcomes.Add(1,
 			new KeyValuePair<string, object?>("source", source),
 			new KeyValuePair<string, object?>("outcome", outcome),
-			new KeyValuePair<string, object?>("user", User(user)));
+			new KeyValuePair<string, object?>("user", label));
 	}
 
 	/// <summary>direction: client_to_server | server_to_client; operation: add | change | delete | fetch.</summary>
