@@ -351,3 +351,44 @@ confirming its declared coverage-not-proof status.
   matched on that old message.
 - `K13` is unprovable by construction — there is no external handle on the pre-fix anonymous buffer to
   assert it was wiped. Struck on the fix's merit, matching the file's existing K9 coverage precedent.
+
+## Item 10 — Plugin trust boundary
+**Findings:** `K3` `K4` `K19`
+**Commits:** `a12e50c` (K3) · `f9b7838` (K4) · `5fe27e9` (K19)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 11 ✓ · one commit per finding ✓ · strike shipped with each ✓ · scope confined to
+`PluginLoader.cs`, `ContractVersion.cs`, the Contracts csproj, `docs/plugins.md` and two test files ✓ ·
+build 0 warnings ✓ · unit **1325 passed, 0 skipped** (Cli 16 · Protocol 91 · Core 812 · WebUi 101 ·
+Server 305) ✓ · **`ContractSurface.approved.txt` and `ContractVersion` both unchanged** — confirmed by
+diff, so the Contracts edit genuinely added no public surface and needed no minor bump ✓
+**Red-first re-proved independently:** `PluginLoader.cs` reverted to `baa32ab` → 5 failures (K3 ×2, K4 ×3),
+18 pre-existing green.
+**A live test failed once, and it was NOT this item's — established, not assumed:**
+The first full live run at this HEAD came back **140 passed / 1 failed**; two subsequent runs at the *same*
+HEAD were 141/141, the second after a clean-volume Stalwart restart. The container had been up ~29 minutes
+across item 9's runs, which is the accumulation failure mode `fix-review.md` describes ("indistinguishable
+at a glance from a real regression"). Decisive evidence it cannot be item 10's: the integration fixture
+configures **no** `ActiveSync:Plugins:Directory`, and `PluginLoader.LoadInto` returns at
+`if (!Directory.Exists(directory))` — so `VerifyPin`, `ComputeDirectoryDigest` and `ContractVersion.Current`
+are never reached by the live suite at all.
+**My own process gap, recorded so it is not repeated:** I lost the failing test's *name* to truncated
+output and could only reason about the failure structurally. Later live runs are captured to a file so a
+transient failure can be named rather than inferred.
+**Notes:**
+- **Two operator-breaking changes, both intended, both requiring action on upgrade.** (1) `K3`: any plugin
+  directory containing a non-`.dll` file (native `.so`, `.deps.json`, `.pdb`) now produces a different
+  digest, so **every existing pin for such a plugin must be re-pinned or startup fails**. (2) `K4`:
+  `RequirePinned=1`/`yes`/`on` previously meant "not required" and now **aborts startup**. Anyone
+  unknowingly relying on the fail-open behaviour will not boot until they fix the value — which is the
+  point, but it is a hard failure rather than a warning.
+- **`K19` landed the finding's exact remedy, including its message string**, and is stronger than "don't
+  default permissively": the gate now throws rather than reporting a version at all. Its red was a **compile
+  failure** against a newly-extracted `internal` seam. The worker cited my acceptance of `K1`'s compile-red
+  in item 9 as precedent — that reasoning is the worker's, not mine; I judged K19 on its own and reach the
+  same conclusion, because the real fallback is genuinely unreachable in any normal build (the SDK always
+  emits an `AssemblyVersion`) and the test is labelled coverage rather than passed off as proof.
+- **`InternalsVisibleTo` was added to `ActiveSync.Contracts` — a published, permanently-MIT package.** It
+  is benign (Contracts holds no sensitive internals, and the assembly is unsigned so the grant is weak
+  either way), and it added no public surface. But it does ship in the package irrevocably, and it was
+  taken on to make one Low/Nit finding testable. A reasonable person could have left `K19` as a
+  comment-documented fix with no test; worth knowing the trade was made.
