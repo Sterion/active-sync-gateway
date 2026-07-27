@@ -1,4 +1,5 @@
 using ActiveSync.Protocol;
+using Microsoft.Extensions.Logging;
 
 using ActiveSync.Contracts;
 
@@ -13,6 +14,10 @@ public sealed class CompositeBackendSession : IBackendSession
 {
 	private readonly List<IBackendConnection> _connections = [];
 	private readonly List<IContentStore> _stores = [];
+	// A2: only used so a disposal failure can be logged instead of thrown into the caller's
+	// `await using` — optional because most callers (tests, in particular) have no logger handy
+	// and a swallow-silently fallback is still strictly better than the previous throw.
+	private readonly ILogger? _logger;
 
 	// A2: the session is a refcounted lease. The cache owns the initial reference; every
 	// GetSessionAsync hands out an additional lease that the request releases (via DisposeAsync)
@@ -21,7 +26,7 @@ public sealed class CompositeBackendSession : IBackendSession
 	// reference but leaves the live socket intact until the request lets go.
 	private int _leaseCount = 1;
 
-	private CompositeBackendSession(BackendCredentials gatewayCredentials, int userId, string? mailAddress)
+	private CompositeBackendSession(BackendCredentials gatewayCredentials, int userId, string? mailAddress, ILogger? logger)
 	{
 		// The gateway UserId is the IDENTITY (DB scoping, encryption AAD, durable keys); the
 		// credentials carry the presented login. Each backend authenticates with its role's
@@ -29,6 +34,7 @@ public sealed class CompositeBackendSession : IBackendSession
 		Credentials = gatewayCredentials;
 		UserId = userId;
 		MailAddress = mailAddress;
+		_logger = logger;
 	}
 
 	/// <summary>
@@ -43,36 +49,53 @@ public sealed class CompositeBackendSession : IBackendSession
 		string? mailAddress,
 		IReadOnlyList<ResolvedRole> roles,
 		IReadOnlyList<SharedCollection> sharedCollections,
-		CancellationToken ct)
+		CancellationToken ct,
+		ILogger? logger = null)
 	{
-		CompositeBackendSession session = new(gatewayCredentials, userId, mailAddress);
+		CompositeBackendSession session = new(gatewayCredentials, userId, mailAddress, logger);
 
-		IMailSubmitOperations? mailSubmit = null;
-		IOofBackend? oof = null;
-		foreach (IGrouping<string, ResolvedRole> group in
-			roles.GroupBy(r => r.ProviderName, StringComparer.OrdinalIgnoreCase))
+		// A1: everything below can throw AFTER one or more providers already opened a live
+		// connection (a later provider's bad BaseUrl, an unsupported role, a transport-open
+		// failure, or either `?? throw` below). Without this guard the half-built session is
+		// discarded — never returned, so nothing ever disposes the connections already gathered
+		// in `session._connections` — and a phone Pinging against a half-broken configuration
+		// leaks one provider's sockets per attempt. Dispose whatever was opened so far before
+		// letting the failure propagate; DisposeConnectionsAsync never throws (A2), so this
+		// cleanup cannot mask the original exception.
+		try
 		{
-			IBackendProvider provider = registry.GetFor(group.Key, group.First().Role);
-			List<ResolvedRole> assigned = group.ToList();
-			foreach (ResolvedRole role in assigned)
-				registry.GetFor(group.Key, role.Role); // validates every assigned role
-			IBackendConnection connection = await provider.CreateConnectionAsync(
-				new BackendConnectionContext(gatewayCredentials, userId, mailAddress, assigned, sharedCollections), ct)
-				.ConfigureAwait(false);
-			session._connections.Add(connection);
-			session._stores.AddRange(connection.Stores);
-			mailSubmit ??= connection.MailSubmit;
-			oof ??= connection.Oof;
-		}
+			IMailSubmitOperations? mailSubmit = null;
+			IOofBackend? oof = null;
+			foreach (IGrouping<string, ResolvedRole> group in
+				roles.GroupBy(r => r.ProviderName, StringComparer.OrdinalIgnoreCase))
+			{
+				IBackendProvider provider = registry.GetFor(group.Key, group.First().Role);
+				List<ResolvedRole> assigned = group.ToList();
+				foreach (ResolvedRole role in assigned)
+					registry.GetFor(group.Key, role.Role); // validates every assigned role
+				IBackendConnection connection = await provider.CreateConnectionAsync(
+					new BackendConnectionContext(gatewayCredentials, userId, mailAddress, assigned, sharedCollections), ct)
+					.ConfigureAwait(false);
+				session._connections.Add(connection);
+				session._stores.AddRange(connection.Stores);
+				mailSubmit ??= connection.MailSubmit;
+				oof ??= connection.Oof;
+			}
 
-		session.MailStore = session.GetStoreForClass(EasClass.Email) as IMailStoreOperations
-			?? throw new InvalidOperationException("No provider filled the MailStore role for this session.");
-		session.MailSubmit = mailSubmit
-			?? throw new InvalidOperationException("No provider filled the MailSubmit role for this session.");
-		session.Calendar = session.GetStoreForClass(EasClass.Calendar) as ICalendarOperations;
-		session.Contacts = session.GetStoreForClass(EasClass.Contacts) as IContactOperations;
-		session.Oof = oof;
-		return session;
+			session.MailStore = session.GetStoreForClass(EasClass.Email) as IMailStoreOperations
+				?? throw new InvalidOperationException("No provider filled the MailStore role for this session.");
+			session.MailSubmit = mailSubmit
+				?? throw new InvalidOperationException("No provider filled the MailSubmit role for this session.");
+			session.Calendar = session.GetStoreForClass(EasClass.Calendar) as ICalendarOperations;
+			session.Contacts = session.GetStoreForClass(EasClass.Contacts) as IContactOperations;
+			session.Oof = oof;
+			return session;
+		}
+		catch
+		{
+			await session.DisposeConnectionsAsync().ConfigureAwait(false);
+			throw;
+		}
 	}
 
 	// A24: written on the request path and read by the eviction timer thread — a bare DateTime is

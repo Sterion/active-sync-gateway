@@ -237,7 +237,7 @@ work. Every finding ID appears in exactly one item.
 > year (DST ignored in the MS-ASTZ read-back). `D5` `AllDayEvent` is the one calendar field with no
 > ghosting guard, so a partial 16.x Change converts an all-day event to timed.
 
-**8. Backend session lifetime & metric cardinality** — `A1` `A2` `A3` `A10`
+**8. Backend session lifetime & metric cardinality** — ~~`A1`~~ `A2` `A3` `A10`
 > `A1` a partially-built composite session leaks every connection it already opened — a phone Pinging against
 > a half-broken configuration leaks ~120 sockets/hour until the healthy backend starts refusing logins.
 > `A2` `DisposeAsync` can throw into the request's `await using` after the response is written. `A3` an

@@ -79,6 +79,28 @@ public class BackendProviderTests
 	}
 
 	[Fact]
+	public async Task CreateAsync_DisposesAlreadyOpenedConnections_WhenALaterProviderFails()
+	{
+		// A1: the provider loop in CreateAsync has no try/catch — when a LATER provider's
+		// CreateConnectionAsync throws (a bad BaseUrl, an unsupported role, a transport-open
+		// failure), the half-built session is never returned and nothing disposes the EARLIER
+		// provider's already-open connection. One request against a half-broken multi-provider
+		// configuration leaks every connection opened before the failing one.
+		FakeProvider good = new("good", [BackendRole.MailStore, BackendRole.MailSubmit]);
+		FakeProvider bad = new("bad", [BackendRole.Calendar], throwOnCreate: true);
+
+		await Assert.ThrowsAsync<InvalidOperationException>(() => CompositeBackendSession.CreateAsync(
+			Registry(good, bad), Gateway, 1, null,
+			[
+				new ResolvedRole(BackendRole.MailStore, "good", ProviderSettings.Empty, Gateway),
+				new ResolvedRole(BackendRole.MailSubmit, "good", ProviderSettings.Empty, Gateway),
+				new ResolvedRole(BackendRole.Calendar, "bad", ProviderSettings.Empty, Gateway)
+			], [], CancellationToken.None));
+
+		Assert.True(good.LastResource!.Disposed); // the earlier connection must not leak
+	}
+
+	[Fact]
 	public async Task Session_Dispose_DisposesEveryConnectionResource()
 	{
 		FakeProvider mail = new("mail", [BackendRole.MailStore, BackendRole.MailSubmit]);
@@ -110,7 +132,7 @@ public class BackendProviderTests
 		Assert.True(good.LastResource!.Disposed); // and the later connection still got disposed
 	}
 
-	private sealed class FakeProvider(string name, BackendRole[] roles, bool throwOnDispose = false)
+	private sealed class FakeProvider(string name, BackendRole[] roles, bool throwOnDispose = false, bool throwOnCreate = false)
 		: IBackendProvider
 	{
 		public int Connections { get; private set; }
@@ -128,6 +150,8 @@ public class BackendProviderTests
 
 		public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
 		{
+			if (throwOnCreate)
+				throw new InvalidOperationException($"{name}: simulated transport-open failure");
 			Connections++;
 			LastAssignedRoles = context.Roles.Select(r => r.Role).ToList();
 			LastResource = new FakeResource(throwOnDispose);
