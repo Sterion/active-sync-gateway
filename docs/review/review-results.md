@@ -443,3 +443,45 @@ worker's report alone — the one finding in this run where that is true.
   roughly 1 run in 8 under full parallel suite load, green in isolation. That is the headline test for K1 —
   the one I accepted a compile-failure red for — so its reliability matters more than a typical flake.
   It passed in every full-suite run I made, including this item's.
+
+## Item 12 — WebUi session, authorization & OIDC
+**Findings:** `C1` `C3` `C9` `C16`
+**Commits:** `3dc8fd0` (C1) · `d823ccd` (C3) · `a1a2bec` (C9) · `e4d0034` (C16)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 13 ✓ · one commit per finding ✓ · strike shipped with each ✓ · build 0 warnings ✓ ·
+unit **1333 passed, 0 skipped** (Cli 16 · Protocol 91 · Core 814 · WebUi 105 · Server 307) ✓ ·
+live **141 passed, 0 skipped** on a clean volume ✓ (mandatory here — C1 and C9 change session and
+authentication policy)
+**Red-first re-proved independently:** the three WebUi source files reverted to `3b3546a` → exactly four
+failures, one per finding (`ReissuedSessionAfterASameInstantRevocation_Survives`,
+`DeletingTheLastAdminThroughTheDeleteRoute_IsRefused`,
+`UnboundConfigAccount_IsRefused_WhenTheTicketCarriesASubject`,
+`TerminationLog_DoesNotMentionTheRemovedBlockedMechanism`), 101 pre-existing green.
+**An intermittent unit failure, almost certainly not this item's:** one full-solution run came back
+Server.Tests 306/307. Three subsequent full runs were 1333/1333, and Server.Tests alone is 307/307.
+Item 12 touches **no** Server source or test file (scope: `SessionValidation.cs`, `UsersEndpoints.cs`,
+`OidcLogin.cs`, `ActiveSyncOptions.cs`, `SettingKeys.cs`, docs, three WebUi test files), and `N3` — filed
+during item 11 — documents a Server.Tests flake that appears only under full parallel load. **I could not
+name the failing test**: the summary-only output had already scrolled past it. That is the second time this
+run; live output is now captured to a file, and unit output is too from here on.
+**Notes:**
+- **`C9` changes the default OIDC outcome for config-declared accounts from "signed in as a plain user" to
+  "refused".** Anyone running OIDC with accounts declared in configuration (rather than the database) and
+  no `OidcSubject` set will find those users **locked out of the portal** on upgrade until they either bind
+  a subject or set the new opt-out. The finding explicitly asks for this, opt-out included — but it is the
+  most disruptive change in the item and the one most likely to generate a support call.
+- **A new configuration key was introduced: `Oidc:AllowUnboundLoginMatch`.** The finding sanctions "an
+  explicit opt-out setting" without naming it; the worker named it, wired it through `SettingKeys` (live,
+  CLI-settable) and documented it in `docs/webui.md` + `docs/configuration.md`, matching the sibling
+  `AdminClaim`/`AutoProvision` pattern. Reasonable, and more than the minimum — a config-file-only knob
+  would also have satisfied the text.
+- **Two pre-existing OIDC tests were modified, and they were not weakened.** Both now pass
+  `allowUnboundLoginMatch: true` to keep exercising the old path, and both retain their original assertions
+  (a config account never TOFU-binds; its admin bit is withheld on a bare login match). The new default is
+  covered by a separate new test. Correct step-9 handling, disclosed by the worker.
+- **`C16`'s proof is log text, and the worker said so.** The `blocked` parameter was hard-wired `false`, so
+  there is no behavioural symptom to reproduce; the only observable surface is the operator-visible message,
+  which did change and is asserted. Struck on the fix matching the finding's exact instruction ("drop the
+  parameter and the `blocked` term from the guard and the log line").
+- `C1`'s fix is the finding's first option (round the stamp up). The alternative — millisecond precision —
+  would have invalidated every existing ticket once; not taken, correctly.
