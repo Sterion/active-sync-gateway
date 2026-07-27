@@ -8,13 +8,7 @@ using Spectre.Console.Cli;
 if (Environment.GetEnvironmentVariable("AS_TEST_FORCE_SERVE") == "1")
 	return await Program.RunServerAsync(args);
 
-string[] cliArgs = args switch
-{
-	// Pre-CLI spelling, kept for existing container HEALTHCHECKs and k8s exec probes.
-	["--healthcheck"] => ["healthcheck"],
-	["help"] => ["--help"],
-	_ => args,
-};
+string[] cliArgs = CliApp.Normalize(args);
 
 // serve and protect accept arbitrary --ActiveSync:Section:Key=value configuration overrides,
 // which a strict command parser would reject — dispatch them before Spectre parses. Their

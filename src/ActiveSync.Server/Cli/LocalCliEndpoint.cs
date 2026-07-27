@@ -321,6 +321,12 @@ internal static class LocalCliEndpoint
 		string[] args, string stdin, CancellationToken ct, bool color = false, int width = 0,
 		IServiceProvider? hostServices = null)
 	{
+		// E10: apply the SAME pre-CLI alias table Program.cs's local dispatch uses, before anything
+		// else sees the raw args — otherwise a forwarded `eas help`/`eas --healthcheck` reaches
+		// Spectre's command tree (which registers no "help" command) as an unrecognized verb instead
+		// of behaving like the local invocation.
+		args = CliApp.Normalize(args);
+
 		if (args.Length > 0 && string.Equals(args[0], "serve", StringComparison.OrdinalIgnoreCase))
 			return new CliResponse(1, "", "serve is not available over /cli; run it locally.\n");
 

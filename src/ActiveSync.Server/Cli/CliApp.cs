@@ -8,6 +8,20 @@ namespace ActiveSync.Server.Cli;
 /// </summary>
 internal static class CliApp
 {
+	/// <summary>
+	///   Pre-CLI argument spellings that must work whether the command runs locally or is forwarded
+	///   over <c>/cli</c> (E10). Both dispatchers — <c>Program.cs</c>'s top-level pre-parse dispatch
+	///   and <see cref="LocalCliEndpoint.ExecuteAsync" /> — call this BEFORE the command tree ever
+	///   sees the args, so `eas help` and `eas --healthcheck` behave identically either way.
+	/// </summary>
+	internal static string[] Normalize(string[] args) => args switch
+	{
+		// Pre-CLI spelling, kept for existing container HEALTHCHECKs and k8s exec probes.
+		["--healthcheck"] => ["healthcheck"],
+		["help"] => ["--help"],
+		_ => args,
+	};
+
 	internal static void Configure(IConfigurator config)
 	{
 		config.SetApplicationName("eas");

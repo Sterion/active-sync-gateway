@@ -120,6 +120,25 @@ public sealed class CliLocalEndpointTests : IDisposable
 	}
 
 	[Fact]
+	public async Task ForwardedHelp_UsesTheSamePreCliAlias_AsTheLocalDispatcher()
+	{
+		// E10: `eas help` is documented (docs/cli.md) and works locally because Program.cs's
+		// pre-parse dispatch translates ["help"] to ["--help"] before Spectre ever sees it — but
+		// LocalCliEndpoint.RunCapturedAsync applies CliApp.Configure directly to the raw forwarded
+		// args, which has no "help" command registered, so a FORWARDED `eas help` hit Spectre's
+		// unknown-command path and exited non-zero instead of listing every command.
+		LocalCliEndpoint.CliResponse help = await LocalCliEndpoint.ExecuteAsync(
+			["help"], "", CancellationToken.None);
+		Assert.Equal(0, help.ExitCode);
+		Assert.Contains("USAGE", help.Stdout);
+
+		// The pre-CLI healthcheck spelling gets the same treatment.
+		LocalCliEndpoint.CliResponse healthcheck = await LocalCliEndpoint.ExecuteAsync(
+			["--healthcheck"], "", CancellationToken.None);
+		Assert.Equal(1, healthcheck.ExitCode); // no gateway listening on the probed URL in-process
+	}
+
+	[Fact]
 	public async Task ForwardedCommand_DoesNotSwallowConcurrentGatewayLogOutput()
 	{
 		// L25: capturing output swapped the PROCESS-GLOBAL Console.Out/Error, so for the duration of
