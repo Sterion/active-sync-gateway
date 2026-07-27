@@ -14,6 +14,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -43,16 +44,30 @@ public sealed class SessionRevalidationTests : IDisposable
 	}
 
 	/// <summary>Signs a principal the way the login endpoint does, then runs the cookie's validation hook.</summary>
-	private async Task<CookieValidatePrincipalContext> ValidateAsync(
+	private Task<CookieValidatePrincipalContext> ValidateAsync(
 		Dictionary<string, UserOptions>? users, string login, bool admin,
 		bool blocked = false, DateTime? revokedAtUtc = null,
 		params (string Type, string Value)[] extraClaims)
+	{
+		return ValidateCoreAsync(users, login, admin, blocked, revokedAtUtc, null, extraClaims);
+	}
+
+	/// <summary>
+	///   As <see cref="ValidateAsync" />, optionally capturing every log message the validation
+	///   hook emits (used only to assert on the termination log's wording — C16).
+	/// </summary>
+	private async Task<CookieValidatePrincipalContext> ValidateCoreAsync(
+		Dictionary<string, UserOptions>? users, string login, bool admin,
+		bool blocked, DateTime? revokedAtUtc, List<string>? capturedLogs,
+		(string Type, string Value)[] extraClaims)
 	{
 		WebApplicationBuilder builder = WebApplication.CreateBuilder();
 		builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 		{
 			["ActiveSync:Encryption:AllowPlaintext"] = "true"
 		});
+		if (capturedLogs is not null)
+			builder.Logging.AddProvider(new CapturingLoggerProvider(capturedLogs));
 		ActiveSyncOptions options = new()
 		{
 			Encryption = new EncryptionOptions { AllowPlaintext = true },
@@ -245,6 +260,47 @@ public sealed class SessionRevalidationTests : IDisposable
 			Users(("alice", new UserOptions { Admin = true })), "alice", admin: true,
 			blocked: false, revokedAtUtc: null, (SessionValidation.SessionStartClaim, started));
 		Assert.Equal(started, context.Principal?.FindFirst(SessionValidation.SessionStartClaim)?.Value);
+	}
+
+	[Fact]
+	public async Task TerminationLog_DoesNotMentionTheRemovedBlockedMechanism()
+	{
+		// C16: `blocked` is hard-wired false at the only production call site (decision 19 — a web
+		// session has no device, so per-device blocks cannot apply here), but the log line still
+		// claimed a live "blocked" possibility. Assert the wording, not just the dead parameter, so
+		// this is provable rather than a pure refactor with nothing to observe.
+		List<string> logs = [];
+		CookieValidatePrincipalContext context = await ValidateCoreAsync(
+			Users(("alice", new UserOptions { Admin = true, Enabled = false })), "alice", admin: true,
+			blocked: false, revokedAtUtc: null, capturedLogs: logs, extraClaims: []);
+		Assert.Null(context.Principal);
+		Assert.Contains(logs, line => line.Contains("terminated", StringComparison.OrdinalIgnoreCase));
+		Assert.DoesNotContain(logs, line => line.Contains("blocked", StringComparison.OrdinalIgnoreCase));
+	}
+
+	private sealed class CapturingLoggerProvider(List<string> messages) : ILoggerProvider
+	{
+		public ILogger CreateLogger(string categoryName)
+		{
+			return new CapturingLogger(messages);
+		}
+
+		public void Dispose()
+		{
+		}
+
+		private sealed class CapturingLogger(List<string> messages) : ILogger
+		{
+			public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+			public bool IsEnabled(LogLevel logLevel) => true;
+
+			public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+				Func<TState, Exception?, string> formatter)
+			{
+				messages.Add(formatter(state, exception));
+			}
+		}
 	}
 
 	private sealed class StaticOptionsMonitor(ActiveSyncOptions value) : IOptionsMonitor<ActiveSyncOptions>

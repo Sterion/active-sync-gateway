@@ -78,11 +78,11 @@ internal static class SessionValidation
 	///   session must be terminated. Pure — the I/O lives in <see cref="ValidateAsync" />.
 	/// </summary>
 	internal static ClaimsPrincipal? Rebuild(
-		ClaimsPrincipal principal, MergedUser? account, bool blocked, DateTimeOffset now,
+		ClaimsPrincipal principal, MergedUser? account, DateTimeOffset now,
 		DateTime? sessionsValidAfterUtc = null)
 	{
 		string? login = principal.Identity?.Name;
-		if (string.IsNullOrEmpty(login) || account is null || account.Options.Enabled == false || blocked)
+		if (string.IsNullOrEmpty(login) || account is null || account.Options.Enabled == false)
 			return null;
 
 		// Signed out (or password changed) after this session began. A ticket minted before the
@@ -131,7 +131,6 @@ internal static class SessionValidation
 		CancellationToken ct = context.HttpContext.RequestAborted;
 
 		MergedUser? account;
-		bool blocked;
 		DateTime? validAfter;
 		try
 		{
@@ -141,9 +140,9 @@ internal static class SessionValidation
 			SyncStateService state = services.GetRequiredService<SyncStateService>();
 			UserStore users = services.GetRequiredService<UserStore>();
 			int? userId = string.IsNullOrEmpty(login) ? null : await users.FindUserIdAsync(login, ct);
-			// Blocks are per-device and a web session has no device, so the session-terminating
-			// switch is the user being disabled (checked in Rebuild) or a revocation cut-off.
-			blocked = false;
+			// Blocks are per-device and a web session has no device (decision 19), so the only
+			// session-terminating switches are the user being disabled (checked in Rebuild) or a
+			// revocation cut-off.
 			validAfter = userId is { } revokeId
 				? await state.GetSessionsValidAfterAsync(revokeId, ct)
 				: null;
@@ -157,11 +156,11 @@ internal static class SessionValidation
 			return;
 		}
 
-		ClaimsPrincipal? rebuilt = Rebuild(principal, account, blocked, now, validAfter);
+		ClaimsPrincipal? rebuilt = Rebuild(principal, account, now, validAfter);
 		if (rebuilt is null)
 		{
 			logger.LogInformation(
-				"Web session for {Login} terminated: the account is gone, disabled, blocked or signed out",
+				"Web session for {Login} terminated: the account is gone, disabled or signed out",
 				login);
 			context.RejectPrincipal();
 			await context.HttpContext.SignOutAsync(WebUiAuth.Scheme);
