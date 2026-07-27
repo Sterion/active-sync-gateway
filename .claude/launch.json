@@ -4,8 +4,8 @@
 		{
 			"name": "gateway",
 			"runtimeExecutable": "dotnet",
-			"runtimeArgs": ["run", "--project", "src/ActiveSync.Server", "--no-build", "--", "serve"],
-			"port": 5000
+			"runtimeArgs": ["run", "--project", "src/ActiveSync.Server", "--launch-profile", "http"],
+			"port": 5080
 		}
 	]
 }
