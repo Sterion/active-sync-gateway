@@ -27,6 +27,52 @@ public sealed class BackendKeyValidatorTests
 	private static IConfiguration Config(Dictionary<string, string?> values) =>
 		new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 
+	[Theory]
+	[InlineData("Password")]
+	[InlineData("UserName")]
+	public void AGlobalBackendCredential_IsRefused_BecauseNothingReadsIt(string leaf)
+	{
+		// It used to be accepted, stored, and even masked as a secret in `eas config list` — while
+		// being read by nothing at all. Credentials are RESOLVED per user and handed to the provider
+		// as BackendCredentials; no provider takes them from settings. So this looked exactly like
+		// configuring one shared mail credential for everyone and silently was not.
+		IConfiguration effective = Config(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:MailStore:Provider"] = "imap",
+			["ActiveSync:Backends:MailStore:Host"] = "imap.example",
+		});
+
+		string? error = BackendKeyValidator.Validate(
+			Registry(), effective, $"ActiveSync:Backends:MailStore:{leaf}", "hunter2");
+
+		Assert.NotNull(error);
+		Assert.Contains("no provider reads it", error);
+		Assert.Contains("per user", error);
+	}
+
+	[Fact]
+	public void AGlobalBackendCredential_IsRefused_EvenBeforeAProviderIsAssigned()
+	{
+		// The early "no provider yet, nothing to judge" exit must not become a way in.
+		Assert.NotNull(BackendKeyValidator.Validate(
+			Registry(), Config(new Dictionary<string, string?>()),
+			"ActiveSync:Backends:MailStore:Password", "hunter2"));
+	}
+
+	[Fact]
+	public void ARealProviderSetting_IsStillAccepted()
+	{
+		// The refusal keys off "no provider field claims this leaf", not off the name alone: a
+		// plugin that genuinely describes a Password setting still owns that name.
+		IConfiguration effective = Config(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:MailStore:Provider"] = "imap",
+		});
+
+		Assert.Null(BackendKeyValidator.Validate(
+			Registry(), effective, "ActiveSync:Backends:MailStore:Host", "imap.example"));
+	}
+
 	// The bug: a value already stored under the role is mis-shaped for the incoming provider (a
 	// non-numeric Port), yet the switch used to be accepted because imap CAN serve MailStore.
 	[Fact]

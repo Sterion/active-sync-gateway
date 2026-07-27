@@ -46,7 +46,7 @@ See [Database-declared users](../README.md#database-declared-users-eas-user-) fo
 | Command | What it does |
 | --- | --- |
 | `user show <login>` | The effective entry for one login, secrets masked, each field tagged with the level it came from. (`eas users` lists them all.) |
-| `user add <login>` | Declare a user in the database (an empty entry is an allowlist grant). |
+| `user add <login>` | Declare a user in the database (an empty entry is an allowlist grant). Always starts empty, including when configuration declares the same login — configuration keeps supplying whatever the row does not say, so `add` then `set` deviates exactly where you asked. |
 | `user remove <login>` | Delete the database **declaration** — the fields it set fall back to a same-login config entry, then to the global settings. The user itself, its devices and its locally-stored items are untouched (that is `user delete`). |
 | `user rename <login> <newLogin>` | Change the login the phone presents. A single-row update: sync state, devices and locally-stored items are unaffected, so the holder only updates the username on the device. Refused for a login declared in configuration (change it there) and for one already taken. |
 | `user delete <login> [--yes]` | **DELETE the user and everything it owns** — devices, folders, shares, and locally-stored contacts/calendar/tasks/notes, which in a local-stores deployment exist nowhere else. Asks first, naming exactly what would be lost. |
@@ -54,7 +54,7 @@ See [Database-declared users](../README.md#database-declared-users-eas-user-) fo
 | `user set <login> <key> <value>` | Set one field by path (`MailAddress`, `Admin` — grants the web admin UI, `Enabled` — `false` disables the user, `OidcSubject` — pins the user to one identity-provider `sub`, `DefaultBackendLogin`/`DefaultBackendPassword` — the backend credentials every role falls back to, `Backends:Calendar:Enabled`, `Backends:MailStore:Settings:Host`, ...); password keys are hashed/sealed automatically. |
 | `user unset <login> <key>` | Clear one field — it falls back to the config entry, then the global setting (an emptied entry remains an allowlist grant). |
 | `user password <login>` | Set the **gateway** password from stdin (stored as a pbkdf2$ hash; device → gateway, verified locally, never sent to a backend). |
-| `user secret <login> <key>` | Set a **backend** password (`DefaultBackendPassword`, `Backends:MailStore:Password`, ...) from stdin (stored sealed, enc:v1:). |
+| `user secret <login> <key>` | Set a **backend** password (`DefaultBackendPassword`, `Backends:MailStore:Password`, ...) from stdin (stored sealed, enc:v1:). A **MailStore** secret requires a gateway `Password` first (`user password`) and blocks `user unset <login> Password` while it is set — otherwise the login could only be settled by a probe using that stored secret, which any password would pass. |
 
 ## Global settings
 
@@ -71,7 +71,7 @@ The settable keys, defaults and tiers are catalogued in
 | --- | --- |
 | `config list` | Every setting with its effective value and source (default / config / db). |
 | `config get <key>` | One setting's effective value and source (e.g. `config get ActiveSync:ReadOnly`). |
-| `config set <key> <value>` | Store a setting (e.g. `config set ActiveSync:Eas:MaxHeartbeatSeconds 1800`); validated by type/range; live in ~1s (listener settings say "restart"). |
+| `config set <key> <value>` | Store a setting (e.g. `config set ActiveSync:Eas:MaxHeartbeatSeconds 1800`); validated by type/range; live in ~1s (listener settings say "restart"). Backend **credentials** are not settings and are refused here (`ActiveSync:Backends:<Role>:Password`/`UserName`) — they resolve per user; see `user set`/`user secret`. |
 | `config unset <key>` | Clear a database setting — falls back to the config file, then the code default. |
 
 ## Access control & cleanup

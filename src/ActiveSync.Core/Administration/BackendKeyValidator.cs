@@ -36,7 +36,7 @@ internal static class BackendKeyValidator
 		// Which provider's shape applies: whichever one currently serves the role.
 		string? providerName = effective[$"ActiveSync:Backends:{role}:{BackendRolesConfig.ProviderKey}"];
 		if (string.IsNullOrWhiteSpace(providerName))
-			return null;
+			return InertCredentialLeaf(role, leaf);
 
 		IBackendProvider provider;
 		try
@@ -51,11 +51,38 @@ internal static class BackendKeyValidator
 		BackendConfigField? field = provider.DescribeConfiguration(role)
 			.FirstOrDefault(f => f.Name.Equals(
 				BackendConfigValidation.ListRoot(leaf), StringComparison.OrdinalIgnoreCase));
-		if (field is null || field.Type == BackendFieldType.StringList)
+		if (field is null)
+			return InertCredentialLeaf(role, leaf);
+		if (field.Type == BackendFieldType.StringList)
 			return null;
 
 		return BackendConfigValidation.CheckValue(field, value)?.Message;
 	}
+
+	/// <summary>
+	///   Backend credentials never come from settings — they are RESOLVED per user (the role
+	///   override, then the user default, then the presented EAS credential) and handed to the
+	///   provider as <see cref="BackendCredentials" />. A global
+	///   <c>ActiveSync:Backends:&lt;Role&gt;:Password</c> was nonetheless accepted, stored, and even
+	///   masked as a secret while being read by nothing at all: it looked exactly like configuring
+	///   one shared mail password for everyone, and silently was not. Refuse it and name the thing
+	///   that does work.
+	///   <para>
+	///     Only when NO provider field claims the leaf. A plugin that genuinely describes a
+	///     "Password" setting of its own still owns that name — it is checked against the schema
+	///     above, like any other declared field.
+	///   </para>
+	/// </summary>
+	private static string? InertCredentialLeaf(BackendRole role, string leaf) =>
+		leaf.Equals("Password", StringComparison.OrdinalIgnoreCase) ||
+		leaf.Equals("UserName", StringComparison.OrdinalIgnoreCase)
+			? $"ActiveSync:Backends:{role}:{leaf} is not a setting — no provider reads it, so it would " +
+			  "have no effect. Backend credentials are per user: set " +
+			  $"Backends:{role}:{leaf} on the user (eas user set <login> Backends:{role}:{leaf} ...), " +
+			  (leaf.Equals("Password", StringComparison.OrdinalIgnoreCase)
+				  ? "or DefaultBackendPassword to cover every role for that user."
+				  : "or DefaultBackendLogin to cover every role for that user.")
+			: null;
 
 	/// <summary>
 	///   Whether a backend leaf key holds a secret, for masking in `eas config list/get`. The

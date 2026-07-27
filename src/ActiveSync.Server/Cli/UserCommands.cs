@@ -137,12 +137,14 @@ internal sealed class UserAddCommand(IAnsiConsole terminal) : UserCommandBase<Us
 			return 1;
 		}
 
-		// A brand-new entry is an empty overlay (an allowlist grant); when a config entry
-		// exists it is copied so the database version starts as an exact replacement.
-		UserOptions entry = options.Users?.GetValueOrDefault(settings.Login) is { } fromConfig
-			? Clone(fromConfig)
-			: new UserOptions();
-		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
+		// A brand-new entry is an empty overlay (an allowlist grant) — including when a config entry
+		// for the same login exists. It used to be cloned from config, which was right while a row
+		// REPLACED the whole config entry; under per-field resolution it is the trap UserEditing
+		// describes, because copying config into the database freezes each value as a database
+		// override and later configuration edits stop reaching that user. Config keeps supplying
+		// whatever the row does not say, so `add` then `set` deviates exactly where asked.
+		return await ValidateAndSaveAsync(
+			store, options, settings.Login, new UserOptions(), cancellationToken);
 	}
 }
 
