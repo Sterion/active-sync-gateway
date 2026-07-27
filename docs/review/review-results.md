@@ -834,3 +834,50 @@ actually enabled. Same limitation as `K6` (item 11) and `B17` (item 13).
   re-validation to the *write* path only; the **unset** path still validates only the role's own schema, so
   the "drops the Oof role" scenario B5's own prose describes is still reachable via `eas config unset`. The
   worker split it that way because each finding's fix text is write-scoped. Unassigned to any queue item.
+
+## Item 19 — Admin UI gaps & coherence
+**Findings:** `C5` `C6` `C7` `C10` `C14` `C17` `C18` `C19`
+**Commits:** `e19173f` (C5) · `bcc6458` (C6) · `6cf0cd4` (C7, C18 — tight cluster, same file and test file) ·
+`ddd1593` (C10) · `e1954ab` (C14) · `445cabb` (C17) · `0800eea` (C19)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 20 ✓ · strike shipped with each ✓ · build 0 warnings ✓ · unit **1389 passed, 0 skipped**
+(Cli 16 · Protocol 99 · Core 841 · WebUi 119 · Server 314) ✓ · live **143 passed, 0 skipped** on a clean
+volume ✓ — the worker ran the live suite unprompted, citing item 18's regression as the reason. Good
+instinct, and I ran it independently too.
+**Red-first re-proved independently for the four testable findings:** `src/ActiveSync.WebUi/Api/` reverted
+to `b495503` → `SwitchingProvider_DropsThePreviousProvidersStoredLeaves` (C5),
+`AStrayDatabaseKey_NotInTheCatalogue_IsSurfacedAsClearable` (C7),
+`DeletingADbOverride_ThatLeavesAConfigFileValue_ReportsConfigNotDefault` (C18),
+`PortalUser_OmittingUserName_KeepsTheStoredValue` (C14) all fail; 115 pre-existing green.
+
+### ⚠ `C17` WAS DELIBERATELY IMPLEMENTED ONLY IN PART — and the worker is right, but the strike hides it
+`C17` asks for two things: correct a stale XML summary, and **drop the `knownUser` field** from the
+devices/block response on the grounds that it is "vestigial … a block for an unknown login cannot succeed".
+The worker did the first and refused the second, arguing the premise is false. **I verified this myself
+rather than accepting it**: `AdminIdentifierValidationTests.DeviceBlock_ReportsWhetherTheLoginIsDeclared`
+is a pre-existing test that seeds a device for login `typo`, blocks it **successfully**, and asserts
+`knownUser == false`. The finding conflates "has no `User` row" with "is not declared" — an identity-only
+row (`User.Json` null, per AGENTS.md) satisfies `FindUserIdAsync` while being absent from
+`resolver.MergedUsers`. So `knownUser` is reachable, meaningful and covered; removing it would have deleted
+tested behaviour on a wrong premise.
+**The judgment is sound. The bookkeeping is the problem:** `C17` is struck `COMPLETE` while half its stated
+FIX was deliberately not done. Per `fix-review.md` a finding that contradicts reality is "a human
+decision", and the strike is precisely what stops anyone looking again. **Flagged for a human:** either
+accept the partial close as recorded here, or re-mark the `knownUser` half `N/A` with this reasoning on the
+finding's own line.
+
+**Notes:**
+- **Three findings landed with NO automated proof at all** — `C6`, `C10`, `C19` are pure changes to the
+  no-build SPA, and the repo has no JS test harness anywhere (the same situation as `C8` in item 17 and
+  prior rounds). They are struck on the strength of the fix. Since a diff read is the only verification
+  available, I did one: `C6` adds a real Clear affordance that sets a `cleared` flag so `collect()` can emit
+  null (and `PersistAsync` already treats null as "delete the row"); `C10`'s new controls post to
+  `/admin/api/users/{login}/rename` and `/delete`, **both of which exist server-side**, and it sends the
+  login back through `confirmTyped` — satisfying the delete route's `request.Confirm == login` echo
+  contract; `C19` adds error handling on the grant-removal and reset-to-config paths. Coherent, but
+  "coherent by inspection" is a weaker guarantee than everything else in this run.
+- **`C10` composes with item 12's `C3`.** The delete route the new SPA control calls is the one `C3` taught
+  to refuse destroying the last enabled administrator — so the UI cannot walk into the state `C3` closed.
+- **`C5` changes stored-row behaviour**: switching a role's provider now deletes the previous provider's
+  leaves rather than orphaning them for the new provider to bind. A bug fix, but it is destructive to rows
+  that previously survived a switch.
