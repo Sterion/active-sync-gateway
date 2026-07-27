@@ -81,7 +81,18 @@ public static class DraftMessageBuilder
 			return;
 		}
 
-		// EAS address lists are "a; b; c" (display forms allowed); unparsable entries are skipped.
+		// D2: Email:To/Cc (and Email2:Bcc) are RFC-5322 comma-separated address lists — this
+		// repo's own emitter produces exactly that shape (MailConverter.cs, message.To.ToString()
+		// -> "Alice" <a@x>, "Bob" <b@y>). Try the whole value as one list first; MimeKit's
+		// InternetAddressList.TryParse handles both quoted display names and bare addresses.
+		// Only fall back to the historical ';'-split (the DisplayTo convention, and some
+		// clients' looser habit) when the comma-list parse fails outright.
+		if (InternetAddressList.TryParse(payload, out InternetAddressList? list))
+		{
+			target.AddRange(list);
+			return;
+		}
+
 		foreach (string entry in payload.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
 			if (MailboxAddress.TryParse(entry, out MailboxAddress? address))
 				target.Add(address);

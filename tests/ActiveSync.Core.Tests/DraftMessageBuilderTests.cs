@@ -223,6 +223,39 @@ public class DraftMessageBuilderTests
 		Assert.Contains(result.BodyParts, p => p.ContentType.MimeType == "image/png");
 	}
 
+	// D2 — Email:To/Cc are RFC-5322 comma-separated address lists (this repo's own emitter,
+	// MailConverter, produces exactly that shape: `message.To.ToString()`), not the ';'-joined
+	// DisplayTo convention. MailboxAddress.TryParse rejects a whole comma-joined string, so the
+	// naive per-';' split silently dropped every recipient of a multi-recipient draft.
+	[Fact]
+	public void Change_MultipleCommaSeparatedRecipients_AreAllKept()
+	{
+		XElement payload = AppData(
+			new XElement(EasNamespaces.Email + "To",
+				"\"Alice\" <alice@example.com>, \"Bob\" <bob@example.com>"));
+
+		MimeMessage result = DraftMessageBuilder.Build(payload, null, "me@example.org");
+
+		Assert.Equal(2, result.To.Count);
+		Assert.Contains(result.To.Mailboxes, m => m.Address == "alice@example.com");
+		Assert.Contains(result.To.Mailboxes, m => m.Address == "bob@example.com");
+	}
+
+	// D2 (adjacent) — the historical ';'-separated DisplayTo convention must still work when a
+	// client uses it instead.
+	[Fact]
+	public void Change_SemicolonSeparatedRecipients_StillWork()
+	{
+		XElement payload = AppData(
+			new XElement(EasNamespaces.Email + "To", "alice@example.com; bob@example.com"));
+
+		MimeMessage result = DraftMessageBuilder.Build(payload, null, "me@example.org");
+
+		Assert.Equal(2, result.To.Count);
+		Assert.Contains(result.To.Mailboxes, m => m.Address == "alice@example.com");
+		Assert.Contains(result.To.Mailboxes, m => m.Address == "bob@example.com");
+	}
+
 	// A payload <Body> still replaces the stored one outright.
 	[Fact]
 	public void Change_WithBody_ReplacesTheStoredBody()
