@@ -349,15 +349,21 @@ public partial class Program
 		// settings — this must run before anything resolves the role config or the resolver.
 		app.Services.GetRequiredService<BackendConfigurationValidator>().Validate();
 
+		// E7: every remaining startup await shares this ONE token — a container SIGTERMed during a
+		// slow first boot (settings load, certificate generation + DB write, per-user bootstrap
+		// inserts) must be interrupted at the next await rather than run unbounded to the SIGKILL,
+		// exactly like the migration call below (E22) already is.
+		CancellationToken stopping = app.Lifetime.ApplicationStopping;
+
 		// Apply EF Core migrations first so the accounts snapshot (and the banner reading it)
 		// can query the database on a fresh install. Pass ApplicationStopping (E22) so a container
 		// SIGTERMed during a slow first-boot migration is interrupted rather than SIGKILLed.
-		await app.ApplyMigrationsAsync(startupLogger, app.Lifetime.ApplicationStopping);
+		await app.ApplyMigrationsAsync(startupLogger, stopping);
 
 		// Refresh the live database settings view now the schema exists (the build-time load
 		// already covered host construction) and prime the change-stamp poll before the banner.
 		await app.Services.GetRequiredService<SettingsRefresher>()
-			.EnsureFreshAsync(true, CancellationToken.None);
+			.EnsureFreshAsync(true, stopping);
 
 		// Start persisting logs now the LogEntries table exists (events buffered since startup flush).
 		databaseLogSink.Activate(app.Services.GetRequiredService<ISyncDbContextFactory>(),
@@ -370,16 +376,16 @@ public partial class Program
 		TlsCertificateSource tlsSource = TlsCertificateSource.Disabled;
 		if (options.Tls.Enabled)
 			(serverCertificate, tlsSource) = await app.Services.GetRequiredService<TlsCertificateResolver>()
-				.LoadForServingAsync(startupLogger, CancellationToken.None);
+				.LoadForServingAsync(startupLogger, stopping);
 
 		// Every config-declared login needs an identity row: per-user tables FK to UserId, so a
 		// config-only user would have nothing for its sync state to point at (item 6b).
 		await app.Services.GetRequiredService<UserProvisioner>()
-			.BootstrapConfigUsersAsync(CancellationToken.None);
+			.BootstrapConfigUsersAsync(stopping);
 
 		// Load database-declared users into the resolver before the first request.
 		UserResolver resolver = app.Services.GetRequiredService<UserResolver>();
-		await resolver.EnsureFreshAsync(true, CancellationToken.None);
+		await resolver.EnsureFreshAsync(true, stopping);
 
 		return new ServerInitResult(startupLogger, serverCertificate, tlsSource, resolver);
 	}
