@@ -236,8 +236,18 @@ internal static class PortalEndpoints
 					refused.Select(key => new BackendsEndpoints.FailureDto(
 						key, "This setting can only be changed by an administrator.")));
 
+			// C12: the portal form is pre-filled from the MERGED (config over database) view — `GET
+			// /user/api/me` and `backends/meta` both report it — so a save the holder never touched
+			// resubmits a config-supplied value verbatim. Storing it here would freeze it into a
+			// permanent database override, the same trap C2 closes on the admin side. Elide it back
+			// to null when it matches what configuration alone already supplies for this role.
+			UserOptions? configUser = UserEditing.FindConfigUser(current, login);
+			BackendRoleOverride? configRole = UserEditing.FindRole(configUser, role.ToString());
+
 			// Deliberately untouched: Enabled and Provider (admin-only surface).
-			@override.UserName = string.IsNullOrWhiteSpace(request.UserName) ? null : request.UserName.Trim();
+			@override.UserName = UserEditing.ElideIfMatchesConfig(
+				string.IsNullOrWhiteSpace(request.UserName) ? null : request.UserName.Trim(),
+				configRole?.UserName);
 			if (request.Password is not null)
 			{
 				if (request.Password.Length == 0)
@@ -256,13 +266,22 @@ internal static class PortalEndpoints
 
 			// Keep every stored key the caller may not touch, replace the editable ones wholesale
 			// (an omitted editable key still means "cleared", as it always did). A re-posted mask
-			// sentinel resolves back to the stored secret so masking on read (C5) can't clobber it.
+			// sentinel resolves back to the stored secret so masking on read (C5) can't clobber it —
+			// unmasking reads through the MERGED role (needed to reveal what the mask stands for when
+			// the secret is config-supplied); the elision that follows then still keeps a submitted
+			// value equal to configuration from being written back, without touching any key the
+			// caller did not submit.
+			BackendRoleOverride? mergedRole = UserEditing.FindRole(account?.Options, role.ToString());
+			Dictionary<string, string?>? submitted = UserEditing.ElideSettingsMatchingConfig(
+				EndpointHelpers.UnmaskSecretSettings(request.Settings, mergedRole?.Settings),
+				configRole?.Settings);
+
 			Dictionary<string, string?>? storedSettings = @override.Settings;
 			Dictionary<string, string?> merged = new(StringComparer.OrdinalIgnoreCase);
 			foreach ((string key, string? value) in storedSettings ?? [])
 				if (!editable.Contains(BackendConfigValidation.ListRoot(key)))
 					merged[key] = value;
-			foreach ((string key, string? value) in EndpointHelpers.UnmaskSecretSettings(request.Settings, storedSettings) ?? [])
+			foreach ((string key, string? value) in submitted ?? [])
 				merged[key] = value;
 			@override.Settings = merged.Count > 0 ? merged : null;
 

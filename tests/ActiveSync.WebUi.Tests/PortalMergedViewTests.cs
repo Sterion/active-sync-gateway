@@ -52,4 +52,73 @@ public sealed class PortalMergedViewTests
 		});
 		Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 	}
+
+	/// <summary>
+	///   C12 — the portal's `PUT backends/{roleName}` freezes config-supplied self-service values
+	///   into the database row for the same reason as C2. `userName` is pre-filled from the MERGED
+	///   view (`GET /user/api/me`), which reports a config-supplied backend user name too, so a save
+	///   the holder never touched resubmits it verbatim — and the handler wrote it straight into the
+	///   row as a permanent database override.
+	/// </summary>
+	[Fact]
+	public async Task Put_ResubmittingTheConfigSuppliedUserName_DoesNotFreezeItAsADatabaseOverride()
+	{
+		await using WebUiHost host = await WebUiHost.StartAsync(WebUiHost.Users(("bob", new UserOptions
+		{
+			Backends = new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase)
+			{
+				["Calendar"] = new BackendRoleOverride
+				{
+					Provider = "caldav",
+					UserName = "bob.dav.default",
+					Settings = new Dictionary<string, string?>
+					{
+						["BaseUrl"] = "https://dav.example.com",
+						["CalendarAttachments"] = "Auto",
+					},
+				},
+			},
+		})));
+		using HttpClient client = await host.SignInAsync("bob", admin: false);
+
+		// Exactly what GET /user/api/me / backends/meta rendered — the holder never touched anything.
+		HttpResponseMessage response = await client.PutAsJsonAsync("/user/api/backends/Calendar", new
+		{
+			userName = "bob.dav.default",
+			settings = new Dictionary<string, string?> { ["CalendarAttachments"] = "Auto" },
+		});
+		Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+		UserOptions? stored = await new UserStore(host.Factory).GetAsync("bob", CancellationToken.None);
+		BackendRoleOverride? role = stored?.Backends?.GetValueOrDefault("Calendar");
+		Assert.Null(role?.UserName);
+		Assert.Null(role?.Settings?.GetValueOrDefault("CalendarAttachments"));
+	}
+
+	[Fact]
+	public async Task Put_ActuallyChangingTheUserName_StillRecordsARealOverride()
+	{
+		await using WebUiHost host = await WebUiHost.StartAsync(WebUiHost.Users(("bob", new UserOptions
+		{
+			Backends = new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase)
+			{
+				["Calendar"] = new BackendRoleOverride
+				{
+					Provider = "caldav",
+					UserName = "bob.dav.default",
+					Settings = new Dictionary<string, string?> { ["BaseUrl"] = "https://dav.example.com" },
+				},
+			},
+		})));
+		using HttpClient client = await host.SignInAsync("bob", admin: false);
+
+		HttpResponseMessage response = await client.PutAsJsonAsync("/user/api/backends/Calendar", new
+		{
+			userName = "bob.dav.custom",
+		});
+		Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+		UserOptions? stored = await new UserStore(host.Factory).GetAsync("bob", CancellationToken.None);
+		Assert.Equal("bob.dav.custom", stored!.Backends!["Calendar"].UserName);
+	}
 }
