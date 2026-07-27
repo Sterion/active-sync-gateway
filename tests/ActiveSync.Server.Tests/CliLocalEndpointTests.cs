@@ -522,6 +522,51 @@ public sealed class CliLocalEndpointTests : IDisposable
 	}
 
 	[Fact]
+	public void TryOpen_RejectsASealedEnvelope_WhoseArgsArrayContainsANullElement()
+	{
+		// E19: LocalCliEnvelope.Args is declared `string[]` (non-nullable elements), but that is only
+		// a compile-time promise — JSON happily deserializes `{"args":["users",null]}` into a
+		// string?[] masquerading as string[], and TryOpen previously checked only
+		// `decoded.Args is null` (the ARRAY reference), never its elements. A downstream consumer
+		// (DescribeCommand's `argument.StartsWith('-')`, Spectre's own parser) then dereferences a
+		// null it was promised could never appear.
+		byte[] key = NewKey();
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		string json = System.Text.Json.JsonSerializer.Serialize(new
+		{
+			args = new string?[] { "users", null }, stdin = (string?)null, timestampUnixMs = now, nonce = "n1",
+		}, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+		string sealedValue = SecretValue.Seal(json, key);
+
+		Assert.False(LocalCliEnvelope.TryOpen(sealedValue, key, now, LocalCliEndpoint.AuthWindowMs, out LocalCliEnvelope? envelope));
+		Assert.Null(envelope);
+
+		// A well-formed envelope with no null element still opens normally.
+		string wellFormed = LocalCliEnvelope.Create(["users"], null, now).Seal(key);
+		Assert.True(LocalCliEnvelope.TryOpen(wellFormed, key, now, LocalCliEndpoint.AuthWindowMs, out _));
+	}
+
+	[Fact]
+	public void TryAuthorize_PlaintextMode_RejectsArgsContainingANullElement()
+	{
+		// E19, same hole in the plaintext (AllowPlaintext) branch: a CliRequest's Args come straight
+		// from an unattributed JSON body with no envelope at all, so the same `[null]` shape reaches
+		// TryAuthorize's plaintext path unfiltered.
+		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		string[] argsWithNull = ["users", null!];
+
+		Assert.False(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(argsWithNull, null, null), key: null, allowPlaintext: true, now,
+			new LocalCliEndpoint.ReplayCache(LocalCliEndpoint.AuthWindowMs), out _, out _));
+
+		// A well-formed plaintext body still authorizes normally.
+		Assert.True(LocalCliEndpoint.TryAuthorize(
+			new LocalCliEndpoint.CliRequest(["users"], null, null), key: null, allowPlaintext: true, now,
+			new LocalCliEndpoint.ReplayCache(LocalCliEndpoint.AuthWindowMs), out string[] args, out _));
+		Assert.Equal(["users"], args);
+	}
+
+	[Fact]
 	public void Envelope_MintsAFreshNonceEachTime_AndRejectsOneWithout()
 	{
 		byte[] key = NewKey();

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Linq;
 
 namespace ActiveSync.Crypto;
 
@@ -70,7 +71,12 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 			return false;
 		}
 
-		if (decoded is null || decoded.Args is null || string.IsNullOrEmpty(decoded.Nonce))
+		// E19: Args is declared `string[]` (non-nullable elements), but that is a compile-time promise
+		// only — JSON deserializes `{"args":["x",null]}` into exactly that array shape at runtime, so
+		// checking the ARRAY reference alone (`decoded.Args is null`) lets a null element through to
+		// every downstream consumer that trusts the non-nullable contract.
+		if (decoded is null || decoded.Args is null || decoded.Args.Any(a => a is null) ||
+		    string.IsNullOrEmpty(decoded.Nonce))
 			return false;
 		if (decoded.TimestampUnixMs - nowUnixMs > FutureSkewMs)
 			return false;

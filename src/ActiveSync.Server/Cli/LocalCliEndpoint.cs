@@ -233,7 +233,11 @@ internal static class LocalCliEndpoint
 		if (key is null)
 		{
 			string[] plainArgs = request?.Args ?? [];
-			if (IsCredentialBearingVerb(plainArgs))
+			// E19: Args is declared `string[]` but that only binds at compile time — a plaintext body
+			// of `{"args":["x",null]}` deserializes into exactly that shape, so a null element must be
+			// rejected explicitly rather than trusted by downstream consumers (DescribeCommand,
+			// Spectre's own parser).
+			if (IsCredentialBearingVerb(plainArgs) || plainArgs.Any(a => a is null))
 			{
 				args = [];
 				stdin = "";
