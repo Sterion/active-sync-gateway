@@ -166,4 +166,34 @@ public class WbxmlDecoderHardeningTests
 		System.Xml.Linq.XDocument result = WbxmlDecoder.Decode(Doc([.. body]));
 		Assert.Equal(1000, result.Root!.Elements().Count());
 	}
+
+	[Fact]
+	public void TooManyTextRuns_IsAParseError()
+	{
+		// 200,001 empty STR_I runs (2 bytes each: STR_I token + null terminator) inside one
+		// open element. No single run is large and neither MaxElements nor MaxDepth ever
+		// fires (one element, depth 1) — only the RUN COUNT is hostile, and each run
+		// allocates a fresh XText with no cap (W1).
+		const int runCount = 200_001;
+		byte[] runs = new byte[runCount * 2];
+		for (int i = 0; i < runCount; i++)
+		{
+			runs[i * 2] = 0x03; // STR_I
+			runs[i * 2 + 1] = 0x00; // empty string, null-terminated
+		}
+
+		Assert.Throws<WbxmlException>(() => WbxmlDecoder.Decode(Doc([0x45], runs, [0x01])));
+	}
+
+	[Fact]
+	public void TooManyTextCharacters_IsAParseError()
+	{
+		// One STR_I run whose decoded length alone exceeds the 8 MB text-character ceiling —
+		// the amplification W1 describes doesn't need many runs, a single huge one works too;
+		// this proves the character-count ceiling independently of the run-count one above.
+		byte[] text = new byte[8 * 1024 * 1024 + 1];
+		Array.Fill(text, (byte)'a');
+		byte[] doc = Doc([0x45], [0x03], text, [0x00], [0x01]);
+		Assert.Throws<WbxmlException>(() => WbxmlDecoder.Decode(doc));
+	}
 }

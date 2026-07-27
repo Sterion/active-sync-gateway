@@ -36,6 +36,14 @@ public static class WbxmlDecoder
 	private const int MaxDepth = 256;
 	private const int MaxElements = 200_000;
 
+	// W1: the element/depth caps above bound the number and nesting of TAGS, but a well-formed
+	// body of repeated STR_I/OPAQUE/ENTITY runs never trips either — one element, depth 1 — and
+	// still allocates one XText per run with no ceiling on run count or accumulated length. At
+	// MaxDocumentBytes (64 MB) that is ~33.5M XText nodes (~1.3 GB) from the 2-byte STR_I-empty
+	// sequence alone. Both ceilings are enforced in AppendText.
+	private const int MaxTextRuns = 200_000;
+	private const int MaxTextChars = 8 * 1024 * 1024;
+
 	/// <summary>Default ceiling for <see cref="DecodeAsync" />; matches Kestrel's request body limit.</summary>
 	public const int MaxDocumentBytes = 64 * 1024 * 1024;
 
@@ -96,6 +104,8 @@ public static class WbxmlDecoder
 		XElement? current = null;
 		int depth = 0;
 		int elements = 0;
+		int textRuns = 0;
+		int textChars = 0;
 
 		while (!reader.AtEnd)
 		{
@@ -116,7 +126,7 @@ public static class WbxmlDecoder
 					break;
 
 				case StrI:
-					AppendText(current, reader.ReadNullTerminatedString());
+					AppendText(current, reader.ReadNullTerminatedString(), ref textRuns, ref textChars);
 					break;
 
 				case Opaque:
@@ -125,7 +135,7 @@ public static class WbxmlDecoder
 					if (current is null)
 						throw new WbxmlException("OPAQUE data outside of an element.");
 					current.SetAttributeValue(EasNamespaces.OpaqueAttribute, "1");
-					AppendText(current, Convert.ToBase64String(bytes));
+					AppendText(current, Convert.ToBase64String(bytes), ref textRuns, ref textChars);
 					break;
 
 				case Entity:
@@ -134,7 +144,7 @@ public static class WbxmlDecoder
 					// (→ uncontrolled 500) for out-of-range or surrogate code points.
 					if (code > 0x10FFFF || code is >= 0xD800 and <= 0xDFFF)
 						throw new WbxmlException($"Invalid ENTITY code point U+{code:X}.");
-					AppendText(current, char.ConvertFromUtf32((int)code));
+					AppendText(current, char.ConvertFromUtf32((int)code), ref textRuns, ref textChars);
 					break;
 
 				case StrT:
@@ -207,11 +217,25 @@ public static class WbxmlDecoder
 		return doc;
 	}
 
-	private static void AppendText(XElement? current, string text)
+	private static void AppendText(XElement? current, string text, ref int textRuns, ref int textChars)
 	{
 		if (current is null)
 			throw new WbxmlException("Text content outside of an element.");
-		current.Add(new XText(text));
+		if (++textRuns > MaxTextRuns)
+			throw new WbxmlException($"WBXML document exceeds {MaxTextRuns} text runs.");
+		// Checked after the addition so a single oversized run (the common attack shape) is
+		// caught on its own, not only once accumulated across many runs.
+		textChars += text.Length;
+		if (textChars > MaxTextChars)
+			throw new WbxmlException($"WBXML document exceeds {MaxTextChars} characters of text.");
+		// Coalesce into the trailing XText instead of adding a sibling: a legitimate element
+		// can carry several runs back to back (STR_I + ENTITY + STR_I for an inline special
+		// character), and without this every one of them would separately count against
+		// MaxTextRuns and allocate its own node.
+		if (current.LastNode is XText tail)
+			tail.Value += text;
+		else
+			current.Add(new XText(text));
 	}
 
 	private ref struct SpanReader(ReadOnlySpan<byte> data)
