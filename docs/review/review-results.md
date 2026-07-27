@@ -533,3 +533,42 @@ voluntary, and a future reader should be able to weigh the evidence rather than 
   test shortens the grace to milliseconds and hits it readily. So: a test-configuration artefact rather
   than a shipped defect — but it is the same race the grace period exists to mitigate, and it makes K1's
   only behavioural test unreliable under parallel load. This supersedes the vaguer `N3` filed in item 11.
+
+## Item 14 — Metrics listener exposure & tier
+**Findings:** `E1` `E2` `B3`
+**Commits:** `8bce897` (E1) · `d64b891` (E2, B3 — one defect reported from the Core and Server sides; both
+entries say to fix it once, and the whole commit was read against both IDs)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 15 ✓ · strike shipped with each fix ✓ · build 0 warnings ✓ · unit **1337 passed, 0 skipped**
+(Cli 16 · Protocol 91 · Core 818 · WebUi 105 · Server 307) ✓ · live **143 passed, 0 skipped** on a clean
+volume — the baseline moves 141 → 143, both new tests belonging to this item ✓
+**Red-first re-proved independently, and this item has the strongest proof shape in the run:** both tests
+are **integration** tests driving the real assembled pipeline (`WebApplicationFactory<Program>`, a genuine
+`Connection.LocalPort`, a real authenticated EAS handshake and a live `GlobalSettingStore` write), not unit
+predicates. Reverting the three source files to `a2552a7` → both fail
+(`DedicatedMetricsPort_AnswersOnlyMetrics_EverythingElseIs404`, `PerUserLabels_AppliesLive_WithoutRestart`),
+3 pre-existing metrics tests still green.
+**Notes:**
+- **`E1` closes a genuine exposure.** Before this, opening `Metrics:Port` to a monitoring network also
+  served the EAS Basic-auth surface, Autodiscover, `/admin`, `/user` and `/cli` over plain HTTP on that
+  port — README told operators the port was scrape-only, which was true of `/metrics` and false of the
+  converse. The new terminal middleware is registered first in the pipeline, so it terminates ahead of
+  every globally-mapped endpoint. Nothing legitimate depended on the leak.
+- **`E2`/`B3` took the CODE fix, not the doc fix, and that was the right read.** Both entries offer either
+  (make `PerUser` genuinely live, or flip the catalogue to restart-tier and correct the docs). Standing
+  context enumerates the findings that are documentation-only by design — `B9`, `B10`, `K10`, `K15`, `K16`,
+  `S1`, `A11`, `A12`, `A13`, `C11`, `C17`, `H25`, `W20` — and neither `B3` nor `E2` is on it. `PerUser` now
+  genuinely applies within one settings poll (~1 s).
+- **`AGENTS.md` and `README.md` were edited, and the edits are correct and minimal.** Both documented the
+  behaviour these findings remove (AGENTS.md said `PerUserLabels` is "set once … at startup" and that only
+  `/metrics` is port-gated). The diff corrects exactly those sentences and cites the finding IDs. This is
+  required by AGENTS.md's own "update the matching doc" convention — but note that an **orientation
+  document every later item reads has changed mid-run**, which is worth knowing when reading earlier
+  entries.
+- **`GatewayMetrics.PerUserLabels` is now a provider-backed computed property** rather than a settable
+  static, wired in `ProgramServer` to `IOptionsMonitor`. Any out-of-repo code assigning that static would
+  no longer compile — it is host-only (not part of the plugin contract), so no version gate applies.
+- Test-timing detail worth carrying: the OpenTelemetry Prometheus exporter caches scrape responses for
+  300 ms by default, so the live-tier test has to wait it out. That is exporter behaviour, not something
+  this item changed — but a future test asserting a metric change immediately after a settings flip will
+  trip over it.
