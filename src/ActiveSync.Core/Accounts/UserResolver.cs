@@ -185,7 +185,24 @@ public sealed class UserResolver
 				_logger?.LogInformation(
 					"Accounts snapshot rebuilt: {Count} declared user(s) ({Db} from database)",
 					built.Users.Count, built.Users.Count(u => u.Value.FromDatabase));
-				SnapshotChanged?.Invoke();
+				// B11: invoke each subscriber independently rather than `SnapshotChanged?.Invoke()`. A
+				// bare multicast Invoke stops at the first throwing handler — silently skipping every
+				// subscriber registered after it (e.g. BackendSessionFactory's auth-cache clear) — and
+				// because this call sits inside the outer try/catch below, a throw here escaped to the
+				// generic failure branch: mislogged an already-applied rebuild as "could not refresh"
+				// and skipped the `_refreshErrorLogged = false` reset just below, permanently
+				// suppressing the warning for the next GENUINE failure.
+				foreach (Delegate handler in SnapshotChanged?.GetInvocationList() ?? [])
+					try
+					{
+						((Action)handler)();
+					}
+					catch (Exception ex) when (ex is not OperationCanceledException)
+					{
+						_logger?.LogWarning(ex,
+							"A SnapshotChanged subscriber threw; the accounts snapshot was still updated and " +
+							"the remaining subscribers still ran");
+					}
 			}
 
 			_refreshErrorLogged = false;

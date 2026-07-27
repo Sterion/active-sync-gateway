@@ -268,7 +268,7 @@ work. Every finding ID appears in exactly one item.
 > `C9` an unbound config-declared account under OIDC still gets a full portal session, from which the
 > impersonator can set that account's gateway password. `C16` dead `blocked` parameter.
 
-**13. User-resolution resilience** — ~~`B1`~~ `B11` `B17`
+**13. User-resolution resilience** — ~~`B1`~~ ~~`B11`~~ `B17`
 > `B1` one invalid *config*-declared user makes `EnsureFreshAsync` throw before advancing the stamp, freezing
 > **all** database user pickup until restart — `eas user disable bob` reports success and never reaches any
 > replica. `B11` a throwing subscriber is mislogged as a refresh failure and aborts the remaining handlers.

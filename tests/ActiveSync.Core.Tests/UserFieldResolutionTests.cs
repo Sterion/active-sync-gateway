@@ -9,6 +9,7 @@ using ActiveSync.Crypto;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Core.Tests;
@@ -433,6 +434,71 @@ public sealed class UserFieldResolutionTests : IDisposable
 
 		Assert.Equal("config-imap", resolved.Roles[BackendRole.MailStore].Credentials.UserName);
 		Assert.Equal("db-smtp", resolved.Roles[BackendRole.MailSubmit].Credentials.UserName);
+	}
+
+	[Fact]
+	public async Task SnapshotChangedSubscriberThrows_OthersStillRun_AndDoesNotSuppressALaterGenuineFailure()
+	{
+		// B11: `SnapshotChanged?.Invoke()` sits inside the outer try/catch (UserResolver.cs), same
+		// shape as SettingsRefresher.Changed. A throwing subscriber (1) is a multicast Delegate.Invoke
+		// — it aborts every subscriber registered after it (e.g. BackendSessionFactory's auth-cache
+		// clear), (2) is mislogged as "Could not refresh database accounts; keeping the current
+		// snapshot" even though the rebuild WAS already applied, and (3) skips the
+		// `_refreshErrorLogged = false` reset, permanently suppressing the warning for the next
+		// GENUINE failure.
+		ToggleableFactory factory = new(_factory);
+		UserStore store = new(factory);
+		CapturingLogger<UserResolver> logger = new();
+		BackendProviderRegistry registry = new(
+		[
+			new ActiveSync.Backends.Imap.ImapBackendProvider(
+				TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
+			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
+			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!),
+		], NullLogger<BackendProviderRegistry>.Instance);
+		UserResolver resolver = new(
+			TestOptionsMonitor.Of(Options()), new BackendRolesProvider(GlobalConfig()), registry, store, logger);
+
+		int laterSubscriberRuns = 0;
+		resolver.SnapshotChanged += () => throw new InvalidOperationException("boom from an unrelated subscriber");
+		resolver.SnapshotChanged += () => laterSubscriberRuns++;
+
+		await store.UpsertAsync("anna", new UserOptions(), CancellationToken.None);
+		await resolver.EnsureFreshAsync(true, CancellationToken.None); // the throwing-subscriber call
+
+		Assert.Equal(1, laterSubscriberRuns); // the second subscriber must still run
+		Assert.DoesNotContain(logger.Lines, // the throw must not surface as a refresh failure — data was applied
+			l => l.Message.Contains("Could not refresh database accounts"));
+
+		// A genuinely different, later failure (a real DB outage) must still be reported — the
+		// earlier subscriber throw must not have left _refreshErrorLogged stuck at true.
+		factory.FailNext = true;
+		await resolver.EnsureFreshAsync(true, CancellationToken.None);
+		Assert.Contains(logger.Lines, l => l.Message.Contains("Could not refresh database accounts"));
+	}
+
+	private sealed class CapturingLogger<T> : ILogger<T>
+	{
+		public List<(LogLevel Level, string Message)> Lines { get; } = [];
+		public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+		public bool IsEnabled(LogLevel logLevel) => true;
+
+		public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
+			Exception? exception, Func<TState, Exception?, string> formatter) =>
+			Lines.Add((logLevel, formatter(state, exception)));
+	}
+
+	/// <summary>Wraps a real factory, throwing on demand to simulate a genuine DB outage.</summary>
+	private sealed class ToggleableFactory(ISyncDbContextFactory inner) : ISyncDbContextFactory
+	{
+		public bool FailNext;
+
+		public SyncDbContext CreateDbContext()
+		{
+			if (FailNext)
+				throw new InvalidOperationException("simulated database outage");
+			return inner.CreateDbContext();
+		}
 	}
 
 	private sealed class TestContextFactory(SqliteConnection connection) : ISyncDbContextFactory

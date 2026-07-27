@@ -73,7 +73,25 @@ public sealed class SettingsRefresher(
 
 				logger?.LogInformation(
 					"Global settings snapshot rebuilt: {Count} database override(s)", data.Count);
-				Changed?.Invoke();
+				// B11: invoke each subscriber independently rather than `Changed?.Invoke()`. A bare
+				// multicast Invoke stops at the first throwing handler (silently skipping every
+				// subscriber registered after it) and — because this call sits inside the outer
+				// try/catch below — a throw here escaped to the generic failure branch, which (1)
+				// mislogged an already-applied change as "could not refresh" and (2) skipped the
+				// `_refreshErrorLogged = false` reset just below, permanently suppressing the warning
+				// for the next GENUINE failure. Catching per-handler keeps every subscriber
+				// independent and keeps this call from ever reaching the outer catch.
+				foreach (Delegate handler in Changed?.GetInvocationList() ?? [])
+					try
+					{
+						((Action)handler)();
+					}
+					catch (Exception ex) when (ex is not OperationCanceledException)
+					{
+						logger?.LogWarning(ex,
+							"A settings-changed subscriber threw; the settings were still updated and the " +
+							"remaining subscribers still ran");
+					}
 			}
 
 			_refreshErrorLogged = false;

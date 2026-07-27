@@ -4,6 +4,7 @@ using ActiveSync.Core.State;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Core.Tests;
@@ -180,6 +181,63 @@ public sealed class GlobalSettingStoreTests : IDisposable
 		// The stamp was recorded, so the next poll is a no-op — not an endless failing retry.
 		await refresher.EnsureFreshAsync(false, CancellationToken.None);
 		Assert.Equal(1, changed);
+	}
+
+	[Fact]
+	public async Task Refresher_ChangedSubscriberThrows_OthersStillRun_AndDoesNotSuppressALaterGenuineFailure()
+	{
+		// B11: `Changed?.Invoke()` sits inside the outer try/catch, so a throwing subscriber (1) is a
+		// multicast Delegate.Invoke — it aborts every subscriber registered AFTER it, (2) is mislogged
+		// as "Could not refresh database settings; keeping the current snapshot" even though the data
+		// WAS already applied (the throw happens after SetData succeeded), and (3) skips the
+		// `_refreshErrorLogged = false` reset that follows the if-block, so it silently suppresses the
+		// warning for the NEXT genuinely different failure.
+		DbSettingsConfigurationSource source = new();
+		ToggleableFactory factory = new(_factory);
+		GlobalSettingStore store = new(factory);
+		CapturingLogger<SettingsRefresher> logger = new();
+		SettingsRefresher refresher = new(store, source.Provider, ZeroIntervalMonitor(), logger);
+
+		int laterSubscriberRuns = 0;
+		refresher.Changed += () => throw new InvalidOperationException("boom from an unrelated subscriber");
+		refresher.Changed += () => laterSubscriberRuns++;
+
+		await store.UpsertAsync("ActiveSync:ReadOnly", "true", CancellationToken.None);
+		await refresher.EnsureFreshAsync(true, CancellationToken.None); // the throwing-subscriber call
+
+		Assert.Equal(1, laterSubscriberRuns); // the second subscriber must still run
+		Assert.DoesNotContain(logger.Lines, // the throw must not surface as a refresh failure — data was applied
+			l => l.Message.Contains("Could not refresh database settings"));
+
+		// A genuinely different, later failure (a real DB outage) must still be reported — the
+		// earlier subscriber throw must not have left _refreshErrorLogged stuck at true.
+		factory.FailNext = true;
+		await refresher.EnsureFreshAsync(true, CancellationToken.None);
+		Assert.Contains(logger.Lines, l => l.Message.Contains("Could not refresh database settings"));
+	}
+
+	private sealed class CapturingLogger<T> : ILogger<T>
+	{
+		public List<(LogLevel Level, string Message)> Lines { get; } = [];
+		public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+		public bool IsEnabled(LogLevel logLevel) => true;
+
+		public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
+			Exception? exception, Func<TState, Exception?, string> formatter) =>
+			Lines.Add((logLevel, formatter(state, exception)));
+	}
+
+	/// <summary>Wraps a real factory, throwing on demand to simulate a genuine DB outage.</summary>
+	private sealed class ToggleableFactory(ISyncDbContextFactory inner) : ISyncDbContextFactory
+	{
+		public bool FailNext;
+
+		public SyncDbContext CreateDbContext()
+		{
+			if (FailNext)
+				throw new InvalidOperationException("simulated database outage");
+			return inner.CreateDbContext();
+		}
 	}
 
 	[Theory]
