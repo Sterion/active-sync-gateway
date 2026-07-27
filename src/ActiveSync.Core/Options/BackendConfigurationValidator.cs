@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
 using ActiveSync.Crypto;
 using Microsoft.Extensions.Configuration;
@@ -27,8 +28,12 @@ public sealed class BackendConfigurationValidator(
 		foreach ((BackendRole role, RoleAssignment assignment) in roles.Assignments)
 			try
 			{
-				registry.GetFor(assignment.ProviderName, role)
-					.ValidateConfiguration(role, assignment.Settings, failures);
+				IBackendProvider provider = registry.GetFor(assignment.ProviderName, role);
+				provider.ValidateConfiguration(role, assignment.Settings, failures);
+				// B12: a global Password/UserName is refused by the write surfaces
+				// (BackendKeyValidator.InertCredentialLeaf), but a value placed directly in a
+				// config file never goes through either — check the role's CURRENT settings too.
+				failures.AddRange(BackendKeyValidator.InertCredentialLeaves(provider, role, assignment.Settings));
 			}
 			catch (InvalidOperationException ex)
 			{

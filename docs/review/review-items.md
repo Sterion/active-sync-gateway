@@ -303,7 +303,7 @@ work. Every finding ID appears in exactly one item.
 > provenance it does not carry, which is what makes the freeze invisible. `C4`/`C13` the portal's permission
 > gate and its form are computed from two different views of the user.
 
-**18. Settings validation & catalogue** — ~~`B2`~~ ~~`B4`~~ ~~`B5`~~ ~~`B6`~~ ~~`B7`~~ `B12` `B14` `E8`
+**18. Settings validation & catalogue** — ~~`B2`~~ ~~`B4`~~ ~~`B5`~~ ~~`B6`~~ ~~`B7`~~ ~~`B12`~~ `B14` `E8`
 > `B2` the OIDC admin-claim pair can never be configured through either write surface — both orders are
 > rejected by a substring test. `B4` setting *removal* is validated by nothing, so `unset` can persist a
 > configuration the next start refuses to boot on; `E8` a port collision does the same. `B5` a backend write

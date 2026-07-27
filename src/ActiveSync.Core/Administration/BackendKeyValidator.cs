@@ -146,6 +146,28 @@ internal static class BackendKeyValidator
 			: null;
 
 	/// <summary>
+	///   B12: the write surfaces (`eas config set`, the web settings PUT) already refuse a global
+	///   Password/UserName leaf via <see cref="InertCredentialLeaf" /> — but that check runs only on
+	///   the value being WRITTEN, so the identical key placed directly in a config file (never going
+	///   through either write surface) was silently accepted and silently inert. Applied to an
+	///   ASSIGNED role's CURRENT settings, so <see cref="BackendConfigurationValidator" /> can catch
+	///   it too, from whichever layer (file, env, or database) the value actually arrived through.
+	/// </summary>
+	internal static IEnumerable<string> InertCredentialLeaves(
+		IBackendProvider provider, BackendRole role, ProviderSettings settings)
+	{
+		foreach (string leaf in new[] { "Password", "UserName" })
+		{
+			if (string.IsNullOrWhiteSpace(settings.Section[leaf]))
+				continue;
+			bool claimed = provider.DescribeConfiguration(role)
+				.Any(f => f.Name.Equals(leaf, StringComparison.OrdinalIgnoreCase));
+			if (!claimed && InertCredentialLeaf(role, leaf) is { } message)
+				yield return message;
+		}
+	}
+
+	/// <summary>
 	///   Whether a backend leaf key holds a secret, for masking in `eas config list/get`. The
 	///   provider's own schema is authoritative (B25) — a declared <see cref="BackendFieldType.Secret" />
 	///   field, whatever its name — with the <see cref="SecretRedaction.IsSecretName" /> name heuristic
