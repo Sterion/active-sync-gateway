@@ -100,13 +100,15 @@ public static class GatewayPasswordHasher
 			return false;
 		}
 
-		// K15: enforce the generator's own sizes, not a looser floor — Hash() always emits a
-		// SaltSize-byte salt and a HashSize-byte hash, so anything shorter is weaker than
+		// K15/K5: enforce the generator's own EXACT sizes, not a looser floor — Hash() always
+		// emits a SaltSize-byte salt and a HashSize-byte hash, so anything shorter is weaker than
 		// anything this hasher would ever produce (an externally-supplied or lower-privilege-
-		// written value must not be accepted just because it clears a lower bar).
-		if (salt.Length < SaltSize || hash.Length < HashSize)
+		// written value must not be accepted just because it clears a lower bar), and anything
+		// LONGER inflates the PBKDF2 output-block count (cost = iterations * ceil(len/32) SHA-256
+		// blocks), turning an oversized stored hash into a per-login denial-of-service.
+		if (salt.Length != SaltSize || hash.Length != HashSize)
 		{
-			error = $"salt or hash is too short (must be at least {SaltSize}/{HashSize} bytes)";
+			error = $"salt or hash is the wrong length (must be exactly {SaltSize}/{HashSize} bytes)";
 			return false;
 		}
 

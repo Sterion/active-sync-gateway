@@ -72,6 +72,22 @@ public class GatewayPasswordHasherTests
 	}
 
 	[Fact]
+	public void TryParse_OversizedHash_IsRejected()
+	{
+		// K5: TryParse enforced only a FLOOR on salt/hash length (`<`), not the exact size
+		// Hash() always emits (16/32 bytes) — so a stored value with a much longer hash (e.g. a
+		// 1 MB base64 blob) passes the floor check and turns every PBKDF2 verify against that
+		// account into a multi-minute denial-of-service. The reachable writer is
+		// UserSecretPolicy.PrepareGatewayPassword, which accepts an already-hashed "pbkdf2$..."
+		// value verbatim from the lowest privilege level (CLI/admin API/user portal).
+		string[] parts = GatewayPasswordHasher.Hash("pw").Split('$');
+		byte[] oversizedHash = new byte[4096]; // far larger than the generator's 32-byte HashSize
+		string stored = $"pbkdf2${parts[1]}${parts[2]}${Convert.ToBase64String(oversizedHash)}";
+		Assert.False(GatewayPasswordHasher.TryParse(stored, out string? error));
+		Assert.NotNull(error);
+	}
+
+	[Fact]
 	public void Verify_PlaintextStoredValue_ComparesExactly()
 	{
 		Assert.True(GatewayPasswordHasher.Verify("plain-secret", "plain-secret"));
