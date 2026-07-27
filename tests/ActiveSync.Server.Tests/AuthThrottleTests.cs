@@ -185,6 +185,28 @@ public class AuthThrottleTests
 	}
 
 	[Fact]
+	public void RecordSuccess_AddressKeyGuard_NeverClearsTheCeiling()
+	{
+		// K7: RecordSuccess cleared whichever key it was handed, so a caller could wipe the
+		// shared per-address ceiling with one valid login. The WebUi login endpoint did exactly
+		// that (RecordSuccess(userKey) AND RecordSuccess(addressKey)), voiding the class's own
+		// documented guarantee: "a valid login for one account cannot clear another account's
+		// counter, and keep a looser per-address ceiling ... so username-rotation from one
+		// address is still bounded." This overload does not exist on unmodified code — nothing in
+		// the type distinguished a granular key from a ceiling key.
+		AuthThrottle throttle = Create(2, 3600);
+		const string address = "203.0.113.5";
+		for (int i = 0; i < throttle.IpWideLimit; i++)
+			throttle.RecordFailure(address);
+		Assert.NotNull(throttle.BlockedForSeconds(address, throttle.IpWideLimit));
+
+		// A caller that correctly marks this as the address ceiling key must not be able to clear
+		// it via a success on some other account.
+		throttle.RecordSuccess(address, isAddressKey: true);
+		Assert.NotNull(throttle.BlockedForSeconds(address, throttle.IpWideLimit));
+	}
+
+	[Fact]
 	public void Prune_UnderConcurrentAccess_StaysConsistent()
 	{
 		// K8 (COVERAGE, not red-first): `_nextPruneUtc` was a plain, non-atomic `DateTime`

@@ -153,11 +153,12 @@ internal static class AuthEndpoints
 		if (admin && !isAdmin)
 			return Results.StatusCode(StatusCodes.Status403Forbidden);
 
-		// Clear BOTH keys: the per-(address, user) counter AND the IP-wide one. A shared egress
-		// IP (NAT/proxy) accrues failures from every user behind it, so leaving the IP-wide key
-		// untouched on success lets occasional typos eventually 429 everyone on that address.
+		// Clear only this account's counter — never the shared per-address ceiling (K7): a valid
+		// login for one account must not reset it, or an attacker holding any one valid credential
+		// could rotate usernames indefinitely from this address. isAddressKey: true makes this
+		// call an explicit, guarded no-op rather than silently wrong.
 		throttle.RecordSuccess(userKey);
-		throttle.RecordSuccess(addressKey);
+		throttle.RecordSuccess(addressKey, isAddressKey: true);
 		List<Claim> claims =
 			[new Claim(ClaimTypes.Name, request.Username), SessionValidation.SessionStart(DateTimeOffset.UtcNow)];
 		if (isAdmin)

@@ -124,8 +124,18 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options, Tim
 		}
 	}
 
-	public void RecordSuccess(string key)
+	/// <summary>
+	///   Clears a key on a successful login. Pass <paramref name="isAddressKey" /> = true ONLY for
+	///   the shared per-address ceiling key (<see cref="IpWideLimit" />) — the call is then a
+	///   deliberate no-op (K7): a valid login for one account must never reset the address-wide
+	///   ceiling, or an attacker holding any one valid credential could rotate usernames
+	///   indefinitely from that address. Only a granular (address, username) key may ever be
+	///   cleared here.
+	/// </summary>
+	public void RecordSuccess(string key, bool isAddressKey = false)
 	{
+		if (isAddressKey)
+			return;
 		_failures.TryRemove(key, out _);
 	}
 
