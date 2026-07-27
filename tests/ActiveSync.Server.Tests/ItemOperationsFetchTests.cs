@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
+using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using ActiveSync.Server.Eas.Handlers;
@@ -17,12 +18,45 @@ public sealed class ItemOperationsFetchTests : IDisposable
 {
 	private static readonly XNamespace IO = EasNamespaces.ItemOperations;
 	private static readonly XNamespace SE = EasNamespaces.Search;
+	private static readonly XNamespace AS = EasNamespaces.AirSync;
 
 	private readonly EasHandlerHarness _harness = new();
 
 	public void Dispose()
 	{
 		_harness.Dispose();
+	}
+
+	// F6 — a 16.x client fetching an item outside Sync (ItemOperations Fetch by CollectionId/
+	// ServerId) must get the SAME version-gated BodyPreference.Eas16 flag Sync itself computes
+	// (context.Version >= EasVersion.V160), not a hard-coded false. Without it, 16.x-only shapes
+	// (airsyncbase:Location, event attachments) silently disappear from a bare Fetch.
+	[Fact]
+	public async Task Fetch_ByCollectionId_Eas16Client_ThreadsEas16IntoBodyPreference()
+	{
+		// The default ItemApplicationData (airsync:Subject with no matching WBXML tag on this
+		// code page in this position) is deliberately unencodable elsewhere in this file; give
+		// this test an encodable payload so the response round-trips.
+		_harness.Session.Store.ItemApplicationData = _ =>
+			[new XElement(EasNamespaces.AirSyncBase + "DisplayName", "x")];
+
+		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+		UserFolder inbox = registry.Single();
+
+		XDocument? response = await _harness.RunAsync(
+			new ItemOperationsHandler(_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+				NullLogger<ItemOperationsHandler>.Instance),
+			"ItemOperations",
+			new XDocument(new XElement(IO + "ItemOperations",
+				new XElement(IO + "Fetch",
+					new XElement(AS + "CollectionId", inbox.ServerId),
+					new XElement(AS + "ServerId", $"{inbox.ServerId}:1")))),
+			protocolVersion: "16.1");
+
+		Assert.Equal("1",
+			response?.Root?.Element(IO + "Response")?.Element(IO + "Fetch")?.Element(IO + "Status")?.Value);
+		Assert.True(_harness.Session.Store.FetchedBodyPreferences.Single().Eas16);
 	}
 
 	[Fact]

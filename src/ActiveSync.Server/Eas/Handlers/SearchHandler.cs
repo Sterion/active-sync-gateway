@@ -89,8 +89,10 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 				foreach (IGrouping<string, (string FolderKey, string ItemKey)> group in page.GroupBy(h => h.FolderKey))
 				{
 					IReadOnlyList<string> keys = group.Select(h => h.ItemKey).ToList();
+					// eas16 must ride the same way it does through Sync/ItemOperations (F6) — a
+					// hard-coded false silently drops 16.x-only shapes from Search results too.
 					IReadOnlyDictionary<string, BackendItem?> items = await mailStore!.GetItemsAsync(
-						group.Key, keys, new BodyPreference(1, 1024, false), ct);
+						group.Key, keys, new BodyPreference(1, 1024, false, context.Version >= EasVersion.V160), ct);
 					foreach ((string folderKey, string itemKey) in group)
 						fetched[(folderKey, itemKey)] = items.GetValueOrDefault(itemKey);
 				}

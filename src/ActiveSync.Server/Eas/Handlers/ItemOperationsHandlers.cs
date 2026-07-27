@@ -121,7 +121,8 @@ public sealed class ItemOperationsHandler(
 			IContentStore? searchStore = context.Session.GetStoreForBackendKey(parts[0]);
 			if (searchStore is null)
 				return Failure("6");
-			BodyPreference options = ParseBodyPreference(fetch.Element(IO + "Options"));
+			BodyPreference options = ParseBodyPreference(
+				fetch.Element(IO + "Options"), context.Version >= EasVersion.V160);
 			BackendItem? found = await searchStore.GetItemAsync(parts[0], parts[1], options, ct);
 			if (found is null)
 				return Failure("6");
@@ -144,7 +145,8 @@ public sealed class ItemOperationsHandler(
 		if (itemKey is null)
 			return Failure("6");
 
-		BodyPreference bodyPreference = ParseBodyPreference(fetch.Element(IO + "Options"));
+		BodyPreference bodyPreference = ParseBodyPreference(
+			fetch.Element(IO + "Options"), context.Version >= EasVersion.V160);
 		BackendItem? item = await store.GetItemAsync(folder.BackendKey, itemKey, bodyPreference, ct);
 		if (item is null)
 			return Failure("6");
@@ -204,18 +206,22 @@ public sealed class ItemOperationsHandler(
 			new XElement(AS + "CollectionId", collectionId));
 	}
 
-	private static BodyPreference ParseBodyPreference(XElement? options)
+	private static BodyPreference ParseBodyPreference(XElement? options, bool eas16)
 	{
 		// AirSyncBase body Type codes (MS-ASAIRS): 1 = plain text, 2 = HTML, 3 = RTF,
 		// 4 = MIME. Default to 2 (HTML) when the client sends no preference.
+		// `eas16` (context.Version >= EasVersion.V160) must reach the store the same way it does
+		// through Sync (AGENTS.md: "version gating rides BodyPreference.Eas16") — a hard-coded
+		// false here silently drops airsyncbase:Location and event attachments for a 16.x client
+		// fetching outside Sync (F6).
 		XElement? preference = options?.Elements(ASB + "BodyPreference").FirstOrDefault();
 		if (preference is null)
-			return new BodyPreference(2, null, false);
+			return new BodyPreference(2, null, false, eas16);
 		int type = int.TryParse(preference.Element(ASB + "Type")?.Value, out int t) ? t : 2;
 		long? truncation = long.TryParse(preference.Element(ASB + "TruncationSize")?.Value, out long tr)
 			? tr
 			: null;
-		return new BodyPreference(type, truncation, false);
+		return new BodyPreference(type, truncation, false, eas16);
 	}
 }
 

@@ -218,6 +218,26 @@ public sealed class SearchFindConformanceTests : IDisposable
 		Assert.Equal("3", response?.Root?.Element(F + "Status")?.Value);
 	}
 
+	// F6 — a 16.x client's mailbox Search must carry the same version-gated BodyPreference.Eas16
+	// flag Sync computes, not a hard-coded false — otherwise a 16.x-only shape silently disappears
+	// from Search results the same way it would from a bare ItemOperations Fetch.
+	[Fact]
+	public async Task Search_MailboxHit_Eas16Client_ThreadsEas16IntoBodyPreference()
+	{
+		await InboxAsync();
+		SeedHits(1);
+
+		await _harness.RunAsync(NewSearch(), "Search",
+			new XDocument(new XElement(S + "Search",
+				new XElement(S + "Store",
+					new XElement(S + "Name", "Mailbox"),
+					new XElement(S + "Query", new XElement(S + "FreeText", "hello")),
+					new XElement(S + "Options", new XElement(S + "Range", "0-0"))))),
+			protocolVersion: "16.1");
+
+		Assert.True(_harness.Session.Store.FetchedBodyPreferences.Single().Eas16);
+	}
+
 	// F41 — a request whose offset is at/beyond the fetch cap must be refused without hitting the
 	// backend (it would otherwise fetch the whole cap and Skip() it all away).
 	[Fact]

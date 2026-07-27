@@ -300,10 +300,18 @@ public sealed class EasHandlerHarness : IDisposable
 		/// </summary>
 		public List<IReadOnlyList<string>> BatchFetched { get; } = [];
 
+		/// <summary>
+		///   The <see cref="BodyPreference" /> each <see cref="GetItemAsync" /> call actually received,
+		///   in call order — lets a test assert the version-gated <c>Eas16</c> flag reached the store
+		///   rather than being hard-coded false (F6).
+		/// </summary>
+		public List<BodyPreference> FetchedBodyPreferences { get; } = [];
+
 		public Task<BackendItem?> GetItemAsync(
 			string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct)
 		{
 			Fetched.Add($"{folderBackendKey}/{itemKey}");
+			FetchedBodyPreferences.Add(bodyPreference);
 			if (VanishedKeys.Contains(itemKey))
 				return Task.FromResult<BackendItem?>(null);
 			IReadOnlyList<XElement> data = ItemApplicationData?.Invoke(itemKey)
