@@ -5,7 +5,7 @@
 
 import { api } from '/shared/api.js';
 import { h, render as renderInto, table, toast, confirmDialog } from '/shared/ui.js';
-import { schemaForm, schemaKeys, listRoot } from '/shared/schema-form.js';
+import { schemaForm, schemaKeys, listRoot, sourceBadge } from '/shared/schema-form.js';
 
 const ROLES = ['MailStore', 'MailSubmit', 'Calendar', 'Tasks', 'Contacts', 'Notes', 'Oof'];
 
@@ -91,18 +91,25 @@ export async function render(container) {
 		});
 		let clearPassword = false;
 
+		// C8: per-field provenance — which level (config file / database) supplied the value
+		// currently shown — so an admin can tell a config-supplied value from a real database
+		// override before saving (C2's freeze is invisible without this).
+		const sources = user?.sources ?? {};
+		const fieldBadge = path => sources[path] ? sourceBadge(sources[path]) : null;
+
 		const roleEditors = ROLES.map(role => roleEditor(
-			role, user?.backends?.[role], providers, globalRoles.find(g => g.role === role)));
+			role, user?.backends?.[role], providers, globalRoles.find(g => g.role === role), sources));
 
 		renderInto(editor, h('div', { class: 'card' },
 			h('h2', {}, isNew ? 'Add user' : `Edit ${user.login}`),
 			user?.origin === 'config'
 				? h('div', { class: 'notice' },
-					'This entry comes from configuration — saving stores a database copy that replaces it (delete the copy to fall back).')
+					'This entry comes from configuration — a database value overrides configuration for that field only; clearing a field falls back to the config value.')
 				: null,
 			h('label', {}, 'Login'), login,
 			h('label', {}, 'Mail address',
-				(user?.mailAddress ?? '') === '' ? h('span', { class: 'badge default', style: 'margin-left:8px' }, 'default') : null),
+				(user?.mailAddress ?? '') === '' ? h('span', { class: 'badge default', style: 'margin-left:8px' }, 'default') : null,
+				fieldBadge('MailAddress')),
 			mail,
 			h('label', {}, 'Gateway password (decouples the phone password from the mail backend)'),
 			h('div', { style: 'display:flex; gap:8px' }, password,
@@ -112,9 +119,9 @@ export async function render(container) {
 					password.placeholder = 'will be REMOVED on save';
 				} }, 'Clear')),
 			h('label', { style: 'display:flex; align-items:center; gap:8px; margin-top:12px' },
-				admin, 'Web admin access (/admin)'),
+				admin, 'Web admin access (/admin)', fieldBadge('Admin')),
 			h('label', { style: 'display:flex; align-items:center; gap:8px; margin-top:8px' },
-				enabled, 'Account enabled (uncheck to disable, refusing every login on all devices)'),
+				enabled, 'Account enabled (uncheck to disable, refusing every login on all devices)', fieldBadge('Enabled')),
 			h('h2', { style: 'margin-top:18px' }, 'Backend role overrides'),
 			...roleEditors.map(r => r.element),
 			h('div', { style: 'display:flex; gap:8px; margin-top:14px' },
@@ -175,9 +182,17 @@ export async function render(container) {
  * settings); everything below them is rendered from the schema of whichever provider ends up
  * serving the role — the one selected here, or the global one when inheriting.
  */
-function roleEditor(role, current, providers, globalRole) {
+function roleEditor(role, current, providers, globalRole, sources = {}) {
 	const candidates = providers.filter(p => p.roles.includes(role));
 	const inheritedProvider = globalRole?.provider ?? null;
+	// C8: per-field provenance for this role — the same flat map the top-level fields read,
+	// scoped to this role's paths.
+	const roleBadge = suffix => sources[`Backends:${role}:${suffix}`]
+		? sourceBadge(sources[`Backends:${role}:${suffix}`]) : null;
+	const settingSources = {};
+	const prefix = `Backends:${role}:Settings:`;
+	for (const [path, level] of Object.entries(sources))
+		if (path.startsWith(prefix)) settingSources[path.slice(prefix.length)] = level;
 
 	const enabled = h('select', {},
 		h('option', { value: '', selected: current?.enabled == null }, '(default: on)'),
@@ -221,7 +236,7 @@ function roleEditor(role, current, providers, globalRole) {
 		const known = schemaKeys(fields);
 		const leftover = Object.entries(values).filter(([k]) => !known.has(listRoot(k)));
 
-		form = schemaForm({ fields, values, inherited });
+		form = schemaForm({ fields, values, inherited, sources: settingSources });
 		advanced = rawEditor(leftover, fields.length > 0);
 		settingsBox.replaceChildren(form.node, advanced.node);
 	}
@@ -233,9 +248,9 @@ function roleEditor(role, current, providers, globalRole) {
 		h('summary', { style: 'cursor:pointer; padding:6px 0' }, role,
 			current ? h('span', { class: 'badge accent', style: 'margin-left:8px' }, 'overridden') : null),
 		h('div', { style: 'padding:4px 0 10px 14px' },
-			h('label', {}, 'Enabled'), enabled,
-			h('label', {}, 'Provider'), provider,
-			h('label', {}, 'Backend user'), userName,
+			h('label', {}, 'Enabled', roleBadge('Enabled')), enabled,
+			h('label', {}, 'Provider', roleBadge('Provider')), provider,
+			h('label', {}, 'Backend user', roleBadge('UserName')), userName,
 			h('label', {}, 'Backend password'),
 			h('div', { style: 'display:flex; gap:8px' }, password,
 				h('button', { onclick: () => {

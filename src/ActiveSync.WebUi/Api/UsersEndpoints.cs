@@ -29,7 +29,8 @@ internal static class UsersEndpoints
 
 	internal sealed record UserDto(
 		string Login, string Origin, string? MailAddress, bool Admin, bool Enabled, bool PasswordSet,
-		string? PasswordFormat, Dictionary<string, RoleDto>? Backends);
+		string? PasswordFormat, Dictionary<string, RoleDto>? Backends,
+		Dictionary<string, string>? Sources);
 
 	internal sealed record RoleUpdate(
 		bool? Enabled, string? Provider, string? UserName, string? Password,
@@ -405,6 +406,24 @@ internal static class UsersEndpoints
 			!string.IsNullOrEmpty(o.Password),
 			string.IsNullOrEmpty(o.Password) ? null :
 			GatewayPasswordHasher.IsHashed(o.Password) ? "pbkdf2" : "PLAINTEXT",
-			backends);
+			backends,
+			ToSourceDto(account.Sources));
+	}
+
+	/// <summary>
+	///   C8: per-field provenance — which level (`config`/`db`) supplied each value — so the admin
+	///   editor can show an operator which of the values in front of them came from the config file
+	///   (a value C2's freeze would otherwise turn into a silent, invisible database override).
+	///   Keyed by the same field paths <see cref="UserMerge" /> already computes them under
+	///   ("MailAddress", "Backends:MailStore:UserName", …).
+	/// </summary>
+	private static Dictionary<string, string>? ToSourceDto(IReadOnlyDictionary<string, UserFieldSource>? sources)
+	{
+		return sources is { Count: > 0 }
+			? sources.ToDictionary(
+				p => p.Key,
+				p => p.Value == UserFieldSource.UserDatabase ? "db" : "config",
+				StringComparer.OrdinalIgnoreCase)
+			: null;
 	}
 }
