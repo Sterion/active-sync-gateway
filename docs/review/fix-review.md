@@ -99,6 +99,9 @@ finding rather than merely compiling and passing.
 >
 > Then append an entry to `review-results.md`. If a check fails, **stop and report** — do not continue.
 >
+> **Narrate as you go** — say what you are spawning, a SHORT summary of what came back, and each check
+> with its result, as you run them. See "Narrate the run" below.
+>
 > Before you finish the run, do the **end-of-run sweep** over every item the run landed and record a
 > run-summary entry.
 
@@ -130,6 +133,43 @@ finds this only in the findings you happen to sample.
 Where the diff is uninspectable at that granularity — a tight-cluster commit covering several
 findings — read the whole commit against **all** the IDs in its subject and say so in the results
 entry, as the existing entries for items 2 and 5 do.
+
+### Narrate the run — a silent orchestrator cannot be corrected
+
+An orchestrated run emits almost nothing a human can read. The work happens in subagents and in tool
+calls, and the harness collapses both to one-line chips — "Ran 7 commands, ran an agent". A run can
+therefore proceed for hours, land dozens of commits, and give the human no place to step in. On this
+programme's first long run the human had to interrupt at item 5 and ask for output, having watched
+four items go by as a column of collapsed chips.
+
+**So narrate, in the turn itself, as you go.** Four beats per item, none of them long:
+
+1. **Before spawning** — the item number and title, its finding IDs, and anything you have decided
+   about it: whether you are running the live suite and *why*, a restart you kicked off in parallel,
+   an orientation document you had to read first.
+2. **When the worker returns** — a **SHORT** summary. Two to four lines: what each finding actually
+   changed, plus anything the worker disclosed that you intend to check (a rewritten test, a
+   deviation, a skipped suite). Never paste the worker's report; it is written for you, not for the
+   human.
+3. **Each check, with its result** — integrity numbers, cursor, strike-with-the-fix, the red-first
+   re-proof, build, unit counts, live counts. State the number you got, not "verified".
+4. **The entry** — say it is recorded, and surface the one or two things a human would actually want
+   to act on (a breaking change, a partial close, a new finding).
+
+Keep it to what a reader can skim. No test logs, no full diffs, no restating the finding text — those
+are what `review-results.md` and the detail file are for.
+
+This is not decoration, and it is not for reassurance. It is the mechanism behind two rules this
+document already relies on:
+
+- **The human is the backstop for a degrading orchestrator** ("When to hand off", below) — and they
+  can only catch what they can see. Degradation shows up first as *terse verification*: "looks good"
+  instead of the counts. A narrated run makes that visible in the transcript, to the human and to you.
+- **Stopping early costs nothing** (working protocol, step 7) — but only if the human knows where the
+  run has got to. An interruption during a silent run leaves them reconstructing state from `git log`.
+
+The results entry is written for the *next orchestrator*, after the fact. The narration is written for
+the *human*, during. They are different audiences and neither substitutes for the other.
 
 ### The end-of-run sweep
 
