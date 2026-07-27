@@ -103,4 +103,42 @@ public sealed class ConfigWriteValidationTests
 		SettingKeys.SettingKey key = SettingKeys.Find("ActiveSync:Log:DbMinimumLevel")!;
 		Assert.Null(SettingKeys.Validate(key, "critical"));
 	}
+
+	// B2 — the OIDC admin-claim pair could never be configured through either write surface. Writing
+	// AdminClaim alone introduces the failure "...AdminClaimValue is required when AdminClaim is set"
+	// (ActiveSyncOptionsValidator.cs:187-190), and that failure string names a DIFFERENT, still-unset
+	// key (AdminClaimValue) — but the substring test `failure.Contains(key)` matched anyway, because
+	// "...AdminClaim" is a textual PREFIX of "...AdminClaimValue". So a write that introduces only a
+	// failure about the OTHER key of the pair was wrongly attributed to THIS key and refused, even
+	// though the scoping rule's own intent (only failures the write introduces AND that name the key
+	// just written) says it should pass through to be completed by the next write.
+	[Fact]
+	public void WritingAdminClaimAlone_IsNotRejectedByTheOtherKeysFailure()
+	{
+		string? error = SettingKeys.ValidateStartupImpact(
+			EffectiveWith(), "ActiveSync:WebUi:Oidc:AdminClaim", "groups");
+		Assert.Null(error);
+	}
+
+	// B2 — the reverse write (AdminClaimValue alone, with AdminClaim still unset) is a REAL,
+	// self-contained failure — the value just written is exactly what is missing its partner — and
+	// must stay rejected so the fix does not become a blanket "ignore this whole failure" hack.
+	[Fact]
+	public void WritingAdminClaimValueAlone_IsStillRejected()
+	{
+		string? error = SettingKeys.ValidateStartupImpact(
+			EffectiveWith(), "ActiveSync:WebUi:Oidc:AdminClaimValue", "engineering");
+		Assert.NotNull(error);
+		Assert.Contains("AdminClaimValue", error);
+	}
+
+	// B2 — once AdminClaim is on file, completing the pair by writing AdminClaimValue must pass (both
+	// requirements are then satisfied), proving the pair is actually reachable in sequence.
+	[Fact]
+	public void CompletingThePair_InEitherOrder_Succeeds()
+	{
+		IConfiguration withAdminClaim = EffectiveWith(("ActiveSync:WebUi:Oidc:AdminClaim", "groups"));
+		Assert.Null(SettingKeys.ValidateStartupImpact(
+			withAdminClaim, "ActiveSync:WebUi:Oidc:AdminClaimValue", "engineering"));
+	}
 }

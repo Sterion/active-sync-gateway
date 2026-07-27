@@ -289,11 +289,36 @@ internal static class SettingKeys
 			.AddInMemoryCollection(new Dictionary<string, string?> { [key] = value })
 			.Build();
 		List<string> introduced = Failures(validator, Bind(candidate))
-			.Where(failure => !before.Contains(failure) &&
-			                  failure.Contains(key, StringComparison.OrdinalIgnoreCase))
+			.Where(failure => !before.Contains(failure) && NamesKey(failure, key))
 			.ToList();
 
 		return introduced.Count > 0 ? string.Join(" ", introduced) : null;
+	}
+
+	/// <summary>
+	///   Whether <paramref name="failure" /> names <paramref name="key" /> itself, as opposed to a
+	///   DIFFERENT key that merely shares <paramref name="key" /> as a textual prefix (B2:
+	///   "...AdminClaim" is a prefix of "...AdminClaimValue", so a plain substring test wrongly
+	///   attributed a failure about AdminClaimValue to a write of AdminClaim alone). A match only
+	///   counts when the character immediately following it is not part of the same identifier
+	///   (config keys are alphanumeric/colon-delimited, so a following letter or digit means the
+	///   match is a prefix of a longer key name).
+	/// </summary>
+	private static bool NamesKey(string failure, string key)
+	{
+		int index = 0;
+		while (true)
+		{
+			int found = failure.IndexOf(key, index, StringComparison.OrdinalIgnoreCase);
+			if (found < 0)
+				return false;
+
+			int after = found + key.Length;
+			if (after >= failure.Length || !char.IsLetterOrDigit(failure[after]))
+				return true;
+
+			index = found + 1;
+		}
 	}
 
 	private static ActiveSyncOptions Bind(IConfiguration config) =>
