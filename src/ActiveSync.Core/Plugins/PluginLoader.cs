@@ -125,22 +125,30 @@ public static class PluginLoader
 	}
 
 	/// <summary>
-	///   The digest a plugin directory is pinned by: SHA-256 over every <c>*.dll</c> beneath it,
-	///   ordered by relative path, hashing the path as well as the bytes so a renamed or added
-	///   assembly changes the result. Public because it is the value an operator writes into
-	///   <c>ActiveSync:Plugins:Pins:&lt;name&gt;</c> after reviewing a plugin — the loader also
-	///   reports it in the mismatch message.
+	///   The digest a plugin directory is pinned by: SHA-256 over EVERY regular file beneath it
+	///   (not just <c>*.dll</c>), ordered by relative path, hashing the path as well as the bytes
+	///   so a renamed or added file changes the result. Public because it is the value an operator
+	///   writes into <c>ActiveSync:Plugins:Pins:&lt;name&gt;</c> after reviewing a plugin — the
+	///   loader also reports it in the mismatch message.
+	///   <para>
+	///     Covering every file matters because <c>*.dll</c> is not the whole loadable surface: on
+	///     the shipped Linux image a plugin's P/Invoke payload is a <c>.so</c>/<c>.dylib</c>
+	///     (<see cref="System.Runtime.Loader.AssemblyDependencyResolver" /> resolves those via
+	///     <c>LoadUnmanagedDll</c>), and its <c>.deps.json</c> drives that same resolver's path
+	///     lookups for both managed and native assets — an allow-list of one extension let either
+	///     be swapped after review with the pin still matching.
+	///   </para>
 	/// </summary>
 	public static string ComputeDirectoryDigest(string pluginDir)
 	{
 		using IncrementalHash digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-		foreach (string dll in Directory.EnumerateFiles(pluginDir, "*.dll", SearchOption.AllDirectories)
-			         .OrderBy(d => Path.GetRelativePath(pluginDir, d), StringComparer.Ordinal))
+		foreach (string file in Directory.EnumerateFiles(pluginDir, "*", SearchOption.AllDirectories)
+			         .OrderBy(f => Path.GetRelativePath(pluginDir, f), StringComparer.Ordinal))
 		{
 			digest.AppendData(Encoding.UTF8.GetBytes(
-				Path.GetRelativePath(pluginDir, dll).Replace('\\', '/')));
+				Path.GetRelativePath(pluginDir, file).Replace('\\', '/')));
 			digest.AppendData([0]);
-			using FileStream stream = File.OpenRead(dll);
+			using FileStream stream = File.OpenRead(file);
 			digest.AppendData(SHA256.HashData(stream));
 		}
 

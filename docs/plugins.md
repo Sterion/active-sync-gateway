@@ -232,7 +232,7 @@ UI; see [configuration.md](configuration.md)) and why a plugin can be pinned:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `Plugins:Pins:<dirname>` | *(none)* | Expected SHA-256 digest of the plugin directory — every `*.dll` beneath it, path and contents. A mismatch aborts startup. |
+| `Plugins:Pins:<dirname>` | *(none)* | Expected SHA-256 digest of the plugin directory — every regular file beneath it, path and contents (not just `*.dll`: native `.so`/`.dylib` payloads and `.deps.json` are covered too). A mismatch aborts startup. |
 | `Plugins:RequirePinned` | `false` | Refuse to load any plugin that has no pin. |
 
 To pin a plugin, set the pin to any placeholder and start the gateway once: the failure

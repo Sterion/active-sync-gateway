@@ -331,6 +331,40 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
+	///   K3 — the pin is the only enforceable trust control the loader has, and it hashed
+	///   <c>*.dll</c> files only. On the shipped Linux image a plugin's native P/Invoke payload
+	///   is a <c>.so</c>, never a <c>.dll</c>, and its <c>.deps.json</c> drives where the loader's
+	///   <see cref="System.Runtime.Loader.AssemblyDependencyResolver" /> resolves dependencies from
+	///   — so either could be swapped after review with the pinned digest still matching, making
+	///   docs/plugins.md's "byte-for-byte what you reviewed" claim false. The digest must change
+	///   when either file is added or edited.
+	/// </summary>
+	[Fact]
+	public void ComputeDirectoryDigest_ChangesWhenADepsJsonFileIsAdded()
+	{
+		string pluginDir = StagePlugin("ActiveSync.TestPlugin");
+		string before = PluginLoader.ComputeDirectoryDigest(pluginDir);
+
+		File.WriteAllText(Path.Combine(pluginDir, "ActiveSync.TestPlugin.deps.json"), "{}");
+
+		string after = PluginLoader.ComputeDirectoryDigest(pluginDir);
+		Assert.NotEqual(before, after);
+	}
+
+	/// <summary>K3 — same defect, the native-library vector named explicitly in the finding.</summary>
+	[Fact]
+	public void ComputeDirectoryDigest_ChangesWhenANativeLibraryIsAdded()
+	{
+		string pluginDir = StagePlugin("ActiveSync.TestPlugin");
+		string before = PluginLoader.ComputeDirectoryDigest(pluginDir);
+
+		File.WriteAllText(Path.Combine(pluginDir, "native.so"), "pretend native payload");
+
+		string after = PluginLoader.ComputeDirectoryDigest(pluginDir);
+		Assert.NotEqual(before, after);
+	}
+
+	/// <summary>
 	///   The primary gate: a plugin DECLARES the contract it supports, and it must match exactly.
 	///   Minor counts as breaking by current policy, so 1.1 against a 1.0 host is refused — that is
 	///   what lets an incompatible change land as a minor bump instead of inflating the major.

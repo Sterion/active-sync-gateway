@@ -249,7 +249,7 @@ work. Every finding ID appears in exactly one item.
 > `K11` no `NotBefore` check. `K13` an unzeroed PKCS#12 holding the private key. `K18` a misleading error
 > when the race fallback finds no row.
 
-**10. Plugin trust boundary** — `K3` `K4` `K19`
+**10. Plugin trust boundary** — ~~`K3`~~ `K4` `K19`
 > `K3` the pin hashes `*.dll` only, so on the Linux image a plugin's native `.so` payload and its
 > `.deps.json` can be swapped with the pin still matching — `docs/plugins.md`'s "byte-for-byte what you
 > reviewed" is false as implemented. `K4` `RequirePinned` fails **open** on `1`/`yes`/`on`. `K19` the
