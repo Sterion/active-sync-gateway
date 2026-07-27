@@ -175,4 +175,35 @@ public sealed class PortalBackendEditingTests
 		Assert.Contains("BaseUrl", names);
 		Assert.Contains("AllowInvalidCertificates", names);
 	}
+
+	/// <summary>
+	///   C14 — <c>RoleSelfUpdate.UserName</c> had no keep-sentinel: <c>Password</c> in the same
+	///   DTO treats null = keep / "" = clear, and <c>Settings</c> preserves administered keys, but
+	///   <c>UserName</c> mapped any omitted value straight to null, silently clearing a stored
+	///   backend user name on any save that does not resend it.
+	/// </summary>
+	[Fact]
+	public async Task PortalUser_OmittingUserName_KeepsTheStoredValue()
+	{
+		await using WebUiHost host = await WebUiHost.StartAsync(OneUser(), CalDavRole);
+		using HttpClient client = await host.SignInAsync("bob", admin: false);
+
+		HttpResponseMessage first = await client.PutAsJsonAsync("/user/api/backends/Calendar", new
+		{
+			userName = "bob.dav",
+			settings = new Dictionary<string, string?>(),
+		});
+		Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+
+		// A second save that only touches Settings (never resends userName) must NOT clear it.
+		HttpResponseMessage second = await client.PutAsJsonAsync("/user/api/backends/Calendar", new
+		{
+			settings = new Dictionary<string, string?> { ["CalendarAttachments"] = "Off" },
+		});
+		Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+
+		UserStore store = new(host.Factory);
+		UserOptions? stored = await store.GetAsync("bob", CancellationToken.None);
+		Assert.Equal("bob.dav", stored!.Backends!["Calendar"].UserName);
+	}
 }

@@ -247,9 +247,15 @@ internal static class PortalEndpoints
 			BackendRoleOverride? configRole = UserEditing.FindRole(configUser, role.ToString());
 
 			// Deliberately untouched: Enabled and Provider (admin-only surface).
-			@override.UserName = UserEditing.ElideIfMatchesConfig(
-				string.IsNullOrWhiteSpace(request.UserName) ? null : request.UserName.Trim(),
-				configRole?.UserName);
+			// C14: UserName had no keep-sentinel — Password just below treats null = keep / "" =
+			// clear, and Settings preserves administered keys, but UserName mapped ANY omitted
+			// value straight to null, silently clearing a stored backend user name on any caller
+			// that does not resend it (the shipped account.js always does, which is why this went
+			// unnoticed). Give it the same sentinel as Password: null = keep the stored value.
+			if (request.UserName is not null)
+				@override.UserName = UserEditing.ElideIfMatchesConfig(
+					request.UserName.Length == 0 ? null : request.UserName.Trim(),
+					configRole?.UserName);
 			if (request.Password is not null)
 			{
 				if (request.Password.Length == 0)
