@@ -228,4 +228,67 @@ public class ImapMailBackendCorrectnessTests
 		Assert.Equal(originalSubject, stored.Subject);
 		await verify.DisconnectAsync(true, ct);
 	}
+
+	// G13 ----------------------------------------------------------------------------------
+
+	/// <summary>
+	///   G13: <c>SearchAsync</c> applies the raw <c>since.Date</c> as the SINCE floor, while
+	///   <c>GetItemRevisionsAsync</c> applies <c>SearchFloor(since)</c> (backed off one extra day —
+	///   RFC 3501 SINCE compares the server's own INTERNALDATE calendar day and disregards
+	///   timezone). <c>SearchFloor</c>'s widening makes the sync-filter query a strict SUPERSET of
+	///   the raw one, so a message dated in that one-day gap is a result the sync filter would keep
+	///   but Search misses. Proven deterministically: append a message with an explicit INTERNALDATE
+	///   exactly one day before <c>since</c> and confirm Search finds it once it uses the same floor.
+	/// </summary>
+	[BackendFact]
+	public async Task SearchAsync_UsesTheSameWidenedFloor_AsGetItemRevisionsAsync()
+	{
+		string user = TestBackend.User1;
+		string folderName = $"ItemG13-{Guid.NewGuid():N}";
+		CancellationToken ct = CancellationToken.None;
+		string subject = $"g13-{Guid.NewGuid():N}";
+
+		// A fixed, deterministic boundary — not "now" — so the test never straddles a real
+		// midnight. `since` is midnight on day D; the message's INTERNALDATE is noon on day D-1,
+		// i.e. inside SearchFloor(since) = (D-1).Date but outside the raw since.Date.
+		// since.AddDays(-1).Date is exactly ImapMailBackend.SearchFloor(since)'s formula
+		// (unit-tested directly in ImapSearchFloorTests) — inlined here rather than calling the
+		// internal method, since this project has no InternalsVisibleTo grant into the backend.
+		DateTime since = new(2024, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+		DateTimeOffset internalDate = new(2024, 6, 14, 12, 0, 0, TimeSpan.Zero);
+		Assert.Equal(since.AddDays(-1).Date, internalDate.UtcDateTime.Date);
+
+		using (ImapClient raw = new())
+		{
+			await raw.ConnectAsync(TestBackend.ImapHost, TestBackend.ImapPort, SecureSocketOptions.None, ct);
+			await raw.AuthenticateAsync(user, TestBackend.Password, ct);
+			IMailFolder personal = raw.GetFolder(raw.PersonalNamespaces[0]);
+			IMailFolder folder = await personal.CreateAsync(folderName, true, ct)
+			                      ?? throw new InvalidOperationException("IMAP server did not return the created folder.");
+			await folder.OpenAsync(FolderAccess.ReadWrite, ct);
+			MimeMessage message = new();
+			message.From.Add(MailboxAddress.Parse(user));
+			message.To.Add(MailboxAddress.Parse(user));
+			message.Subject = subject;
+			message.Body = new TextPart("plain") { Text = "g13-body" };
+			await folder.AppendAsync(message, MessageFlags.None, internalDate, ct);
+			await raw.DisconnectAsync(true, ct);
+		}
+
+		(ImapSession session, ImapMailBackend backend) = CreateBackend(user);
+		try
+		{
+			string folderKey = ImapSession.ToBackendKey(folderName);
+			IReadOnlyList<(string FolderBackendKey, string ItemKey)> results =
+				await backend.SearchAsync(folderKey, subject, since, 10, ct);
+
+			// GetItemRevisionsAsync (the sync-filter path) already applies SearchFloor and would
+			// keep this message; Search must not be a narrower view of the same folder.
+			Assert.Contains(results, r => r.FolderBackendKey == folderKey);
+		}
+		finally
+		{
+			await session.DisposeAsync();
+		}
+	}
 }

@@ -536,7 +536,7 @@ public sealed partial class ImapMailBackend(
 				.Or(SearchQuery.ToContains(freeText))
 				.Or(SearchQuery.BodyContains(freeText));
 			if (sinceUtc is { } since)
-				query = query.And(SearchQuery.DeliveredAfter(since.Date));
+				query = query.And(SearchQuery.DeliveredAfter(SearchFloor(since)));
 			IList<UniqueId> uids = await folder.SearchAsync(query, ct).ConfigureAwait(false);
 			return uids
 				.OrderByDescending(u => u.Id)
