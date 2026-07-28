@@ -37,6 +37,14 @@ public sealed class ImapIdleWatcher(
 
 	public BackendCredentials Credentials { get; } = credentials;
 
+	/// <summary>
+	///   The resolved connection options this watcher was built with (G7) — compared alongside
+	///   <see cref="Credentials" /> by <see cref="ImapBackendProvider.GetOrCreateWatcher" /> so a
+	///   per-user host/port/security change rebuilds the watcher instead of reusing one still
+	///   pointed at the old server.
+	/// </summary>
+	internal ImapOptions Options { get; } = options;
+
 	/// <summary>UTC time of the most recent folder event (the latch); MinValue when none yet.</summary>
 	public DateTime LastChangeUtc => new(Interlocked.Read(ref _lastChangeTicks), DateTimeKind.Utc);
 
@@ -125,7 +133,7 @@ public sealed class ImapIdleWatcher(
 		while (!ct.IsCancellationRequested)
 			try
 			{
-				using ImapClient client = await ImapConnectionFactory.ConnectAsync(options, Credentials, ct, wireLogger)
+				using ImapClient client = await ImapConnectionFactory.ConnectAsync(Options, Credentials, ct, wireLogger)
 					.ConfigureAwait(false);
 
 				if (!client.Capabilities.HasFlag(ImapCapabilities.Idle))

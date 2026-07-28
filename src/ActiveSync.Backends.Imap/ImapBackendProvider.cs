@@ -166,9 +166,12 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 
 	/// <summary>
 	///   One shared IDLE watcher per (gateway user, folder) — all of the user's devices reuse
-	///   it. Rebuilt on password rotation; null when IDLE is disabled by configuration.
+	///   it. Rebuilt on credential OR resolved-connection-options change (G7 — a per-user
+	///   host/port/security edit must not leave a live watcher connected to the old server, the
+	///   same way a password rotation already rebuilds it); null when IDLE is disabled by
+	///   configuration.
 	/// </summary>
-	private ImapIdleWatcher? GetOrCreateWatcher(
+	internal ImapIdleWatcher? GetOrCreateWatcher(
 		string gatewayLogin, ImapOptions options, BackendCredentials credentials, string folderFullName)
 	{
 		if (!_options.CurrentValue.Eas.UseImapIdle)
@@ -179,10 +182,10 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 			new(() => new ImapIdleWatcher(options, credentials, folderFullName, _logger, _wireLogger));
 
 		Lazy<ImapIdleWatcher> current = _watchers.GetOrAdd(key, NewWatcherLazy);
-		if (current.Value.Credentials.Password == credentials.Password)
+		if (current.Value.Credentials == credentials && ConnectionMatches(current.Value.Options, options))
 			return current.Value;
 
-		// D27: password rotation — swap the stale lazy for a fresh one with an atomic compare-and-set,
+		// D27: credential/connection rotation — swap the stale lazy for a fresh one with an atomic compare-and-set,
 		// so only the thread that wins the swap disposes the stale watcher, and a loser never
 		// materializes (and thus orphans) a freshly-built watcher outside the map. The replacement
 		// lazy is deferred, so a loser that never installs it builds nothing.
@@ -197,6 +200,23 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		// Lost the swap (another thread rebuilt, or the entry was trimmed): use whatever fresh entry
 		// is there now — GetOrAdd returns the winner's, or re-adds one for the current credentials.
 		return _watchers.GetOrAdd(key, NewWatcherLazy).Value;
+	}
+
+	/// <summary>
+	///   G7: the connection-affecting subset of <see cref="ImapOptions" /> — everything a
+	///   per-user backend edit could change that would leave a cached watcher pointed at the
+	///   wrong server or with the wrong transport/certificate policy.
+	/// </summary>
+	private static bool ConnectionMatches(ImapOptions a, ImapOptions b)
+	{
+		return a.Host == b.Host
+		       && a.Port == b.Port
+		       && a.UseSsl == b.UseSsl
+		       && a.Security == b.Security
+		       && a.AllowInvalidCertificates == b.AllowInvalidCertificates
+		       && a.CaCertificatePath == b.CaCertificatePath
+		       && a.CheckRevocation == b.CheckRevocation
+		       && a.PathSeparator == b.PathSeparator;
 	}
 
 	private async Task DisposeWatcherAsync(ImapIdleWatcher watcher)
