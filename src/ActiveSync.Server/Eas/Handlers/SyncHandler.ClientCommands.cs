@@ -91,7 +91,7 @@ public sealed partial class SyncHandler
 				if (HasSendElement(command, appData) &&
 				    store.EasClass.Equals(EasClass.Email, StringComparison.OrdinalIgnoreCase))
 				{
-					// F2: the SMTP send is irreversible but the ledger entry above is only durable
+					// The SMTP send is irreversible but the ledger entry above is only durable
 					// once THIS round's CommitCollectionStateAsync lands — which happens after every
 					// command in the collection is processed. A crash between the send SUCCEEDING and
 					// that commit leaves the SyncKey unadvanced, so the client's resend validates as
@@ -122,7 +122,7 @@ public sealed partial class SyncHandler
 						// between SubmitDraftAsync returning (the mail is definitely out) and this
 						// write landing (we durably say so) still resends — but that window is one
 						// in-process DB round trip, not "the rest of this round plus every remaining
-						// command plus the response write-out", which is what F2 originally closed.
+						// command plus the response write-out", which is the gap this claim closes.
 						await context.State.MarkSendCompletedAsync(context.Device, folder.ServerId, syncKeyForClaim, addClaimKey, ct);
 						ledger.RecordAdd(clientId, new AppliedClientAdd(null, null));
 					}
@@ -182,7 +182,7 @@ public sealed partial class SyncHandler
 					return null;
 				}
 
-				// F7: conflict detection. When the backend's current revision of this item differs
+				// Conflict detection. When the backend's current revision of this item differs
 				// from the one the client last acked (snapshot[itemKey]), someone else changed it in
 				// the meantime. Server-wins (the default and MS-ASCMD Conflict != 0) rejects the
 				// client's Change with Status 7 and poisons the snapshot so the next diff re-pushes
@@ -206,11 +206,11 @@ public sealed partial class SyncHandler
 				if (HasSendElement(command, appData) &&
 				    store.EasClass.Equals(EasClass.Email, StringComparison.OrdinalIgnoreCase))
 				{
-					// F2: same crash window as the Add path above — claim the send durably, keyed to
+					// Same crash window as the Add path above — claim the send durably, keyed to
 					// this round's still-unadvanced SyncKey, BEFORE submitting. A resend that finds a
 					// COMPLETED claim treats the draft as already gone (best-effort delete already
 					// happened or doesn't matter — the draft is either gone or will reappear via the
-					// next diff per F10) rather than re-submitting the mail. A claim that was never
+					// next diff) rather than re-submitting the mail. A claim that was never
 					// marked complete is NOT proof the send happened (SubmitDraftAsync may have thrown
 					// on a prior attempt — a routine transient failure), so this branch falls through
 					// and retries the submit instead of silently dropping the draft with no send.
@@ -229,7 +229,7 @@ public sealed partial class SyncHandler
 					await context.State.MarkSendCompletedAsync(context.Device, folder.ServerId, syncKeyForClaim, changeClaimKey, ct);
 					// The draft is already sent; deleting it from Drafts is best-effort cleanup. A
 					// failure here must not report failure for a sent message (the client would
-					// resend and duplicate it) — worst case the draft reappears via the next diff (F10).
+					// resend and duplicate it) — worst case the draft reappears via the next diff.
 					try
 					{
 						await store.DeleteItemAsync(folder.BackendKey, itemKey, true, ct);
@@ -285,7 +285,7 @@ public sealed partial class SyncHandler
 					if (!EasDateTime.TryParse(instanceId, out DateTime occurrence))
 						return ClientCommandStatus(command, "6"); // unparsable InstanceId
 
-					// F2: the iTIP CANCEL mail below is irreversible but the ledger entry is only
+					// The iTIP CANCEL mail below is irreversible but the ledger entry is only
 					// durable once THIS round's own commit lands (after every command in the
 					// collection is processed). A crash between the mail SUCCEEDING and that commit
 					// leaves the SyncKey unadvanced, so the resend validates as Current (empty
@@ -398,7 +398,7 @@ public sealed partial class SyncHandler
 		// The SMTP submit is the point of no return: a failure here MUST surface (nothing was sent,
 		// so the client is free to resend). Everything after it is best-effort and swallowed —
 		// filing to Sent must never turn an already-sent message into a reported failure, or the
-		// client resends and the recipient gets it twice (F10).
+		// client resends and the recipient gets it twice.
 		await context.Session.MailSubmit.SendAsync(mime, ct);
 		Core.Observability.GatewayMetrics.RecordMailSent(context.UserName, "draft_submit");
 		try

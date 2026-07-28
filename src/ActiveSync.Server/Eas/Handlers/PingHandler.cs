@@ -49,7 +49,7 @@ public sealed class PingHandler(
 			{
 				parameters = new PingParams(hbSeconds, effectiveFolders);
 				// Persist when the client supplied a (new) monitoring set, so a later bare Ping replays
-				// it — including the F17 case where Folders arrive without a HeartbeatInterval and the
+				// it — including the case where Folders arrive without a HeartbeatInterval and the
 				// heartbeat is inherited from the cache.
 				if (folderIds is { Count: > 0 })
 				{
@@ -181,7 +181,7 @@ public sealed class PingHandler(
 					.Select(v => v.CollectionId)
 					.Distinct()
 					.ToList();
-				// F16: the store signalled a change but none of the returned keys matched a watched
+				// The store signalled a change but none of the returned keys matched a watched
 				// folder (a store reporting at a coarser granularity, or a normalized/aliased key).
 				// Never drop the notification — surface every collection on this store so the client
 				// resyncs and reconciles, rather than sitting blind for the rest of the heartbeat.

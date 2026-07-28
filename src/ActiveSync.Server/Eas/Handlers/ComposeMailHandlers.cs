@@ -20,7 +20,7 @@ public abstract class ComposeMailHandlerBase(
 {
 	protected static readonly XNamespace CM = EasNamespaces.ComposeMail;
 	protected FolderService Folders => folders;
-	// F12: exposed so a derived handler's post-send logic (SendMailHandler.MarkSourceAsync) can
+	// Exposed so a derived handler's post-send logic (SendMailHandler.MarkSourceAsync) can
 	// consult the read-only grant without also capturing its OWN copy of the primary constructor
 	// parameter (which would trigger CS9107 — captured by both this type and the base class).
 	protected IOptionsSnapshot<ActiveSyncOptions> Options => options;
@@ -49,7 +49,7 @@ public abstract class ComposeMailHandlerBase(
 		// 16.x requests may legitimately carry no MIME: SmartForward with Forwardees, or
 		// SendMail sourcing a stored draft — BuildOutgoingAsync produces the bytes then. A request
 		// that decoded fine but carries none of the three is not an XML problem — it is an
-		// empty/invalid MIME submission (F19: MS-ASCMD common status 107, not 103).
+		// empty/invalid MIME submission (MS-ASCMD common status 107, not 103).
 		if (request.Mime.Length == 0 && request.Forwardees.Count == 0 && request.SourceItemId is null)
 		{
 			await WriteErrorAsync(context, "107", request); // invalid MIME
@@ -59,7 +59,7 @@ public abstract class ComposeMailHandlerBase(
 		// Building the outgoing bytes and the submit itself are the only steps whose failure means
 		// the mail did NOT go out — they alone map to Status 120. Everything after the submit is
 		// best-effort: once the mail is accepted, reporting a failure would make the client resend
-		// and the recipient receive it twice (F30).
+		// and the recipient receive it twice.
 		byte[]? outgoing;
 		try
 		{
@@ -77,7 +77,7 @@ public abstract class ComposeMailHandlerBase(
 		{
 			// The client referenced a source item (reply-to / forward-of) that no longer resolves —
 			// a stale ServerId, a moved or re-listed item. Sending the typed text alone would
-			// silently drop the quote/forwarded message, so fail the command (F29).
+			// silently drop the quote/forwarded message, so fail the command.
 			logger.LogWarning(
 				"{Command} for {User}: the referenced source item could not be resolved; not sending a degraded message",
 				Command, context.UserName);
@@ -87,11 +87,11 @@ public abstract class ComposeMailHandlerBase(
 
 		if (outgoing.Length == 0)
 		{
-			await WriteErrorAsync(context, "107", request); // F19: empty MIME, not an XML problem
+			await WriteErrorAsync(context, "107", request); // empty MIME, not an XML problem
 			return;
 		}
 
-		// F1: MS-ASCMD makes ClientId a required child of SendMail/SmartForward/SmartReply
+		// MS-ASCMD makes ClientId a required child of SendMail/SmartForward/SmartReply
 		// precisely so a lost 200 (Wi-Fi→LTE handover, a proxy timeout, the gateway restarting
 		// between SendAsync and the response write) can be retried without duplicating the mail —
 		// this is the same durable claim-before/mark-after shape the Sync draft-submit path already
@@ -198,7 +198,7 @@ public abstract class ComposeMailHandlerBase(
 				context.Parameters.ItemId,
 				[],
 				// 12.x carries no ClientId anywhere (options ride the query string) — the record's
-				// ClientId stays null, so the F1 dedup guard above always falls through to a real send.
+				// ClientId stays null, so the dedup guard above always falls through to a real send.
 				null,
 				IsRawForm: true);
 		}
@@ -259,7 +259,7 @@ public abstract class ComposeMailHandlerBase(
 
 	private async Task WriteErrorAsync(EasContext context, string status, ComposeRequest? request)
 	{
-		// F26: the 12.x raw message/rfc822 form has no ComposeMail WBXML response shape at all —
+		// The 12.x raw message/rfc822 form has no ComposeMail WBXML response shape at all —
 		// MS-ASHTTP defines success as an empty 200 and failures as HTTP status codes for that form.
 		// A null request (the request itself failed to parse) never reaches here as a raw form —
 		// ParseAsync's 12.x branch always returns a non-null ComposeRequest.
@@ -278,12 +278,12 @@ public abstract class ComposeMailHandlerBase(
 			new XElement(CM + Command, new XElement(CM + "Status", status))));
 	}
 
-	// F4: BuildOutgoingAsync resolves the referenced source to build the quote/attachment, then
+	// BuildOutgoingAsync resolves the referenced source to build the quote/attachment, then
 	// MarkSourceAsync resolves the SAME source again to flag it (answered/forwarded) — a second
 	// DB round trip (and, for a DAV store, a second backend lookup) per send for no reason: the
 	// source never changes within one HandleAsync call. Cache the outcome (including a "not
 	// found" miss) so the second call is free. The cached shape carries the resolved UserFolder +
-	// IContentStore (not just the backend-key string) because SendMailHandler.MarkSourceAsync (F29)
+	// IContentStore (not just the backend-key string) because SendMailHandler.MarkSourceAsync
 	// needs the folder's Type (Drafts check) and the store itself (DeleteItemAsync) — a plain
 	// (string, string) tuple could not serve that caller too.
 	private bool _sourceResolveAttempted;
@@ -314,10 +314,10 @@ public abstract class ComposeMailHandlerBase(
 		string? SourceFolderId,
 		string? SourceItemId,
 		IReadOnlyList<(string Name, string Email)> Forwardees,
-		// F1: null on the 12.x raw wire form (which carries no ClientId anywhere) — the dedup guard
+		// Null on the 12.x raw wire form (which carries no ClientId anywhere) — the dedup guard
 		// in HandleAsync always falls through to a real send in that case.
 		string? ClientId = null,
-		// F26: true for the 12.x raw message/rfc822 form. MS-ASHTTP defines that form's errors as
+		// True for the 12.x raw message/rfc822 form. MS-ASHTTP defines that form's errors as
 		// HTTP status codes with no body — WriteErrorAsync must not write a 14.x/16.x ComposeMail
 		// WBXML response for it.
 		bool IsRawForm = false)
@@ -345,7 +345,7 @@ public sealed class SendMailHandler(
 			return request.Mime;
 
 		// 16.x: SendMail without MIME submits a stored draft (Source > FolderId/ItemId). An
-		// unresolvable draft yields empty bytes → Status 107 (F19; already a clean failure, never a
+		// unresolvable draft yields empty bytes → Status 107 (already a clean failure, never a
 		// degraded send), so this path does not need the source-not-found sentinel.
 		(UserFolder Folder, IContentStore Store, string ItemKey)? source =
 			await ResolveSourceAsync(context, request, ct);
@@ -360,13 +360,13 @@ public sealed class SendMailHandler(
 		// A draft that was submitted by reference is consumed by the send.
 		if (request.Mime.Length > 0 || request.SourceFolderId is null || request.SourceItemId is null)
 			return;
-		// F29: reuse BuildOutgoingAsync's resolution (which already ran for this same request when
+		// Reuse BuildOutgoingAsync's resolution (which already ran for this same request when
 		// Mime is empty, the only way this method is reached) instead of resolving the source again.
 		(UserFolder Folder, IContentStore Store, string ItemKey)? source =
 			await ResolveSourceAsync(context, request, ct);
 		if (source is null)
 			return;
-		// F12: nothing else enforces the 16.x "submit a stored draft" flow's assumption that Source
+		// Nothing else enforces the 16.x "submit a stored draft" flow's assumption that Source
 		// names a draft — a client (or a bug) pointing SendMail at an ordinary message would
 		// otherwise get it re-sent AND hard-deleted with no tombstone and no Trash copy. Only a
 		// genuine Drafts item may be consumed by the send; anything else is left untouched. Also
@@ -396,7 +396,7 @@ public sealed class SmartReplyHandler(
 		if (request.SourceFolderId is null || request.SourceItemId is null)
 			return request.Mime;
 		// A source WAS referenced but could not be resolved / fetched — fail rather than send a
-		// reply with the quoted original silently missing (F29).
+		// reply with the quoted original silently missing.
 		(UserFolder Folder, IContentStore Store, string ItemKey)? source =
 			await ResolveSourceAsync(context, request, ct);
 		if (source is null)
@@ -453,7 +453,7 @@ public sealed class SmartReplyHandler(
 	{
 		(UserFolder Folder, IContentStore Store, string ItemKey)? source =
 			await ResolveSourceAsync(context, request, ct);
-		// F25: the global ReadOnly check above only covers the SEND — this post-send write into the
+		// The global ReadOnly check above only covers the SEND — this post-send write into the
 		// source folder must honour a per-folder read-only/share grant too, the same way
 		// SendMailHandler's post-send delete already does.
 		if (source is not null && !WritePermission.IsBlocked(context, Options.Value, source.Value.Folder.BackendKey))
@@ -479,7 +479,7 @@ public sealed class SmartForwardHandler(
 		if (request.SourceFolderId is null || request.SourceItemId is null)
 			return request.Mime;
 		// A source WAS referenced but could not be resolved / fetched — fail rather than forward a
-		// message with the forwarded content silently missing (F29).
+		// message with the forwarded content silently missing.
 		(UserFolder Folder, IContentStore Store, string ItemKey)? source =
 			await ResolveSourceAsync(context, request, ct);
 		if (source is null)
@@ -552,7 +552,7 @@ public sealed class SmartForwardHandler(
 	{
 		(UserFolder Folder, IContentStore Store, string ItemKey)? source =
 			await ResolveSourceAsync(context, request, ct);
-		// F25: see SmartReplyHandler.MarkSourceAsync — the same per-folder grant must gate this
+		// See SmartReplyHandler.MarkSourceAsync — the same per-folder grant must gate this
 		// post-send write, not just the global ReadOnly flag the send itself already checked.
 		if (source is not null && !WritePermission.IsBlocked(context, Options.Value, source.Value.Folder.BackendKey))
 			await context.Session.MailStore.SetAnsweredAsync(

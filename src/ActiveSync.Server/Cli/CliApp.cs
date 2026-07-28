@@ -10,7 +10,7 @@ internal static class CliApp
 {
 	/// <summary>
 	///   Pre-CLI argument spellings that must work whether the command runs locally or is forwarded
-	///   over <c>/cli</c> (E10). Both dispatchers — <c>Program.cs</c>'s top-level pre-parse dispatch
+	///   over <c>/cli</c>. Both dispatchers — <c>Program.cs</c>'s top-level pre-parse dispatch
 	///   and <see cref="LocalCliEndpoint.ExecuteAsync" /> — call this BEFORE the command tree ever
 	///   sees the args, so `eas help` and `eas --healthcheck` behave identically either way.
 	/// </summary>
@@ -48,7 +48,7 @@ internal static class CliApp
 		config.AddCommand<TlsCommand>("tls")
 			.WithDescription("Show the active HTTPS certificate (mode, subject, SANs, validity, fingerprint).");
 		config.AddCommand<BlockCommand>("block")
-			// E12: BlockCommand actually refuses a bare user outright (DeviceRequired — "blocks are
+			// BlockCommand actually refuses a bare user outright (DeviceRequired — "blocks are
 			// per-device"), matching docs/cli.md; the old text ("...for a user, or for one of their
 			// devices") led an operator to try `eas block alice` expecting it to work.
 			.WithDescription("Refuse logins (403) for ONE DEVICE of a user ('eas user disable' turns off a whole user).");

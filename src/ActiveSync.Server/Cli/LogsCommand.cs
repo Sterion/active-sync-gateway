@@ -56,7 +56,7 @@ internal sealed class LogsCommand(IAnsiConsole terminal) : AsyncCommand<LogsComm
 
 		int limit = settings.Limit is > 0 and <= 10_000 ? settings.Limit : 100;
 
-		// E5: forwarded to the warm gateway — reuse its already-built provider (same short-circuit
+		// Forwarded to the warm gateway — reuse its already-built provider (same short-circuit
 		// DatabaseCommand<TSettings> uses) instead of rebuilding a parallel container per call.
 		LogQueryService logs;
 		AsyncServiceScope? hostScope = null;

@@ -28,7 +28,7 @@ public static class WebApplicationExtensions
 
 	/// <summary>
 	///   Creates the migrations-history table and applies any pending migrations. Honours
-	///   <paramref name="ct" /> (E22): a container SIGKILLed during a slow first-boot migration is
+	///   <paramref name="ct" />: a container SIGKILLed during a slow first-boot migration is
 	///   interrupted at the next await instead of running unbounded and being force-killed.
 	/// </summary>
 	internal static async Task MigrateDatabaseAsync(SyncDbContext db, ILogger logger, CancellationToken ct)
@@ -142,7 +142,7 @@ public static class WebApplicationExtensions
 	///   <para>
 	///     It is deliberately not an <c>UseExceptionHandler</c> re-execute: there is no error
 	///     page to re-execute into, and the clients here are phones speaking WBXML, for which
-	///     any HTML body would be noise. E21: Serilog's request-logging middleware
+	///     any HTML body would be noise. Serilog's request-logging middleware
 	///     (<see cref="UseEasRequestLogging" />) is registered AFTER this shield, so it sits
 	///     NESTED INSIDE it, not outside — it still records the failure at Error via its own
 	///     exception filter and rethrows, so nothing is lost by swallowing here, but the
@@ -178,7 +178,7 @@ public static class WebApplicationExtensions
 	}
 
 	/// <summary>
-	///   E1: when a dedicated metrics listener is configured, every path other than <c>/metrics</c>
+	///   When a dedicated metrics listener is configured, every path other than <c>/metrics</c>
 	///   answers 404 on that listener's port — otherwise the plain-HTTP metrics port an operator
 	///   opens to a monitoring network also serves the EAS Basic-auth surface and the admin/user
 	///   portals, since <c>EasEndpoint.Map</c>/<c>AutodiscoverEndpoint.Map</c>/<c>MapWebUi</c>/
@@ -236,7 +236,7 @@ public static class WebApplicationExtensions
 	///   identity provider is never handed an http callback. <see cref="ActiveSyncOptions.PublicUrl" />
 	///   wins (it never depends on client-supplied headers); otherwise <c>X-Forwarded-Proto</c> is
 	///   honoured ONLY when the request arrived from a configured <see cref="AuthOptions.TrustedProxies" />
-	///   hop (E1) — from a direct/untrusted peer the header is ignored, so an attacker cannot force the
+	///   hop — from a direct/untrusted peer the header is ignored, so an attacker cannot force the
 	///   scheme to https. Host and <c>RemoteIpAddress</c> are left untouched, so the /cli loopback gate
 	///   and the auth throttle are unaffected.
 	/// </summary>
@@ -275,7 +275,7 @@ public static class WebApplicationExtensions
 
 	/// <summary>
 	///   The scheme to force onto the request, or null to keep its own. A configured
-	///   <paramref name="publicUrl" /> beats the <paramref name="forwardedProto" /> header. E16: unlike
+	///   <paramref name="publicUrl" /> beats the <paramref name="forwardedProto" /> header. Unlike
 	///   <c>X-Forwarded-For</c>'s rightmost-untrusted-hop rule (<see cref="EndpointAuth.ClientKey" />),
 	///   a proxy-chain list here takes the LAST entry, not the first — under a proxy that APPENDS
 	///   rather than overwrites the header, the leftmost value is whatever the client itself sent, so

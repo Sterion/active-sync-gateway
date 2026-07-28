@@ -1,7 +1,7 @@
 namespace ActiveSync.Server.Cli;
 
 /// <summary>
-///   L35 (item 37): publishes the warm gateway's already-built service provider to CLI commands that
+///   Publishes the warm gateway's already-built service provider to CLI commands that
 ///   run <em>inside</em> the <c>/cli</c> forwarding endpoint, so a forwarded database command reuses
 ///   the host's DI container, EF model and loaded plugins instead of building a parallel container
 ///   (and probing pending migrations) on every invocation — the cost that dominates a forwarded

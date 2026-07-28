@@ -23,7 +23,7 @@ public sealed class FolderSyncHandler(FolderService folders, ILogger<FolderSyncH
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
-			// F17: FolderSync runs on every device on every reconnect, yet unlike its three sibling
+			// FolderSync runs on every device on every reconnect, yet unlike its three sibling
 			// folder handlers (FolderModifyHandlerBase's ExecuteAsync/refresh/commit path) it had no
 			// backend-failure mapping — a transport failure (e.g. IMAP down) during the hierarchy
 			// refresh or commit escaped raw to the endpoint's generic catch (HTTP 500), which the
@@ -46,7 +46,7 @@ public sealed class FolderSyncHandler(FolderService folders, ILogger<FolderSyncH
 		bool parsed = int.TryParse(clientKey, out int key);
 
 		// The current key is the normal case; the previous generation (key == N-1) is a lost
-		// response we replay (F25). Anything else is an unknown key → Status 9 → restart from 0.
+		// response we replay. Anything else is an unknown key → Status 9 → restart from 0.
 		if (!initial && (!parsed || (key != device.FolderSyncKey && key != device.FolderSyncKey - 1)))
 		{
 			await context.WriteResponseAsync(new XDocument(
@@ -55,7 +55,7 @@ public sealed class FolderSyncHandler(FolderService folders, ILogger<FolderSyncH
 			return;
 		}
 
-		// F25: one-generation replay. The client resent its previous key — the response carrying
+		// One-generation replay. The client resent its previous key — the response carrying
 		// FolderSyncKey N was lost, so it still holds N-1 while we hold N. Rather than force a full
 		// resync (Status 9 → key 0), re-emit the CURRENT hierarchy as Adds under the current key
 		// without advancing it; clients apply re-Adds idempotently. This mirrors the item Sync
@@ -83,7 +83,7 @@ public sealed class FolderSyncHandler(FolderService folders, ILogger<FolderSyncH
 			{
 				newKey = await context.State.CommitFolderHierarchyAsync(device, registry, ct);
 			}
-			catch (BackendException) // a pipelined FolderSync won the FolderSyncKey race (A6)
+			catch (BackendException) // a pipelined FolderSync won the FolderSyncKey race
 			{
 				await context.WriteResponseAsync(new XDocument(
 					new XElement(FH + "FolderSync",
@@ -172,7 +172,7 @@ public abstract class FolderModifyHandlerBase(
 		{
 			newBackendKey = await ExecuteAsync(context, request.Root, ct);
 		}
-		catch (FolderOperationException ex) // a client error that knows its own EAS status (F26)
+		catch (FolderOperationException ex) // a client error that knows its own EAS status
 		{
 			logger.LogInformation("{Command} rejected for {User}: {Reason} (Status {Status})",
 				Command, context.UserName, ex.Message, ex.Status);
@@ -187,13 +187,13 @@ public abstract class FolderModifyHandlerBase(
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
 			// A backend/transport failure (e.g. IMAP down) must surface as EAS Status 6, not escape
-			// to the endpoint as an HTTP 500 the client cannot interpret (F26).
+			// to the endpoint as an HTTP 500 the client cannot interpret.
 			logger.LogError(ex, "{Command} failed for {User}", Command, context.UserName);
 			await WriteStatusAsync(context, "6", null);
 			return;
 		}
 
-		// F28: ONE hierarchy enumeration per FolderCreate. ExecuteAsync used to run its own
+		// ONE hierarchy enumeration per FolderCreate. ExecuteAsync used to run its own
 		// Folders.RefreshAsync just to map the new backend key to a ServerId, and this refresh ran
 		// a second — two full multi-backend enumerations. ExecuteAsync now returns the backend key
 		// and the new folder's ServerId is resolved from this single refresh.
@@ -203,7 +203,7 @@ public abstract class FolderModifyHandlerBase(
 		{
 			newKey = await context.State.CommitFolderHierarchyAsync(context.Device, registry, ct);
 		}
-		catch (BackendException) // a pipelined FolderSync won the FolderSyncKey race (A6)
+		catch (BackendException) // a pipelined FolderSync won the FolderSyncKey race
 		{
 			await WriteStatusAsync(context, "9", null);
 			return;
@@ -213,7 +213,7 @@ public abstract class FolderModifyHandlerBase(
 			? null
 			: registry.FirstOrDefault(f => f.BackendKey == newBackendKey)?.ServerId;
 
-		// F13: a backend just created the folder but its listing does not (yet) reflect it — e.g.
+		// A backend just created the folder but its listing does not (yet) reflect it — e.g.
 		// Axigen's async indexing can lag a PUT/MKCALENDAR by up to ~a minute (AGENTS.md). Reporting
 		// success with no ServerId leaves the client caching a folder it can never address again; a
 		// retryable status makes it re-issue FolderCreate (or pick the folder up on the next
@@ -241,7 +241,7 @@ public abstract class FolderModifyHandlerBase(
 
 	/// <summary>
 	///   Performs the backend change. Returns the new folder's BACKEND KEY for FolderCreate (the
-	///   base handler maps it to a ServerId from its own single hierarchy refresh — F28); null for
+	///   base handler maps it to a ServerId from its own single hierarchy refresh); null for
 	///   Delete/Update, which create nothing.
 	/// </summary>
 	protected abstract Task<string?> ExecuteAsync(EasContext context, XElement root, CancellationToken ct);
@@ -250,7 +250,7 @@ public abstract class FolderModifyHandlerBase(
 	///   Resolves a folder a modifying operation is about to touch. A folder that does not exist
 	///   yields a <see cref="FolderOperationException" /> carrying <paramref name="notFoundStatus" />
 	///   (Status 4 "folder does not exist", or 5 "parent does not exist" for a create) — NOT the
-	///   generic "system folder" Status 3 (F26). A folder the session reports read-only (a
+	///   generic "system folder" Status 3. A folder the session reports read-only (a
 	///   shared-collection grant) still throws <see cref="BackendException" /> → Status 3, the same
 	///   answer an unmodifiable system folder gets: the client must not retry either.
 	/// </summary>
@@ -283,7 +283,7 @@ public abstract class FolderModifyHandlerBase(
 ///   (MS-ASCMD FolderCreate/Delete/Update Status: 10 malformed request, 5 parent missing,
 ///   4 folder missing, …). Distinct from <see cref="BackendException" />, which the base handler
 ///   maps to the generic "cannot be modified" Status 3 — so a client is told what actually went
-///   wrong instead of "system folder" (F26).
+///   wrong instead of "system folder".
 /// </summary>
 internal sealed class FolderOperationException(string status, string message) : Exception(message)
 {
@@ -304,14 +304,14 @@ public sealed class FolderCreateHandler(
 		string displayName = root.Element(FH + "DisplayName")?.Value
 		                     ?? throw new FolderOperationException("10", "Missing DisplayName");
 
-		// F27: honour the requested Type. A client creating a calendar (13), contacts (14) or
+		// Honour the requested Type. A client creating a calendar (13), contacts (14) or
 		// tasks (15) folder must NOT get a mail folder silently created and reported as success.
 		// Route to the store for the requested class; a class with no configured store (or one
 		// without folder ops) falls through to Status 3 rather than being misfiled as mail.
 		int type = int.TryParse(root.Element(FH + "Type")?.Value, out int t) ? t : EasFolderType.UserMail;
 		string easClass = ClassForFolderType(type);
 		IContentStore? store = context.Session.GetStoreForClass(easClass);
-		// K58: folder mutation is an optional capability. A store without it (or an unconfigured
+		// Folder mutation is an optional capability. A store without it (or an unconfigured
 		// class → null) throws BackendException, which the base handler turns into Status 3 — the
 		// same answer as an unmodifiable system folder.
 		IFolderOperations folderOps = store as IFolderOperations
@@ -322,7 +322,7 @@ public sealed class FolderCreateHandler(
 			// is a write to the shared collection. A missing parent is Status 5, not "system folder".
 			parentBackendKey = (await ResolveWritableAsync(context, parentId, ct, "5")).Folder.BackendKey;
 
-		// Return the new folder's backend key; the base handler's single hierarchy refresh (F28)
+		// Return the new folder's backend key; the base handler's single hierarchy refresh
 		// registers it and resolves the ServerId for the response.
 		return await folderOps.CreateFolderAsync(parentBackendKey, displayName, ct);
 	}
@@ -380,7 +380,7 @@ public sealed class FolderUpdateHandler(
 		                     ?? throw new FolderOperationException("10", "Missing DisplayName");
 		(UserFolder Folder, IContentStore Store) resolved = await ResolveWritableAsync(context, serverId, ct);
 
-		// F6: MS-ASCMD FolderUpdate carries a mandatory ParentId. Only DisplayName used to be
+		// MS-ASCMD FolderUpdate carries a mandatory ParentId. Only DisplayName used to be
 		// honoured — a client asking to MOVE the folder (a different ParentId) got a silent rename
 		// in place, reported as success; the client believes it moved the folder and the next
 		// FolderSync re-asserts the old parent (churn). No store here can actually change a

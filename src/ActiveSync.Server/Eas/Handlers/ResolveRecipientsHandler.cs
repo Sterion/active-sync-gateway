@@ -46,7 +46,7 @@ public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> l
 		    windowEnd > windowStart)
 			availabilityWindow = (windowStart, windowEnd);
 
-		// F43: each To is independent; run them concurrently rather than one SearchGalAsync (and its
+		// Each To is independent; run them concurrently rather than one SearchGalAsync (and its
 		// nested free/busy fetches) after another while a user watches a compose screen. Task.WhenAll
 		// preserves input order, so the responses still line up with the To list.
 		XElement[] responses = await Task.WhenAll(
@@ -72,7 +72,7 @@ public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> l
 
 			// Build the recipient skeletons first, collecting the email of each so the free/busy
 			// lookups for the whole match set can run concurrently rather than one after another.
-			// F20: MS-ASCMD's Recipient sequence is Type, DisplayName, EmailAddress, Availability,
+			// MS-ASCMD's Recipient sequence is Type, DisplayName, EmailAddress, Availability,
 			// Certificates, Picture — Picture is held aside and appended AFTER Availability below,
 			// rather than added here where it would land ahead of it (WBXML is order-sensitive).
 			List<(XElement Recipient, string Email, XElement? Picture)> built = new();

@@ -25,7 +25,7 @@ internal abstract class SettingsCommandBase<TSettings>(IAnsiConsole terminal) : 
 	protected sealed override async Task<int> ExecuteAsync(
 		CommandContext context, TSettings settings, CancellationToken cancellationToken)
 	{
-		// E5: when forwarded to the warm gateway, reuse the HOST's already-built provider — same
+		// When forwarded to the warm gateway, reuse the HOST's already-built provider — same
 		// short-circuit DatabaseCommand<TSettings> uses — instead of rebuilding a parallel container
 		// (re-running plugin discovery and leaking a non-collectible AssemblyLoadContext) per call.
 		if (CliHostServices.Current is { } host)
@@ -134,7 +134,7 @@ internal sealed class ConfigListCommand(IAnsiConsole terminal) : SettingsCommand
 		{
 			(string value, string source) = Effective(key, null, db, fileConfig);
 			SettingKeys.SettingKey? definition = SettingKeys.Find(key);
-			// A backend leaf's secrecy comes from its provider's schema (B25), not just a name match.
+			// A backend leaf's secrecy comes from its provider's schema, not just a name match.
 			bool secret = BackendKeyValidator.IsSecretLeaf(Registry, effective, key);
 			table.AddRow(new Text(key), new Text(Mask(secret, value)),
 				new Markup(SourceTag(source)), new Markup(TierTag(definition?.Tier ?? "live")));
@@ -169,7 +169,7 @@ internal sealed class ConfigGetCommand(IAnsiConsole terminal) : SettingsCommandB
 			return 1;
 		}
 
-		// A backend leaf's secrecy is authoritative from its provider's schema (B25); catalogue keys
+		// A backend leaf's secrecy is authoritative from its provider's schema; catalogue keys
 		// carry their own Secret flag.
 		bool secret = SettingKeys.IsCatalogueKey(settings.Key)
 			? definition is { Secret: true }
@@ -232,7 +232,7 @@ internal sealed class ConfigSetCommand(IAnsiConsole terminal) : SettingsCommandB
 			return 1;
 		}
 
-		// B5: seal a catalogue-level secret at rest the same way the web settings editor does —
+		// Seal a catalogue-level secret at rest the same way the web settings editor does —
 		// otherwise `eas config set ActiveSync:WebUi:Oidc:ClientSecret ...` stored it in plaintext
 		// while the web UI sealed it. Open-ended backend leaves stay raw (their provider reads them).
 		string valueToStore = settings.Value;
@@ -252,8 +252,8 @@ internal sealed class ConfigSetCommand(IAnsiConsole terminal) : SettingsCommandB
 		}
 
 		await store.UpsertAsync(definition.Key, valueToStore, cancellationToken);
-		// E13: a catalogue key carries its own Secret flag, but a backend leaf's secrecy is
-		// authoritative from its PROVIDER'S schema (B25) — SettingKeys.Find's Secret flag for a
+		// A catalogue key carries its own Secret flag, but a backend leaf's secrecy is
+		// authoritative from its PROVIDER'S schema — SettingKeys.Find's Secret flag for a
 		// leaf is only ever the SecretRedaction name-heuristic fallback, exactly what `config
 		// get`/`config list` already refuse to rely on alone via BackendKeyValidator.IsSecretLeaf.
 		bool secret = SettingKeys.IsCatalogueKey(definition.Key)
@@ -285,7 +285,7 @@ internal sealed class ConfigUnsetCommand(IAnsiConsole terminal) : SettingsComman
 			return 0;
 		}
 
-		// B4: a removal is validated exactly like a write — `unset` must not persist a
+		// A removal is validated exactly like a write — `unset` must not persist a
 		// configuration the next start refuses to boot on.
 		if (SettingKeys.ValidateRemovalImpact(fileConfig, db, Registry, stored) is { } error)
 		{

@@ -16,7 +16,7 @@ public sealed partial class SyncHandler
 		IReadOnlyDictionary<string, BackendItem?>? prefetched = null)
 	{
 		BackendItem? item;
-		// F13: the window's items are fetched in one batched GetItemsAsync call up-front; use that
+		// The window's items are fetched in one batched GetItemsAsync call up-front; use that
 		// result when present. Fall back to a single fetch only when the batch didn't cover this key
 		// (a store override that omitted a failed item) so a lone fetch failure still skips just that
 		// item and re-tries next round rather than failing the whole collection.

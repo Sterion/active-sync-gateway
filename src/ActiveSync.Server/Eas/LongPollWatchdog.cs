@@ -30,7 +30,7 @@ internal static class LongPollWatchdog
 	/// <param name="deadline">
 	///   End of the heartbeat window. Watchers are expected to wait it out, but a degraded one can
 	///   complete "no change" early; the race honours the deadline rather than returning immediately
-	///   (which would collapse the heartbeat into a tight client re-poll loop — <c>E7</c>).
+	///   (which would collapse the heartbeat into a tight client re-poll loop).
 	/// </param>
 	/// <param name="linkedCts">The caller's cancellation source; cancelled here in the finally.</param>
 	/// <param name="requestAborted">The bare request token, to tell a client disconnect from host shutdown.</param>
@@ -66,7 +66,7 @@ internal static class LongPollWatchdog
 				}
 				catch
 				{
-					// E8: a single watcher faulting must not abort the whole long-poll into a 500.
+					// A single watcher faulting must not abort the whole long-poll into a 500.
 					// The watcher self-logs its failure; treat it as "no change from this watcher"
 					// and keep racing the rest (and the watchdog, the real correctness backstop).
 					continue;
@@ -79,7 +79,7 @@ internal static class LongPollWatchdog
 				}
 			}
 
-			// E7: a watcher that completes "no change" before its timeout is spent (a degraded or
+			// A watcher that completes "no change" before its timeout is spent (a degraded or
 			// unavailable backend watcher) is dropped above — and when the watchdog is disabled
 			// (WatchdogSeconds=0) nothing else keeps the poll alive, so the loop would drain and
 			// return "no change" the instant the last watcher gives up, turning the client's
@@ -102,7 +102,7 @@ internal static class LongPollWatchdog
 			await linkedCts.CancelAsync();
 			// Drain whatever is still running (the removed tasks were already awaited above),
 			// but bound it: a well-behaved watcher self-cancels within milliseconds of the token
-			// firing — a misbehaving one must not hang the request indefinitely (E8).
+			// firing — a misbehaving one must not hang the request indefinitely.
 			try
 			{
 				await Task.WhenAll(pending).WaitAsync(DrainTimeout);

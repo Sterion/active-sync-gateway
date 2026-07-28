@@ -56,7 +56,7 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 			CalendarConverter.SchedulingInfo? previous =
 				previousIcs is null ? null : CalendarConverter.ReadSchedulingInfo(previousIcs);
 			List<(string Email, string? Name)> current = Recipients(info, context);
-			// E24: compute the previous recipient list ONCE. The old code called Recipients(previous)
+			// Compute the previous recipient list ONCE. The old code called Recipients(previous)
 			// inside both the removed- and added-filters, so it re-parsed and re-filtered the whole
 			// attendee list per current attendee — O(n²) for a large meeting.
 			List<(string Email, string? Name)> previousRecipients =
@@ -143,7 +143,7 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
-			// E34: degrade to "no previous state" so the command still succeeds — but say so. A
+			// Degrade to "no previous state" so the command still succeeds — but say so. A
 			// swallowed read here makes the change hook treat every attendee as newly added and
 			// re-invite the whole meeting; silently doing that on a transient backend hiccup is a
 			// spam vector the operator can't see.

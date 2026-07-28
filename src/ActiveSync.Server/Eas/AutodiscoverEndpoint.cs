@@ -93,7 +93,7 @@ public static class AutodiscoverEndpoint
 			Encoding.UTF8.GetBytes(doc.Declaration + "\r\n" + doc), ct);
 	}
 
-	// E11: real Autodiscover request bodies are a few hundred bytes. Without a cap, an
+	// Real Autodiscover request bodies are a few hundred bytes. Without a cap, an
 	// authenticated caller could POST up to MaxRequestBodySize (64 MB) and have it fully buffered
 	// into one string and XML-parsed, per request.
 	private const int MaxBodyBytes = 16 * 1024;
@@ -141,11 +141,11 @@ public static class AutodiscoverEndpoint
 		if (!string.IsNullOrWhiteSpace(publicUrl))
 			return publicUrl.TrimEnd('/') + EasEndpoint.Path;
 		// Fallback: honour reverse-proxy headers so the advertised URL is the public one — but ONLY
-		// from a configured Auth:TrustedProxies hop (E1/E10). From a direct/untrusted peer the
+		// from a configured Auth:TrustedProxies hop. From a direct/untrusted peer the
 		// forwarded scheme/host are ignored (they would otherwise hand an authenticated client an
 		// attacker-chosen sync URL); set ActiveSync:PublicUrl to pin the advertised URL entirely.
 		bool trusted = EndpointAuth.IsFromTrustedProxy(http, auth);
-		// E16: the header may itself be a comma-separated chain (each proxy appends its own hop) —
+		// The header may itself be a comma-separated chain (each proxy appends its own hop) —
 		// take the LAST entry, matching WebApplicationExtensions.ResolvePublicScheme, not the first
 		// (which, under an appending proxy, is whatever the client itself sent).
 		string scheme = (trusted ? http.Request.Headers["X-Forwarded-Proto"].FirstOrDefault()?.Split(',')[^1].Trim() : null)

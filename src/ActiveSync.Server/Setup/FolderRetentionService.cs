@@ -12,7 +12,7 @@ namespace ActiveSync.Server.Setup;
 ///   soft-deleted past Eas:FolderRetentionDays (default 30; 0 disables). A soft-deleted
 ///   <see cref="UserFolder" /> never had a path that removed the row, its <see cref="DavItem" />
 ///   href map, or the per-device <see cref="CollectionState" />/<see cref="DeviceFolder" /> keyed
-///   by its ServerId, so those tables only grew (A35). Runs a few times a day; the window is read
+///   by its ServerId, so those tables only grew. Runs a few times a day; the window is read
 ///   live. Multi-pod safe — the deletes are idempotent, so overlapping sweeps are harmless.
 /// </summary>
 public sealed class FolderRetentionService(
@@ -43,7 +43,7 @@ public sealed class FolderRetentionService(
 			}
 			catch (Exception ex)
 			{
-				// E2: any other fault — including a non-shutdown OperationCanceledException such as an
+				// Any other fault — including a non-shutdown OperationCanceledException such as an
 				// EF command timeout — must NOT stop the sweep, or retention freezes for the process
 				// lifetime with no signal. Keep the loop alive; retry on the next tick.
 				logger.LogDebug(ex, "Folder retention sweep failed; will retry");

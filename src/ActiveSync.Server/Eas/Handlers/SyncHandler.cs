@@ -47,7 +47,7 @@ public sealed partial class SyncHandler(
 
 		// A request carrying real <Collection> elements is a full request; a body that is just the
 		// <Sync/> root with no collections is the same "repeat my previous request" idiom as a
-		// zero-length body (F1) — both take the replay path below, and Status 13 is reserved for
+		// zero-length body — both take the replay path below, and Status 13 is reserved for
 		// "no cache available".
 		List<XElement>? requested = request?.Root?
 			.Element(AS + "Collections")?.Elements(AS + "Collection").ToList();
@@ -68,7 +68,7 @@ public sealed partial class SyncHandler(
 				waitSeconds = heartbeat;
 			}
 
-			// F5: a heartbeat outside the accepted range is answered with top-level Status 14 and a
+			// A heartbeat outside the accepted range is answered with top-level Status 14 and a
 			// Limit teaching the correct bound (in the unit the client used) — not silently clamped
 			// upward, which would hold a client that asked for 30 s for a full 60 s (twice its socket
 			// budget) and provoke abandon/retry churn. Mirrors PingHandler's Status 5 + HeartbeatInterval.
@@ -97,7 +97,7 @@ public sealed partial class SyncHandler(
 					int.TryParse(c.Element(AS + "WindowSize")?.Value, out int cw) ? cw : null))
 				.Where(c => c.CollectionId.Length > 0)
 				.ToList());
-			// F15: the replayable shape is identical across consecutive steady-state polls, so only
+			// The replayable shape is identical across consecutive steady-state polls, so only
 			// write (and flush) the Device row when it actually changed — an idle device polling
 			// every 30 s otherwise generates a redundant write every round on top of LastSeenUtc.
 			string serializedCache = JsonSerializer.Serialize(cache);
@@ -167,7 +167,7 @@ public sealed partial class SyncHandler(
 			bool changed = await WaitWithWatchdogAsync(
 				context, pendingWaitCollections, TimeSpan.FromSeconds(wait), ct);
 			if (changed)
-				// F11: re-processing each waitable and appending its response is duplication-free by
+				// Re-processing each waitable and appending its response is duplication-free by
 				// invariant, not by coincidence. This block is reached only when `responses` is empty
 				// (guarded above), and a WaitableCollection is produced by ProcessCollectionAsync ONLY
 				// when that first pass emitted no Response (see CollectionResult: "empty response ⇒
@@ -184,11 +184,11 @@ public sealed partial class SyncHandler(
 					}
 				}
 
-			// F27: a collection with GetChanges=0 is still classified waitable — PendingChangeDetector
+			// A collection with GetChanges=0 is still classified waitable — PendingChangeDetector
 			// ignores GetChanges entirely — so the watchdog can wake this poll for a collection that
 			// can never actually report anything, and the re-process above then finds nothing new.
 			// Answering immediately here would turn the client's heartbeat into a tight re-poll loop
-			// (LongPollWatchdog's own E7 rationale, reproduced one layer up); idle out the remaining
+			// (LongPollWatchdog's own rationale, reproduced one layer up); idle out the remaining
 			// window instead, exactly as WaitWithWatchdogAsync's own race does for a genuine "no change".
 			if (!anyPayload)
 			{

@@ -39,7 +39,7 @@ public sealed class GetItemEstimateHandler(
 				XElement collectionElement = new(GIE + "Collection",
 					new XElement(GIE + "CollectionId", collectionId),
 					estimate is null ? null : new XElement(GIE + "Estimate", estimate.ToString()));
-				// F28: a 12.1 client identifies a collection by Class + CollectionId (mirroring the
+				// A 12.1 client identifies a collection by Class + CollectionId (mirroring the
 				// deliberate EchoClassIfLegacy handling in SyncHandler.Collection.cs) — only once the
 				// store is known, since Class names the collection's EAS class.
 				if (context.Version <= EasVersion.V121 && resolvedStore is not null)
@@ -62,7 +62,7 @@ public sealed class GetItemEstimateHandler(
 			// (ValidateSyncKeyAsync, used by Sync, would reset the snapshot on key 0).
 			(SyncKeyValidation validation, Dictionary<string, string> snapshot, int stateFilterType) =
 				await context.State.PeekSyncKeyAsync(context.Device, collectionId, syncKey, ct);
-			// F18: MS-ASCMD's GetItemEstimate Status element is its own table, distinct from Sync's —
+			// MS-ASCMD's GetItemEstimate Status element is its own table, distinct from Sync's —
 			// 3 is SYNCSTATENOTPRIMED (the collection has never completed a Sync round) and 4 is
 			// INVALIDSYNCKEY (a stale/mismatched/unparseable key). Initial (key 0) falls through to
 			// the estimate below only in valid states (Current/Replay); it must not estimate against

@@ -56,8 +56,8 @@ public partial class Program
 
 		// HTTPS: the certificate is loaded after migrations (InitializeAsync) but Kestrel binds the
 		// listener now, so its selector reads this holder per handshake. The volatile field inside
-		// gives the cross-thread ordering the startup path and the Kestrel connection threads need
-		// (E20). Assigned once below.
+		// gives the cross-thread ordering the startup path and the Kestrel connection threads need.
+		// Assigned once below.
 		CertificateHolder certificateHolder = new();
 
 		// Persists Information+ to the state database; its background drain begins after migrations
@@ -71,15 +71,15 @@ public partial class Program
 		ServerInitResult init = await InitializeAsync(app, options, databaseLogSink);
 		certificateHolder.Current = init.Certificate;
 
-		// K5: feed the serving certificate's expiry to the TLS-expiry gauge (null when plaintext).
+		// Feed the serving certificate's expiry to the TLS-expiry gauge (null when plaintext).
 		ActiveSync.Core.Observability.GatewayMetrics.SetCertificateExpiryObserver(
 			() => certificateHolder.Current is { } cert ? new DateTimeOffset(cert.NotAfter.ToUniversalTime()) : null);
 
-		// B3/E2: Metrics:PerUser is catalogued live-tier, so read it through the live
+		// Metrics:PerUser is catalogued live-tier, so read it through the live
 		// IOptionsMonitor snapshot on every metric emission rather than a value captured once
 		// (the previous "assign GatewayMetrics.PerUserLabels once at startup" never picked up a
 		// later `eas config set`/admin Settings change despite both claiming it applies live).
-		// Reused below (E9) for /readyz's trusted-proxy check — Auth:TrustedProxies is live-settable
+		// Reused below for /readyz's trusted-proxy check — Auth:TrustedProxies is live-settable
 		// too, so it must be read the same way rather than off the startup-only `options` snapshot.
 		IOptionsMonitor<ActiveSyncOptions> metricsOptionsMonitor =
 			app.Services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>();
@@ -108,7 +108,7 @@ public partial class Program
 		// render stack traces and request headers to an unauthenticated caller.
 		app.UseUnhandledExceptionShield();
 
-		// E1: give the dedicated metrics listener its own filter BEFORE anything else runs, so a
+		// Give the dedicated metrics listener its own filter BEFORE anything else runs, so a
 		// request arriving on that port for any path but /metrics never reaches the scheme
 		// correction, EAS auth, or the WebUi — the port filter added below only ever gated the
 		// Prometheus endpoint itself, leaving every other endpoint reachable in plaintext on
@@ -128,7 +128,7 @@ public partial class Program
 		app.MapGet("/readyz", async (HttpContext http, ReadinessProbe probe, CancellationToken ct) =>
 		{
 			(bool ready, Dictionary<string, bool> components) = await probe.CheckAsync(ct);
-			// E16/E9: withhold the component topology from anonymous, non-local callers — the HTTP
+			// Withhold the component topology from anonymous, non-local callers — the HTTP
 			// status is the readiness verdict; only a loopback caller (an operator on the box) or one
 			// arriving from a configured Auth:TrustedProxies hop (a k8s node probe, live-settable) sees
 			// which backend roles are configured.
@@ -192,7 +192,7 @@ public partial class Program
 	/// <summary>
 	///   Resolves the optional mounted users file (<c>ActiveSync:UsersFile</c>) to an absolute
 	///   path, or null when the setting is unset. Throws a message naming the setting and the
-	///   resolved absolute path when the file is missing (E19) — otherwise the operator gets a
+	///   resolved absolute path when the file is missing — otherwise the operator gets a
 	///   raw <see cref="FileNotFoundException" /> from deep in the configuration builder with no
 	///   hint at the typo'd mount path.
 	/// </summary>
@@ -214,7 +214,7 @@ public partial class Program
 	///   The old 65-minute value was set on the mistaken belief it protected long polls; all it did
 	///   was let every dead/abandoned phone socket (NAT rebind, roaming, backgrounded app) linger for
 	///   over an hour as a zombie connection/fd. Keep the framework default (2 min) so they are
-	///   reaped promptly (E12).
+	///   reaped promptly.
 	/// </summary>
 	internal static void ConfigureKestrelLimits(
 		Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerLimits limits)
@@ -286,14 +286,14 @@ public partial class Program
 		builder.Services.AddLocalContentProtection();
 		builder.Services.AddSingleton<GatewayCertificateStore>();
 		builder.Services.AddSingleton<TlsCertificateResolver>();
-		// K1: the one instance InitializeAsync assigns and Kestrel's selector reads — registered so
+		// The one instance InitializeAsync assigns and Kestrel's selector reads — registered so
 		// TlsCertificateRenewalService can swap it in place after a background renewal.
 		builder.Services.AddSingleton(certificateHolder);
 		if (tlsEnabled)
 			builder.Services.AddHostedService<TlsCertificateRenewalService>();
 
 		// Metrics: BCL Meter instruments (GatewayMetrics) exported via OpenTelemetry.
-		// PerUserLabels is wired live in RunServerAsync (B3/E2), once IOptionsMonitor is available.
+		// PerUserLabels is wired live in RunServerAsync, once IOptionsMonitor is available.
 		if (options.Metrics.Enabled)
 			builder.Services.AddOpenTelemetry().WithMetrics(metrics => metrics
 				.AddMeter(ActiveSync.Core.Observability.GatewayMetrics.MeterName)
@@ -353,14 +353,14 @@ public partial class Program
 		// settings — this must run before anything resolves the role config or the resolver.
 		app.Services.GetRequiredService<BackendConfigurationValidator>().Validate();
 
-		// E7: every remaining startup await shares this ONE token — a container SIGTERMed during a
+		// Every remaining startup await shares this ONE token — a container SIGTERMed during a
 		// slow first boot (settings load, certificate generation + DB write, per-user bootstrap
 		// inserts) must be interrupted at the next await rather than run unbounded to the SIGKILL,
-		// exactly like the migration call below (E22) already is.
+		// exactly like the migration call below already is.
 		CancellationToken stopping = app.Lifetime.ApplicationStopping;
 
 		// Apply EF Core migrations first so the accounts snapshot (and the banner reading it)
-		// can query the database on a fresh install. Pass ApplicationStopping (E22) so a container
+		// can query the database on a fresh install. Pass ApplicationStopping so a container
 		// SIGTERMed during a slow first-boot migration is interrupted rather than SIGKILLed.
 		await app.ApplyMigrationsAsync(startupLogger, stopping);
 

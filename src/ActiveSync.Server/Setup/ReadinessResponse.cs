@@ -5,11 +5,11 @@ using ActiveSync.Server.Eas;
 namespace ActiveSync.Server.Setup;
 
 /// <summary>
-///   Shapes the /readyz payload. E16: the component map names every configured backend role — a
+///   Shapes the /readyz payload. The component map names every configured backend role — a
 ///   topology map an anonymous caller on the phone-facing listener has no business enumerating. A
 ///   readiness probe only needs the verdict (and the HTTP status carries that), so the detail is
 ///   exposed to local callers (k8s node probes, an operator on the box) and to callers arriving from
-///   a configured <see cref="AuthOptions.TrustedProxies" /> hop (E9 — a kubelet's httpGet probe dials
+///   a configured <see cref="AuthOptions.TrustedProxies" /> hop (a kubelet's httpGet probe dials
 ///   the pod from the node/CNI address, never 127.0.0.1, so loopback-only left the documented k8s
 ///   deployment never seeing any detail at all), and withheld from everyone else.
 /// </summary>
@@ -25,10 +25,10 @@ internal static class ReadinessResponse
 
 	/// <summary>
 	///   A loopback connection is treated as local and trusted, and so is a connection arriving from a
-	///   configured <see cref="AuthOptions.TrustedProxies" /> hop (E9) — the same peer-trust gate
+	///   configured <see cref="AuthOptions.TrustedProxies" /> hop — the same peer-trust gate
 	///   <see cref="EndpointAuth.IsFromTrustedProxy" /> applies to <c>X-Forwarded-Proto</c>, so listing
 	///   the k8s node/CIDR there restores the detail for the node probe without opening it to anyone
-	///   else. E6: a NULL peer is NOT local in production — some transports can legitimately deliver a
+	///   else. A NULL peer is NOT local in production — some transports can legitimately deliver a
 	///   null <c>RemoteIpAddress</c> for a genuinely remote caller too, so treating every null as local
 	///   disclosed the same backend topology the check exists to withhold. The one exception is
 	///   Microsoft.AspNetCore.TestHost's in-memory transport, which never sets a peer for ANY

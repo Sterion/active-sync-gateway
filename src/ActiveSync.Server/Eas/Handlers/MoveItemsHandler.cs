@@ -24,7 +24,7 @@ public sealed class MoveItemsHandler(
 		List<XElement> moves = request?.Root?.Elements(M + "Move").ToList() ?? [];
 		List<XElement> responses = new();
 
-		// F22: accumulate snapshot edits per collection and apply them ONCE at the end — a single
+		// Accumulate snapshot edits per collection and apply them ONCE at the end — a single
 		// state load + one PersistAsync per collection, instead of a query + commit per move (a
 		// 50-item move was 100 queries and 100 commits). Each edit is also applied to the previous
 		// (replay) generation, so an N-1 replay cannot restore the pre-move snapshot and echo the
@@ -101,7 +101,7 @@ public sealed class MoveItemsHandler(
 					continue;
 				}
 
-				// K58: item move is an optional capability. A store without it (local, DAV) reports
+				// Item move is an optional capability. A store without it (local, DAV) reports
 				// Status 5 (move failed) — the same answer its "not supported" throw used to produce.
 				if (source.Value.Store is not IItemMoveOperations mover)
 				{
@@ -114,7 +114,7 @@ public sealed class MoveItemsHandler(
 				string dstMsgId = await folders.ComposeServerIdAsync(
 					destination.Value.Folder, destination.Value.Store, newItemKey, ct);
 
-				// Patch snapshots so the move is not echoed back on the next Sync. F5: the
+				// Patch snapshots so the move is not echoed back on the next Sync. The
 				// destination side must record the item's REAL revision — a manufactured value
 				// (the old "moved" placeholder) can never match what the next revision listing
 				// reports, so the destination diff would see a spurious Change for an item the

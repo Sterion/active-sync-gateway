@@ -39,7 +39,7 @@ internal sealed record SyncCollectionOptions(
 			}
 			catch (JsonException)
 			{
-				// F23: a truncated or schema-drifted CollectionState.OptionsJson row (a shape change
+				// A truncated or schema-drifted CollectionState.OptionsJson row (a shape change
 				// to this record, a partial write) must not throw out of ProcessCollectionAsync, past
 				// every catch in the handler, to the endpoint's 500 — and on every SUBSEQUENT Sync for
 				// this collection, wedging the folder permanently with no recovery path short of a DB
@@ -84,7 +84,7 @@ internal sealed record SyncCollectionOptions(
 			.ToList();
 		if (preferences.Count > 0)
 		{
-			// F6: honour MIMESupport. When the client offers a Type-4 (MIME) BodyPreference and asks
+			// Honour MIMESupport. When the client offers a Type-4 (MIME) BodyPreference and asks
 			// for MIME (always, or S/MIME-only), send raw MIME rather than downgrading to the HTML
 			// ladder — otherwise S/MIME signed/encrypted mail can never be verified or decrypted on
 			// device. Absent a MIME preference, fall back to the richest we render well.

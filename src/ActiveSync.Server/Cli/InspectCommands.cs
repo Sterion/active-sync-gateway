@@ -28,7 +28,7 @@ internal abstract class DatabaseCommand<TSettings>(IAnsiConsole terminal) : Asyn
 	protected sealed override async Task<int> ExecuteAsync(
 		CommandContext context, TSettings settings, CancellationToken cancellationToken)
 	{
-		// L35: when this command is forwarded to the warm gateway, reuse the host's already-built and
+		// When this command is forwarded to the warm gateway, reuse the host's already-built and
 		// already-migrated provider instead of constructing a parallel container (and probing pending
 		// migrations) per invocation. Standalone (no gateway answered) falls back to CliServices.
 		if (CliHostServices.Current is { } host)
@@ -74,7 +74,7 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 	{
 		// Declared side: config overlay ⊕ database rows (the former `eas user list`).
 		UserStore store = services.GetRequiredService<UserStore>();
-		// E17: IOptionsMonitor, not a captured IOptions — see UserCommandBase.RunAsync's note.
+		// IOptionsMonitor, not a captured IOptions — see UserCommandBase.RunAsync's note.
 		ActiveSyncOptions options = services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>().CurrentValue;
 		List<(string UserName, UserOptions Options, DateTime UpdatedUtc, bool Valid)> dbEntries =
 			await store.ListAsync(cancellationToken);
@@ -113,7 +113,7 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 			return 0;
 		}
 
-		// L41: project each per-login list into an OrdinalIgnoreCase lookup ONCE, so the render loop is
+		// Project each per-login list into an OrdinalIgnoreCase lookup ONCE, so the render loop is
 		// O(users) point-reads instead of O(users × rows) repeated FirstOrDefault/Any/Count scans (tens
 		// of millions of comparisons on a large fleet). Case-insensitive keys also line up state rows
 		// recorded under a casing that differs from the login — the old ordinal `==` scans missed those.
@@ -142,7 +142,7 @@ internal sealed class UsersCommand(IAnsiConsole terminal) : DatabaseCommand<User
 			bool inDb = dbByUser.TryGetValue(user, out (UserOptions Options, bool Valid) dbEntry);
 			bool inConfig = configUsers.ContainsKey(user);
 			UserOptions? declared = inDb ? dbEntry.Options : inConfig ? configUsers[user] : null;
-			// B15: a row whose JSON does not parse is surfaced FLAGGED, not omitted, so the
+			// A row whose JSON does not parse is surfaced FLAGGED, not omitted, so the
 			// operator can see (and fix) the login the auth path is silently ignoring.
 			string origin = declared is null
 				? "pass-through"

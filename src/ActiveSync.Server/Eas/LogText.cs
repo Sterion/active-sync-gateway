@@ -8,7 +8,7 @@ namespace ActiveSync.Server.Eas;
 ///   forge log lines, smuggle terminal escape sequences, or visually reorder a log line.
 ///   Single-field values never carry line structure, so every control character (including
 ///   CR/LF/TAB) is neutralized — unlike <see cref="WireLog.Payload" />'s multi-line dumps,
-///   see <see cref="WireLog.IsUnsafe" /> (S6/K21: the one shared classifier).
+///   see <see cref="WireLog.IsUnsafe" />, the one shared classifier.
 /// </summary>
 public static class LogText
 {

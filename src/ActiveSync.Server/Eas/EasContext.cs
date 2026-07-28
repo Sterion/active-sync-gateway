@@ -49,7 +49,7 @@ public sealed class EasContext
 	{
 		if (_requestRead)
 			return _requestDocument;
-		// Mark the body consumed only once the read+decode has SUCCEEDED (E17): setting the
+		// Mark the body consumed only once the read+decode has SUCCEEDED: setting the
 		// flag first meant a read/decode that threw left _requestRead=true and _requestDocument
 		// null, so a retry got a silent "empty body" instead of re-surfacing the real error.
 		_requestDocument = await ReadAndDecodeRequestAsync();
@@ -64,7 +64,7 @@ public sealed class EasContext
 		// Content-Length but still carries a body we must read. This shortcut is an HTTP/1.x
 		// framing fact ONLY — HTTP/2 forbids Transfer-Encoding (RFC 9113 §8.2.2) and streamed
 		// h2 bodies carry no Content-Length, so applying it there drops every request body
-		// (E1). Under h2 (and h3) fall through and let the zero-length read below decide.
+		// Under h2 (and h3) fall through and let the zero-length read below decide.
 		bool http1 = HttpProtocol.IsHttp11(Http.Request.Protocol) || HttpProtocol.IsHttp10(Http.Request.Protocol);
 		if (http1 && Http.Request.ContentLength is 0 or null && !Http.Request.Headers.ContainsKey("Transfer-Encoding"))
 			return null;
@@ -73,7 +73,7 @@ public sealed class EasContext
 		if (buffer.Length == 0)
 			return null;
 		XDocument document = WbxmlDecoder.Decode(buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
-		// W5: an unrecognized tag token decodes as a placeholder (namespace WbxmlInternal,
+		// An unrecognized tag token decodes as a placeholder (namespace WbxmlInternal,
 		// local name "unknown-{page}-{token}") rather than aborting the whole document — log it
 		// at Warning so the degradation is still visible instead of silent. Decode() doesn't
 		// take a logging hook itself (that would change ActiveSync.Protocol's published public
@@ -97,7 +97,7 @@ public sealed class EasContext
 	public async Task<byte[]> ReadRawBodyAsync()
 	{
 		// The request body is a single-consumption stream: a handler that already read it as
-		// WBXML (or raw) would silently get an empty second read here (E17). Fail loudly.
+		// WBXML (or raw) would silently get an empty second read here. Fail loudly.
 		if (_requestRead)
 			throw new InvalidOperationException(
 				"The request body has already been consumed; read it as WBXML or raw, not both.");

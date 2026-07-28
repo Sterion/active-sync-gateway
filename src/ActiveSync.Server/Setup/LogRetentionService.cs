@@ -40,7 +40,7 @@ public sealed class LogRetentionService(
 			}
 			catch (Exception ex)
 			{
-				// E2: any other fault — including a non-shutdown OperationCanceledException such as an
+				// Any other fault — including a non-shutdown OperationCanceledException such as an
 				// EF command timeout — must NOT stop the sweep, or retention freezes for the process
 				// lifetime with no signal. Keep the loop alive; retry on the next tick.
 				logger.LogDebug(ex, "Log retention sweep failed; will retry");

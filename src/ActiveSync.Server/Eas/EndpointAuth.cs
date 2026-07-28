@@ -215,8 +215,9 @@ internal static class EndpointAuth
 	}
 
 	/// <summary>
-	///   The disabled/blocked decision shared by both authenticated endpoints — the single point the
-	///   E14 drift proved must not be copy-pasted. The two mechanisms are distinct by design: a user
+	///   The disabled/blocked decision shared by both authenticated endpoints — the single point that
+	///   must not be copy-pasted, after the two call sites drifted out of sync when this logic lived
+	///   separately in each. The two mechanisms are distinct by design: a user
 	///   disabled via <c>eas user disable</c> is refused on EVERY device and on the web, while an
 	///   operator block (<c>eas block/unblock</c>) cuts off exactly ONE device. A null
 	///   <paramref name="deviceId" /> (Autodiscover carries none) therefore has no block to match —
@@ -284,7 +285,8 @@ internal static class EndpointAuth
 		if (!await AuthenticateAsync(http, sessionFactory, throttle, clientKey, credentials, logger, ct))
 			return new AuthOutcome(false, null);
 
-		// Identity is total past the auth boundary (db-restructure item 2).
+		// Identity is total past the auth boundary: every authenticated login gets a user row and
+		// a known UserId, so nothing downstream needs a "not provisioned yet" branch.
 		int? userId = await provisioner.EnsureUserAsync(credentials.UserName, ct);
 		if (userId is null)
 		{

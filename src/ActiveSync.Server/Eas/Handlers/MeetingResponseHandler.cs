@@ -31,7 +31,7 @@ public sealed class MeetingResponseHandler(
 		{
 			string? requestId = req.Element(MR + "RequestId")?.Value;
 			string? collectionId = req.Element(MR + "CollectionId")?.Value;
-			// F9: UserResponse is a required child of Request in MS-ASCMD; defaulting a missing or
+			// UserResponse is a required child of Request in MS-ASCMD; defaulting a missing or
 			// unparsable value to 1 (Accept) means a client bug or truncated request accepts a
 			// meeting on the user's behalf and tells the organizer so — the most-committing possible
 			// answer to a malformed input. Only 1/2/3 (Accept/Tentative/Decline) are valid.
@@ -65,7 +65,7 @@ public sealed class MeetingResponseHandler(
 					continue;
 				}
 
-				// F9: reject rather than silently accept on the user's behalf.
+				// Reject rather than silently accept on the user's behalf.
 				if (parsedUserResponse is not (1 or 2 or 3))
 				{
 					results.Add(Result("2"));
@@ -73,7 +73,7 @@ public sealed class MeetingResponseHandler(
 				}
 				int userResponse = parsedUserResponse.Value;
 
-				// F8: an InstanceId scopes the response to ONE occurrence, but RespondToMeetingAsync
+				// An InstanceId scopes the response to ONE occurrence, but RespondToMeetingAsync
 				// (ICalendarOperations) has no occurrence-level entry point — only a whole-series UID.
 				// Silently responding for the whole series (writing PARTSTAT on the master and mailing
 				// the organizer a series-wide REPLY) when the client asked to respond to a single
@@ -107,7 +107,7 @@ public sealed class MeetingResponseHandler(
 				// The CollectionId may name either the Inbox message carrying the invite (mail path)
 				// OR the calendar collection holding an already-filed event (calendar path). Branch
 				// on the store class — handing a calendar backend key to the mail store, as the old
-				// single path did, fails the request (F33).
+				// single path did, fails the request.
 				string ics;
 				string? organizerFallback = null;
 				string subject = "Meeting";
@@ -189,9 +189,9 @@ public sealed class MeetingResponseHandler(
 				// (SMTP) and the PARTSTAT write above are irreversible, so nothing after it may report
 				// failure. A Status 4 here would make the client retry the WHOLE MeetingResponse and the
 				// organizer would receive a SECOND reply (and PARTSTAT would be written twice) — the
-				// "post-send failure must not report failure" rule ComposeMail already follows (F1).
+				// "post-send failure must not report failure" rule ComposeMail already follows.
 				//
-				// F7: the client may never see THIS response either (the same lost-200 hazard F1 closes
+				// The client may never see THIS response either (the same lost-200 hazard closes
 				// for ComposeMail) and resend the identical MeetingResponse. "meetingresponse" is a fixed
 				// collection namespace and 0 a fixed generation (this path has no Sync collection/SyncKey
 				// of its own); the key embeds the request's own CollectionId/RequestId/UserResponse so a
@@ -214,8 +214,8 @@ public sealed class MeetingResponseHandler(
 				// Past the send everything is best-effort. Exchange removes the meeting-request mail from
 				// the Inbox after a response (that is why CalendarId points the client at the surviving
 				// calendar item); leaving it shows a stale "respond to this invitation" message. Only the
-				// mail path has an invite mail to remove (F35). A cleanup failure must NOT turn a sent
-				// reply into a reported failure (F1) — swallow everything and still return Status 1.
+				// mail path has an invite mail to remove. A cleanup failure must NOT turn a sent
+				// reply into a reported failure — swallow everything and still return Status 1.
 				try
 				{
 					if (store.EasClass == EasClass.Email)
@@ -234,7 +234,7 @@ public sealed class MeetingResponseHandler(
 			{
 				// A transient backend failure is a server error — status 4 (retryable), not
 				// status 2 "invalid meeting request", which tells the client the request was
-				// malformed. The explicit 2s above stay for genuinely bad input (F34).
+				// malformed. The explicit 2s above stay for genuinely bad input.
 				logger.LogError(ex, "MeetingResponse failed for {RequestId}", requestId);
 				results.Add(Result("4"));
 			}

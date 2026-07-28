@@ -16,10 +16,10 @@ namespace ActiveSync.Server.Setup;
 public sealed class SqlitePragmaInterceptor : DbConnectionInterceptor
 {
 	// One interceptor instance is created per database (see the AddDbContext registration), so an
-	// instance-scoped guard applies WAL exactly once for that database's connections (E13).
+	// instance-scoped guard applies WAL exactly once for that database's connections.
 	private int _walApplied;
 
-	/// <summary>Test seam (E13): how many times the WAL pragma was actually issued.</summary>
+	/// <summary>Test seam: how many times the WAL pragma was actually issued.</summary>
 	internal int WalPragmaExecutions { get; private set; }
 
 	public override void ConnectionOpened(DbConnection connection, ConnectionEndEventData eventData)

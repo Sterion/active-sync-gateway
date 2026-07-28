@@ -35,7 +35,7 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 		int fetch = Math.Min(start + pageSize, MaxFetch);
 		// Paging at/beyond the fetch cap can never return anything (the backend fetches at most
 		// MaxFetch, then Skip(start) drops them all) — refuse it without a wasted backend call
-		// rather than returning an empty page indistinguishable from "no more results" (F41).
+		// rather than returning an empty page indistinguishable from "no more results".
 		if (start >= MaxFetch)
 		{
 			await WriteAsync(context, "1", []);
@@ -82,14 +82,14 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 				IReadOnlyList<(string FolderBackendKey, string ItemKey)> hits =
 					await context.Session.MailStore.SearchAsync(folderBackendKey, freeText, null, fetch, ct);
 				// Skip the requested offset, then fetch the page's bodies in ONE batched call per
-				// folder instead of a sequential GetItemAsync per hit (F40).
+				// folder instead of a sequential GetItemAsync per hit.
 				List<(string FolderKey, string ItemKey)> page =
 					hits.Skip(start).Take(pageSize).ToList();
 				Dictionary<(string, string), BackendItem?> fetched = new();
 				foreach (IGrouping<string, (string FolderKey, string ItemKey)> group in page.GroupBy(h => h.FolderKey))
 				{
 					IReadOnlyList<string> keys = group.Select(h => h.ItemKey).ToList();
-					// eas16 must ride the same way it does through Sync/ItemOperations (F6) — a
+					// eas16 must ride the same way it does through Sync/ItemOperations — a
 					// hard-coded false silently drops 16.x-only shapes from Search results too.
 					IReadOnlyDictionary<string, BackendItem?> items = await mailStore!.GetItemsAsync(
 						group.Key, keys, new BodyPreference(1, 1024, false, context.Version >= EasVersion.V160), ct);
@@ -157,7 +157,7 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 					? new XElement(S + "Range", $"{start}-{start + results.Count - 1}")
 					: null,
 				// Total is the number of matches FOUND (capped by the fetch limit), not the served
-				// page size — reporting the page size makes the client stop after page 1 (F36).
+				// page size — reporting the page size makes the client stop after page 1.
 				new XElement(S + "Total", total.ToString())));
 		return context.WriteResponseAsync(new XDocument(
 			new XElement(S + "Search",

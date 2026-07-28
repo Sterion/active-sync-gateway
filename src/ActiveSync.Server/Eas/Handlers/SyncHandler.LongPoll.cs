@@ -62,7 +62,7 @@ public sealed partial class SyncHandler
 	///   Upper bound on the post-cancellation drain — mirrors <see cref="LongPollWatchdog" />'s own
 	///   bound. A well-behaved store's wait unwinds within milliseconds of cancellation; a
 	///   misbehaving one must not pin the request (and the session lease it was called under) open
-	///   indefinitely (F15).
+	///   indefinitely.
 	/// </summary>
 	private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(10);
 
@@ -94,7 +94,7 @@ public sealed partial class SyncHandler
 		finally
 		{
 			await cts.CancelAsync(); // stop the remaining pollers
-			// F15: drain every wait still running before returning, rather than abandoning it —
+			// Drain every wait still running before returning, rather than abandoning it —
 			// the caller's IBackendSession lease is released the moment HandleAsync returns, so an
 			// abandoned wait keeps running (or later faults) against a session no longer valid, and
 			// nothing observes it. Bounded so a misbehaving store cannot hang the request forever.

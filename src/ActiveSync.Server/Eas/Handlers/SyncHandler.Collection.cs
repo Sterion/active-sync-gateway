@@ -11,7 +11,7 @@ namespace ActiveSync.Server.Eas.Handlers;
 public sealed partial class SyncHandler
 {
 	/// <summary>
-	///   F8: EAS 12.1 identifies a collection by Class + CollectionId, and the response is expected
+	///   EAS 12.1 identifies a collection by Class + CollectionId, and the response is expected
 	///   to echo the request's Class as the first child of the Collection. 14.0+ dropped it — the
 	///   CollectionId alone identifies the collection — so it is emitted only for &lt;= 12.1 to keep
 	///   the 14.1 wire form byte-identical.
@@ -30,7 +30,7 @@ public sealed partial class SyncHandler
 
 		XElement Error(string status)
 		{
-			// F4: Status 3 (invalid sync key) must reset the client to an initial sync — echoing
+			// Status 3 (invalid sync key) must reset the client to an initial sync — echoing
 			// the rejected key back makes a trusting client resend it, the resync loop this
 			// codebase avoids. Transient/hierarchy errors ("5"/"12") keep the client's key.
 			string echoKey = status == "3" ? "0" : clientSyncKey;
@@ -82,7 +82,7 @@ public sealed partial class SyncHandler
 		// explicit "0" requests a permanent delete.
 		bool deletesAsMoves = collectionElement.Element(AS + "DeletesAsMoves")?.Value != "0";
 
-		// On a Replay the entity is NOT rolled back until this collection's own commit (A1), so the
+		// On a Replay the entity is NOT rolled back until this collection's own commit, so the
 		// snapshot to diff against is the previous generation, read explicitly here (mirrors
 		// PeekSyncKeyAsync). Current diffs against the live snapshot.
 		Dictionary<string, string> snapshot = validation == SyncKeyValidation.Replay
@@ -102,7 +102,7 @@ public sealed partial class SyncHandler
 		int clientAdds = 0, clientChanges = 0, clientDeletes = 0;
 		XElement? commands = collectionElement.Element(AS + "Commands");
 
-		// F7: to detect a concurrent edit (client Change vs a backend that moved on) we need the
+		// To detect a concurrent edit (client Change vs a backend that moved on) we need the
 		// backend's CURRENT revision of the changed items. Fetch the folder's revision map once,
 		// only when the client actually sent Change commands, and only for conflict comparison —
 		// NOT for the diff, which must fetch AFTER the client commands land so echo suppression
@@ -159,7 +159,7 @@ public sealed partial class SyncHandler
 		List<XElement> serverCommands = new();
 		bool moreAvailable = false;
 		Dictionary<string, string> newSnapshot = snapshot;
-		// F2: set when an Add or Change was skipped this round (its render failed). Backend state
+		// Set when an Add or Change was skipped this round (its render failed). Backend state
 		// genuinely differs from the (rolled-back) persisted snapshot for that item, so offering this
 		// collection to the long-poll wait would have the watchdog re-check spin against the same
 		// permanently-failing item every interval.
@@ -207,7 +207,7 @@ public sealed partial class SyncHandler
 				}
 
 			// Pre-resolve the whole window's DAV item ids in one query + one flush; without this
-			// every Add/Change/Delete composition below did its own SELECT + SaveChanges (A3).
+			// every Add/Change/Delete composition below did its own SELECT + SaveChanges.
 			List<string> windowKeys = new(diff.Adds.Count + diff.Changes.Count + diff.Deletes.Count);
 			windowKeys.AddRange(diff.Adds.Select(a => a.ServerId));
 			windowKeys.AddRange(diff.Changes.Select(c => c.ServerId));
@@ -215,7 +215,7 @@ public sealed partial class SyncHandler
 			IReadOnlyDictionary<string, string>? davIds =
 				await folders.PreResolveDavItemIdsAsync(folder, store, windowKeys, ct);
 
-			// F13: fetch every Add/Change item's body in ONE batched round instead of one backend
+			// Fetch every Add/Change item's body in ONE batched round instead of one backend
 			// round trip (and, for IMAP, one per-user gate acquisition) per item. The default
 			// GetItemsAsync loops GetItemAsync so behaviour is unchanged; a store override batches
 			// at the protocol level. A batch-level failure degrades to per-item fetch inside
@@ -256,7 +256,7 @@ public sealed partial class SyncHandler
 					serverCommands.Add(element);
 				else
 				{
-					// F3/K2: CollectionDiff.Compute already wrote the NEW backend revision into
+					// CollectionDiff.Compute already wrote the NEW backend revision into
 					// newSnapshot when it charged this item to the window. Mirror the Add loop above:
 					// revert to the revision the client last acked (or the sentinel that never matches
 					// a real backend revision) so the round does NOT record this Change as delivered —
@@ -275,7 +275,7 @@ public sealed partial class SyncHandler
 					new XElement(AS + "ServerId", serverId)));
 			}
 
-			// F14: record the metric from what was actually SENT — an Add whose fetch returned null
+			// Record the metric from what was actually SENT — an Add whose fetch returned null
 			// (vanished mid-sync) is not in serverCommands and must not be counted as delivered.
 			// The same counts feed the activity log below.
 			Core.Observability.GatewayMetrics.RecordSyncItems(
@@ -306,7 +306,7 @@ public sealed partial class SyncHandler
 		bool hasPayload = clientResponses.Count > 0 || serverCommands.Count > 0;
 		if (!hasPayload && !snapshotDirty)
 			// Nothing to say for this collection; it is a candidate for the long-poll wait — UNLESS an
-			// item was skipped this round (F2), in which case the backend genuinely still differs from
+			// item was skipped this round, in which case the backend genuinely still differs from
 			// what's stored and re-waiting would just spin the watchdog against the same permanently-
 			// failing item on every interval.
 			return new CollectionResult(
@@ -322,7 +322,7 @@ public sealed partial class SyncHandler
 		}
 		catch (BackendException ex)
 		{
-			// F16: a pipelined sibling request already won the commit race on this collection's
+			// A pipelined sibling request already won the commit race on this collection's
 			// CollectionState row. This must not escape as an unhandled exception (an HTTP 500 that
 			// discards every OTHER collection's already-computed response in the same request) —
 			// FolderModifyHandlerBase and FolderSyncHandler both catch this exact exception and
@@ -337,7 +337,7 @@ public sealed partial class SyncHandler
 			new XElement(AS + "CollectionId", collectionId),
 			new XElement(AS + "Status", "1"));
 		EchoClassIfLegacy(response, context, store);
-		// F9: MoreAvailable is emitted immediately after Status — before Responses/Commands — as
+		// MoreAvailable is emitted immediately after Status — before Responses/Commands — as
 		// Exchange and Z-Push do; WBXML is order-sensitive for strict sequence parsers.
 		if (moreAvailable)
 			response.Add(new XElement(AS + "MoreAvailable"));

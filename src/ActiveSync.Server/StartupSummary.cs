@@ -239,7 +239,7 @@ public static class StartupSummary
 	///   Redacts the password in a database connection string for the banner. Delegates to the
 	///   shared <see cref="SecretRedaction.RedactConnectionString" /> so the banner, the settings
 	///   surfaces and any other caller mask identically — including SQLite/SQLCipher strings that
-	///   carry a Password keyword, which this used to wave through as "just a file path" (E23).
+	///   carry a Password keyword, which this used to wave through as "just a file path".
 	///   The provider is kept for the caller's log message; the redaction is content-driven.
 	/// </summary>
 	internal static string Redact(string provider, string connectionString)

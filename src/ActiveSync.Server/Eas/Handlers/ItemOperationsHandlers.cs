@@ -85,7 +85,7 @@ public sealed class ItemOperationsHandler(
 			// everything else is a mail attachment reference.
 			bool isCalendarAttachment =
 				fileReference.StartsWith(CalendarConverter.AttachmentReferencePrefix, StringComparison.Ordinal);
-			// F22: a mail FileReference is client-supplied and names a backend folder directly, just
+			// A mail FileReference is client-supplied and names a backend folder directly, just
 			// like LongId below — the store's own parsing is only a shape test, not a membership
 			// test. Gate it through the same per-user folder registry before asking the backend.
 			if (!isCalendarAttachment && !await IsAttachmentFolderRegisteredAsync(context, fileReference, ct))
@@ -198,7 +198,7 @@ public sealed class ItemOperationsHandler(
 		// 2 not a mail folder OR read-only/access-denied (emptying is a bulk delete, so a read-only
 		// grant on the folder blocks it just like global ReadOnly mode does) — AGENTS.md's
 		// documented read-only scheme is explicit that EmptyFolderContents answers the TERMINAL
-		// status 2 here, not 3 (F11); 3 is reserved for F10's genuine, retryable backend failure —
+		// status 2 here, not 3; 3 is reserved for a genuine, retryable backend failure —
 		// a client that read a blocked bulk delete as retryable would retry it every sync round
 		// against a gateway that will never allow it, and never see a refusal.
 		string? failure =
@@ -212,7 +212,7 @@ public sealed class ItemOperationsHandler(
 				new XElement(AS + "CollectionId", collectionId));
 		// A backend hiccup here must fail just this ItemOperations child (a retryable status),
 		// not escape unhandled and turn the whole request into an HTTP 500 — matching the
-		// try/catch HandleFetchAsync already wraps its own core in (F10).
+		// try/catch HandleFetchAsync already wraps its own core in.
 		try
 		{
 			await context.Session.MailStore.EmptyFolderAsync(resolved.Value.Folder.BackendKey, ct);
@@ -236,7 +236,7 @@ public sealed class ItemOperationsHandler(
 		// `eas16` (context.Version >= EasVersion.V160) must reach the store the same way it does
 		// through Sync (AGENTS.md: "version gating rides BodyPreference.Eas16") — a hard-coded
 		// false here silently drops airsyncbase:Location and event attachments for a 16.x client
-		// fetching outside Sync (F6).
+		// fetching outside Sync.
 		XElement? preference = options?.Elements(ASB + "BodyPreference").FirstOrDefault();
 		if (preference is null)
 			return new BodyPreference(2, null, false, eas16);
@@ -248,7 +248,7 @@ public sealed class ItemOperationsHandler(
 	}
 
 	/// <summary>
-	///   F22: a mail-attachment FileReference ("{imapBackendKey}|{uid}|{attachmentIndex}",
+	///   A mail-attachment FileReference ("{imapBackendKey}|{uid}|{attachmentIndex}",
 	///   DelimitedKey-encoded) is client-supplied and names a backend folder directly — the same
 	///   shape-vs-membership gap the LongId branch above closes. Shared with
 	///   <see cref="GetAttachmentHandler" />, the other command that resolves a FileReference.
@@ -278,7 +278,7 @@ public sealed class GetAttachmentHandler : IEasCommandHandler
 			return;
 		}
 
-		// F22: same folder-registry gate as ItemOperations Fetch's FileReference path — a
+		// Same folder-registry gate as ItemOperations Fetch's FileReference path — a
 		// client-supplied reference names a backend folder directly.
 		if (!await ItemOperationsHandler.IsAttachmentFolderRegisteredAsync(context, fileReference, ct))
 		{

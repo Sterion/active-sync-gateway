@@ -162,10 +162,11 @@ public static class EasEndpoint
 		http.Items[MetricsKey] = (parameters.Command, LogText.Clean(credentials.UserName, 128));
 
 		// Identity is total past the auth boundary: every authenticated login has a user row and
-		// a known immutable UserId before anything user-scoped runs (db-restructure item 2). On
-		// first sign-in this mints the row (an auto-provisioned declaration for undeclared
-		// logins; identity-only for config-declared ones). Runs before the block check so an
-		// operator can see (and block) even a user they intend to block.
+		// a known immutable UserId before anything user-scoped runs, so no handler, store,
+		// notifier or cache further down needs a "not provisioned yet" branch. On first sign-in
+		// this mints the row (an auto-provisioned declaration for undeclared logins; identity-only
+		// for config-declared ones). Runs before the block check so an operator can see (and
+		// block) even a user they intend to block.
 		int? ensuredUserId = await provisioner.EnsureUserAsync(credentials.UserName, ct);
 		if (ensuredUserId is not { } userId)
 		{
@@ -175,8 +176,9 @@ public static class EasEndpoint
 
 		// A disabled account (eas user disable) refuses every device; operator blocks (eas
 		// block/unblock) are the ad-hoc/device-scoped variant. Both are enforced after auth so
-		// only holders of valid credentials can observe them, through the same decision the
-		// Autodiscover prologue uses (EndpointAuth.CheckLoginRefusalAsync — the E14 drift point).
+		// only holders of valid credentials can observe them, through the same shared decision the
+		// Autodiscover prologue uses (EndpointAuth.CheckLoginRefusalAsync) rather than a second copy
+		// that could drift out of sync with it.
 		// 403, not 401 — a challenge would loop the client through credential prompts.
 		LoginRefusal refusal = await EndpointAuth.CheckLoginRefusalAsync(
 			userResolver, state, credentials.UserName, userId, parameters.DeviceId, ct);
@@ -215,7 +217,7 @@ public static class EasEndpoint
 		if (device.PendingAccountWipe &&
 		    !parameters.Command.Equals("Provision", StringComparison.OrdinalIgnoreCase))
 		{
-			// F14: AccountOnlyRemoteWipe (MS-ASPROV token 0x3B) is a 16.1-only element. A pre-16.1
+			// AccountOnlyRemoteWipe (MS-ASPROV token 0x3B) is a 16.1-only element. A pre-16.1
 			// device herded into Provision cannot decode the directive, never sends the Status-1
 			// acknowledgment, and so never completes the wipe — every command 449s forever. Complete
 			// the wipe server-side instead (the same terminal state a 16.1 device reaches once it
@@ -264,7 +266,7 @@ public static class EasEndpoint
 			}
 		}
 
-		// A2: the returned session is a lease — disposing it at the end of the request releases the
+		// The returned session is a lease — disposing it at the end of the request releases the
 		// lease (the cache keeps the connection alive for reuse; the last release tears it down).
 		await using IBackendSession session =
 			await sessionFactory.GetSessionAsync(credentials, userId, parameters.DeviceId, ct);
@@ -318,11 +320,11 @@ public static class EasEndpoint
 	/// <summary>
 	///   MS-ASHTTP device ids are short and alphanumeric (the base64 query form hex-encodes
 	///   raw bytes); a few punctuation characters are tolerated for older clients.
-	///   <c>internal</c> so <c>EasEndpointDeviceIdTests</c> (F21) can exercise it directly.
+	///   <c>internal</c> so <c>EasEndpointDeviceIdTests</c> can exercise it directly.
 	/// </summary>
 	internal static bool IsValidDeviceId(string deviceId)
 	{
-		// F21: an empty DeviceId used to be let through on the theory that some tools (e.g.
+		// An empty DeviceId used to be let through on the theory that some tools (e.g.
 		// OPTIONS probes) omit it — but OPTIONS is mapped separately (HandleOptions) and never
 		// reaches this check, so the only effect was every POST that omitted DeviceId sharing one
 		// "" keyed Device row (SyncKeys, snapshots, PolicyKey, ...) for that user. MS-ASHTTP

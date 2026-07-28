@@ -19,7 +19,7 @@ internal sealed class TlsCommand(IAnsiConsole terminal) : AsyncCommand<TlsComman
 	protected override async Task<int> ExecuteAsync(
 		CommandContext context, Settings settings, CancellationToken cancellationToken)
 	{
-		// E5: forwarded to the warm gateway — reuse its already-built provider (same short-circuit
+		// Forwarded to the warm gateway — reuse its already-built provider (same short-circuit
 		// DatabaseCommand<TSettings> uses) instead of rebuilding a parallel container per call.
 		// Standalone: the lean provider works even on an unconfigured or broken gateway (TLS is
 		// independent of mail configuration).

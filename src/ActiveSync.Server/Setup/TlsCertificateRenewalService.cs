@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 namespace ActiveSync.Server.Setup;
 
 /// <summary>
-///   Keeps a self-signed HTTPS certificate from expiring inside a long-running process (K1).
+///   Keeps a self-signed HTTPS certificate from expiring inside a long-running process.
 ///   <see cref="GatewayCertificateStore.GetOrCreateAsync" /> already renews ahead of expiry once a
 ///   stored certificate enters its renewal window — but until this service existed nothing ever
 ///   called it again after the single startup load in <c>InitializeAsync</c>, so a gateway with

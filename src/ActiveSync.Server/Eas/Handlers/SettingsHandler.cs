@@ -91,9 +91,9 @@ public sealed class SettingsHandler(
 				{
 					// An unrecognized/unimplemented section gets its OWN status so the client can
 					// tell it was not applied, instead of a bare top-level Status 1 and complete
-					// silence about the section (F48). Status 2 = not supported.
+					// silence about the section. Status 2 = not supported.
 					//
-					// F24: section.Name.LocalName is reflected straight back as an element name below
+					// section.Name.LocalName is reflected straight back as an element name below
 					// — only safe when the section actually belongs to the Settings code page (page
 					// 18). A crafted WBXML SWITCH_PAGE can put a token from another page here, whose
 					// local name is not a token on page 18; echoing it would make WbxmlEncoder throw
@@ -150,7 +150,7 @@ public sealed class SettingsHandler(
 	{
 		// Arming Oof installs a real server-side auto-reply (ManageSieve) — a far more
 		// externally-visible side effect than the writes ReadOnly already blocks — so a read-only
-		// gateway must refuse it with access-denied (F47), the same as the other mutating handlers.
+		// gateway must refuse it with access-denied, the same as the other mutating handlers.
 		if (options.Value.ReadOnly)
 		{
 			logger.LogInformation("Read-only: rejecting Oof Set for {User}",

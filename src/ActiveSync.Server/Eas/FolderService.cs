@@ -14,7 +14,7 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 	public async Task<List<UserFolder>> RefreshAsync(IBackendSession session, int userId, CancellationToken ct)
 	{
 		List<BackendFolder> all = new();
-		// The stored registry is fetched lazily and AT MOST ONCE (E25): when several DAV stores
+		// The stored registry is fetched lazily and AT MOST ONCE: when several DAV stores
 		// are down at the same time — the common correlated case — re-reading the whole registry
 		// inside each store's catch was N identical full-table queries during an already-degraded
 		// request. The registry does not change while we iterate, so one read serves every fallback.
@@ -51,7 +51,7 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 	/// <summary>
 	///   Returns the user's whole folder registry indexed by backend key, for resolving a batch of
 	///   hits that can span more than one folder (e.g. a mailbox-wide Find) back to their owning
-	///   folder in ONE query rather than one lookup per hit (F4).
+	///   folder in ONE query rather than one lookup per hit.
 	/// </summary>
 	public async Task<IReadOnlyDictionary<string, UserFolder>> GetFolderMapAsync(int userId, CancellationToken ct)
 	{
@@ -61,7 +61,7 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 
 	/// <summary>
 	///   Pre-resolves a whole window of DAV item keys to short ids in one query + one flush, so the
-	///   render loop can compose ServerIds without a per-item round trip (A3). Returns null for mail
+	///   render loop can compose ServerIds without a per-item round trip. Returns null for mail
 	///   collections (their sub IS the UID — no map) and for an empty window.
 	/// </summary>
 	public async Task<IReadOnlyDictionary<string, string>?> PreResolveDavItemIdsAsync(
@@ -75,7 +75,7 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 	/// <summary>Composes an item ServerId from a backend item key.</summary>
 	/// <param name="davIdCache">
 	///   Optional href → short-id map from <see cref="PreResolveDavItemIdsAsync" />; when it already
-	///   holds the key the composition costs no database round trip (A3).
+	///   holds the key the composition costs no database round trip.
 	/// </param>
 	public async Task<string> ComposeServerIdAsync(
 		UserFolder folder, IContentStore store, string itemKey, CancellationToken ct,

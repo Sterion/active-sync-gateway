@@ -42,7 +42,7 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 		(int start, int pageSize) = ParseRange(criterion.Element(F + "Options")?.Element(F + "Range")?.Value);
 		int fetch = Math.Min(start + pageSize, MaxFetch);
 		// Paging at/beyond the fetch cap can never serve anything — refuse it without a wasted
-		// backend call rather than fetching the whole cap and Skip()-ing it all away (F41).
+		// backend call rather than fetching the whole cap and Skip()-ing it all away.
 		if (start >= MaxFetch)
 		{
 			await WriteAsync(context, searchId, "1",
@@ -61,11 +61,11 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 			XElement response = new(F + "Response",
 				new XElement(F + "Status", "1"),
 				results);
-			// Omit Range entirely when empty — "0-0" claims one result was returned (F37).
+			// Omit Range entirely when empty — "0-0" claims one result was returned.
 			if (results.Count > 0)
 				response.Add(new XElement(F + "Range", $"{start}-{start + results.Count - 1}"));
 			// Total is the number of matches FOUND (capped by the fetch limit), not start+served,
-			// which stops the client after the first page (F36).
+			// which stops the client after the first page.
 			response.Add(new XElement(F + "Total", total.ToString()));
 			await WriteAsync(context, searchId, "1", response);
 		}
@@ -74,7 +74,7 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 			// A transient backend failure is retryable and must not be reported with the SAME
 			// status a malformed request gets ("2") — Search already makes this distinction
 			// (SearchHandler.cs); a client told "protocol error" for a backend blip stops retrying
-			// the search entirely (F5).
+			// the search entirely.
 			logger.LogError(ex, "Find failed");
 			await WriteAsync(context, searchId, "3", null);
 		}
@@ -107,7 +107,7 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 			await context.Session.MailStore.SearchAsync(folderBackendKey, freeText, null, fetch, ct);
 
 		// Fetch the page's bodies in ONE batched call per folder rather than a sequential
-		// GetItemAsync per hit (F40).
+		// GetItemAsync per hit.
 		BodyPreference bodyPreference = new(1, 1024, false, true);
 		List<(string FolderKey, string ItemKey)> page = hits.Skip(start).Take(pageSize).ToList();
 		Dictionary<(string, string), BackendItem?> fetched = new();
@@ -123,7 +123,7 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 		// Resolve every hit's OWN folder rather than the single optional CollectionId-scoped
 		// `searchFolder` — a mailbox-wide Find (the common case, no CollectionId/DeepTraversal
 		// narrowing) previously left this null for every result, so nothing came back with a
-		// ServerId/CollectionId to open (F4). One registry read serves the whole page, however
+		// ServerId/CollectionId to open. One registry read serves the whole page, however
 		// many distinct folders its hits span, rather than a lookup per hit.
 		IReadOnlyDictionary<string, UserFolder> folderMap =
 			await folders.GetFolderMapAsync(context.UserId, ct);
@@ -151,7 +151,7 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 			properties.Add(new XElement(F + "HasAttachments", hasAttachments ? "1" : "0"));
 
 			// MS-ASCMD Find Result child order: Class, ServerId, CollectionId, Properties. Build
-			// them in that order rather than prepending ServerId/CollectionId after the fact (F38).
+			// them in that order rather than prepending ServerId/CollectionId after the fact.
 			List<XElement> children = [new XElement(AS + "Class", EasClass.Email)];
 			if (hitFolder is not null)
 			{

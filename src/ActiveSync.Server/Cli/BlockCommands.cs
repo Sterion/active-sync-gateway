@@ -23,8 +23,9 @@ internal sealed class BlockSettings : CommandSettings
 /// <summary>
 ///   Refuses logins (HTTP 403 after auth) for ONE DEVICE. Deliberately device-scoped: a bare
 ///   user is an error pointing at <c>eas user disable</c> rather than doing something subtly
-///   different. Having both spellings write the same state would put back, in the CLI, exactly
-///   the two-mechanisms-one-concept problem the schema removed (db-restructure decision 19).
+///   different. <c>LoginBlock</c> carries only a device key and no user id — whole-user blocking
+///   lives on <c>Users.Enabled</c> instead — so having both spellings write the same state would
+///   recreate, one level up, the two-mechanisms-one-concept problem that split was meant to remove.
 /// </summary>
 internal sealed class BlockCommand(IAnsiConsole terminal) : DatabaseCommand<BlockSettings>(terminal)
 {

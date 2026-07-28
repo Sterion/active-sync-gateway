@@ -31,7 +31,7 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 	{
 		Services = services;
 		UserStore store = services.GetRequiredService<UserStore>();
-		// E17: IOptionsMonitor, not a captured IOptions — this command may run inside the warm
+		// IOptionsMonitor, not a captured IOptions — this command may run inside the warm
 		// gateway (forwarded via /cli), whose IOptions<ActiveSyncOptions> singleton was bound once at
 		// first resolution and never recomputes, while a live database settings change (`eas config
 		// set`) fires the reload token IOptionsMonitor DOES pick up.
@@ -81,7 +81,7 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 	protected static string PickupNote(ActiveSyncOptions options)
 	{
 		// A negative/non-finite cadence no longer disables live refresh — it is clamped to
-		// "every request" (B11), so a running gateway always picks this up.
+		// "every request", so a running gateway always picks this up.
 		double seconds = double.IsFinite(options.Auth.UsersRefreshSeconds)
 			? Math.Max(options.Auth.UsersRefreshSeconds, 0)
 			: 0;
@@ -497,7 +497,7 @@ internal sealed class UserPasswordCommand(IAnsiConsole terminal)
 			return 1;
 		}
 
-		// C6: through the shared policy (strength floor + empty/sealed rejection), not a direct hash.
+		// Through the shared policy (strength floor + empty/sealed rejection), not a direct hash.
 		UserSecretPolicy.SecretResult prepared = UserSecretPolicy.PrepareGatewayPassword(password);
 		if (prepared.Error is not null)
 		{
@@ -546,7 +546,7 @@ internal sealed class UserSecretCommand(IAnsiConsole terminal)
 
 		// Zero the master key on every exit — including a failed/cancelled stdin read or a throwing
 		// seal. This runs inside the long-lived gateway process (via /cli), so a leaked key array
-		// sits on the heap until GC (L42).
+		// sits on the heap until GC.
 		try
 		{
 			string secret = (await Console.In.ReadToEndAsync(cancellationToken)).TrimEnd('\r', '\n');

@@ -53,7 +53,7 @@ internal static class LocalCliEndpoint
 		/// </summary>
 		/// <param name="nonce">The envelope's nonce.</param>
 		/// <param name="envelopeTimestampUnixMs">
-		///   The envelope's OWN <see cref="LocalCliEnvelope.TimestampUnixMs" /> — E11: this used to be
+		///   The envelope's OWN <see cref="LocalCliEnvelope.TimestampUnixMs" /> — this used to be
 		///   the receipt clock (<paramref name="nowUnixMs" />), so an envelope received early (within
 		///   <see cref="LocalCliEnvelope.FutureSkewMs" /> of forward clock skew) got its entry pruned
 		///   up to that same skew BEFORE the envelope itself stopped being acceptable under
@@ -123,7 +123,7 @@ internal static class LocalCliEndpoint
 		app.MapPost("/cli", async (HttpContext context, IOptionsMonitor<ActiveSyncOptions> options) =>
 		{
 			// Disabled or non-loopback: 404 so the endpoint is invisible. Loopback is a cheap
-			// pre-filter; the real auth is proof of the master key (see TryAuthorize). E3: these
+			// pre-filter; the real auth is proof of the master key (see TryAuthorize). These
 			// gates MUST run before anything touches the body — CliRequest used to be bound as a
 			// complex parameter, so the request-delegate factory deserialized it before this
 			// lambda ever ran, and a malformed body (400) or wrong content type (415) from a
@@ -153,7 +153,7 @@ internal static class LocalCliEndpoint
 			if (!TryAuthorize(request, key, allowPlaintext, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
 				    replay, out string[] args, out string stdin))
 			{
-				// K7: with no master key, a credential-bearing verb (device password / user secret)
+				// With no master key, a credential-bearing verb (device password / user secret)
 				// is a distinct refusal from "not authorized at all" — TryAuthorize rejects it because
 				// there is nothing to seal its response with, not because the loopback+AllowPlaintext
 				// proof itself failed.
@@ -208,7 +208,7 @@ internal static class LocalCliEndpoint
 	///   loopback gate alone; a key that simply failed to load authenticates nobody.
 	///
 	///   <para>
-	///     K7: in that keyless AllowPlaintext mode there is nothing to seal a response with (see
+	///     In that keyless AllowPlaintext mode there is nothing to seal a response with (see
 	///     <see cref="ProtectResponse" />), so a <see cref="IsCredentialBearingVerb">credential-bearing
 	///     verb</see> is refused outright rather than executed and returned in cleartext — the exact
 	///     gap a co-located, non-key-holding sidecar sharing loopback (the type doc's threat model)
@@ -233,7 +233,7 @@ internal static class LocalCliEndpoint
 		if (key is null)
 		{
 			string[] plainArgs = request?.Args ?? [];
-			// E19: Args is declared `string[]` but that only binds at compile time — a plaintext body
+			// Args is declared `string[]` but that only binds at compile time — a plaintext body
 			// of `{"args":["x",null]}` deserializes into exactly that shape, so a null element must be
 			// rejected explicitly rather than trusted by downstream consumers (DescribeCommand,
 			// Spectre's own parser).
@@ -355,7 +355,7 @@ internal static class LocalCliEndpoint
 		string[] args, string stdin, CancellationToken ct, bool color = false, int width = 0,
 		IServiceProvider? hostServices = null)
 	{
-		// E10: apply the SAME pre-CLI alias table Program.cs's local dispatch uses, before anything
+		// Apply the SAME pre-CLI alias table Program.cs's local dispatch uses, before anything
 		// else sees the raw args — otherwise a forwarded `eas help`/`eas --healthcheck` reaches
 		// Spectre's command tree (which registers no "help" command) as an unrecognized verb instead
 		// of behaving like the local invocation.
@@ -396,7 +396,7 @@ internal static class LocalCliEndpoint
 		IServiceProvider? hostServices = null)
 	{
 		await Gate.WaitAsync(ct);
-		// L35: publish the host provider so a forwarded DatabaseCommand reuses it instead of building
+		// Publish the host provider so a forwarded DatabaseCommand reuses it instead of building
 		// its own; cleared in the finally so a later local run never sees a stale provider.
 		CliHostServices.Enter(hostServices);
 		TextWriter originalOut = Console.Out;
@@ -414,7 +414,7 @@ internal static class LocalCliEndpoint
 			Console.SetIn(new StringReader(stdin));
 			// A command may fan out to its own tasks (which DO inherit the flow), so the buffers are
 			// written through synchronized wrappers; their contents are read back after the run.
-			// E3: the injected IAnsiConsole below writes through this SAME wrapper INSTANCE, not an
+			// The injected IAnsiConsole below writes through this SAME wrapper INSTANCE, not an
 			// independent one over the same StringWriter — TextWriter.Synchronized locks on the
 			// wrapper object itself, so two separate wrappers over one StringWriter would each
 			// serialize their own writes while still racing each other on the shared buffer. Sharing
@@ -435,7 +435,7 @@ internal static class LocalCliEndpoint
 				Interactive = InteractionSupport.No,
 				Out = new AnsiConsoleOutput(syncedOut),
 			});
-			// E18: width is a caller-supplied rendering hint that rides OUTSIDE the sealed envelope
+			// Width is a caller-supplied rendering hint that rides OUTSIDE the sealed envelope
 			// (see the CliRequest doc above) — clamp it rather than trusting it, so an arbitrary or
 			// enormous value from any loopback caller can never drive Spectre's layout with an
 			// unbounded width inside this long-lived process.

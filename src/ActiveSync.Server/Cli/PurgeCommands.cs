@@ -30,7 +30,7 @@ internal abstract class PurgeCommand<TSettings>(IAnsiConsole terminal) : Databas
 		IServiceProvider services, SyncDbContext db, TSettings settings, CancellationToken cancellationToken)
 	{
 		DeviceAdminService devices = services.GetRequiredService<DeviceAdminService>();
-		// E20: counted unconditionally — including on the --yes call — so a confirmed purge RE-CHECKS
+		// Counted unconditionally — including on the --yes call — so a confirmed purge RE-CHECKS
 		// the impact rather than trusting the count from the asking round-trip. CliConfirmation's own
 		// type doc requires this: "the operator confirmed a specific loss, not an open-ended one."
 		(string user, string? deviceId) = Target(settings);

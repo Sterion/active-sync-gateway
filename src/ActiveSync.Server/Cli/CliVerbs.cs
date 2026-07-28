@@ -33,7 +33,7 @@ internal static class CliVerbs
 			.AddCommandLine(args);
 		IConfigurationRoot config = builder.Build();
 
-		// E14: go through the same guard RunServerAsync uses (Program.ResolveUsersFilePath), so a
+		// Go through the same guard RunServerAsync uses (Program.ResolveUsersFilePath), so a
 		// typo'd mount path throws an actionable InvalidOperationException naming the setting and
 		// the resolved path — not a raw FileNotFoundException from deep inside the configuration
 		// builder. This is reached by every non-serve verb, including a forwarded one via /cli.
@@ -49,7 +49,7 @@ internal static class CliVerbs
 	/// <summary>
 	///   Same as <see cref="BuildConfiguration" />, plus the database-stored global settings layered
 	///   on top — the same three lines <see cref="ShowBannerAsync" /> already uses, and the same
-	///   layering <c>ProgramServer.ConfigureConfiguration</c> does for the running gateway. E4: the
+	///   layering <c>ProgramServer.ConfigureConfiguration</c> does for the running gateway. The
 	///   documented setup path stores backend role assignments in the database
 	///   (<c>eas config set ActiveSync:Backends:...</c>), so any CLI path that validates against the
 	///   EFFECTIVE role/user configuration (not just labels a value's source) needs this layer —
@@ -182,7 +182,7 @@ internal static class CliVerbs
 	}
 
 	/// <summary>
-	///   E15: mirrors <c>EasForwardingClient.ResolveBaseUrl</c> — always resolves to 127.0.0.1, never
+	///   Mirrors <c>EasForwardingClient.ResolveBaseUrl</c> — always resolves to 127.0.0.1, never
 	///   "localhost". AGENTS.md's auth-model paragraph states the reason: the gateway is IPv4-only, and
 	///   a "localhost" that resolves ::1 first costs a ~2 s failed connect before falling back to IPv4.
 	///   The container HEALTHCHECK runs this with a 4 s HttpClient timeout inside a 5 s Docker timeout,
@@ -215,7 +215,7 @@ internal static class CliVerbs
 			return 1;
 		}
 
-		// E8: zero the key on every exit — including the empty-secret early return — not only
+		// Zero the key on every exit — including the empty-secret early return — not only
 		// after a successful seal. Mirrors the try/finally UserSecretCommand already uses.
 		try
 		{
@@ -245,7 +245,7 @@ internal static class CliVerbs
 			return 1;
 		}
 
-		// C6: through the shared gateway-password policy so the emitted hash honours the same
+		// Through the shared gateway-password policy so the emitted hash honours the same
 		// strength floor as `eas user password` and the web surfaces.
 		UserSecretPolicy.SecretResult prepared = UserSecretPolicy.PrepareGatewayPassword(password);
 		if (prepared.Error is not null)

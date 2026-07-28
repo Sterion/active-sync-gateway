@@ -16,7 +16,7 @@ internal static class CliServices
 {
 	internal static async Task<ServiceProvider?> TryCreateAsync()
 	{
-		// E4: layer the database-stored global settings on top of file/env — the backend role
+		// Layer the database-stored global settings on top of file/env — the backend role
 		// sections + declared users validated below (BackendConfigurationValidator, and every
 		// `eas user` command's UserResolver.ValidateEntry) must see the SAME effective configuration
 		// the running gateway does, and the documented setup path stores backend roles in the

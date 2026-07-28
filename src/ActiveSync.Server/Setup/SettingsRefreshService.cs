@@ -37,7 +37,7 @@ public sealed class SettingsRefreshService(
 			}
 			catch (Exception ex)
 			{
-				// E11: any other fault — including a non-shutdown OperationCanceledException such as an
+				// Any other fault — including a non-shutdown OperationCanceledException such as an
 				// EF command timeout — must NOT stop the poll, or live settings freeze for the process
 				// lifetime with no signal. Keep ticking; log the first occurrence and every 60th after
 				// (~once a minute at the default interval) so a sustained fault leaves a trail without

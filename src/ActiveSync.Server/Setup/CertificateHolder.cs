@@ -3,7 +3,7 @@ using System.Security.Cryptography.X509Certificates;
 namespace ActiveSync.Server.Setup;
 
 /// <summary>
-///   Holds the serving TLS certificate behind a memory barrier (E20). The startup path writes it
+///   Holds the serving TLS certificate behind a memory barrier. The startup path writes it
 ///   once the certificate has loaded; Kestrel reads it on connection threads through the HTTPS
 ///   selector. The <c>volatile</c> field supplies the happens-before ordering the previous
 ///   captured-local pattern relied on the intervening <c>await</c>s to provide — ordering that

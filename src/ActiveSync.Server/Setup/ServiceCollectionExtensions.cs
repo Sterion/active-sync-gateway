@@ -67,7 +67,7 @@ public static class ServiceCollectionExtensions
 						npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory")));
 				break;
 			case "sqlite":
-				// E22: the SAME `configure` delegate below is passed to both AddDbContextFactory and
+				// The SAME `configure` delegate below is passed to both AddDbContextFactory and
 				// AddDbContext, but a `new SqlitePragmaInterceptor()` INSIDE the delegate body still
 				// mints a fresh instance on every invocation, so the two registrations (and, in
 				// practice, more invocations than that) each get their OWN instance — silently
@@ -142,7 +142,7 @@ public static class ServiceCollectionExtensions
 	///   command name so <see cref="EasEndpoint" /> resolves exactly the handler a request needs.
 	///   The old non-keyed <c>IEnumerable&lt;IEasCommandHandler&gt;</c> injection materialized all
 	///   ~19 scoped handlers (and their dependency graphs) per request and discarded 18 — the
-	///   largest allocation source on the polling hot path (E4).
+	///   largest allocation source on the polling hot path.
 	/// </summary>
 	public static IServiceCollection AddEasHandlers(this IServiceCollection services)
 	{

@@ -34,7 +34,7 @@ public sealed class ReadinessProbe(
 
 	public async Task<(bool Ready, Dictionary<string, bool> Components)> CheckAsync(CancellationToken ct)
 	{
-		// E16: serve a warm cache without touching the gate, so concurrent probes (an orchestrator
+		// Serve a warm cache without touching the gate, so concurrent probes (an orchestrator
 		// scraping /readyz, k8s liveness) are not serialized behind a single semaphore for a value
 		// that is already computed. The gate is taken only to run — and single-flight — a refresh.
 		if (TryReadFresh() is { } fast)

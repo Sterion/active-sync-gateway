@@ -31,7 +31,7 @@ internal sealed class ShareAddCommand(IAnsiConsole terminal) : DatabaseCommand<S
 	protected override async Task<int> RunAsync(
 		IServiceProvider services, SyncDbContext db, ShareAddSettings settings, CancellationToken cancellationToken)
 	{
-		// The same identifier rules the web admin and every other write path apply (C16) — the CLI
+		// The same identifier rules the web admin and every other write path apply — the CLI
 		// used to check only that the href started with '/'.
 		if (AdminIdentifiers.LoginProblem(settings.User) is { } loginError)
 		{

@@ -24,7 +24,7 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 	private const int Capacity = 10_000;
 	private const int BatchSize = 500;
 
-	/// <summary>E13: throttle for the disabled-live discard path — bounds CPU regardless of inbound rate.</summary>
+	/// <summary>Throttle for the disabled-live discard path — bounds CPU regardless of inbound rate.</summary>
 	private static readonly TimeSpan DisabledDiscardPause = TimeSpan.FromMilliseconds(200);
 
 	private readonly Channel<LogEntry> _channel = Channel.CreateBounded<LogEntry>(
@@ -46,7 +46,7 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 		// Hard floor: Trace/Debug (and the EAS wire dumps) are never persisted.
 		if (logEvent.Level < LogEventLevel.Information)
 			return;
-		// E10: honor Log:Database at Emit once options are available. The drain re-checks it too
+		// Honor Log:Database at Emit once options are available. The drain re-checks it too
 		// (it may flip between enqueue and write), but checking here avoids rendering the message
 		// and allocating a LogEntry for an event that will only be discarded. Before Activate the
 		// options are unknown, so buffer — the drain applies the live switch when it starts.
@@ -84,7 +84,7 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 			return;
 
 		_channel.Writer.TryComplete();
-		// E4: signal the drain's in-flight read/write to unwind NOW instead of only bounding our own
+		// Signal the drain's in-flight read/write to unwind NOW instead of only bounding our own
 		// wait below — without this, a genuinely hung write (a stuck DB) was never actually
 		// interrupted: Dispose gave up waiting, but the drain task (and its SaveChangesAsync) kept
 		// running to completion on its own schedule, unobserved, against a disposing host.
@@ -117,7 +117,7 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 				ActiveSyncOptions options = _options!.CurrentValue;
 				if (!options.Log.Database)
 				{
-					// E13: discard the batch, but don't immediately loop back to re-read — with data
+					// Discard the batch, but don't immediately loop back to re-read — with data
 					// continuously available, WaitToReadAsync returns instantly and this becomes a tight
 					// spin, CPU proportional to however fast the channel refills. A short pause bounds
 					// the discard rate regardless of the inbound rate, while still draining the backlog
@@ -148,13 +148,13 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 				}
 				catch (OperationCanceledException) when (shutdownToken.IsCancellationRequested)
 				{
-					// E4: the shutdown-linked token fired mid-write — let the outer catch below treat
+					// The shutdown-linked token fired mid-write — let the outer catch below treat
 					// this as a clean shutdown exit, not a "batch failed" fault to log and shrug off.
 					throw;
 				}
 				catch (Exception ex)
 				{
-					// E9: a transient database hiccup (or the table not yet present on a very early
+					// A transient database hiccup (or the table not yet present on a very early
 					// write) must never crash the drain — drop the batch and keep going. But it must
 					// not be swallowed silently either: a persistent outage would otherwise disable DB
 					// logging for the process lifetime with no trace. The sink IS the logging pipeline,
@@ -171,12 +171,12 @@ public sealed class DatabaseLogSink : ILogEventSink, IDisposable
 		}
 		catch (OperationCanceledException) when (shutdownToken.IsCancellationRequested)
 		{
-			// E4: Dispose cancelled the shutdown token to unstick an in-flight read/write; this is the
+			// Dispose cancelled the shutdown token to unstick an in-flight read/write; this is the
 			// drain exiting cleanly on that signal, not an unexpected fault — nothing to announce.
 		}
 		catch (Exception ex)
 		{
-			// E9: WaitToReadAsync (or anything outside the per-batch guard) faulted — the drain is
+			// WaitToReadAsync (or anything outside the per-batch guard) faulted — the drain is
 			// exiting and database logging is now dead for the process lifetime. This is exactly the
 			// loss-of-the-diagnostic-channel failure, so it must be announced where the logger itself
 			// is suspect.
