@@ -1818,3 +1818,42 @@ statuses) all change behaviour on the request path. 150 passed, 0 skipped.
 - **`F19` renumbers ComposeMail statuses** (empty/undecodable MIME 103 → 107) and **`F28` adds
   `airsync:Class`** to 12.1 GetItemEstimate responses; three pre-existing 14.1 tests confirm the 14.1 wire
   form is byte-identical, which is the AGENTS.md invariant that matters here.
+
+## Item 34 — Converter & TLS-helper nits
+**Findings:** `D23` `D24` `D27` `D28` `D29` `D30` `D31` `D32` `D33` `D34` `D35`
+**Commits:** `53b6aa3` (D23) · `917d230` (D24) · `291ea15` (D27) · `a16304f` (D28) · `835ecb7` (D29) ·
+`dafad6a` (D30) · `9f7ea6d` (D31) · `3d09a6a` (D32) · `b2a825b` (D33) · `2e20a28` (D34) · `6115ee6` (D35)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 35 ✓ · one commit per finding, strike shipped with every one ✓ · build 0 warnings ✓ ·
+unit **1535 passed, 0 failed** (Cli 16 · Protocol 108 · Core 939 · WebUi 123 · Server 349) ✓ ·
+live **150 passed, 0 skipped** ✓
+
+**Red-first re-proved independently for all ten behavioural findings** — nine by reversal, plus `D32` and
+`D34` by mutation (disabling the unpaired-high-surrogate trim; reverting the photo cap to `<`). `D33` is a
+pure `var`→explicit-type style change with no behaviour to exercise.
+
+**`D30`'s "coverage" label was pessimistic.** The worker marked the MailConverter half coverage-not-proof
+because both call sites were routed through one `StripMailto` in a single commit — but under reversal
+`MeetingRequest_OrganizerEmail_OnlyStripsTheLeadingMailtoPrefix` fails alongside the Calendar one, so it
+does discriminate the fix. Same distinction as `D14` in item 27: "not separable by reversal within one
+commit" is not the same as "proves nothing".
+
+**Notes:**
+- **`D23` is a real wire-format change**: `email2:ConversationIndex` is no longer emitted at all. The
+  finding offered "emit the full 22-byte MS-OXOMSG header" as the alternative; the worker dropped the
+  element instead, on the grounds that the 5-byte stub was never spec-correct and clients fall back to
+  `ConversationId`. Lower risk, and no test anywhere asserted the element's presence — but a client that
+  keyed threading on its presence would now see none.
+- **`D31` took the documentation-only remedy**, which the finding lists first: the `Security` field help
+  and `docs/configuration.md` now warn that leaving it unset means opportunistic STARTTLS on the standard
+  mail ports. **No default changed**, so the silent-downgrade behaviour itself is unchanged — the finding
+  sanctions this, but the hazard is now documented rather than removed.
+- **`D34` shifts an inclusive boundary**: a photo of exactly the cap size is now included rather than
+  dropped, and the cap is a named `MaxWirePhotoBytes` constant.
+- **`D32`/`D34` needed new `internal` visibility plus an `InternalsVisibleTo` grant on
+  `ActiveSync.Backends.Common`** to be provable — the worker checked empirically that both
+  `TimeZoneInfo.CreateCustomTimeZone` and `Encoding.Unicode.GetString` sanitize the exact byte pattern
+  `D32` needs, so no public surface could observe it. `Backends.Common` carries no `IsPackable`, so the
+  grant cannot leak into a published package — I verified that rather than assuming.
+- **`D27` closes a genuine operational trap**: a rotated CA bundle at the same path was cached forever;
+  the cache now keys on `(path, lastWriteUtc, length)`, mirroring `BackendSettingsValidation.CaCache`.
