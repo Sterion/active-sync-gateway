@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Text;
 
 namespace ActiveSync.Protocol.Http;
@@ -214,9 +215,7 @@ public sealed record EasRequestParameters
 		int commandCode = Array.IndexOf(CommandCodes, Command);
 		if (commandCode < 0)
 			throw new ArgumentException($"Unknown EAS command '{Command}'.");
-		string[] versionParts = ProtocolVersion.Split('.');
-		byte versionByte = (byte)(int.Parse(versionParts[0]) * 10 +
-		                          (versionParts.Length > 1 ? int.Parse(versionParts[1]) : 0));
+		byte versionByte = EncodeProtocolVersion(ProtocolVersion);
 
 		Span<byte> multi = stackalloc byte[4];
 
@@ -280,6 +279,35 @@ public sealed record EasRequestParameters
 	///   than this is unrepresentable -- it must be rejected, not silently wrapped/truncated (W6).
 	/// </summary>
 	private const int MaxFieldBytes = 255;
+
+	/// <summary>
+	///   Encodes "major.minor" into the packed version byte, validated against the same
+	///   <see cref="ProtocolVersionBytes" /> allowlist <see cref="FromBase64" /> reads with (W12):
+	///   an out-of-allowlist version (e.g. "15.0" -&gt; 150) is rejected here instead of emitting a
+	///   byte FromBase64 refuses to read back, and the allowlist check runs on the pre-cast int
+	///   value so an overflowing version (e.g. "28.1" -&gt; 281) cannot wrap into an allowed byte
+	///   (281 wraps to 25, which decodes as "2.5") and be silently accepted as a different,
+	///   wrong version. Parses with NumberStyles.None + InvariantCulture rather than the
+	///   default culture-sensitive style, matching the repo's invariant-culture convention.
+	/// </summary>
+	private static byte EncodeProtocolVersion(string protocolVersion)
+	{
+		string[] versionParts = protocolVersion.Split('.');
+		int major = 0, minor = 0;
+		bool valid = versionParts.Length is 1 or 2
+			&& int.TryParse(versionParts[0], NumberStyles.None, CultureInfo.InvariantCulture, out major)
+			&& (versionParts.Length == 1 ||
+			    int.TryParse(versionParts[1], NumberStyles.None, CultureInfo.InvariantCulture, out minor));
+
+		if (!valid)
+			throw new ArgumentException($"Invalid protocol version '{protocolVersion}'.");
+
+		int versionValue = major * 10 + minor;
+		if (versionValue is < 0 or > byte.MaxValue || Array.IndexOf(ProtocolVersionBytes, (byte)versionValue) < 0)
+			throw new ArgumentException($"Unknown EAS protocol version '{protocolVersion}'.");
+
+		return (byte)versionValue;
+	}
 
 	/// <summary>
 	///   Encodes <paramref name="value" /> for the fixed-position ASCII fields (DeviceId,

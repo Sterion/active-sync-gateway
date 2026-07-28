@@ -251,6 +251,30 @@ public class EasRequestParametersTests
 		Assert.Throws<ArgumentException>(() => original.ToBase64());
 	}
 
+	[Fact]
+	public void ToBase64_UnknownProtocolVersion_IsRejected()
+	{
+		// W12: versionByte = (byte)(major * 10 + minor) is never checked against
+		// ProtocolVersionBytes, so "15.0" silently writes byte 150, which FromBase64 (correctly)
+		// refuses to read back -- the two halves of the documented round trip disagree. ToBase64
+		// must reject an unknown version itself rather than emit a query FromBase64 cannot parse.
+		EasRequestParameters original = new() { Command = "Sync", ProtocolVersion = "15.0" };
+
+		Assert.Throws<ArgumentException>(() => original.ToBase64());
+	}
+
+	[Fact]
+	public void ToBase64_ProtocolVersionByteOverflow_DoesNotWrapIntoAnAllowedByte()
+	{
+		// W12: the unchecked (byte) cast means a version whose arithmetic value overflows 255
+		// could wrap around and coincidentally land on an allowlisted byte (e.g. 281 wraps to
+		// 25, which decodes back as "2.5") -- a completely different, wrong version silently
+		// accepted. Must be rejected on the pre-cast value, not the wrapped one.
+		EasRequestParameters original = new() { Command = "Sync", ProtocolVersion = "28.1" };
+
+		Assert.Throws<ArgumentException>(() => original.ToBase64());
+	}
+
 	[Theory]
 	[InlineData(25, "2.5")]
 	[InlineData(120, "12.0")]

@@ -410,7 +410,7 @@ work. Every finding ID appears in exactly one item.
 > `B8` every authenticated request materializes backend-role rows it never uses, on the Ping/Sync hot path.
 > `A5`/`A6`/`A7` tracker hygiene after a conflict.
 
-**31. Protocol support types** — ~~`W3`~~ ~~`W6`~~ `W12` `W13` `W17` `W18` `W19`
+**31. Protocol support types** — ~~`W3`~~ ~~`W6`~~ ~~`W12`~~ `W13` `W17` `W18` `W19`
 > **Protocol layer — read the hard gate.** `W3` `CompareIds` is intransitive (`9 < 10 < 1a < 9`), so `Sort`
 > can throw or reshuffle a windowed device's items between rounds. `W6` `ToBase64` silently truncates any
 > length-prefixed field over 255 bytes, emitting a blob its own parser cannot read — and `LongId`/
