@@ -30,7 +30,8 @@ public static class MailConverter
 			new XElement(Email + "From", Limit(message.From.ToString(), 32 * 1024)),
 			new XElement(Email + "Subject", message.Subject ?? ""),
 			new XElement(Email + "DateReceived", EasDateTime.ToLong(message.Date.UtcDateTime)),
-			new XElement(Email + "DisplayTo", string.Join("; ", message.To.Mailboxes.Select(m => m.Name ?? m.Address))),
+			new XElement(Email + "DisplayTo", string.Join("; ",
+				message.To.Mailboxes.Select(m => string.IsNullOrEmpty(m.Name) ? m.Address : m.Name))),
 			new XElement(Email + "ThreadTopic", NormalizeTopic(message.Subject)),
 			new XElement(Email + "Importance", message.Priority switch
 			{
