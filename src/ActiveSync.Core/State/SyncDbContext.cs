@@ -125,7 +125,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 		modelBuilder.Entity<LogEntry>(e =>
 			e.HasIndex(l => l.TimestampUtc));
 
-		// Single well-known row (Id=1) — same explicit-key idiom as AccountsStamp, and the
+		// Single well-known row (Id=1) — same explicit-key idiom as DataChange (above), and the
 		// primary-key conflict is what serializes concurrent first-boot generation races.
 		// ConcurrencyToken (K6) additionally serializes the *replace an unreadable/expiring row*
 		// race, which the primary-key conflict alone doesn't cover (that path is an UPDATE).
