@@ -126,6 +126,65 @@ public sealed class DataChangeStampTests : IDisposable
 		Assert.Single(verify.DataChanges);
 	}
 
+	[Fact]
+	public async Task UserStore_ConcurrentFirstBump_IsToleratedInsteadOfARawPkViolation()
+	{
+		// A8, through the actual PUBLIC call site named in the finding (UserStore.cs — the
+		// BumpStampAsync wrapper): UpsertAsync's insert branch stages the new User row, THEN
+		// stages the "users" area's first-ever DataChange row (BumpStampAsync's own BumpAsync
+		// call finds no row yet), and only then saves. ConcurrentWriteInterceptor injects a
+		// genuine competing commit of that SAME first row immediately before our SaveChangesAsync
+		// sends its SQL — i.e. strictly AFTER our own read-found-nothing, so this is a real
+		// collision (unlike committing the racer BEFORE calling UpsertAsync, which would just let
+		// our own read see it and take the trivial update branch, never exercising the conflict
+		// at all). Before the fix (BumpStampAsync called the racing BumpAsync + a bare
+		// SaveChangesAsync) this surfaced the raw SQLite PK violation as an unhandled exception.
+		ConcurrentWriteInterceptor interceptor = new(() =>
+		{
+			using SyncDbContext racer = StateTestSupport.NewContext(_connection);
+#pragma warning disable VSTHRD103
+			racer.DataChanges.Add(new DataChange
+			{
+				Key = DataChangeAreas.Users, Version = Guid.NewGuid(), UpdatedUtc = DateTime.UtcNow,
+			});
+#pragma warning restore VSTHRD103
+			racer.SaveChanges();
+		});
+		UserStore raced = new(new InterceptedDbContextFactory(_connection, interceptor));
+
+		await raced.UpsertAsync("anna", new UserOptions { MailAddress = "a@x" }, CancellationToken.None);
+
+		Assert.NotNull(await _users.GetAsync("anna", CancellationToken.None));
+		await using SyncDbContext verify = _factory.CreateDbContext();
+		Assert.Single(await verify.DataChanges.Where(c => c.Key == DataChangeAreas.Users).ToListAsync());
+	}
+
+	[Fact]
+	public async Task GlobalSettingStore_ConcurrentFirstBump_IsToleratedInsteadOfARawPkViolation()
+	{
+		// A8, through the second call site the finding names (GlobalSettingStore.cs): same
+		// mechanism as UserStore_ConcurrentFirstBump_..., but for the "settings" area and
+		// UpsertAsync's own BumpStampAsync wrapper.
+		ConcurrentWriteInterceptor interceptor = new(() =>
+		{
+			using SyncDbContext racer = StateTestSupport.NewContext(_connection);
+#pragma warning disable VSTHRD103
+			racer.DataChanges.Add(new DataChange
+			{
+				Key = DataChangeAreas.Settings, Version = Guid.NewGuid(), UpdatedUtc = DateTime.UtcNow,
+			});
+#pragma warning restore VSTHRD103
+			racer.SaveChanges();
+		});
+		GlobalSettingStore raced = new(new InterceptedDbContextFactory(_connection, interceptor));
+
+		await raced.UpsertAsync("ActiveSync:ReadOnly", "true", CancellationToken.None);
+
+		Assert.Equal("true", await _settings.GetAsync("ActiveSync:ReadOnly", CancellationToken.None));
+		await using SyncDbContext verify = _factory.CreateDbContext();
+		Assert.Single(await verify.DataChanges.Where(c => c.Key == DataChangeAreas.Settings).ToListAsync());
+	}
+
 	private sealed class TestContextFactory(SqliteConnection connection) : ISyncDbContextFactory
 	{
 		public SyncDbContext CreateDbContext()

@@ -404,7 +404,7 @@ work. Every finding ID appears in exactly one item.
 > against a server that omits `address-data`. `H16` transport failures escape the "never break folder sync
 > over a share" guards. `H22`/`H23` shared calendars folded into own availability; no default calendar.
 
-**30. State layer & retention** — ~~`A5`~~ ~~`A6`~~ ~~`A7`~~ `A8` `A9` `B8` `B16` `B18`
+**30. State layer & retention** — ~~`A5`~~ ~~`A6`~~ ~~`A7`~~ ~~`A8`~~ `A9` `B8` `B16` `B18`
 > `A9` a duplicate `BackendKey` from any store makes **every** FolderSync for that user 500 until the backend
 > stops emitting it. `A8` the race-safe stamp helper is dead code while both call sites use the racing one.
 > `B8` every authenticated request materializes backend-role rows it never uses, on the Ping/Sync hot path.

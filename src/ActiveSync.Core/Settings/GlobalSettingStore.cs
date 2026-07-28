@@ -86,7 +86,6 @@ public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)
 		}
 
 		await BumpStampAsync(db, ct).ConfigureAwait(false);
-		await db.SaveChangesAsync(ct).ConfigureAwait(false);
 	}
 
 	public async Task<bool> DeleteAsync(string key, CancellationToken ct)
@@ -99,10 +98,15 @@ public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)
 			return false;
 		db.GlobalSettings.Remove(row);
 		await BumpStampAsync(db, ct).ConfigureAwait(false);
-		await db.SaveChangesAsync(ct).ConfigureAwait(false);
 		return true;
 	}
 
+	/// <summary>
+	///   Bumps the "settings" area AND saves — the one SaveChangesAsync for whichever mutation the
+	///   caller staged. A8: uses <see cref="DataChangeStamps.BumpAndSaveAsync" /> rather than the
+	///   racing <see cref="DataChangeStamps.BumpAsync" /> + a bare save, so two replicas' very first
+	///   bump of this area resolves as an update instead of a raw PK violation.
+	/// </summary>
 	private static Task BumpStampAsync(SyncDbContext db, CancellationToken ct) =>
-		DataChangeStamps.BumpAsync(db, DataChangeAreas.Settings, ct);
+		DataChangeStamps.BumpAndSaveAsync(db, DataChangeAreas.Settings, ct);
 }

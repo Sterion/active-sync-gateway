@@ -78,7 +78,6 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 				return (row.UserId, false);
 			ToEntity(declarationIfMissing, row);
 			await BumpStampAsync(db, ct).ConfigureAwait(false);
-			await db.SaveChangesAsync(ct).ConfigureAwait(false);
 			return (row.UserId, true);
 		}
 
@@ -89,11 +88,15 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 #pragma warning disable VSTHRD103
 		db.Users.Add(created);
 #pragma warning restore VSTHRD103
-		if (declarationIfMissing is not null)
-			await BumpStampAsync(db, ct).ConfigureAwait(false);
 		try
 		{
-			await db.SaveChangesAsync(ct).ConfigureAwait(false);
+			// A8: BumpStampAsync now bumps AND saves (DataChangeStamps.BumpAndSaveAsync), tolerating
+			// a concurrent replica's first-ever bump of this area; when there is no declaration to
+			// bump, save directly — either way this is the ONE SaveChangesAsync for this branch.
+			if (declarationIfMissing is not null)
+				await BumpStampAsync(db, ct).ConfigureAwait(false);
+			else
+				await db.SaveChangesAsync(ct).ConfigureAwait(false);
 			return (created.UserId, declarationIfMissing is not null);
 		}
 		catch (DbUpdateException ex) when (DbExceptions.IsUniqueViolation(ex))
@@ -149,10 +152,9 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 
 		user.Login = to;
 		user.UpdatedUtc = DateTime.UtcNow;
-		await BumpStampAsync(db, ct).ConfigureAwait(false);
 		try
 		{
-			await db.SaveChangesAsync(ct).ConfigureAwait(false);
+			await BumpStampAsync(db, ct).ConfigureAwait(false);
 			return RenameOutcome.Renamed;
 		}
 		catch (DbUpdateException ex) when (DbExceptions.IsUniqueViolation(ex))
@@ -178,7 +180,6 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 			return false;
 		db.Users.Remove(user);
 		await BumpStampAsync(db, ct).ConfigureAwait(false);
-		await db.SaveChangesAsync(ct).ConfigureAwait(false);
 		return true;
 	}
 
@@ -269,10 +270,9 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 #pragma warning disable VSTHRD103
 			db.Users.Add(entry);
 #pragma warning restore VSTHRD103
-			await BumpStampAsync(db, ct).ConfigureAwait(false);
 			try
 			{
-				await db.SaveChangesAsync(ct).ConfigureAwait(false);
+				await BumpStampAsync(db, ct).ConfigureAwait(false);
 				return;
 			}
 			catch (DbUpdateException ex) when (DbExceptions.IsUniqueViolation(ex))
@@ -294,7 +294,6 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 
 		ToEntity(options, entry);
 		await BumpStampAsync(db, ct).ConfigureAwait(false);
-		await db.SaveChangesAsync(ct).ConfigureAwait(false);
 	}
 
 	/// <summary>
@@ -318,7 +317,6 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 		entry.BackendRoles.Clear();
 		entry.UpdatedUtc = DateTime.UtcNow;
 		await BumpStampAsync(db, ct).ConfigureAwait(false);
-		await db.SaveChangesAsync(ct).ConfigureAwait(false);
 		return true;
 	}
 
@@ -439,10 +437,13 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 	}
 
 	/// <summary>
-	///   Bumps the "users" area. A UserBackendRoles write bumps this SAME area rather than getting
-	///   its own: a stamp belongs to a consumer's aggregate, and the resolver rebuilds the whole
-	///   user snapshot on any bump.
+	///   Bumps the "users" area AND saves — the one SaveChangesAsync for whichever mutation the
+	///   caller staged. A UserBackendRoles write bumps this SAME area rather than getting its own:
+	///   a stamp belongs to a consumer's aggregate, and the resolver rebuilds the whole user
+	///   snapshot on any bump. A8: uses <see cref="DataChangeStamps.BumpAndSaveAsync" /> rather than
+	///   the racing <see cref="DataChangeStamps.BumpAsync" /> + a bare save, so two replicas' very
+	///   first bump of this area resolves as an update instead of a raw PK violation.
 	/// </summary>
 	private static Task BumpStampAsync(SyncDbContext db, CancellationToken ct) =>
-		DataChangeStamps.BumpAsync(db, DataChangeAreas.Users, ct);
+		DataChangeStamps.BumpAndSaveAsync(db, DataChangeAreas.Users, ct);
 }
