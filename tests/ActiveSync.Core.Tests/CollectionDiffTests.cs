@@ -131,4 +131,29 @@ public class CollectionDiffTests
 		Assert.Equal(2, result.NewSnapshot.Count);
 		Assert.DoesNotContain(result.Deletes[0], result.NewSnapshot.Keys);
 	}
+
+	[Fact]
+	public void MixedNumericAndNonNumericIds_SortOrderIsIndependentOfInputOrder()
+	{
+		// W3: CompareIds computed "9" < "10" (numeric), "10" < "1a" (ordinal fallback), but
+		// "9" > "1a" (ordinal fallback) -- an intransitive comparator. List.Sort has no
+		// obligation to produce the same result for the same *set* of ids when the comparator
+		// is not a total order; empirically it produces a different order depending purely on
+		// the ids' original enumeration order, which is exactly the "silently reshuffling which
+		// items a windowed device receives across rounds" defect the finding describes. A
+		// correct (total-order) comparer must sort the same three ids identically no matter
+		// which order the backend happened to hand them back in.
+		Dictionary<string, string> currentA = new() { ["9"] = "r", ["10"] = "r", ["1a"] = "r" };
+		Dictionary<string, string> currentB = new() { ["1a"] = "r", ["9"] = "r", ["10"] = "r" };
+		Dictionary<string, string> currentC = new() { ["10"] = "r", ["1a"] = "r", ["9"] = "r" };
+
+		string[] orderA = CollectionDiff.Compute(Map(), currentA, 100).Adds.Select(a => a.ServerId).ToArray();
+		string[] orderB = CollectionDiff.Compute(Map(), currentB, 100).Adds.Select(a => a.ServerId).ToArray();
+		string[] orderC = CollectionDiff.Compute(Map(), currentC, 100).Adds.Select(a => a.ServerId).ToArray();
+
+		Assert.Equal(orderA, orderB);
+		Assert.Equal(orderA, orderC);
+		// And the numeric ids must still sort as a block ahead of the non-numeric one.
+		Assert.Equal(["9", "10", "1a"], orderA);
+	}
 }

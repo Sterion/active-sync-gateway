@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Ruben Andersen
 // SPDX-License-Identifier: MIT
 
+using System.Globalization;
+
 namespace ActiveSync.Protocol.Sync;
 
 public sealed record ItemChange(string ServerId, string Revision);
@@ -97,9 +99,22 @@ public static class CollectionDiff
 	private static int CompareIds(string a, string b)
 	{
 		// Numeric ids (IMAP UIDs, DAV short ids) compare numerically so windows fill in
-		// ascending id order; fall back to ordinal for anything else.
-		if (long.TryParse(a, out long na) && long.TryParse(b, out long nb))
+		// ascending id order; fall back to ordinal for anything else. W3: comparing "na vs nb
+		// when both parse, else ordinal(a, b)" is NOT a total order -- "9" < "10" (numeric),
+		// "10" < "1a" (ordinal), but "9" > "1a" (ordinal) is a genuine cycle, which makes
+		// List.Sort's result depend on the ids' original order rather than their values. Make
+		// it total by comparing (isNumeric, value) as one ordered pair: every numeric id sorts
+		// strictly before every non-numeric id, and numeric-vs-numeric / non-numeric-vs-non-
+		// numeric each fall back to their own transitive comparison. NumberStyles.None +
+		// InvariantCulture (rather than the default culture-sensitive style) so " 5"/"+5" are
+		// not silently treated as numeric.
+		bool aNumeric = long.TryParse(a, NumberStyles.None, CultureInfo.InvariantCulture, out long na);
+		bool bNumeric = long.TryParse(b, NumberStyles.None, CultureInfo.InvariantCulture, out long nb);
+
+		if (aNumeric && bNumeric)
 			return na.CompareTo(nb);
+		if (aNumeric != bNumeric)
+			return aNumeric ? -1 : 1;
 		return string.CompareOrdinal(a, b);
 	}
 }
