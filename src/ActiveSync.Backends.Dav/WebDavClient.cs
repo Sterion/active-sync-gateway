@@ -18,12 +18,17 @@ namespace ActiveSync.Backends.Dav;
 public sealed class WebDavClient : IDisposable
 {
 	/// <summary>
-	///   Ceiling on a single DAV response body (H24). Multistatus listings for a large collection
-	///   are legitimately several MB, so the cap is generous — its job is to bound a malicious or
-	///   malfunctioning server that would otherwise stream an unbounded body into memory, not to
-	///   second-guess a real listing. Exposed internally so tests can lower it.
+	///   Ceiling on a single DAV response body (H24, narrowed by H17). Multistatus listings for a
+	///   large collection are legitimately several MB, so the cap is generous — its job is to bound a
+	///   malicious or malfunctioning server that would otherwise stream an unbounded body into memory,
+	///   not to second-guess a real listing. Deliberately decoupled from and lower than
+	///   <see cref="BackendHttpClientFactory.MaxBackendResponseBytes" /> (128 MiB): that shared ceiling
+	///   exists for JMAP's legitimate large blob/attachment downloads, but a DAV multistatus response
+	///   is never remotely that large, and XDocument's in-memory tree runs 5-10x the wire size — a
+	///   hostile 128 MB multistatus would amplify to roughly 1 GB of managed heap. Exposed internally
+	///   so tests can lower it further.
 	/// </summary>
-	internal static readonly long DefaultMaxResponseBytes = BackendHttpClientFactory.MaxBackendResponseBytes;
+	internal static readonly long DefaultMaxResponseBytes = 32L * 1024 * 1024;
 
 	private readonly Uri _baseUri;
 	private readonly HttpClient _http;
@@ -32,6 +37,17 @@ public sealed class WebDavClient : IDisposable
 
 	/// <summary>Per-response size ceiling; see <see cref="DefaultMaxResponseBytes" />.</summary>
 	internal long MaxResponseBytes { get; set; } = DefaultMaxResponseBytes;
+
+	/// <summary>
+	///   Ceiling on XML character count during parse (H17) — decoupled from
+	///   <see cref="MaxResponseBytes" />: a response can be well within the byte ceiling and still
+	///   expand into an excessive character count once XDocument materializes an XElement/XAttribute/
+	///   XText per node. A few million is far above any real multistatus listing. Exposed internally
+	///   so tests can lower it.
+	/// </summary>
+	internal long MaxCharactersInDocument { get; set; } = DefaultMaxCharactersInDocument;
+
+	private const long DefaultMaxCharactersInDocument = 8_000_000;
 
 	public WebDavClient(
 		Uri baseUri,
@@ -370,6 +386,7 @@ public sealed class WebDavClient : IDisposable
 			DtdProcessing = DtdProcessing.Prohibit,
 			XmlResolver = null,
 			MaxCharactersFromEntities = 0,
+			MaxCharactersInDocument = MaxCharactersInDocument,
 			Async = true
 		};
 		using XmlReader reader = XmlReader.Create(stream, settings);

@@ -361,6 +361,44 @@ public sealed class WebDavClientTests
 		}
 	}
 
+	// H17: WebDavClient.DefaultMaxResponseBytes shared the SAME 128 MiB ceiling as JMAP's blob
+	// downloads (BackendHttpClientFactory.MaxBackendResponseBytes) — but a DAV multistatus is legitimately
+	// several MB, never remotely close to a legitimate JMAP attachment, and XDocument materializes
+	// roughly 5-10x the wire size (an XElement/XAttribute/XText per node) on top of the already-buffered
+	// HTTP response — so a hostile 128 MB multistatus amplifies to ~1 GB of managed heap. The DAV ceiling
+	// must be decoupled from and lower than JMAP's, which stays 128 MiB for its own legitimate use.
+	[Fact]
+	public void DefaultMaxResponseBytes_IsDecoupledFromAndLowerThanTheJmapBlobCeiling()
+	{
+		Assert.NotEqual(ActiveSync.Backends.Common.BackendHttpClientFactory.MaxBackendResponseBytes,
+			WebDavClient.DefaultMaxResponseBytes);
+		Assert.True(WebDavClient.DefaultMaxResponseBytes <= 32L * 1024 * 1024,
+			$"DAV's default response ceiling ({WebDavClient.DefaultMaxResponseBytes} bytes) should be " +
+			"proportionate to a multistatus listing, not JMAP's much larger blob-download ceiling");
+	}
+
+	// H17: there was no MaxCharactersInDocument ceiling at all on the XmlReaderSettings used to parse
+	// a multistatus — only the byte-level MaxResponseBytes cap existed. A response entirely within the
+	// byte ceiling can still amplify into an excessive character count during parse; the ceiling below
+	// must be independently enforced regardless of how generous the byte cap is.
+	[Fact]
+	public async Task Propfind_ResponseOverCharacterCeiling_IsRejected()
+	{
+		string multistatus =
+			"<D:multistatus xmlns:D=\"DAV:\"><D:response><D:href>/dav/cal/a.ics</D:href>" +
+			"<D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop><D:getetag>\"" +
+			new string('x', 500) + "\"</D:getetag></D:prop></D:propstat></D:response></D:multistatus>";
+		RecordingHandler stub = new(_ => Xml(multistatus));
+		using WebDavClient client = new(Base, new HttpClient(stub))
+		{
+			MaxResponseBytes = 1_000_000, // well within the byte ceiling — this must not be what blocks it
+			MaxCharactersInDocument = 50  // but the parse itself is capped far below the document's length
+		};
+
+		await Assert.ThrowsAsync<ActiveSync.Contracts.BackendException>(() =>
+			client.PropfindAsync("/dav/cal/", 1, new XElement(XName.Get("propfind", "DAV:")), CancellationToken.None));
+	}
+
 	private static HttpResponseMessage Ok(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)
