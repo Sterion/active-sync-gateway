@@ -168,10 +168,7 @@ internal static class CliVerbs
 	/// <summary>Container HEALTHCHECK: probe /healthz over the loopback and exit 0/1.</summary>
 	internal static async Task<int> HealthcheckAsync()
 	{
-		string baseUrl = Environment.GetEnvironmentVariable("Kestrel__Endpoints__Http__Url")
-		                 ?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS")?.Split(';')[0]
-		                 ?? "http://localhost:5080";
-		baseUrl = baseUrl.Replace("0.0.0.0", "localhost").Replace("[::]", "localhost").TrimEnd('/');
+		string baseUrl = ResolveHealthcheckBaseUrl(Environment.GetEnvironmentVariable);
 		try
 		{
 			using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(4) };
@@ -182,6 +179,22 @@ internal static class CliVerbs
 		{
 			return 1;
 		}
+	}
+
+	/// <summary>
+	///   E15: mirrors <c>EasForwardingClient.ResolveBaseUrl</c> — always resolves to 127.0.0.1, never
+	///   "localhost". AGENTS.md's auth-model paragraph states the reason: the gateway is IPv4-only, and
+	///   a "localhost" that resolves ::1 first costs a ~2 s failed connect before falling back to IPv4.
+	///   The container HEALTHCHECK runs this with a 4 s HttpClient timeout inside a 5 s Docker timeout,
+	///   so that stall alone could make a healthy container fail its probe and restart.
+	/// </summary>
+	internal static string ResolveHealthcheckBaseUrl(Func<string, string?> getEnvironmentVariable)
+	{
+		string baseUrl = getEnvironmentVariable("Kestrel__Endpoints__Http__Url")
+		                 ?? getEnvironmentVariable("ASPNETCORE_URLS")?.Split(';')[0]
+		                 ?? "http://127.0.0.1:5080";
+		return baseUrl.Replace("0.0.0.0", "127.0.0.1").Replace("[::]", "127.0.0.1")
+			.Replace("://localhost", "://127.0.0.1").TrimEnd('/');
 	}
 
 	/// <summary>
