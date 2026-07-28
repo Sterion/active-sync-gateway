@@ -50,7 +50,6 @@ The `imap` settings are below; for `jmap` see [the JMAP subsection](#backends-pr
 | `AllowInvalidCertificates` | `false` | Accept any TLS certificate (lab use; wins over `CaCertificatePath`). |
 | `CaCertificatePath` | `null` | PEM file with CA certificates trusted in addition to the system store (private PKI). Validated at startup. |
 | `CheckRevocation` | `false` | Check CRL/OCSP revocation status against `CaCertificatePath`'s trust store. Off by default — most private CAs behind a self-signed/lab setup publish no revocation info, so enabling this against one fails every connection closed. |
-| `PathSeparator` | `null` | IMAP folder path separator override; autodetected when unset. |
 
 ## `Backends:MailSubmit` (required, provider `smtp` or `jmap`)
 

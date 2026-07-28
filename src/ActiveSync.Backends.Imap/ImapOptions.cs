@@ -12,7 +12,4 @@ public sealed class ImapOptions : MailConnectionOptions
 	{
 		Port = 993;
 	}
-
-	/// <summary>IMAP folder path separator override; autodetected when null.</summary>
-	public char? PathSeparator { get; set; }
 }

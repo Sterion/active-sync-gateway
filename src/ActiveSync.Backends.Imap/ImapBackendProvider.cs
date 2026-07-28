@@ -68,12 +68,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 
 	public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role)
 	{
-		return
-		[
-			.. BackendSchemaFields.MailConnection(993),
-			new BackendConfigField("PathSeparator", "Folder path separator", BackendFieldType.String,
-				Help: "Override for the IMAP hierarchy delimiter (a single character). Autodetected when empty.")
-		];
+		return [.. BackendSchemaFields.MailConnection(993)];
 	}
 
 	public string DescribeRole(BackendRole role, ProviderSettings settings)
@@ -274,8 +269,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		       && a.Security == b.Security
 		       && a.AllowInvalidCertificates == b.AllowInvalidCertificates
 		       && a.CaCertificatePath == b.CaCertificatePath
-		       && a.CheckRevocation == b.CheckRevocation
-		       && a.PathSeparator == b.PathSeparator;
+		       && a.CheckRevocation == b.CheckRevocation;
 	}
 
 	private async Task DisposeWatcherAsync(ImapIdleWatcher watcher)

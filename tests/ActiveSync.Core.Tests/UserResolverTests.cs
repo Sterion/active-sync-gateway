@@ -158,7 +158,7 @@ public class UserResolverTests
 					["MailStore"] = new()
 					{
 						Settings = new Dictionary<string, string?>
-							{ ["Host"] = "imap.other", ["UseSsl"] = "true", ["PathSeparator"] = "/" }
+							{ ["Host"] = "imap.other", ["UseSsl"] = "true", ["Security"] = "StartTls" }
 					},
 					["MailSubmit"] = new()
 					{
@@ -175,7 +175,7 @@ public class UserResolverTests
 		Assert.Equal("imap.other", imap.Host);  // overridden
 		Assert.Equal(143, imap.Port);           // inherited
 		Assert.True(imap.UseSsl);               // overridden
-		Assert.Equal('/', imap.PathSeparator);  // overridden
+		Assert.Equal("StartTls", imap.Security); // overridden
 		Assert.Equal(new BackendCredentials("u", "presented-pw"),
 			account.Roles[BackendRole.MailStore].Credentials);
 		Assert.Equal(new BackendCredentials("relay-user", "relay-pw"),
@@ -332,9 +332,9 @@ public class UserResolverTests
 		// B16 (coverage): the doc used to say "Null values are ignored", but a null user setting
 		// actually CLEARS the inherited global key (the removal loop strips the global subtree the
 		// key addresses, and the write loop then skips the null). Pin that so the corrected doc and
-		// the code cannot drift. If null were ignored, the "clears" user would keep the global '/'.
+		// the code cannot drift. If null were ignored, the "clears" user would keep the global value.
 		Dictionary<string, string?> config = BaseConfig();
-		config["ActiveSync:Backends:MailStore:PathSeparator"] = "/";
+		config["ActiveSync:Backends:MailStore:Security"] = "StartTlsWhenAvailable";
 		ActiveSyncOptions options = HostOptions();
 		options.Users = new Dictionary<string, UserOptions>
 		{
@@ -345,7 +345,7 @@ public class UserResolverTests
 				{
 					["MailStore"] = new()
 					{
-						Settings = new Dictionary<string, string?> { ["PathSeparator"] = null },
+						Settings = new Dictionary<string, string?> { ["Security"] = null },
 					},
 				},
 			},
@@ -353,15 +353,15 @@ public class UserResolverTests
 		UserResolver resolver = Resolver(options, config);
 		BackendCredentials presented = new("x", "P");
 
-		// The inheriting user keeps the global separator; the clearing user drops it (back to the
-		// option-class default null) while STILL inheriting the untouched global Host.
+		// The inheriting user keeps the global security setting; the clearing user drops it (back to
+		// the option-class default null) while STILL inheriting the untouched global Host.
 		ImapOptions inherited = resolver.Resolve(presented with { UserName = "inherits" })
 			.Roles[BackendRole.MailStore].Settings.Bind<ImapOptions>();
-		Assert.Equal('/', inherited.PathSeparator);
+		Assert.Equal("StartTlsWhenAvailable", inherited.Security);
 
 		ImapOptions cleared = resolver.Resolve(presented with { UserName = "clears" })
 			.Roles[BackendRole.MailStore].Settings.Bind<ImapOptions>();
-		Assert.Null(cleared.PathSeparator);
+		Assert.Null(cleared.Security);
 		Assert.Equal("imap.global", cleared.Host); // untouched global key still inherited
 	}
 
