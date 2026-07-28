@@ -17,12 +17,16 @@ public sealed class BackendRoleOverride
 	/// <summary>Serve this role with a different provider than the global assignment.</summary>
 	public string? Provider { get; set; }
 
-	/// <summary>Backend login; defaults to the effective MailStore user name (gateway login for MailStore).</summary>
+	/// <summary>
+	///   Backend login; defaults to <see cref="UserOptions.DefaultBackendLogin" />, then to the
+	///   gateway login.
+	/// </summary>
 	public string? UserName { get; set; }
 
 	/// <summary>
-	///   Backend password, plaintext or "enc:v1:..." sealed; defaults to the effective
-	///   MailStore password (the presented EAS password for MailStore itself).
+	///   Backend password, plaintext or "enc:v1:..." sealed; defaults to
+	///   <see cref="UserOptions.DefaultBackendPassword" />, then to the presented EAS password
+	///   (pass-through).
 	/// </summary>
 	public string? Password { get; set; }
 
@@ -49,8 +53,11 @@ public sealed class UserOptions
 	/// <summary>
 	///   Optional gateway password override — decouples the phone's password from the mail
 	///   backend: a "pbkdf2$..." hash (hash-password verb; preferred) or plaintext (startup
-	///   warning). When unset, the phone's password is validated against the MailStore
-	///   role's Password override if configured, else by the MailStore provider's probe.
+	///   warning). When set, it is verified LOCALLY and never sent to any backend. When unset,
+	///   the presented EAS password is verified by the MailStore provider's login probe — and a
+	///   stored MailStore secret then REQUIRES this field to be set (see
+	///   <c>UserResolver.RequireGatewayPasswordForStoredMailSecret</c>), because the probe is
+	///   only honest while the password it sends is the one the phone presented.
 	/// </summary>
 	public string? Password { get; set; }
 
