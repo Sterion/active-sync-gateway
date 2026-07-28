@@ -148,6 +148,26 @@ public class ContactConverterTests
 		return false;
 	}
 
+	/// <summary>
+	///   D34 — the wire photo cap was applied with a strict "&lt;", silently dropping a photo of
+	///   EXACTLY the cap size even though it fits the budget precisely. Drives the internal
+	///   maxPhotoBytes overload directly with a small cap so the boundary can be pinned exactly,
+	///   instead of needing a 96 KB fixture for the real (MaxWirePhotoBytes) cap.
+	/// </summary>
+	[Fact]
+	public void Photo_ExactlyAtTheCap_IsIncluded()
+	{
+		const int cap = 10;
+		string vcf = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:photo-1\r\nFN:Photo Test\r\n" +
+		             $"PHOTO;ENCODING=b;TYPE=JPEG:{Convert.ToBase64String(new byte[cap])}\r\n" +
+		             "END:VCARD\r\n";
+
+		List<XElement>? data = ContactConverter.ToApplicationData(vcf, cap, null);
+
+		Assert.NotNull(data);
+		Assert.Contains(data!, e => e.Name == Contacts + "Picture");
+	}
+
 	[Fact]
 	public void Create_WithoutExistingCard_HasNoPreservedLines()
 	{

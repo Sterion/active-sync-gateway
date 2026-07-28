@@ -31,9 +31,12 @@ public static class ContactConverter
 	///   the store base classes read that as "skip this item", so one corrupt card costs one
 	///   contact instead of the whole Sync response.
 	/// </summary>
+	/// <summary>D34: the wire PHOTO cap, named rather than the undocumented literal it used to be.</summary>
+	internal const int MaxWirePhotoBytes = 96 * 1024;
+
 	public static List<XElement>? ToApplicationData(string vcf, BodyPreference bodyPreference)
 	{
-		return ToApplicationData(vcf, 96 * 1024, bodyPreference.TruncationSize);
+		return ToApplicationData(vcf, MaxWirePhotoBytes, bodyPreference.TruncationSize);
 	}
 
 	/// <summary>
@@ -42,9 +45,10 @@ public static class ContactConverter
 	///   never sent in. <paramref name="noteTruncationSize" /> is null (no truncation) on the
 	///   ghosting path — the merge needs the FULL stored note to re-embed in the vCard, never a
 	///   client-budget-truncated one, or an unrelated edit would permanently cut the note down to
-	///   whatever a past sync's TruncationSize allowed.
+	///   whatever a past sync's TruncationSize allowed. Internal (not private) so tests can drive
+	///   the boundary with a small cap instead of a 96 KB fixture (D34).
 	/// </summary>
-	private static List<XElement>? ToApplicationData(string vcf, int maxPhotoBytes, long? noteTruncationSize = null)
+	internal static List<XElement>? ToApplicationData(string vcf, int maxPhotoBytes, long? noteTruncationSize = null)
 	{
 		if (Vcf.Parse(vcf).FirstOrDefault() is not { } vcard)
 			return null;
@@ -155,7 +159,9 @@ public static class ContactConverter
 			data.Add(new XElement(Contacts + "Birthday", EasDateTime.ToLong(dto.UtcDateTime)));
 
 		RawData? photo = vcard.Photos?.FirstOrDefault(p => p is not null)?.Value;
-		if (photo?.Bytes is { Length: > 0 } bytes && bytes.Length < maxPhotoBytes)
+		// D34: "<=" — a photo of EXACTLY the cap size fits the budget precisely and must not be
+		// silently dropped by a strict "<".
+		if (photo?.Bytes is { Length: > 0 } bytes && bytes.Length <= maxPhotoBytes)
 			data.Add(new XElement(Contacts + "Picture", Convert.ToBase64String(bytes)));
 
 		string? note = vcard.Notes?.FirstOrDefault(n => n is not null)?.Value;
