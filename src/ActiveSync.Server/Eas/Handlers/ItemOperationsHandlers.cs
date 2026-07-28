@@ -83,10 +83,16 @@ public sealed class ItemOperationsHandler(
 		{
 			// "calatt::<serverId>::<index>" = inline calendar-event attachment (16.x);
 			// everything else is a mail attachment reference.
-			BackendAttachment? attachment =
-				fileReference.StartsWith(CalendarConverter.AttachmentReferencePrefix, StringComparison.Ordinal)
-					? await FetchCalendarAttachmentAsync(context, fileReference, ct)
-					: await context.Session.MailStore.GetAttachmentAsync(fileReference, ct);
+			bool isCalendarAttachment =
+				fileReference.StartsWith(CalendarConverter.AttachmentReferencePrefix, StringComparison.Ordinal);
+			// F22: a mail FileReference is client-supplied and names a backend folder directly, just
+			// like LongId below — the store's own parsing is only a shape test, not a membership
+			// test. Gate it through the same per-user folder registry before asking the backend.
+			if (!isCalendarAttachment && !await IsAttachmentFolderRegisteredAsync(context, fileReference, ct))
+				return Failure("6");
+			BackendAttachment? attachment = isCalendarAttachment
+				? await FetchCalendarAttachmentAsync(context, fileReference, ct)
+				: await context.Session.MailStore.GetAttachmentAsync(fileReference, ct);
 			if (attachment is null)
 				return Failure("6");
 			XElement data = new(IO + "Data", Convert.ToBase64String(attachment.Content));
@@ -240,6 +246,22 @@ public sealed class ItemOperationsHandler(
 			: null;
 		return new BodyPreference(type, truncation, false, eas16);
 	}
+
+	/// <summary>
+	///   F22: a mail-attachment FileReference ("{imapBackendKey}|{uid}|{attachmentIndex}",
+	///   DelimitedKey-encoded) is client-supplied and names a backend folder directly — the same
+	///   shape-vs-membership gap the LongId branch above closes. Shared with
+	///   <see cref="GetAttachmentHandler" />, the other command that resolves a FileReference.
+	/// </summary>
+	internal static async Task<bool> IsAttachmentFolderRegisteredAsync(
+		EasContext context, string fileReference, CancellationToken ct)
+	{
+		string[]? parts = DelimitedKey.Decode(fileReference, 3);
+		if (parts is null)
+			return false; // malformed reference — same answer as "not found" to the caller
+		List<UserFolder> registry = await context.State.GetFoldersAsync(context.UserId, ct);
+		return registry.Any(f => string.Equals(f.BackendKey, parts[0], StringComparison.Ordinal));
+	}
 }
 
 /// <summary>GetAttachment (legacy, pre-14.0): returns raw attachment bytes over HTTP.</summary>
@@ -253,6 +275,14 @@ public sealed class GetAttachmentHandler : IEasCommandHandler
 		if (string.IsNullOrEmpty(fileReference))
 		{
 			context.Http.Response.StatusCode = StatusCodes.Status400BadRequest;
+			return;
+		}
+
+		// F22: same folder-registry gate as ItemOperations Fetch's FileReference path — a
+		// client-supplied reference names a backend folder directly.
+		if (!await ItemOperationsHandler.IsAttachmentFolderRegisteredAsync(context, fileReference, ct))
+		{
+			context.Http.Response.StatusCode = StatusCodes.Status404NotFound;
 			return;
 		}
 

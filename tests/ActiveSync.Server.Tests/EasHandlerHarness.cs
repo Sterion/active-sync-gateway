@@ -530,8 +530,20 @@ public sealed class EasHandlerHarness : IDisposable
 			return Task.FromResult<byte[]?>(RawMessage);
 		}
 
+		/// <summary>
+		///   The attachment <see cref="GetAttachmentAsync" /> returns when told to answer instead of
+		///   throwing (F22: proves whether the backend was reached at all, vs. just returning null).
+		/// </summary>
+		public BackendAttachment? Attachment { get; set; }
+
+		/// <summary>Number of times <see cref="GetAttachmentAsync" /> was actually invoked (F22).</summary>
+		public int GetAttachmentCalls { get; private set; }
+
 		public Task<BackendAttachment?> GetAttachmentAsync(string fileReference, CancellationToken ct)
 		{
+			GetAttachmentCalls++;
+			if (Attachment is not null)
+				return Task.FromResult<BackendAttachment?>(Attachment);
 			throw new NotSupportedException();
 		}
 
