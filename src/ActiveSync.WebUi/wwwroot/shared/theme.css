@@ -23,6 +23,7 @@
 	/* Brand + status */
 	--accent: #4f8cff;
 	--accent-fg: #ffffff;
+	--accent-2: #7b5bff;
 	--ok: #3fb950;
 	--warn: #d29922;
 	--danger: #f85149;
@@ -51,6 +52,7 @@
 		--border-strong: #b7c0c9;
 		--accent: #0969da;
 		--accent-fg: #ffffff;
+		--accent-2: #6f42c1;
 		--ok: #1a7f37;
 		--warn: #9a6700;
 		--danger: #d1242f;
@@ -72,6 +74,7 @@
 	--border-strong: #b7c0c9;
 	--accent: #0969da;
 	--accent-fg: #ffffff;
+	--accent-2: #6f42c1;
 	--ok: #1a7f37;
 	--warn: #9a6700;
 	--danger: #d1242f;
