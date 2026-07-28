@@ -674,7 +674,7 @@ entries from the Search page's token table (`src/ActiveSync.Protocol/Wbxml/Wbxml
 Page 15: Search); add a round-trip test asserting `Search/Schema` and `Search/Supported` are not
 encodable (mirroring how other unknown-tag tests work) so the mistake cannot silently return.
 
-`N10` **Nit** `LogTextTests.BidiOverrideCharacters_AreNeutralized`
+~~`N10`~~ **Nit** `LogTextTests.BidiOverrideCharacters_AreNeutralized`
 (`tests/ActiveSync.Server.Tests/LogTextTests.cs`) embeds the same raw, unterminated bidi-override
 characters (U+202E, U+2069, U+202A, U+2066) as string-literal test data that `W9` (item 37) fixed in
 `WireLog.cs` and `WireLogTests.cs` — the identical Trojan Source hazard (CVE-2021-42574): an
