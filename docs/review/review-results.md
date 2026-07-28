@@ -1638,3 +1638,46 @@ H16, `GetBusyPeriods_Self_ExcludesSharedCalendars` H22,
   live run is Stalwart. The mechanism (one PROPFIND per home set instead of per folder) is proven by the
   unit test and the suite is green, but the Axigen async-indexing interaction `H5` names is NOT exercised
   here. `scripts/test-fast` covers Axigen if someone wants that confirmation.
+
+## Item 30 — State layer & retention
+**Findings:** `A5` `A6` `A7` `A8` `A9` `B8` `B16` `B18`
+**Commits:** `e758475` (A5) · `394766d` (A6) · `3cdd902` (A7) · `df965b0` (A8) · `51c2246` (A9) ·
+`6d3326c` (B8) · `a0ddc5a` (B16, B18 — cluster, read against both IDs)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 31 ✓ · strike shipped with every commit ✓ · build 0 warnings ✓ ·
+unit **1490 passed, 0 failed** (Cli 16 · Protocol 99 · Core 922 · WebUi 120 · Server 333) ✓ ·
+live **150 passed, 0 skipped** ✓
+
+**Red-first re-proved independently for all six that claimed it** — reversal gave 7 failures:
+`UserStore_ConcurrentFirstBump_...` + `GlobalSettingStore_ConcurrentFirstBump_...` (A8),
+`CommitFolderHierarchy_ConcurrencyConflict_DoesNotPoisonLaterSaveOnSameContext` (A5),
+`RecycleAll_OneThrowingProviderTrim_StillTrimsTheRestUnaffected` (A7),
+`RefreshFolderRegistry_DuplicateBackendKey_DedupesInsteadOfPermanentlyFailing` (A9),
+`GetOrCreateUser_HotPath_DoesNotJoinBackendRoles` (B8),
+`CountDeletionImpact_IncludesOofSettingsAndWebSessionRevocations` (B18). `A6` (coverage) and `B16`
+(doc-only) correctly absent.
+
+**The live suite was run although the item is unmarked**, because `A9` sits in the FolderSync path and
+`B8` on the authenticated hot path — both reachable over HTTP on every request. 150 passed, 0 skipped.
+
+**Notes:**
+- **`A9` turns a hard failure into a silent drop, deliberately.** A duplicate `BackendKey` from a
+  misbehaving store previously 500'd every FolderSync for that user; it now dedupes and logs a warning, so
+  the extra folder disappears rather than the hierarchy breaking. That is the finding's own remedy, and
+  the warning is the only signal an operator gets — worth knowing when diagnosing "a folder vanished".
+- **`A6` is coverage and the reasoning is sound**: the race is a few instructions inside a fully
+  synchronous method with no await point to gate a deterministic test on, and the fix is a one-line
+  value-compared `TryRemove`. Reproducing it would need a production-only seam or a probabilistic stress
+  loop. Labelled in both the test comment and the commit.
+- **`A8` has an interaction the worker flagged and did not test in isolation.** Routing `BumpStampAsync`
+  through `BumpAndSaveAsync` moved it inside two `try`/`catch` blocks that already handle a *different*
+  unique violation (a Login collision). The worker traced that `BumpAndSaveAsync` rethrows the original
+  exception unchanged when its re-read finds no winner, so the outer handler still fires — but that exact
+  interaction is covered only by the suite passing, not by a test aimed at it.
+- **`B16` is doc-only but is NOT in the standing doc-only list**, and the worker said so rather than
+  quietly treating it as one. Its secondary suggestion — splitting the content delete behind an explicit
+  `includeContent` parameter so the destructive branch cannot be reached by omission — was **not**
+  implemented and was flagged rather than dropped. That half of the finding is still open in substance
+  even though the ID is struck.
+- **`SyncStateService`'s constructor gained an optional `ILogger` parameter** for A9's warning; backward
+  compatible, no call site needed updating.
