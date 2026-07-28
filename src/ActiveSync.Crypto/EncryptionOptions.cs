@@ -11,12 +11,16 @@ public sealed class EncryptionOptions
 	///   Master key for local content encryption at rest — ANY string works. A base64 value
 	///   decoding to exactly 32 bytes is used as the raw 256-bit key ('openssl rand -base64
 	///   32'); anything else is a passphrase, stretched to 256 bits with PBKDF2-SHA256.
+	///   K23: surrounding whitespace is stripped (load-bearing for a trailing newline from
+	///   <c>echo … &gt; key</c> or a base64 value with incidental padding), so on the passphrase
+	///   path any leading/trailing whitespace you type carries no entropy.
 	/// </summary>
 	public string? Key { get; set; }
 
 	/// <summary>
 	///   Path to a file containing the key (docker-secret friendly; same raw-or-passphrase
 	///   interpretation as <see cref="Key" />). Mutually exclusive with <see cref="Key" />.
+	///   K23: the file's contents are whitespace-trimmed the same way <see cref="Key" /> is.
 	/// </summary>
 	public string? KeyFile { get; set; }
 
@@ -36,6 +40,8 @@ public sealed class EncryptionOptions
 	///   startup (there is deliberately no fixed fallback salt; see
 	///   <see cref="EncryptionKeyLoader.TryLoadKey" />). Ignored on the raw base64-32-byte key
 	///   path, which skips PBKDF2 entirely and needs no salt.
+	///   K23: surrounding whitespace is stripped, so it carries no entropy — <c>" prod "</c> and
+	///   <c>"prod"</c> derive the same key.
 	/// </summary>
 	public string? KeyDerivationSalt { get; set; }
 }
