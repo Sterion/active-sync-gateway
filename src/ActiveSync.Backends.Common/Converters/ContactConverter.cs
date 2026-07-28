@@ -66,7 +66,7 @@ public static class ContactConverter
 		Add(Contacts + "FileAs", vcard.DisplayNames?.FirstOrDefault(d => d is not null)?.Value);
 
 		int emailIndex = 1;
-		foreach (var email in vcard.EMails.OrderByPref())
+		foreach (TextProperty email in vcard.EMails.OrderByPref())
 		{
 			if (email?.Value is not { } address || emailIndex > 3)
 				continue;
@@ -74,7 +74,7 @@ public static class ContactConverter
 			emailIndex++;
 		}
 
-		foreach (var phone in vcard.Phones.OrderByPref())
+		foreach (TextProperty phone in vcard.Phones.OrderByPref())
 		{
 			if (phone?.Value is not { } number)
 				continue;
@@ -125,7 +125,7 @@ public static class ContactConverter
 		// address of the same class must be skipped ENTIRELY (not field-by-field), or its
 		// fields would blend with the first address's into one inconsistent record.
 		HashSet<string> filledAddressSlots = new(StringComparer.Ordinal);
-		foreach (var address in vcard.Addresses.OrderByPref())
+		foreach (AddressProperty address in vcard.Addresses.OrderByPref())
 		{
 			if (address?.Value is not { } adr)
 				continue;
@@ -347,7 +347,7 @@ public static class ContactConverter
 		HashSet<string> addresses = new(StringComparer.OrdinalIgnoreCase);
 		if (Vcf.Parse(vcf).FirstOrDefault() is not { } vcard)
 			return addresses;
-		foreach (var email in vcard.EMails.OrderByPref())
+		foreach (TextProperty email in vcard.EMails.OrderByPref())
 		{
 			if (addresses.Count >= count)
 				break;
