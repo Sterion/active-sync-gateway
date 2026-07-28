@@ -138,8 +138,10 @@ src/ActiveSync.Core/        Provider engine (BackendProviderRegistry, CompositeB
 src/ActiveSync.Backends.Common/  Shared building blocks: MIME/iCal/vCard ⇄ EAS converters
                             + TLS/wire-logging helpers + the shared backend-options bases
                             (NetworkBackendOptions = the TLS knobs; MailConnectionOptions =
-                            Host/Port/UseSsl/Security). Depends on Core (+ MailKit, Ical.Net,
-                            FolkerKinzel.VCards) so those deps stay OUT of Core.
+                            Host/Port/UseSsl/Security). Depends on Contracts ONLY (+ MailKit,
+                            Ical.Net, FolkerKinzel.VCards) so those deps stay OUT of Core — the
+                            absence of a Core reference is test-enforced
+                            (DependencyRuleTests.BackendsCommon_DoesNotReferenceCore).
                             OPTIONS CONVENTION: a provider's own options class lives in ITS
                             assembly (e.g. ImapOptions, JmapOptions), deriving from the Common
                             bases and adding only its specifics; bound via ProviderSettings.
