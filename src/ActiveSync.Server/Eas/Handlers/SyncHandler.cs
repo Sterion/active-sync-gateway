@@ -161,6 +161,7 @@ public sealed partial class SyncHandler(
 		if (!anyPayload && responses.Count == 0 && waitSeconds is { } wait && pendingWaitCollections.Count > 0)
 		{
 			wait = Math.Clamp(wait, options.Value.Eas.MinHeartbeatSeconds, options.Value.Eas.MaxHeartbeatSeconds);
+			DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(wait);
 			using IDisposable longPoll =
 				Core.Observability.GatewayMetrics.TrackLongPoll(context.UserName);
 			bool changed = await WaitWithWatchdogAsync(
@@ -182,6 +183,19 @@ public sealed partial class SyncHandler(
 						anyPayload = true;
 					}
 				}
+
+			// F27: a collection with GetChanges=0 is still classified waitable — PendingChangeDetector
+			// ignores GetChanges entirely — so the watchdog can wake this poll for a collection that
+			// can never actually report anything, and the re-process above then finds nothing new.
+			// Answering immediately here would turn the client's heartbeat into a tight re-poll loop
+			// (LongPollWatchdog's own E7 rationale, reproduced one layer up); idle out the remaining
+			// window instead, exactly as WaitWithWatchdogAsync's own race does for a genuine "no change".
+			if (!anyPayload)
+			{
+				TimeSpan remaining = deadline - DateTime.UtcNow;
+				if (remaining > TimeSpan.Zero)
+					await Task.Delay(remaining, ct);
+			}
 		}
 
 		if (responses.Count == 0)

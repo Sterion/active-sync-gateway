@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Xml.Linq;
 using ActiveSync.Contracts;
 using ActiveSync.Core.State;
@@ -190,6 +191,45 @@ public sealed class SyncConformanceTests : IDisposable
 		// CollectionStateStore.ReadAppliedAdds uses ?? []) — unguarded here, this throws and wedges
 		// the folder permanently (every subsequent Sync for this collection hits the same row).
 		Assert.Equal(SyncCollectionOptions.Default, resolved);
+	}
+
+	// ---- item 23 F27: GetChanges=0 must not turn a watchdog false-positive into a tight re-poll ----
+	[Fact]
+	public async Task F27_GetChanges0_WatchdogFalsePositive_HonoursTheHeartbeat_NotATightRepoll()
+	{
+		_harness.Options.Eas.MinHeartbeatSeconds = 1;
+		_harness.Options.Eas.WatchdogSeconds = 1; // fires well before the 2s heartbeat deadline
+
+		UserFolder inbox = await RegisterInboxAsync();
+		SyncHandler handler = NewSyncHandler();
+
+		// Prime: initial sync establishes key 1 with an empty snapshot.
+		await _harness.RunAsync(handler, "Sync", SyncRequest(inbox.ServerId, "0"));
+
+		// The backend now differs from the stored (empty) snapshot — PendingChangeDetector (which
+		// ignores GetChanges entirely) reports this as a pending change and wakes the watchdog...
+		_harness.Session.Store.Revisions["10"] = "a";
+
+		// ...but the client explicitly asked NOT to be told about server changes on this collection,
+		// so re-processing it can never actually produce a payload.
+		XDocument request = new(new XElement(AS + "Sync",
+			new XElement(AS + "HeartbeatInterval", "2"),
+			new XElement(AS + "Collections",
+				new XElement(AS + "Collection",
+					new XElement(AS + "SyncKey", "1"),
+					new XElement(AS + "CollectionId", inbox.ServerId),
+					new XElement(AS + "GetChanges", "0")))));
+
+		Stopwatch sw = Stopwatch.StartNew();
+		XDocument? response = await _harness.RunAsync(handler, "Sync", request);
+		sw.Stop();
+
+		// The canonical "no changes" answer either way...
+		Assert.Null(response);
+		// ...but it must not come back the instant the watchdog's false-positive re-check resolves —
+		// that turns the client's 2s heartbeat into an effective ~1s tight re-poll loop.
+		Assert.True(sw.ElapsedMilliseconds >= 1700,
+			$"expected Sync to idle out the heartbeat (~2s), returned after {sw.ElapsedMilliseconds}ms");
 	}
 
 	// ---- F7: a client Change to an item the backend moved on must return Status 7, not overwrite ----
