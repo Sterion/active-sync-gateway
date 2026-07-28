@@ -67,6 +67,13 @@ public static class WireLog
 		// diff) would render the remainder of the line reordered, showing a reviewer something
 		// different from what the compiler sees. U+202A-202E are the bidi override/embedding
 		// controls (LRE/RLE/PDF/LRO/RLO); U+2066-2069 are the bidi isolates (LRI/RLI/FSI/PDI).
-		return char.IsControl(c) || c is (>= '\u202A' and <= '\u202E') or (>= '\u2066' and <= '\u2069');
+		// W10: U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR (categories Zl/Zp) — written
+		// as escapes, same reason as the bidi range above. Neither is char.IsControl, so a
+		// hostile string can forge a line break to a JSON/CLEF sink or a line-splitting log
+		// viewer even on the allowLineStructure:false, single-field path (LogText.Clean) whose
+		// whole purpose is to prevent exactly that.
+		return char.IsControl(c)
+		       || c is (>= '\u202A' and <= '\u202E') or (>= '\u2066' and <= '\u2069')
+		       || c is '\u2028' or '\u2029';
 	}
 }

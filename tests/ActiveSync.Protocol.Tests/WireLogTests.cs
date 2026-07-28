@@ -67,6 +67,23 @@ public sealed class WireLogTests
 		Assert.Equal("admin?evil", WireLog.Payload("admin\u202Eevil"));
 	}
 
+	// W10: U+2028 (LINE SEPARATOR, category Zl) and U+2029 (PARAGRAPH SEPARATOR, category Zp) are
+	// line terminators to StringReader/XmlReader, to JSON consumers reading a CLEF sink, and to log
+	// viewers that split on Unicode line boundaries — but neither is char.IsControl (that is why the
+	// bidi overrides needed an explicit range too), so IsUnsafe's control-only check lets them
+	// through even on the allowLineStructure:false, single-field path (LogText.Clean on usernames
+	// and device ids) whose entire purpose is to prevent an embedded line terminator from forging a
+	// fake log line.
+	[Fact]
+	public void IsUnsafe_LineAndParagraphSeparators_AreUnsafeEvenWithoutLineStructure()
+	{
+		Assert.True(WireLog.IsUnsafe('\u2028', allowLineStructure: false));
+		Assert.True(WireLog.IsUnsafe('\u2029', allowLineStructure: false));
+		// And they must not slip through as "allowed line structure" either — only CR/LF/TAB do.
+		Assert.True(WireLog.IsUnsafe('\u2028', allowLineStructure: true));
+		Assert.True(WireLog.IsUnsafe('\u2029', allowLineStructure: true));
+	}
+
 	// W9: IsUnsafe's own classifier embedded the bidi-override code points it defends against as RAW
 	// literal characters in its source line — exactly the Trojan Source hazard (CVE-2021-42574) the
 	// check exists to prevent. An unterminated LRE/RLO sitting in the file reorders how the rest of
