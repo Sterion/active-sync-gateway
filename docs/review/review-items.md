@@ -145,6 +145,14 @@ dotnet test tests/ActiveSync.Integration.Tests --filter Category=Integration
 
 **Environment gotchas:**
 
+- **NEVER run `find /` (or `find $HOME` unbounded) on this machine — it is Windows.** Walking the whole
+  drive does not finish: three such commands were left running during the round-3 fix programme, one of
+  them burning **4.4 hours of CPU** before it was killed, which starves the test suites and makes
+  timing-sensitive tests flake. It comes up when checking a third-party API surface against the shipped
+  package (AGENTS.md suggests reading `~/.nuget/packages/**/*.xml`). Use a bounded, targeted lookup
+  instead: `Get-ChildItem -Path "$env:USERPROFILE\.nuget\packages\<package>" -Recurse -Filter *.xml`, or
+  the `Glob` tool with a pattern, or simply reflect over the referenced assembly from a test.
+
 - **A skipped suite exits 0 and looks exactly like a passing one.** Read the passed/skipped counts, never
   the exit code. The local baseline showed the integration suite **skipping** (8 skipped, no backend up) —
   a [LIVE] item MUST bring a backend up and confirm passed > 0.
