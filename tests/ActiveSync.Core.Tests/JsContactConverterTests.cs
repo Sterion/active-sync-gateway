@@ -145,6 +145,24 @@ public class JsContactConverterTests
 		Assert.Equal("birth", anniversaries.GetProperty("b").GetProperty("kind").GetString());
 	}
 
+	// H26: `if (V("CompanyName") is { } company || V("Department") is { } department1)` used a
+	// `{ }` pattern, which matches any NON-NULL string — including an empty one. An empty
+	// <CompanyName/> element (present but cleared, distinct from absent) must leave
+	// "organizations" unset, not produce an org with an empty name.
+	[Fact]
+	public void FromApplicationData_EmptyCompanyNameAndDepartment_LeavesOrganizationsUnset()
+	{
+		XElement app = new("ApplicationData",
+			new XElement(C + "FirstName", "Ada"),
+			new XElement(C + "CompanyName", ""),
+			new XElement(C + "Department", ""));
+
+		Dictionary<string, object?> card = JsContactConverter.FromApplicationData(app, null);
+
+		Assert.False(card.ContainsKey("organizations"),
+			"an empty CompanyName/Department element must not produce an organization with an empty name");
+	}
+
 	// H11: a malformed angle-bracket EAS email (an unmatched '<' with no closing '>') kept the
 	// WHOLE original string — including the display-name text and the stray '<' — as the JMAP
 	// "address" member, which isn't a valid email address at all.

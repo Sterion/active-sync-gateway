@@ -13,9 +13,12 @@ namespace ActiveSync.Backends.Jmap;
 /// <summary>
 ///   JSContact (RFC 9553) ⇄ EAS Contacts-class ApplicationData (MS-ASCNTC). Covers the fields
 ///   the EAS Contacts class carries (name parts, file-as, up to three emails, typed phones,
-///   home/work addresses, organization/department/title, nickname, birthday, note, categories,
-///   photo). On write, unknown JSContact members of an existing card are preserved so editing
-///   one EAS field never drops data the Contacts class cannot express.
+///   home/work addresses, organization/department/title, nickname, birthday, note, categories).
+///   H25: this bridge does NOT cover photo — "media" is Managed (see below) but nothing reads it
+///   into a contacts:Picture element or writes one back (the EAS Contacts view neither reads nor
+///   writes the photo; see the ClearedOnUpdate comment). On write, unknown JSContact members of
+///   an existing card are preserved so editing one EAS field never drops data the Contacts class
+///   cannot express.
 /// </summary>
 public static class JsContactConverter
 {
@@ -233,11 +236,17 @@ public static class JsContactConverter
 		if (addresses.Count > 0)
 			card["addresses"] = addresses;
 
-		if (V("CompanyName") is { } company || V("Department") is { } department1)
+		// H26: `V(...) is { }` matches any NON-NULL string, including an empty one — a present but
+		// cleared <CompanyName/> (distinct from an absent element) produced an organization with an
+		// empty name instead of leaving the member unset. Blank-check both values instead.
+		string? company = V("CompanyName");
+		string? department = V("Department");
+		if (!string.IsNullOrWhiteSpace(company) || !string.IsNullOrWhiteSpace(department))
 		{
 			Dictionary<string, object?> org = new();
-			if (V("CompanyName") is { } c) org["name"] = c;
-			if (V("Department") is { } d) org["units"] = new object[] { new Dictionary<string, object?> { ["name"] = d } };
+			if (!string.IsNullOrWhiteSpace(company)) org["name"] = company;
+			if (!string.IsNullOrWhiteSpace(department))
+				org["units"] = new object[] { new Dictionary<string, object?> { ["name"] = department } };
 			card["organizations"] = new Dictionary<string, object?> { ["o"] = org };
 		}
 
