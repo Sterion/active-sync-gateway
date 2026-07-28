@@ -90,4 +90,24 @@ public class WbxmlCodePagesTests
 		];
 		Assert.Equal(expected, bytes);
 	}
+
+	// W16: Pages and Tokens are declared as the read-only INTERFACE types (IReadOnlyList /
+	// IReadOnlyDictionary), but that is documentation, not protection — Build() actually returns a
+	// List<CodePage> and T(...) actually returns a Dictionary<byte, string>, so a cast back to the
+	// concrete mutable type succeeds and a plugin (this assembly is a published MIT package loaded
+	// into the host AssemblyLoadContext) can silently repoint a token for the whole gateway.
+	// CodePage.Reverse would not follow such a change (it is built once from Tokens at construction
+	// time), so the encoder and decoder would disagree about what a given token means.
+	[Fact]
+	public void Pages_CannotBeCastBackToAMutableList()
+	{
+		Assert.Throws<InvalidCastException>(() => (List<WbxmlCodePages.CodePage>)(object)WbxmlCodePages.Pages);
+	}
+
+	[Fact]
+	public void Tokens_CannotBeCastBackToAMutableDictionary()
+	{
+		WbxmlCodePages.CodePage page = WbxmlCodePages.ForIndex(0)!;
+		Assert.Throws<InvalidCastException>(() => (Dictionary<byte, string>)(object)page.Tokens);
+	}
 }

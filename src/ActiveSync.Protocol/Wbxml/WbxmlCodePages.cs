@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Ruben Andersen
 // SPDX-License-Identifier: MIT
 
+using System.Collections.Frozen;
 using System.Xml.Linq;
 
 namespace ActiveSync.Protocol.Wbxml;
@@ -11,7 +12,16 @@ namespace ActiveSync.Protocol.Wbxml;
 /// </summary>
 public static class WbxmlCodePages
 {
-	public static readonly IReadOnlyList<CodePage> Pages = Build();
+	// W16: IReadOnlyList/IReadOnlyDictionary are the interface types, but that alone is
+	// documentation, not protection — Build() itself returns a List<CodePage> and T(...) a
+	// Dictionary<byte, string>, so a cast back to the concrete mutable type used to succeed. This
+	// assembly is a published MIT package shared with every out-of-repo plugin's
+	// AssemblyLoadContext, so a plugin could silently repoint a token for the whole gateway with
+	// the encoder and decoder then disagreeing (CodePage.Reverse is built once from Tokens at
+	// construction time and would not follow the change). FrozenDictionary/AsReadOnly are actual
+	// wrapper types a List</Dictionary> cast cannot unwrap — and FrozenDictionary is also faster on
+	// the hot decode path, which is the reason to prefer it over ReadOnlyDictionary here.
+	public static readonly IReadOnlyList<CodePage> Pages = Build().AsReadOnly();
 
 	private static readonly Dictionary<XNamespace, CodePage> ByNamespace =
 		Pages.Where(p => p.Tokens.Count > 0).ToDictionary(p => p.Namespace, p => p);
@@ -26,9 +36,9 @@ public static class WbxmlCodePages
 		return page >= 0 && page < Pages.Count ? Pages[page] : null;
 	}
 
-	private static Dictionary<byte, string> T(params (byte Token, string Name)[] entries)
+	private static FrozenDictionary<byte, string> T(params (byte Token, string Name)[] entries)
 	{
-		return entries.ToDictionary(e => e.Token, e => e.Name);
+		return entries.ToFrozenDictionary(e => e.Token, e => e.Name);
 	}
 
 	private static List<CodePage> Build()
@@ -320,7 +330,9 @@ public static class WbxmlCodePages
 
 	public sealed record CodePage(int Index, XNamespace Namespace, IReadOnlyDictionary<byte, string> Tokens)
 	{
+		// W16: same hardening as Tokens above — a cast back to Dictionary<string, byte> must not
+		// let a plugin silently repoint the encoder's half of the token table.
 		public IReadOnlyDictionary<string, byte> Reverse { get; } =
-			Tokens.ToDictionary(kv => kv.Value, kv => kv.Key, StringComparer.Ordinal);
+			Tokens.ToFrozenDictionary(kv => kv.Value, kv => kv.Key, StringComparer.Ordinal);
 	}
 }
