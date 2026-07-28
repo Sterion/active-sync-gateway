@@ -28,6 +28,16 @@ public sealed class ImapIdleWatcher(
 	private static readonly TimeSpan InitialBackoff = TimeSpan.FromSeconds(5);
 	private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(60);
 
+	/// <summary>
+	///   G6: MailKit raises <see cref="AuthenticationException" /> for ANY negative LOGIN/
+	///   AUTHENTICATE reply, not only a genuinely wrong password — including a transient one
+	///   (Dovecot's "NO [UNAVAILABLE] Maximum number of connections from user+IP exceeded", which
+	///   this watcher's dedicated-connection-per-(user,folder) shape provokes). Retry with the
+	///   normal capped backoff for this many CONSECUTIVE auth failures before treating it as a
+	///   real credential rejection and latching the watcher unavailable.
+	/// </summary>
+	private const int MaxTransientAuthFailures = 3;
+
 	private readonly Lock _lock = new();
 	private readonly CancellationTokenSource _stopCts = new();
 	private readonly List<TaskCompletionSource> _waiters = [];
@@ -130,6 +140,7 @@ public sealed class ImapIdleWatcher(
 			Credentials.UserName, folderFullName);
 		TimeSpan backoff = InitialBackoff;
 		bool connectionLost = false;
+		int consecutiveAuthFailures = 0;
 		while (!ct.IsCancellationRequested)
 			try
 			{
@@ -156,6 +167,7 @@ public sealed class ImapIdleWatcher(
 				}
 
 				backoff = InitialBackoff;
+				consecutiveAuthFailures = 0;
 
 				void OnCountChanged(object? sender, EventArgs e)
 				{
@@ -205,12 +217,35 @@ public sealed class ImapIdleWatcher(
 			{
 				break;
 			}
+			catch (AuthenticationException ex) when (++consecutiveAuthFailures < MaxTransientAuthFailures)
+			{
+				// Within the transient-failure budget — retry with the normal capped backoff
+				// instead of latching unavailable on what may be a momentary rejection (e.g. a
+				// per-user-IP connection cap) rather than a genuine credential problem.
+				logger.LogWarning(ex,
+					"IMAP IDLE watcher for {User}: authentication failed (attempt {Attempt}/{Max}); retrying",
+					Credentials.UserName, consecutiveAuthFailures, MaxTransientAuthFailures);
+				try
+				{
+					await Task.Delay(backoff, ct).ConfigureAwait(false);
+				}
+				catch (OperationCanceledException)
+				{
+					break;
+				}
+
+				backoff = backoff * 2 > MaxBackoff ? MaxBackoff : backoff * 2;
+			}
 			catch (AuthenticationException ex)
 			{
-				// Stale credentials (rotation) — stop; the session factory rebuilds the
-				// watcher when it sees a new password for this user.
-				logger.LogWarning(ex, "IMAP IDLE watcher for {User}: authentication failed; watcher stopped",
-					Credentials.UserName);
+				// Exhausted the transient-failure budget: MaxTransientAuthFailures consecutive
+				// rejections without a single successful connect in between — a genuine
+				// credential problem (or a sustained block), not a momentary connection-cap hit.
+				// Stop; the session factory rebuilds the watcher when it sees a new password for
+				// this user.
+				logger.LogWarning(ex,
+					"IMAP IDLE watcher for {User}: authentication failed {Attempts} times in a row; watcher stopped",
+					Credentials.UserName, consecutiveAuthFailures);
 				MarkUnavailable();
 				return;
 			}
