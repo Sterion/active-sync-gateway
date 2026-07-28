@@ -344,7 +344,7 @@ work. Every finding ID appears in exactly one item.
 > `F13` FolderCreate can report success with no ServerId. `F15` the long poll abandons its losing waits
 > instead of draining them. `F16`/`F17` unmapped backend failures reach the client as HTTP 500.
 
-**24. IMAP correctness** [LIVE] — ~~`G3`~~ `G6` ~~`G7`~~ `G9` ~~`G12`~~ `G13` `G16` `G22`
+**24. IMAP correctness** [LIVE] — ~~`G3`~~ `G6` ~~`G7`~~ `G9` ~~`G12`~~ `G13` ~~`G16`~~ `G22`
 > `G6` one transient `AuthenticationException` (Dovecot's per-user connection cap, which this design provokes)
 > **permanently** disables IDLE push for that folder. `G7` a per-user backend change leaves a live
 > authenticated IDLE connection against the old server. `G9` a draft rewrite is append-then-delete with no

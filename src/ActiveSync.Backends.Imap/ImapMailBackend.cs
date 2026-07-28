@@ -194,6 +194,14 @@ public sealed partial class ImapMailBackend(
 				.ConfigureAwait(false);
 			UniqueId uid = ParseUid(folder, itemKey);
 
+			// G16: a content-bearing Change outside Drafts must be refused, mirroring
+			// CreateItemAsync's explicit refusal of the analogous case (AGENTS.md: Sync Add/Change
+			// of Email is allowed ONLY in the Drafts folder). Falling through to the Read/Flag/
+			// Categories handling below would silently discard the edit while still returning
+			// Status 1 (applied) to the client.
+			if (!IsDraftsFolder(folder) && HasDraftContent(applicationData))
+				throw new BackendException("Changing mail content via Sync is only supported in the Drafts folder.");
+
 			// EAS 16.x draft edit: content-bearing changes in the Drafts folder rewrite the
 			// message (append merged draft, expunge the old one). The old UID vanishes and
 			// the new one appears — the snapshot diff turns that into Delete+Add for the

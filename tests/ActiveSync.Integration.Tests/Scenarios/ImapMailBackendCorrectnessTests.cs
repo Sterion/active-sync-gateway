@@ -160,4 +160,72 @@ public class ImapMailBackendCorrectnessTests
 			await session.DisposeAsync();
 		}
 	}
+
+	// G16 ----------------------------------------------------------------------------------
+
+	/// <summary>
+	///   G16: a content-bearing Change to a mail item OUTSIDE the Drafts folder falls through the
+	///   Drafts-only rewrite branch straight into the Read/Flag/Categories handling, which ignores
+	///   the content elements and returns a fresh revision — the client is told Status 1 (applied)
+	///   while the edit was silently discarded. <c>CreateItemAsync</c> already refuses the
+	///   analogous case explicitly; this proves <c>UpdateItemAsync</c> does not.
+	/// </summary>
+	[BackendFact]
+	public async Task UpdateItemAsync_ContentChangeOutsideDrafts_IsRejected_NotSilentlyDiscarded()
+	{
+		string user = TestBackend.User1;
+		string folderName = $"ItemG16-{Guid.NewGuid():N}";
+		CancellationToken ct = CancellationToken.None;
+		string itemKey;
+		string originalSubject = $"g16-original-{Guid.NewGuid():N}";
+
+		using (ImapClient raw = new())
+		{
+			await raw.ConnectAsync(TestBackend.ImapHost, TestBackend.ImapPort, SecureSocketOptions.None, ct);
+			await raw.AuthenticateAsync(user, TestBackend.Password, ct);
+			IMailFolder personal = raw.GetFolder(raw.PersonalNamespaces[0]);
+			IMailFolder folder = await personal.CreateAsync(folderName, true, ct)
+			                      ?? throw new InvalidOperationException("IMAP server did not return the created folder.");
+			await folder.OpenAsync(FolderAccess.ReadWrite, ct);
+			MimeMessage message = new();
+			message.From.Add(MailboxAddress.Parse(user));
+			message.To.Add(MailboxAddress.Parse(user));
+			message.Subject = originalSubject;
+			message.Body = new TextPart("plain") { Text = "g16-body" };
+			UniqueId? appended = await folder.AppendAsync(message, MessageFlags.None, ct);
+			Assert.NotNull(appended);
+			itemKey = $"{folder.UidValidity}:{appended.Value.Id}";
+			await raw.DisconnectAsync(true, ct);
+		}
+
+		(ImapSession session, ImapMailBackend backend) = CreateBackend(user);
+		try
+		{
+			string folderKey = ImapSession.ToBackendKey(folderName);
+			XElement contentChange = new("ApplicationData",
+				new XElement(EasNamespaces.Email + "Subject", "g16-hijacked-subject"));
+
+			// This is NOT the Drafts folder, so a content-bearing Change (a Subject edit) must be
+			// refused — mirroring CreateItemAsync's explicit refusal of the analogous case — not
+			// silently accepted with the content dropped.
+			await Assert.ThrowsAsync<BackendException>(
+				() => backend.UpdateItemAsync(folderKey, itemKey, contentChange, ct));
+		}
+		finally
+		{
+			await session.DisposeAsync();
+		}
+
+		// The stored message must be untouched.
+		using ImapClient verify = new();
+		await verify.ConnectAsync(TestBackend.ImapHost, TestBackend.ImapPort, SecureSocketOptions.None, ct);
+		await verify.AuthenticateAsync(user, TestBackend.Password, ct);
+		IMailFolder verifyFolder = await verify.GetFolderAsync(folderName, ct);
+		await verifyFolder.OpenAsync(FolderAccess.ReadOnly, ct);
+		IList<UniqueId> uids = await verifyFolder.SearchAsync(MailKit.Search.SearchQuery.All, ct);
+		Assert.Single(uids);
+		MimeMessage stored = await verifyFolder.GetMessageAsync(uids[0], ct);
+		Assert.Equal(originalSubject, stored.Subject);
+		await verify.DisconnectAsync(true, ct);
+	}
 }
