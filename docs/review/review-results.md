@@ -1131,3 +1131,109 @@ earlier in the same session, on the same machine.
 - **The second test was never filed as a finding**, only mentioned in item 4's notes. It is fixed here, so
   nothing needs filing now — but it is worth knowing that a flake can live for eighteen items in a notes
   paragraph without ever becoming a tracked item.
+
+## Item 23 — Sync handler status & lifecycle [LIVE]
+**Findings:** `F13` `F14` `F15` `F16` `F17` `F18` `F23` `F27`
+**Commits:** `0898917` (F13) · `ead305a` (F14) · `da011a1` (F15) · `6bc2f86` (F16) · `b7fdb87` (F17) ·
+`e74a93b` (F18) · `f054384` (F23) · `cfe450d` (F27)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 24 ✓ · one commit per finding, **strike shipped with every one** ✓ · build 0 warnings ✓ ·
+unit **1415 passed, 0 failed** (Cli 16 · Protocol 99 · Core 847 · WebUi 120 · Server 334; plus the
+8 Axigen-gated tests in the Integration project that the unit filter selects and skips) ✓ ·
+live **145 passed, 0 skipped** on a clean-volume Stalwart ✓
+
+**Red-first re-proved independently for 7 of 8.** A whole-`src` revert does NOT compile here — `F17`
+changes `FolderSyncHandler`'s constructor, so the test assembly fails to build and `--no-build` silently
+runs the STALE binaries, reporting a full green that proves nothing. (Worth remembering: that is the
+protocol's own "the revert doesn't compile" warning, and it produced a convincing false pass.) Re-proved
+instead by applying the **reverse diff of each commit's `src` portion only**, which keeps the new tests in
+place:
+- Six findings, unit suite, exactly 7 failures and no others —
+  `FolderCreate_NotVisibleInThePostCreateListing_IsRetryable_NotFalseSuccess` (F13),
+  `Sync_MultiStoreWait_DrainsTheLosingWait_BeforeReturning` (F15),
+  `Sync_ConcurrentCollectionCommitRace_ReturnsStatus5ForThatCollection_SiblingsUnaffected` (F16),
+  `UnprimedInitialKey_ReportsStatus3_WithoutEstimating` + `StaleOrMismatchedSyncKey_ReportsStatus4` (F18),
+  `F23_MalformedPersistedOptionsJson_FallsBackToDefault_DoesNotThrow` (F23),
+  `F27_GetChanges0_WatchdogFalsePositive_HonoursTheHeartbeat_NotATightRepoll` (F27).
+- **`F14` re-proved on the live backend** with `EasEndpoint.cs` reversed:
+  `AccountOnlyWipe_OnPre161Device_CompletesServerSide_InsteadOfLoopingProvision` fails
+  `Expected: Forbidden / Actual: 449` — the permanent-449 loop, exactly as written. The sibling 16.1 wipe
+  test stayed green, so the fix does not disturb the acknowledged path.
+- **`F17` is the one strike NOT independently re-proved.** Reversing it restores the 1-arg constructor and
+  breaks `FolderConformanceTests.cs:84`, so there is no compiling tree that exhibits the old behaviour. I
+  read the diff instead: it wraps the whole body and answers Status 6, and its `catch (Exception ex) when
+  (ex is not OperationCanceledException)` is **byte-identical in breadth to the sibling it is told to
+  mirror** (`FolderModifyHandlerBase`, same file, line 187) — I checked that specifically, because a
+  catch-all that swallows a `NullReferenceException` into a retryable status would be a real cost, and the
+  finding's "wrap the body in the same catch" sanctions exactly this breadth.
+
+**Notes:**
+- **`F18` reverses a decision an earlier round landed, and the finding — not the worker — is the authority
+  for that.** Round 2 had "fixed" GetItemEstimate the other way (Status 3 for an invalid key) and shipped a
+  test pinning it. Round 3's `F18` says that is backwards and states the mapping: MS-ASCMD's
+  GetItemEstimate Status table is its own, where **3 = SYNCSTATENOTPRIMED and 4 = INVALIDSYNCKEY**, and its
+  FIX is literally "return `4` for `Invalid`, `3` for `Initial`, and correct the comment" — which is what
+  landed. The old comment was wrong twice over: it also claimed 4 meant "collection invalid", which is
+  Status **2**. The worker additionally dispatched a research subagent to the published spec before
+  proceeding; that was diligence, but the finding already carried the answer.
+- **The rewritten test increased coverage rather than reducing it.** The prior round's
+  `InvalidSyncKey_ReportsStatus3` kept its input (nonzero key, unprimed) and became
+  `StaleOrMismatchedSyncKey_ReportsStatus4` with the corrected expectation — renamed, so the change is
+  visible in the test name instead of hidden in an edited assertion — and a NEW test covers the `Initial`
+  case, asserting Status 3 **and** the absence of an `Estimate` element. The integration guard
+  (`GetItemEstimate_WithStaleSyncKey0_DoesNotResetCollectionState`) moved 1 → 3, and its real guarantee —
+  that the query does not mutate primed state — is untouched.
+- **Client-visible behaviour changes, several of them real.** `F18`: GetItemEstimate with SyncKey 0 now
+  answers Status 3 instead of returning an estimate — correct per spec, but any client relying on the old
+  estimate sees a different answer. `F13`: FolderCreate answers retryable Status 6 instead of a false
+  success when the backend's own listing has not caught up (Axigen's async indexing is the live case).
+  `F14`: a pre-16.1 device with a pending wipe now gets 403 and the wipe completes server-side, instead of
+  449 forever. `F16`/`F17`: previously-uncaught exceptions become EAS statuses instead of HTTP 500.
+  `F27`: a `GetChanges=0` collection woken by a watchdog false positive now idles out the remaining
+  heartbeat instead of answering immediately.
+- **`F15` bounds its own drain at 10 s.** The finding asks for the losing waits to be drained rather than
+  abandoned; the worker added a `DrainTimeout` so a misbehaving store cannot pin the request (and its
+  session lease) open forever. That bound is the worker's own addition, not the finding's — a sensible one,
+  mirroring `LongPollWatchdog`, but it means a pathological store still leaks an abandoned wait after 10 s.
+- **Test-harness additions, disclosed by the worker:** `EasHandlerHarness.RecordingStore` gained `Listing`
+  and `WaitForChangesAsyncOverride`, both defaulting to prior behaviour. Three pre-existing FolderCreate
+  tests were updated to set `Listing` — they had been exercising `F13`'s exact defect without asserting on
+  it.
+- **A third flaky test surfaced, pre-existing, and item 23 made it likelier.**
+  `SyncHotPathTests.F14_VanishedItem_IsNotCountedAsSent` (a ROUND-2 F14, unrelated to this item's F14)
+  failed my first full unit run and passed the next; it passes 3/3 in isolation. Item 23 does not touch
+  that file. Mechanism: the test attaches a `MeterListener` to the process-global `GatewayMetrics` meter
+  and asserts `Assert.Equal(sentAdds, addsRecorded)`, where `sentAdds` is its own response but
+  `addsRecorded` counts EVERY `server_to_client`/`add` measurement in the process — so any concurrently
+  running Sync test inflates it. Item 23 added several Sync-driving tests to the same assembly, which
+  raises the collision rate without being the cause. Sent to a scoped repair agent rather than fixed here
+  (the orchestrator does not edit tests); see the repair entry that follows.
+
+### Scoped repair (during item 23) — the third flaky test
+**Not a queue item.** `8fd6daa` · `SyncHotPathTests.F14_VanishedItem_IsNotCountedAsSent` +
+`EasHandlerHarness.RunAsync`. Spawned as a scoped repair agent rather than fixed by the orchestrator.
+
+`GatewayMetrics` is one process-global static `Meter` and xUnit runs the assembly's test classes in
+parallel, so the test's `MeterListener` summed every concurrent test's `server_to_client`/`add`
+measurements into `addsRecorded` and then compared that against its OWN `sentAdds`. The `user` tag was
+useless for filtering because `EasHandlerHarness` hard-codes one shared `UserName` for every test in the
+assembly. The repair adds an optional `credentialsUserName` to `RunAsync`, gives this one call a per-run
+GUID identity, and filters the listener on it.
+
+**Verified:** both assertions are intact (`Assert.Equal(1, sentAdds)` and `Assert.Equal(sentAdds,
+addsRecorded)`) — the isolation is in what the listener *counts*, not in what the test proves. Build 0
+warnings; full unit suite green 4× (agent) + 3× (mine), Server.Tests 334/334 every run.
+
+**One risk the agent did not raise, checked here:** the filter now depends on the `user` tag carrying a
+real value, and `GatewayMetrics.PerUserLabels` is itself process-global — if anything set it `false`
+concurrently the tag would collapse to `"-"` and this test would fail for a brand-new reason. It cannot
+happen in this assembly: `PerUserLabels` returns `true` when no provider is wired, and the only
+`SetPerUserLabelsProvider` callers are `ProgramServer` (not used by the handler harness) and
+`GatewayMetrics`/`Metrics` tests in *other* test assemblies, which `dotnet test` runs as separate
+processes.
+
+**Standing observation, now three for three.** Every flaky test found in this programme has the same
+shape: a test observing **process-global** state — a static `Meter`, a certificate the production code
+owns, a `StringBuilder` under a deliberate race — while the suite runs in parallel. That is a category,
+not three coincidences, and it is worth a targeted sweep rather than waiting for each one to surface
+mid-verification and cost an item's worth of bisecting.
