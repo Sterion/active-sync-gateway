@@ -308,15 +308,35 @@ public static class WbxmlCodePages
 				(0x18, "RemoveRightsManagementDistribution"))),
 
 			// Page 25: Find (16.1). Token gaps at 0x0F/0x10 and 0x1A-0x1F are per MS-ASWBXML.
-			// W7: the MaxPictures(0x20)/MaxSize(0x21)/Picture(0x22) order below is the REVERSE of
-			// every sibling page (Search page 15 and ResolveRecipients page 10 both put Picture
-			// before its MaxSize/MaxPictures children) and was flagged as needing a human check
-			// against the actual spec rather than trusting the internal pattern. Verified against
-			// the published [MS-ASWBXML] spec, revision 24.0 (2025-05-20), section 2.1.2.1.26
-			// "Code Page 25: Find" — the table there lists exactly MaxPictures=0x20, MaxSize=0x21,
-			// Picture=0x22 in that order, so this transcription is correct as written; it is Find,
-			// not the other two pages, that is the outlier in MS-ASWBXML itself. Pinned by
-			// WbxmlCodePagesTests.FindPage25_PictureTripletOrder_MatchesMsAswbxmlSpec.
+			//
+			// ┌─ SETTLED — DO NOT RE-LITIGATE (W7, round 3). ────────────────────────────────────┐
+			// The MaxPictures(0x20)/MaxSize(0x21)/Picture(0x22) order below is the REVERSE of every
+			// sibling page, which looks like a transcription error and has now been questioned once.
+			// It is CORRECT. Find is the outlier in MS-ASWBXML itself. The four picture-bearing
+			// pages, as verified:
+			//
+			//     Page 10 ResolveRecipients : 0x1A Picture · 0x1B MaxSize · 0x1C Data · 0x1D MaxPictures
+			//     Page 15 Search            : 0x21 Picture · 0x22 MaxSize · 0x23 MaxPictures
+			//     Page 16 GAL               : 0x10 Picture · 0x11 Status  · 0x12 Data
+			//     Page 25 Find (HERE)       : 0x20 MaxPictures · 0x21 MaxSize · 0x22 Picture   ← reversed
+			//
+			// TWO INDEPENDENT SOURCES agree on all four:
+			//   1. The published [MS-ASWBXML], revision 24.0 (2025-05-20), §2.1.2.1.26 "Code Page 25:
+			//      Find" lists MaxPictures=0x20, MaxSize=0x21, Picture=0x22 in that order.
+			//   2. Z-Push's `wbxmldefs.php` — an independent implementation with years of production
+			//      exposure to real devices — carries byte-identical tokens for pages 10, 15 and 25.
+			//      (Consulted for SEMANTICS only, per AGENTS.md; nothing was ported, and our table
+			//      already matched before the check.)
+			//
+			// WHY THIS NEEDED AN EXTERNAL SOURCE AT ALL, and why the pinning test is not enough:
+			// round-trip tests cannot detect a wrong token, because the encoder and decoder read the
+			// SAME table — a mis-transcribed token round-trips perfectly and only fails against a real
+			// client. `WbxmlCodePagesTests.FindPage25_PictureTripletOrder_MatchesMsAswbxmlSpec` pins
+			// these bytes so a future "consistency cleanup" cannot quietly reorder them; it does not,
+			// and cannot, prove them right. If you ever do doubt this, check an independent
+			// implementation — not our own tests. Symptom if it were wrong: GAL photos over Find
+			// silently never work.
+			// └──────────────────────────────────────────────────────────────────────────────────┘
 			new(25, EasNamespaces.Find, T(
 				(0x05, "Find"), (0x06, "SearchId"), (0x07, "ExecuteSearch"),
 				(0x08, "MailBoxSearchCriterion"), (0x09, "Query"), (0x0A, "Status"),

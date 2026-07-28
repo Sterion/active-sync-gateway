@@ -42,6 +42,16 @@ public class WbxmlCodePagesTests
 	///   (2025-05-20), section 2.1.2.1.26 "Code Page 25: Find": the byte assignment below is
 	///   exactly what the spec lists. This is coverage that pins the answer, not a red-first
 	///   proof of a bug — the table was already correct; only the uncertainty was the defect.
+	///   <para>
+	///     Corroborated by an INDEPENDENT implementation: Z-Push's <c>wbxmldefs.php</c> carries
+	///     byte-identical tokens for pages 10, 15 and 25 (consulted for semantics per AGENTS.md;
+	///     nothing ported — our table already matched). That external check is the one that
+	///     matters, because THIS test cannot prove the tokens right: it and the codec read the
+	///     same table, so a mis-transcription would satisfy both. It exists to stop a future
+	///     "make the pages consistent" cleanup silently reordering the triplet. If you doubt the
+	///     values, check another implementation — not this suite. See the settled-block comment
+	///     on page 25 in <c>WbxmlCodePages.cs</c> for the full four-page comparison.
+	///   </para>
 	/// </summary>
 	[Fact]
 	public void FindPage25_PictureTripletOrder_MatchesMsAswbxmlSpec()
