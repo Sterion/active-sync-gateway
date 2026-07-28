@@ -2090,3 +2090,64 @@ the README documented the old behaviour).
    after trusting `TaskList` over the human's screen, and briefly ran two workers on one item. The
    reliable liveness signal is the **completion notification**; `TaskList` and output-file mtime are both
    unreliable for background agents.
+
+## Found-while-working findings — `N1`–`N11` (all closed), `N12` filed
+**Commits:** `142227c` (N1) · `9dff0c3` (N2) · `822267a` (N4) · `8551e05` (N5) · `080e19f` (N6) ·
+`0878e71` (N7, N8) · `f6de452` (N10) · `3e4fd18` (N11) · `d304b04` (N9) · `1809adb` (files N12)
+`N3` was already closed earlier in the run.
+**Verification:** build 0 warnings ✓ · unit **1580 passed, 0 failed** (Cli 18 · Protocol 123 · Core 956 ·
+WebUi 123 · Server 360) ✓ · live **152 passed, 0 skipped** ✓ · every finding struck in the same commit as
+its fix ✓ · red-first re-proved independently for `N2`, `N6` and `N9` by reversal ✓
+
+**Run strictly sequentially, after a near-miss.** I first spawned three of these in parallel and the human
+asked whether that was safe. It was not, and the protocol says so outright: these workers COMMIT and run
+suites, so they would have collided three ways — all three write their strike into `review-items.md`, all
+three drive one shared git index (where worker A's staged files land in worker B's commit), and all three
+build into one `bin`/`obj`. Stopped before any of them committed; nothing had to be undone. The
+de-scaffolding fleet earlier was parallel-safe only because it was edit-only with no git and no build —
+that precedent did not transfer, and I carried it over without re-deriving it.
+
+### `N9` — the one that mattered, and where my own first judgment was wrong
+`WbxmlCodePages` Search page 15 carried `Schema` (0x1C) and `Supported` (0x1D). I initially recommended
+**won't-fix**, reasoning that Z-Push's `wbxmldefs.php` carries both byte-identically and is an independent
+implementation with years of real-device exposure. That reasoning was unsound. On the human's instruction
+to dig further I fetched the published spec, extracted it with `pdftotext`, and read §2.1.2.1.16 directly:
+the table goes **`GreaterThan 0x1B` → `UserName 0x1E`**, with 0x1C/0x1D unassigned. Our entries were
+phantom — and so are Z-Push's.
+
+**The lesson is about evidence class, not about this table.** An independent implementation agreeing is
+corroboration; it is not authority, and it can carry an inherited transcription error — demonstrably so,
+one page away from the very page I had used it to corroborate (`W7`). Where a token value is in doubt, the
+spec is the only authority.
+
+**A test was defending the bug.** `SearchSchemaAndSupported_RoundTrip` had existed since the initial public
+release, round-tripping both phantom tokens, its own comment claiming they had been "previously missing".
+So the transcription error was not merely present, it was pinned — exactly the failure mode that makes
+"the suite is green" worthless as evidence about a transcribed table. It was rewritten in place to assert
+the corrected, non-encodable behaviour rather than left to contradict the new tests.
+
+**Hard gate honoured:** exactly two token tuples removed, none added, no other page touched (I diffed the
+tuples specifically). Round-trip proof in both directions — encode of `Search/Schema`/`Search/Supported`
+now throws, and a decode of 0x1C/0x1D under page 15 yields the `unknown-15-xx` placeholder rather than the
+phantom names. Graceful degradation confirmed: an unknown token still does not abort the document.
+
+### Notes on the rest
+- **`N1` was proved by compile failure**, not a runtime red: the send-dedup sweep is new capability, so
+  there was nothing to fail at runtime beforehand. Same precedent as `K1`/`K19`/`E9`/`E15`. It also added a
+  live-configurable `Eas.SendDedupRetentionDays` (default 30) rather than a constant, matching the
+  `FolderRetentionDays`/`Log.RetentionDays` convention — more surface than the finding demanded, and
+  consistent with the codebase.
+- **`N4` is a behaviour change**: a backend-section removal that drops a role a declared user's override
+  still depends on is now REFUSED rather than silently accepted.
+- **`N5` avoided a contract bump deliberately** — reused `WatcherInfo` with the kind encoded in the
+  `Resource` string (`"(status poll)"`) plus a new `activesync_imap_status_poll_connections_active` gauge,
+  rather than adding a `kind` field to a type in `ActiveSync.Contracts`. Cheaper, and the poll connection is
+  now visible exactly where an operator diagnosing a per-user connection cap would look.
+- **`N10` grew slightly beyond its text, correctly**: the guard test the worker added caught a fourth raw
+  bidi character in a comment the finding had not named. There are now **zero** raw bidi characters
+  anywhere under `src/` or `tests/`.
+- **`N12` filed with measured numbers, not estimates.** Enabling `GenerateDocumentationFile` surfaces
+  **2650** warnings (2601 of them `CS1591` noise) — unusable against a 0-warning baseline. Suppress the
+  noise and leave `CS1574` live and it catches **14 dangling crefs**, the exact rot that let `N11`'s
+  pointer at the deleted `SettingsStamp` survive the db-restructure. Two-step remedy recorded; not done
+  unilaterally because it is a build-policy decision.
