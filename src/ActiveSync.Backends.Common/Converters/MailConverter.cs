@@ -389,13 +389,50 @@ public static class MailConverter
 		{
 			if (part.Content is null)
 				return 0;
-			using MemoryStream ms = new();
-			part.Content.DecodeTo(ms);
-			return ms.Length;
+			// D16: decoding into a MemoryStream just to read its Length materializes the whole
+			// attachment in memory, per message per windowed Sync batch. Count the decoded bytes
+			// through a write-only sink instead -- DecodeTo still runs the transfer decoder, but
+			// nothing beyond its own small internal buffer is ever held at once.
+			using CountingStream counter = new();
+			part.Content.DecodeTo(counter);
+			return counter.Length;
 		}
 		catch
 		{
 			return 0;
+		}
+	}
+
+	/// <summary>
+	///   A write-only sink that counts bytes without buffering them (D16) -- used to size a MIME
+	///   part's decoded content without materializing it in memory.
+	/// </summary>
+	private sealed class CountingStream : Stream
+	{
+		private long length;
+
+		public override bool CanRead => false;
+		public override bool CanSeek => false;
+		public override bool CanWrite => true;
+		public override long Length => length;
+		public override long Position { get => length; set { } }
+
+		public override void Flush()
+		{
+		}
+
+		public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+
+		public override void Write(byte[] buffer, int offset, int count)
+		{
+			length += count;
+		}
+
+		public override void Write(ReadOnlySpan<byte> buffer)
+		{
+			length += buffer.Length;
 		}
 	}
 
