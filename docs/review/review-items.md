@@ -426,7 +426,7 @@ work. Every finding ID appears in exactly one item.
 > entity list contradicts the schema it documents (names `LoginBlock`, omits `UserBackendRole`, still cites
 > deleted tables). `S2` two file-wide unrestored `CS0618` pragmas.
 
-**33. Handler & WebUi polish** — ~~`C20`~~ ~~`C21`~~ ~~`C22`~~ ~~`C23`~~ ~~`F19`~~ ~~`F20`~~ `F21` `F22` `F24` `F25` `F26` `F28` `F29`
+**33. Handler & WebUi polish** — ~~`C20`~~ ~~`C21`~~ ~~`C22`~~ ~~`C23`~~ ~~`F19`~~ ~~`F20`~~ ~~`F21`~~ `F22` `F24` `F25` `F26` `F28` `F29`
 > `F21` an empty DeviceId is accepted, so every client that omits one shares a single sync-state row.
 > `F20` `Picture` is emitted before `Availability`, out of MS-ASCMD sequence. `F22` the FileReference path
 > skips the registry check its sibling performs. Plus CSS/CSP/nav polish and status-code accuracy.

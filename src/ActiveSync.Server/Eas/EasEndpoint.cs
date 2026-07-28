@@ -317,13 +317,18 @@ public static class EasEndpoint
 
 	/// <summary>
 	///   MS-ASHTTP device ids are short and alphanumeric (the base64 query form hex-encodes
-	///   raw bytes); a few punctuation characters are tolerated for older clients. Empty is
-	///   allowed — some commands (e.g. OPTIONS-probing tools) omit it.
+	///   raw bytes); a few punctuation characters are tolerated for older clients.
+	///   <c>internal</c> so <c>EasEndpointDeviceIdTests</c> (F21) can exercise it directly.
 	/// </summary>
-	private static bool IsValidDeviceId(string deviceId)
+	internal static bool IsValidDeviceId(string deviceId)
 	{
+		// F21: an empty DeviceId used to be let through on the theory that some tools (e.g.
+		// OPTIONS probes) omit it — but OPTIONS is mapped separately (HandleOptions) and never
+		// reaches this check, so the only effect was every POST that omitted DeviceId sharing one
+		// "" keyed Device row (SyncKeys, snapshots, PolicyKey, ...) for that user. MS-ASHTTP
+		// requires DeviceId on a POST; reject the empty case.
 		if (deviceId.Length == 0)
-			return true;
+			return false;
 		if (deviceId.Length > 64)
 			return false;
 		foreach (char c in deviceId)
