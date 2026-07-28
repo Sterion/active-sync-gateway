@@ -1,7 +1,9 @@
+using System.Xml.Linq;
 using ActiveSync.Backends.Imap;
 using ActiveSync.Contracts;
 using ActiveSync.Integration.Tests.Infrastructure;
 using ActiveSync.Protocol;
+using ActiveSync.Protocol.Wbxml;
 using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Security;
@@ -96,5 +98,66 @@ public class ImapMailBackendCorrectnessTests
 		await verifyFolder.OpenAsync(FolderAccess.ReadOnly, ct);
 		Assert.Equal(1, verifyFolder.Count);
 		await verify.DisconnectAsync(true, ct);
+	}
+
+	// G12 ----------------------------------------------------------------------------------
+
+	/// <summary>
+	///   G12: <c>ClassifyFolder</c> (FolderSync's Type element) matches only a special folder's
+	///   FullName, while <c>IsDraftsFolder</c> (the Sync write-path gate) also matches the leaf
+	///   Name — so a server without SPECIAL-USE that nests Drafts under a non-INBOX parent (no
+	///   FullName match) is reported to the phone as an ordinary UserMail folder while the backend
+	///   still accepts draft creates/edits there. Proven against a real mailbox: create
+	///   "&lt;parent&gt;/Drafts" and check that ListFoldersAsync's reported Type agrees with
+	///   whether CreateItemAsync actually treats it as Drafts.
+	/// </summary>
+	[BackendFact]
+	public async Task ListFoldersAsync_NestedDraftsFolder_IsClassifiedConsistentlyWithTheWritePath()
+	{
+		string user = TestBackend.User1;
+		string parentName = $"ItemG12-{Guid.NewGuid():N}";
+		CancellationToken ct = CancellationToken.None;
+		string draftsFullName;
+
+		using (ImapClient raw = new())
+		{
+			await raw.ConnectAsync(TestBackend.ImapHost, TestBackend.ImapPort, SecureSocketOptions.None, ct);
+			await raw.AuthenticateAsync(user, TestBackend.Password, ct);
+			IMailFolder personal = raw.GetFolder(raw.PersonalNamespaces[0]);
+			IMailFolder parent = await personal.CreateAsync(parentName, false, ct)
+			                      ?? throw new InvalidOperationException("IMAP server did not return the created parent.");
+			// A leaf named "Drafts" nested under a non-INBOX parent, with no SPECIAL-USE
+			// attribute the server would only assign to a canonical top-level Drafts.
+			IMailFolder drafts = await parent.CreateAsync("Drafts", true, ct)
+			                     ?? throw new InvalidOperationException("IMAP server did not return the created folder.");
+			draftsFullName = drafts.FullName;
+			await raw.DisconnectAsync(true, ct);
+		}
+
+		(ImapSession session, ImapMailBackend backend) = CreateBackend(user);
+		try
+		{
+			IReadOnlyList<BackendFolder> folders = await backend.ListFoldersAsync(ct);
+			BackendFolder nested = Assert.Single(folders, f => f.BackendKey == ImapSession.ToBackendKey(draftsFullName));
+
+			// The write path (draft create) already treats this folder as Drafts (IsDraftsFolder
+			// matches on the leaf Name) — FolderSync's classification must agree, or the phone
+			// never shows a Drafts folder it can actually compose into.
+			(string ItemKey, string Revision) created = await backend.CreateItemAsync(
+				nested.BackendKey,
+				new XElement("ApplicationData",
+					new XElement(EasNamespaces.Email + "Subject", "G12 draft"),
+					new XElement(EasNamespaces.AirSyncBase + "Body",
+						new XElement(EasNamespaces.AirSyncBase + "Type", "1"),
+						new XElement(EasNamespaces.AirSyncBase + "Data", "g12-body"))),
+				ct);
+			Assert.NotNull(created.ItemKey);
+
+			Assert.Equal(EasFolderType.Drafts, nested.EasType);
+		}
+		finally
+		{
+			await session.DisposeAsync();
+		}
 	}
 }

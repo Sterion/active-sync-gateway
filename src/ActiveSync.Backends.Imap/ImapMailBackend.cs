@@ -285,9 +285,7 @@ public sealed partial class ImapMailBackend(
 
 	private static bool IsDraftsFolder(IMailFolder folder)
 	{
-		return folder.Attributes.HasFlag(FolderAttributes.Drafts) ||
-		       DraftsNames.Contains(folder.FullName, StringComparer.OrdinalIgnoreCase) ||
-		       DraftsNames.Contains(folder.Name, StringComparer.OrdinalIgnoreCase);
+		return MatchesSpecialFolder(folder, FolderAttributes.Drafts, DraftsNames);
 	}
 
 	/// <summary>Draft-content elements, as opposed to a pure flag change (Read/Flag).</summary>
@@ -569,16 +567,28 @@ public sealed partial class ImapMailBackend(
 		if (folder.Attributes.HasFlag(FolderAttributes.Inbox) ||
 		    folder.FullName.Equals("INBOX", StringComparison.OrdinalIgnoreCase))
 			return EasFolderType.Inbox;
-		if (folder.Attributes.HasFlag(FolderAttributes.Drafts) ||
-		    DraftsNames.Contains(folder.FullName, StringComparer.OrdinalIgnoreCase))
+		if (IsDraftsFolder(folder))
 			return EasFolderType.Drafts;
-		if (folder.Attributes.HasFlag(FolderAttributes.Sent) ||
-		    SentNames.Contains(folder.FullName, StringComparer.OrdinalIgnoreCase))
+		if (MatchesSpecialFolder(folder, FolderAttributes.Sent, SentNames))
 			return EasFolderType.SentItems;
-		if (folder.Attributes.HasFlag(FolderAttributes.Trash) ||
-		    TrashNames.Contains(folder.FullName, StringComparer.OrdinalIgnoreCase))
+		if (MatchesSpecialFolder(folder, FolderAttributes.Trash, TrashNames))
 			return EasFolderType.DeletedItems;
 		return EasFolderType.UserMail;
+	}
+
+	/// <summary>
+	///   G12: one predicate per special folder (SPECIAL-USE attribute ∪ FullName ∪ leaf Name), so
+	///   FolderSync's classification (<see cref="ClassifyFolder" />) and the Sync write-path gates
+	///   (<see cref="IsDraftsFolder" />, and Sent/Trash here) agree. Matching only FullName let a
+	///   server without SPECIAL-USE that nests a special folder under a non-INBOX parent (e.g.
+	///   "Personal/Drafts") report as an ordinary UserMail folder to the phone while the backend
+	///   still treated it as the special folder for creates/edits.
+	/// </summary>
+	private static bool MatchesSpecialFolder(IMailFolder folder, FolderAttributes attribute, string[] names)
+	{
+		return folder.Attributes.HasFlag(attribute) ||
+		       names.Contains(folder.FullName, StringComparer.OrdinalIgnoreCase) ||
+		       names.Contains(folder.Name, StringComparer.OrdinalIgnoreCase);
 	}
 
 	/// <summary>
