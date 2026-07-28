@@ -38,15 +38,26 @@ public static class SealedBlob
 	public static string Seal(string prefix, ReadOnlySpan<byte> aad, byte[] key, string plaintext)
 	{
 		byte[] plaintextBytes = Encoding.UTF8.GetBytes(plaintext);
-		byte[] payload = new byte[NonceSize + plaintextBytes.Length + TagSize];
-		Span<byte> nonce = payload.AsSpan(0, NonceSize);
-		Span<byte> ciphertext = payload.AsSpan(NonceSize, plaintextBytes.Length);
-		Span<byte> tag = payload.AsSpan(NonceSize + plaintextBytes.Length, TagSize);
+		try
+		{
+			byte[] payload = new byte[NonceSize + plaintextBytes.Length + TagSize];
+			Span<byte> nonce = payload.AsSpan(0, NonceSize);
+			Span<byte> ciphertext = payload.AsSpan(NonceSize, plaintextBytes.Length);
+			Span<byte> tag = payload.AsSpan(NonceSize + plaintextBytes.Length, TagSize);
 
-		RandomNumberGenerator.Fill(nonce);
-		using AesGcm aes = new(key, TagSize);
-		aes.Encrypt(nonce, plaintextBytes, ciphertext, tag, aad);
-		return prefix + Convert.ToBase64String(payload);
+			RandomNumberGenerator.Fill(nonce);
+			using AesGcm aes = new(key, TagSize);
+			aes.Encrypt(nonce, plaintextBytes, ciphertext, tag, aad);
+			return prefix + Convert.ToBase64String(payload);
+		}
+		finally
+		{
+			// K14: everything sealed through here is sensitive (backend passwords, the escrowed
+			// device recovery password, /cli envelopes, the TLS certificate password, the
+			// gateway's own PKCS#12 blob) — wipe the plaintext copy rather than leaving it for the
+			// GC to collect whenever it gets around to it.
+			CryptographicOperations.ZeroMemory(plaintextBytes);
+		}
 	}
 
 	public static bool TryUnseal(
@@ -90,20 +101,29 @@ public static class SealedBlob
 		ReadOnlySpan<byte> tag = payload.AsSpan(payload.Length - TagSize, TagSize);
 		byte[] plaintextBytes = new byte[ciphertext.Length];
 
+		// K14: plaintextBytes is wiped on every exit — success, auth failure, or otherwise —
+		// rather than left for the GC to collect whenever it gets around to it.
 		try
 		{
-			using AesGcm aes = new(key, TagSize);
-			aes.Decrypt(nonce, ciphertext, tag, plaintextBytes, aad);
-		}
-		catch (CryptographicException ex)
-		{
-			error = SealedBlobError.AuthenticationFailed;
-			innerException = ex;
-			return false;
-		}
+			try
+			{
+				using AesGcm aes = new(key, TagSize);
+				aes.Decrypt(nonce, ciphertext, tag, plaintextBytes, aad);
+			}
+			catch (CryptographicException ex)
+			{
+				error = SealedBlobError.AuthenticationFailed;
+				innerException = ex;
+				return false;
+			}
 
-		plaintext = Encoding.UTF8.GetString(plaintextBytes);
-		error = SealedBlobError.None;
-		return true;
+			plaintext = Encoding.UTF8.GetString(plaintextBytes);
+			error = SealedBlobError.None;
+			return true;
+		}
+		finally
+		{
+			CryptographicOperations.ZeroMemory(plaintextBytes);
+		}
 	}
 }
