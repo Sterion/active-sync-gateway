@@ -431,7 +431,7 @@ work. Every finding ID appears in exactly one item.
 > `F20` `Picture` is emitted before `Availability`, out of MS-ASCMD sequence. `F22` the FileReference path
 > skips the registry check its sibling performs. Plus CSS/CSP/nav polish and status-code accuracy.
 
-**34. Converter & TLS-helper nits** — ~~`D23`~~ ~~`D24`~~ ~~`D27`~~ ~~`D28`~~ ~~`D29`~~ ~~`D30`~~ ~~`D31`~~ `D32` `D33` `D34` `D35`
+**34. Converter & TLS-helper nits** — ~~`D23`~~ ~~`D24`~~ ~~`D27`~~ ~~`D28`~~ ~~`D29`~~ ~~`D30`~~ ~~`D31`~~ ~~`D32`~~ `D33` `D34` `D35`
 > `D27` a rotated CA bundle needs a process restart (cached forever by path). `D31` the derived default for
 > the standard mail ports is opportunistic STARTTLS, which downgrades silently. `D24` a bare CR survives
 > vCard escaping. Plus `ConversationIndex`, surrogate cuts, `var` usage, allocation.

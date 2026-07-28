@@ -10,6 +10,13 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<!-- D32: lets Core.Tests exercise TimeZoneBlob.WriteName directly with a real surrogate
+		     pair, which TimeZoneInfo.CreateCustomTimeZone itself sanitizes away before it ever
+		     reaches the field-write code — same grant pattern the Imap/Smtp/Jmap/Dav csprojs use. -->
+		<InternalsVisibleTo Include="ActiveSync.Core.Tests" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<PackageReference Include="FolkerKinzel.VCards" />
 		<PackageReference Include="Ical.Net" />
 		<PackageReference Include="MailKit" />
