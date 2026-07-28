@@ -88,4 +88,62 @@ public sealed class LocalStoreConcurrencyTests : IDisposable
 		LocalItem row = await db.LocalItems.FirstAsync(i => i.Uid == _uid);
 		return row.Id.ToString();
 	}
+
+	[Fact]
+	public async Task RespondToMeetingAsync_RetriesOnceOnAConcurrentWrite_LikeEverySiblingWrite()
+	{
+		string ics = """
+		                    BEGIN:VCALENDAR
+		                    VERSION:2.0
+		                    BEGIN:VEVENT
+		                    UID:meet-1
+		                    DTSTART:20260801T090000Z
+		                    DTEND:20260801T100000Z
+		                    SUMMARY:Planning
+		                    ORGANIZER:mailto:boss@example.com
+		                    ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:me@example.com
+		                    END:VEVENT
+		                    END:VCALENDAR
+		                    """.ReplaceLineEndings("\r\n");
+		SeedEvent(ics);
+
+		// A SINGLE competing write races the first attempt's save — a real device bumping the
+		// same row between our read and save — then goes quiet, so a bounded retry (matching
+		// LocalStoreBase.UpdateItemAsync's own 4-attempt loop) must recover on the very next
+		// attempt instead of losing the response.
+		ConcurrentWriteInterceptor race = new(() =>
+		{
+			using SyncDbContext racer = StateTestSupport.NewContext(_connection);
+			LocalItem row = racer.LocalItems.First(i => i.Uid == "meet-1");
+			row.LastModifiedUtc = DateTime.UtcNow;
+			racer.SaveChanges();
+		});
+		InterceptedDbContextFactory factory = new(_connection, race);
+		LocalCalendarStore store = new(
+			factory, new LocalChangeNotifier(), _userId, LocalContentProtector.CreatePlaintext(),
+			"me@example.com", "me@example.com", NullLogger.Instance);
+
+		string? id = await store.RespondToMeetingAsync(store.FolderBackendKey, "meet-1", 1, CancellationToken.None);
+
+		Assert.NotNull(id); // must not throw DbUpdateConcurrencyException — the response must land
+
+		using SyncDbContext verify = StateTestSupport.NewContext(_connection);
+		LocalItem stored = await verify.LocalItems.AsNoTracking().FirstAsync(i => i.Uid == "meet-1");
+		Assert.Contains("PARTSTAT=ACCEPTED", stored.Content);
+	}
+
+	private void SeedEvent(string ics)
+	{
+		using SyncDbContext db = StateTestSupport.NewContext(_connection);
+		db.LocalItems.Add(new LocalItem
+		{
+			UserId = _userId,
+			Collection = "calendar",
+			Uid = "meet-1",
+			Content = ics,
+			Version = 1,
+			LastModifiedUtc = DateTime.UtcNow
+		});
+		db.SaveChanges();
+	}
 }

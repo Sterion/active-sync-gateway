@@ -103,24 +103,43 @@ public sealed class LocalCalendarStore(
 	public async Task<string?> RespondToMeetingAsync(
 		string calendarFolderBackendKey, string eventUid, int userResponse, CancellationToken ct)
 	{
-		await using SyncDbContext db = DbFactory.CreateDbContext();
-		LocalItem? row = await Rows(db).FirstOrDefaultAsync(i => i.Uid == eventUid, ct).ConfigureAwait(false);
-		if (row is null)
-			return null;
-		string plain = Protector.Unprotect(row.Content, UserId, "calendar");
-		// partStatIdentity = mail address ?? gateway login; the row scope and encryption AAD
-		// above stay on the gateway UserId.
-		string? updated = CalendarConverter.SetPartStat(plain, userResponse, partStatIdentity);
-		if (updated is not null)
+		// G20: bounded retry mirroring LocalStoreBase.UpdateItemAsync — another device may bump
+		// the same row between our read and save, so each attempt re-reads the latest content
+		// and re-applies the response instead of losing it to a lost concurrency race.
+		const int maxAttempts = 4;
+		for (int attempt = 1; ; attempt++)
 		{
+			await using SyncDbContext db = DbFactory.CreateDbContext();
+			LocalItem? row = await Rows(db).FirstOrDefaultAsync(i => i.Uid == eventUid, ct).ConfigureAwait(false);
+			if (row is null)
+				return null;
+			string plain = Protector.Unprotect(row.Content, UserId, "calendar");
+			// partStatIdentity = mail address ?? gateway login; the row scope and encryption AAD
+			// above stay on the gateway UserId.
+			string? updated = CalendarConverter.SetPartStat(plain, userResponse, partStatIdentity);
+			if (updated is null)
+				return row.Id.ToString();
+
 			row.Content = Protector.Protect(updated, UserId, "calendar");
 			row.Version++;
 			row.LastModifiedUtc = DateTime.UtcNow;
-			await db.SaveChangesAsync(ct).ConfigureAwait(false);
-			NotifyChanged(); // wake waiting Pings, like every other local write path
-		}
+			try
+			{
+				await db.SaveChangesAsync(ct).ConfigureAwait(false);
+			}
+			catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
+			{
+				continue;
+			}
+			catch (DbUpdateConcurrencyException ex)
+			{
+				throw new BackendException(
+					$"Local calendar item {eventUid} is being modified concurrently; retry.", ex);
+			}
 
-		return row.Id.ToString();
+			NotifyChanged(); // wake waiting Pings, like every other local write path
+			return row.Id.ToString();
+		}
 	}
 
 	public async Task<string?> GetRawEventAsync(string folderBackendKey, string itemKey, CancellationToken ct)
