@@ -27,12 +27,15 @@ public sealed class EncryptionOptions
 	public bool AllowPlaintext { get; set; }
 
 	/// <summary>
-	///   Optional per-deployment salt for PBKDF2 passphrase stretching (K45). When set, the
+	///   Per-deployment salt for PBKDF2 passphrase stretching (K45). When set, the
 	///   passphrase-derived key is unique to this deployment, so a precomputed rainbow table for
 	///   one deployment does not carry to another. Deterministic and NOT stored (both the gateway
 	///   and the slim CLI derive the key from configuration alone, with no shared database), so it
-	///   must be supplied identically everywhere the key is derived. Unset keeps the historical
-	///   fixed application salt. Ignored on the raw base64-32-byte key path, which skips PBKDF2.
+	///   must be supplied identically everywhere the key is derived.
+	///   K15: required for the passphrase path — a passphrase key with no salt is refused at
+	///   startup (there is deliberately no fixed fallback salt; see
+	///   <see cref="EncryptionKeyLoader.TryLoadKey" />). Ignored on the raw base64-32-byte key
+	///   path, which skips PBKDF2 entirely and needs no salt.
 	/// </summary>
 	public string? KeyDerivationSalt { get; set; }
 }
