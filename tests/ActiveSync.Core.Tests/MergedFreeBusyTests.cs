@@ -64,6 +64,26 @@ public sealed class MergedFreeBusyTests
 		Assert.Equal(new DateTime(2026, 7, 28, 15, 30, 0, DateTimeKind.Utc), period.EndUtc);
 	}
 
+	/// <summary>
+	///   D35 — FBTYPE was classified by substring-scanning the WHOLE parameter segment
+	///   (`parameters.Contains("BUSY-TENTATIVE", ...)`), so an unrelated parameter whose value
+	///   merely CONTAINS that text anywhere before the colon is misclassified, even though it is
+	///   not the FBTYPE parameter at all. Here an X- parameter happens to embed the substring, and
+	///   no real FBTYPE is present — the period must default to BUSY ('2'), not TENTATIVE ('1').
+	/// </summary>
+	[Fact]
+	public void ParseFreeBusy_DoesNotMisreadAnUnrelatedParameterContainingFbtypeText()
+	{
+		const string ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n" +
+		                   "BEGIN:VFREEBUSY\r\nDTSTART:20260728T000000Z\r\nDTEND:20260729T000000Z\r\n" +
+		                   "DTSTAMP:20260717T051745Z\r\n" +
+		                   "FREEBUSY;X-NOTE=NOT-BUSY-TENTATIVE-REALLY:20260728T140000Z/20260728T153000Z\r\n" +
+		                   "END:VFREEBUSY\r\nEND:VCALENDAR\r\n";
+		IReadOnlyList<BusyPeriod> periods = CalendarConverter.ParseFreeBusy(ics);
+		BusyPeriod period = Assert.Single(periods);
+		Assert.Equal('2', period.Kind); // no real FBTYPE parameter present -> defaults to BUSY
+	}
+
 	[Fact]
 	public void PeriodsOutsideTheWindow_AreIgnored()
 	{

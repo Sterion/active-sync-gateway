@@ -666,12 +666,27 @@ public static class CalendarConverter
 				continue;
 
 			string parameters = line[..colon];
+			// D35: find the FBTYPE parameter by NAME (split on ';', match the key before '='),
+			// not by substring-scanning the whole segment — an unrelated parameter (or a TZID)
+			// whose value merely contains "BUSY-TENTATIVE"/etc. anywhere must not be misread as
+			// FBTYPE.
+			string? fbtype = null;
+			foreach (string segment in parameters.Split(';', StringSplitOptions.RemoveEmptyEntries))
+			{
+				int eq = segment.IndexOf('=');
+				if (eq >= 0 && segment[..eq].Equals("FBTYPE", StringComparison.OrdinalIgnoreCase))
+				{
+					fbtype = segment[(eq + 1)..];
+					break;
+				}
+			}
+
 			char kind = '2'; // FBTYPE defaults to BUSY (RFC 5545 §3.2.9)
-			if (parameters.Contains("BUSY-TENTATIVE", StringComparison.OrdinalIgnoreCase))
+			if (string.Equals(fbtype, "BUSY-TENTATIVE", StringComparison.OrdinalIgnoreCase))
 				kind = '1';
-			else if (parameters.Contains("BUSY-UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
+			else if (string.Equals(fbtype, "BUSY-UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
 				kind = '3';
-			else if (parameters.Contains("FBTYPE=FREE", StringComparison.OrdinalIgnoreCase))
+			else if (string.Equals(fbtype, "FREE", StringComparison.OrdinalIgnoreCase))
 				continue;
 
 			foreach (string period in line[(colon + 1)..].Split(',', StringSplitOptions.RemoveEmptyEntries))
