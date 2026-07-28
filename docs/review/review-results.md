@@ -1512,3 +1512,43 @@ hitting a second `HasTime` site — a mutation artefact, not a finding's test.
   it, which is the other half of protocol step 8. I have added it to "Found while working the queue" so it
   is not lost. Worth watching: this is the second worker this run to notice something and report it only in
   prose.
+
+## Item 27 — Mail & draft converter correctness [LIVE]
+**Findings:** `D11` `D12` `D13` `D14` `D15` `D16` `D20` `D22` `D25`
+**Commits:** `bd1bc20` (D11) · `f0b497a` (D12) · `f355397` (D13) · `0ae1c56` (D14) · `a65b67c` (D15) ·
+`d98fe77` (D16) · `8eabdee` (D20) · `579f8dd` (D22) · `8833861` (D25)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 28 ✓ · one commit per finding, strike shipped with every one ✓ · build 0 warnings ✓ ·
+unit **1460 passed, 0 failed** (Cli 16 · Protocol 99 · Core 892 · WebUi 120 · Server 333) ✓ ·
+live **150 passed, 0 skipped** ✓ · scope confined to `Converters/`, two backend call sites, tests ✓
+
+**Red-first re-proved independently for all nine** — eight by reversal plus a `D14` mutation
+(`received = message.Date`, the pre-fix shape), then `D13` separately by mutation
+(`string.IsNullOrEmpty(m.Name) ? m.Address : m.Name` → `m.Name`) because its reversal patch would not
+apply after the neighbouring hunks moved. 9 + 2 failures, every finding covered.
+
+**Notes:**
+- **`D14`'s "coverage" test is better than the worker claimed.** It labelled
+  `ReceivedUtc_WhenSupplied_TakesPrecedenceOverTheDateHeader` coverage-not-proof because the new optional
+  parameter cannot be expressed against the pre-fix signature — true for *reversal*. Under mutation it
+  went red, so it does discriminate the fix and is a genuine guard. Worth generalising: "cannot be proven
+  by reversal" is not the same as "cannot be proven", and this run has now hit that distinction five times.
+- **`D15` deviates from the finding's prose for a good reason.** The FIX names a
+  `FormatOptions.EncodingConstraint` property that does not exist in this MimeKit version; the worker used
+  `MimeMessage.Prepare(EncodingConstraint.SevenBit, …)`, which is the actual API achieving the stated
+  intent. The finding is wrong about the API, not about the remedy.
+- **`D15` legitimately rewrote a pre-existing assertion, and it is not a weakening.** Making the type-4
+  body ASCII-safe means a 2000-character whitespace-free run is now quoted-printable soft-wrapped, so the
+  older test unfolds `=\r\n` before asserting the text survived intact. Same guarantee, adjusted for
+  behaviour the fix deliberately changes — the protocol's "rewrite it and call that out" case, and the
+  worker did call it out.
+- **Behaviour changes:** `D14` — a message with a missing or forged `Date:` now reports the backend's own
+  delivery time (IMAP `INTERNALDATE` / JMAP `receivedAt`), falling back to `UtcNow` instead of year 0001.
+  `D20` — a draft rewrite now carries `In-Reply-To`, `References`, `Message-Id` and custom headers, so a
+  reply started elsewhere stays in its thread. `D25` — `Limit`'s bound is now a UTF-8 byte budget rather
+  than a UTF-16 char count (identical for the ASCII-heavy header text it bounds). `D22` — an unparsable
+  stored iCalendar now throws `BackendException` instead of silently emptying the item, which is a
+  louder failure by design.
+- **`D25` is tested through private reflection.** Precedented in this suite and it targets the offending
+  expression precisely, but it means the guard is coupled to the method name rather than to observable
+  behaviour.
