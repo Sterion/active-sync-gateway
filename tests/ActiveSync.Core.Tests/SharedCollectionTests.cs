@@ -37,6 +37,19 @@ public class SharedCollectionTests
 		Assert.NotNull(SharedCollection.Validate(entry, "https://dav.example.com"));
 	}
 
+	// K22: the unknown-mode-suffix error told the operator "|ro" is the only recognized suffix,
+	// even though Parse (and Validate's own check two lines above the message) accepts "|rw" too
+	// — so an operator who mistyped "|rw" as "|rww" was never told the suffix they meant exists.
+	[Fact]
+	public void Validate_UnknownModeSuffix_MentionsBothRecognizedSuffixes()
+	{
+		string? message = SharedCollection.Validate("/cal/x|rww", "https://dav.example.com");
+
+		Assert.NotNull(message);
+		Assert.Contains("\"|ro\"", message);
+		Assert.Contains("\"|rw\"", message);
+	}
+
 	// K62: Parse is the RUNTIME path (CalDavBackendProvider parses configured SharedCollections
 	// with it). It used to fail OPEN — any mode suffix that was not "ro" produced a read-WRITE
 	// grant, so a typo like "|read-only" or "|r" silently handed a shared collection full write

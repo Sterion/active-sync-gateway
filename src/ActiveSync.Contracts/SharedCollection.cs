@@ -7,6 +7,11 @@ namespace ActiveSync.Contracts;
 ///   A shared CalDAV collection reference resolved from config ("/path/" or same-host URL,
 ///   optional "|ro" suffix) or from a database grant (`eas share`). ReadOnly is enforced
 ///   gateway-side, on top of whatever the DAV server itself allows.
+///   K22: <see cref="Validate" /> is stricter than <see cref="Parse" /> about a trailing "|xxx"
+///   segment — Parse (since K10) treats anything that is not exactly "ro"/"rw" as part of the
+///   href rather than guessing at a mode, but Validate still REJECTS an entry whose trailing
+///   segment looks like an attempted (but misspelled) mode suffix, so a typo is reported rather
+///   than silently absorbed into the href.
 /// </summary>
 public sealed record SharedCollection(string Href, bool ReadOnly)
 {
@@ -42,7 +47,7 @@ public sealed record SharedCollection(string Href, bool ReadOnly)
 			string mode = entry[(separator + 1)..].Trim();
 			if (!mode.Equals("ro", StringComparison.OrdinalIgnoreCase) &&
 			    !mode.Equals("rw", StringComparison.OrdinalIgnoreCase))
-				return $"'{entry}' has an unknown mode suffix '{mode}' (use \"|ro\" or nothing).";
+				return $"'{entry}' has an unknown mode suffix '{mode}' (use \"|ro\", \"|rw\", or nothing).";
 		}
 
 		if (parsed.Href.StartsWith('/'))
