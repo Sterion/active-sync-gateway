@@ -33,7 +33,6 @@ public sealed partial class ImapMailBackend(
 	private static readonly string[] SentNames = ["Sent", "Sent Items", "Sent Messages", "INBOX.Sent"];
 	private static readonly string[] TrashNames = ["Trash", "Deleted Items", "Deleted Messages", "INBOX.Trash"];
 	private static readonly string[] DraftsNames = ["Drafts", "INBOX.Drafts"];
-	private static readonly string[] JunkNames = ["Junk", "Spam", "Junk E-mail", "INBOX.Junk"];
 
 	/// <summary>
 	///   G15: <see cref="FindSpecialFolderAsync" /> result, memoized per resolved <see cref="ImapClient" />
