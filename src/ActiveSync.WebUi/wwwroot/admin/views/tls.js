@@ -44,7 +44,7 @@ export async function render(container) {
 	if (tls.error) {
 		cards.push(h('div', { class: 'card' },
 			h('h2', {}, 'Problem'),
-			h('div', { class: 'notice danger' }, tls.error)));
+			h('div', { class: 'notice error' }, tls.error)));
 	}
 
 	if (tls.fingerprint) {
