@@ -1304,3 +1304,26 @@ seams and reversing them breaks the test assemblies:
   servers that close the connection at an exact protocol boundary, because a real network fault cannot be
   timed deterministically. That is the right answer for fault-injection findings and mirrors the existing
   `RawSieveServer` pattern — no coverage-only tests were needed anywhere in this item.
+
+### Item 24 — CORRECTION: `G22` rolled back, item 24 is NOT complete
+`3a269d4` reverts `91ce0cc` (src + test) and reopens `G22` on the queue line. The entry above records
+item 24 as eight-for-eight; that is now **seven**, and `G22` must be redone.
+
+The note above flagged the per-poll connection as a churn regression but still let the strike stand. That
+was too generous, and one fact I had not checked at the time makes it clearly wrong: `PollForChangesAsync`
+is **not** an IDLE fallback. `WaitForChangesAsync` races it against IDLE on **every** long-poll
+(`Task.WhenAny(idleTask, pollTask)`), so the new connect+LOGIN+STATUS+LOGOUT every 30 s is the **normal
+path for every device**, not an IDLE-unavailable edge case — on the order of 118 IMAP logins per device
+per hour, against `G6`'s own documented `mail_max_userip_connections` cap. Two fixes in one item, pulling
+against each other, and the item shipped anyway.
+
+**Lesson for the next orchestrator:** I read `G22`'s diff correctly and described the cost accurately, then
+struck it because each fix was individually correct. "Individually correct" is not the bar when two
+findings in the same item touch the same resource — the question is what the item does as a whole. When a
+fix's cost lands on the same axis another finding in the same item is about, that is a stop-and-report, not
+a note.
+
+**Redo guidance** is on the queue line: persistent poll connection owned by `ImapBackendProvider`, keyed on
+the gateway login (one per user), its own `SemaphoreSlim` — the defect is the shared GATE, not the shared
+connection — plus lazy start, capped-backoff reconnect and `IPerUserResourceOwner` eviction.
+**After rollback:** build 0 warnings · unit **1424 passed** · live **149 passed, 0 skipped**.
