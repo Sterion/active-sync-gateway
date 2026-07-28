@@ -181,71 +181,23 @@ public sealed class CliLocalEndpointTests : IDisposable
 
 	// E3 — COVERAGE, NOT PROOF. RunCapturedAsync's writer wiring is a private local, and no command
 	// in the current tree fans out concurrent writes through both the Console-routing path and
-	// AnsiConsole, so the actual race can't be triggered end-to-end through ExecuteAsync. These two
-	// tests reproduce the IDENTICAL wiring pattern standalone: one proves the "before" shape (a
-	// TextWriter.Synchronized wrapper on one path, the raw StringWriter directly on the other —
-	// Synchronized locks on ITSELF, not on the StringWriter, so the two paths still race on the
-	// shared buffer underneath) reliably corrupts output under concurrent load; the other proves the
-	// fix (both paths sharing ONE synchronized instance, exactly what RunCapturedAsync now does)
-	// does not.
-	[Fact]
-	public void UnfixedPattern_TwoIndependentWrappersOverOneStringWriter_CorruptsUnderConcurrentWrites()
-	{
-		const int threads = 8;
-		const int itersPerThread = 4000;
-		const string chunk = "0123456789";
-		long expectedLength = (long)threads * itersPerThread * chunk.Length;
-
-		bool corrupted = false;
-		for (int attempt = 0; attempt < 10 && !corrupted; attempt++)
-		{
-			StringWriter outWriter = new();
-			TextWriter synced = TextWriter.Synchronized(outWriter); // mirrors the router path
-			TextWriter raw = outWriter;                              // mirrors AnsiConsoleOutput(outWriter), unfixed
-
-			Exception? caught = null;
-			Thread[] pool = new Thread[threads];
-			for (int t = 0; t < threads; t++)
-			{
-				TextWriter w = t % 2 == 0 ? synced : raw;
-				pool[t] = new Thread(() =>
-				{
-					try
-					{
-						for (int i = 0; i < itersPerThread; i++)
-							w.Write(chunk);
-					}
-					catch (Exception ex)
-					{
-						caught = ex;
-					}
-				});
-			}
-
-			foreach (Thread th in pool) th.Start();
-			foreach (Thread th in pool) th.Join();
-
-			// A torn StringBuilder can throw from ToString() itself (observed:
-			// ArgumentOutOfRangeException out of StringBuilder.ToString) rather than merely returning a
-			// short buffer — the race corrupts the chunk pointers, not just the content. That throw IS
-			// the corruption this test is looking for, so treat it as the positive signal instead of
-			// letting it escape as a spurious failure; leaking it made this test flake ~1-in-N and
-			// obscured real regressions for every later item.
-			try
-			{
-				corrupted = caught is not null || outWriter.ToString().Length != expectedLength;
-			}
-			catch (Exception)
-			{
-				corrupted = true;
-			}
-		}
-
-		Assert.True(corrupted,
-			"expected the unfixed dual-writer pattern (independent Synchronized wrapper + raw " +
-			"StringWriter) to corrupt the shared buffer at least once in 10 concurrent attempts");
-	}
-
+	// AnsiConsole, so the actual race can't be triggered end-to-end through ExecuteAsync. This test
+	// reproduces the FIXED wiring standalone: both paths share ONE TextWriter.Synchronized instance,
+	// exactly what RunCapturedAsync does (`outRouter.Capture(syncedOut)` and
+	// `new AnsiConsoleOutput(syncedOut)` — the same instance, which is the whole point, because
+	// Synchronized locks on ITSELF and two wrappers over one StringWriter would each serialize their
+	// own writes while still racing each other on the shared buffer underneath).
+	//
+	// There used to be a sibling here, UnfixedPattern_TwoIndependentWrappersOverOneStringWriter_
+	// CorruptsUnderConcurrentWrites, asserting that the UNFIXED shape does corrupt within 10
+	// attempts. It was deleted (2026-07-28) after failing CI. Two reasons, and the first alone is
+	// fatal: it asserted that a data race MANIFESTS, which is a property of the core count, the
+	// scheduler and the JIT — not of this repository — so a CI runner with little real parallelism
+	// fails it with nothing wrong. And like this test it built the pattern inline, never touching
+	// RunCapturedAsync, so it could not have caught a reintroduction of the bug either. A test that
+	// cannot detect the regression but can fail without one is pure cost. This one stays because its
+	// assertion runs in the SAFE direction: with a shared synchronized writer the length is exact,
+	// deterministically, on any machine.
 	[Fact]
 	public void FixedPattern_OneSharedSynchronizedWriter_NeverCorrupts_UnderTheSameConcurrentLoad()
 	{

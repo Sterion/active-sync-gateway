@@ -1327,3 +1327,30 @@ a note.
 the gateway login (one per user), its own `SemaphoreSlim` — the defect is the shared GATE, not the shared
 connection — plus lazy start, capped-backoff reconnect and `IPerUserResourceOwner` eviction.
 **After rollback:** build 0 warnings · unit **1424 passed** · live **149 passed, 0 skipped**.
+
+### Flaky-test follow-up — the concurrent-writer demonstration is deleted, not repaired
+CI (Release, Linux) failed `CliLocalEndpointTests.UnfixedPattern_TwoIndependentWrappersOverOneStringWriter_
+CorruptsUnderConcurrentWrites` on the pushed tree with *"expected the unfixed dual-writer pattern to
+corrupt the shared buffer at least once in 10 concurrent attempts"*.
+
+**My earlier repair of this test addressed the wrong failure mode.** I made a torn `StringBuilder`'s
+throwing `ToString()` count as the corruption signal — real, but it can only make the test pass MORE
+often. CI hit the opposite mode: no corruption at all in 10 attempts.
+
+**The test was unsound as a gate and is now deleted.** It asserted that a **data race manifests**, which is
+a property of core count, scheduler and JIT rather than of this repository — a CI runner with little real
+parallelism fails it with nothing wrong. And, exactly like `E18`'s tests, it constructed the pattern
+inline and never touched `RunCapturedAsync`, so it could not have caught a reintroduction of the bug
+either. A test that cannot detect the regression but can fail without one is pure cost.
+
+`FixedPattern_OneSharedSynchronizedWriter_NeverCorrupts_UnderTheSameConcurrentLoad` stays: its assertion
+runs in the SAFE direction (shared synchronized writer ⇒ exact length), which is deterministic anywhere.
+The reasoning is written into the comment block so nobody restores the sibling.
+
+**Verified:** `-c Release` (what CI runs) built 0 warnings and the full unit suite ran green **3/3**;
+Server.Tests 333 (334 minus the deleted test).
+
+**This is the second time an "it's only a test" flake cost real time, and both had the same root cause as
+`E18`: a test that reproduces a pattern instead of exercising the code.** Worth a rule for the remaining
+queue — if a test does not execute production code, it is documentation, and it must never be able to fail
+nondeterministically.
