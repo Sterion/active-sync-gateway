@@ -92,8 +92,21 @@ public sealed class SettingsHandler(
 					// An unrecognized/unimplemented section gets its OWN status so the client can
 					// tell it was not applied, instead of a bare top-level Status 1 and complete
 					// silence about the section (F48). Status 2 = not supported.
-					response.Add(new XElement(ST + section.Name.LocalName,
-						new XElement(ST + "Status", "2")));
+					//
+					// F24: section.Name.LocalName is reflected straight back as an element name below
+					// — only safe when the section actually belongs to the Settings code page (page
+					// 18). A crafted WBXML SWITCH_PAGE can put a token from another page here, whose
+					// local name is not a token on page 18; echoing it would make WbxmlEncoder throw
+					// encoding the response, turning a malformed request into an unhandled exception
+					// instead of a clean per-section status. Such a section cannot legitimately be a
+					// direct child of <Settings> at all, so it is simply dropped.
+					if (section.Name.Namespace == ST)
+						response.Add(new XElement(ST + section.Name.LocalName,
+							new XElement(ST + "Status", "2")));
+					else
+						logger.LogWarning(
+							"Settings request carried an out-of-page section {Namespace}:{Name}; ignoring it",
+							section.Name.NamespaceName, LogText.Clean(section.Name.LocalName, 64));
 					break;
 				}
 			}

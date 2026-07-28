@@ -90,6 +90,26 @@ public sealed class SettingsHandlerTests : IDisposable
 		Assert.Equal("2", section.Element(ST + "Status")?.Value);
 	}
 
+	// F24 (round 3) — a crafted WBXML document can SWITCH_PAGE inside <Settings> so a child
+	// element's LOCAL NAME belongs to a completely different code page (here: AirSync's "Class",
+	// page 0) while still landing in the handler's untyped `default` branch, which used to reflect
+	// section.Name.LocalName straight back as a Settings-namespaced (page 18) element name. "Class"
+	// is not a token on page 18, so WbxmlEncoder throws encoding the RESPONSE — a crafted request
+	// turns into an unhandled exception instead of a clean per-section status.
+	[Fact]
+	public async Task OutOfCodePageSection_DoesNotCrashTheEncoder()
+	{
+		XDocument request = new(new XElement(ST + "Settings",
+			new XElement(EasNamespaces.AirSync + "Class", "Email")));
+
+		XDocument? response = await _harness.RunAsync(NewHandler(), "Settings", request);
+
+		// The overall request still succeeds; the intruding section is simply not echoed back
+		// under a name that belongs to another code page.
+		Assert.Equal("1", response?.Root?.Element(ST + "Status")?.Value);
+		Assert.Null(response?.Root?.Element(EasNamespaces.AirSync + "Class"));
+	}
+
 	private sealed class StubOof : IOofBackend
 	{
 		public bool Enabled { get; private set; }
