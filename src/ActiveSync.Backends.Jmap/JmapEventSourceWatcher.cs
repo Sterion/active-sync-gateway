@@ -39,12 +39,22 @@ public sealed class JmapEventSourceWatcher : IAsyncDisposable
 	/// </summary>
 	public Task WaitForChangeAsync(DateTime afterUtc, CancellationToken ct)
 	{
+		// H14: capture the CURRENT signal TCS BEFORE checking the latch (capture-then-check). The
+		// old check-then-read order read _signal only after the latch check — if Signal() ran in
+		// that gap, it had already installed a FRESH, uncompleted TCS (and completed the old one),
+		// so the waiter subscribed to the new TCS and missed the change until the NEXT push. With
+		// the TCS captured first, a Signal() landing anywhere between the capture and the return
+		// below either (a) advances _lastChangeTicks past afterUtc, so the latch check below
+		// short-circuits with Task.CompletedTask, or (b) completes the exact TCS instance already
+		// captured in `pending` — so `pending.Task` is already complete by the time it is awaited.
+		// Either way the push cannot land in an unobserved gap.
+		TaskCompletionSource pending = Volatile.Read(ref _signal);
 		if (new DateTime(Interlocked.Read(ref _lastChangeTicks), DateTimeKind.Utc) > afterUtc)
 			return Task.CompletedTask;
 		// The signal TCS is completed by the background SSE loop — the shared-latch pattern the
 		// IMAP IDLE watcher uses too.
 #pragma warning disable VSTHRD003
-		return _signal.Task.WaitAsync(ct);
+		return pending.Task.WaitAsync(ct);
 #pragma warning restore VSTHRD003
 	}
 

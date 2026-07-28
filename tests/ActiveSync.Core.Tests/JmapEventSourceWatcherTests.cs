@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using System.Text;
 using ActiveSync.Backends.Jmap;
 using ActiveSync.Contracts;
@@ -73,6 +74,40 @@ public sealed class JmapEventSourceWatcherTests
 		Task winner = await Task.WhenAny(wait, Task.Delay(TimeSpan.FromSeconds(2)));
 
 		Assert.Same(wait, winner); // the state-change record must have signalled
+	}
+
+	// H14 (coverage, not red-first proof — see fix-review.md's "genuinely cannot be reproduced"
+	// clause). The defect was a single-VM-instruction gap in WaitForChangeAsync between reading
+	// the latch and capturing the signal TCS: nothing between those two statements ever yields, so
+	// no external caller can suspend execution in that exact gap to force the interleaving without
+	// an invasive test seam — an attempted stress-test version of this test (many concurrent
+	// Signal() calls racing many waits) was tried and discarded: it passed identically on the
+	// unfixed code, because a tight, continuous stream of Signal() calls completes whatever TCS is
+	// current within a cycle or two either way, masking the one-signal loss the fix closes. What
+	// IS verifiable from outside the class is that the refactor (capturing `pending` before the
+	// latch check, instead of reading `_signal` after it) did not change the two behaviours the
+	// method contracts to: an already-latched call returns synchronously-completed, and a genuine
+	// signal still wakes an in-flight wait.
+	[Fact]
+	public async Task WaitForChangeAsync_AlreadyLatched_ReturnsSynchronously()
+	{
+		StubHandler stub = new(request => request.RequestUri!.AbsolutePath.StartsWith("/jmap/eventsource")
+			? new HttpResponseMessage(HttpStatusCode.OK)
+			{
+				Content = new StringContent("", Encoding.UTF8, "text/event-stream")
+			}
+			: Json(SessionJson));
+
+		await using JmapEventSourceWatcher watcher = new(
+			new JmapClient(Base, new HttpClient(stub)), new BackendCredentials("u", "p"), NullLogger.Instance);
+		MethodInfo signal = typeof(JmapEventSourceWatcher).GetMethod(
+			"Signal", BindingFlags.NonPublic | BindingFlags.Instance)!;
+		DateTime beforeSignal = DateTime.UtcNow;
+		signal.Invoke(watcher, null);
+
+		Task wait = watcher.WaitForChangeAsync(beforeSignal, CancellationToken.None);
+
+		Assert.Equal(TaskStatus.RanToCompletion, wait.Status); // no await needed — already latched
 	}
 
 	// H12: the SSE stream read through a plain StreamReader.ReadLineAsync with no size cap, on a
