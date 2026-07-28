@@ -1,5 +1,4 @@
 using MailKit;
-using MailKit.Net.Imap;
 using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Backends.Imap;
@@ -104,45 +103,30 @@ public sealed partial class ImapMailBackend
 		return [];
 	}
 
-	/// <summary>
-	///   G22: deliberately bypasses <see cref="ImapSession.RunAsync{T}" />'s per-session gate via a
-	///   standalone connection. This is the STATUS-poll fallback that backs a Ping's push
-	///   detection, called repeatedly across a long-poll's whole duration — sharing the session
-	///   gate with `GetItemRevisionsAsync`'s whole-mailbox FETCH (deliberately NOT paged, so it can
-	///   hold the gate for a while on a large mailbox) meant one device's Sync/FolderSync round
-	///   could stall every other device's Ping push-detection for the same user behind it.
-	/// </summary>
-	private async Task<Dictionary<string, string>> SnapshotStatusAsync(
+	private Task<Dictionary<string, string>> SnapshotStatusAsync(
 		IReadOnlyList<string> folderBackendKeys, CancellationToken ct)
 	{
-		using ImapClient client = await session.ConnectStandaloneAsync(ct).ConfigureAwait(false);
-		Dictionary<string, string> map = new(StringComparer.Ordinal);
-		foreach (string key in folderBackendKeys)
-			try
-			{
-				IMailFolder folder = await client.GetFolderAsync(ImapSession.FromBackendKey(key), ct).ConfigureAwait(false);
-				// UIDVALIDITY leads the fingerprint so a reset (mailbox recreated, restored,
-				// migrated) always reads as a change even when count/uidnext/unread happen to
-				// land identically — that is the moment every stored item key goes stale.
-				await folder.StatusAsync(
-					StatusItems.Count | StatusItems.UidNext | StatusItems.Unread | StatusItems.UidValidity, ct)
-					.ConfigureAwait(false);
-				map[key] = $"{folder.UidValidity}:{folder.Count}:{folder.UidNext}:{folder.Unread}";
-			}
-			catch (Exception ex) when (ex is FolderNotFoundException)
-			{
-				map[key] = "gone";
-			}
-
-		try
+		return session.RunAsync(async client =>
 		{
-			await client.DisconnectAsync(true, CancellationToken.None).ConfigureAwait(false);
-		}
-		catch
-		{
-			// best effort — the client is about to be disposed regardless
-		}
+			Dictionary<string, string> map = new(StringComparer.Ordinal);
+			foreach (string key in folderBackendKeys)
+				try
+				{
+					IMailFolder folder = await client.GetFolderAsync(ImapSession.FromBackendKey(key), ct).ConfigureAwait(false);
+					// UIDVALIDITY leads the fingerprint so a reset (mailbox recreated, restored,
+					// migrated) always reads as a change even when count/uidnext/unread happen to
+					// land identically — that is the moment every stored item key goes stale.
+					await folder.StatusAsync(
+						StatusItems.Count | StatusItems.UidNext | StatusItems.Unread | StatusItems.UidValidity, ct)
+						.ConfigureAwait(false);
+					map[key] = $"{folder.UidValidity}:{folder.Count}:{folder.UidNext}:{folder.Unread}";
+				}
+				catch (Exception ex) when (ex is FolderNotFoundException)
+				{
+					map[key] = "gone";
+				}
 
-		return map;
+			return map;
+		}, ct);
 	}
 }

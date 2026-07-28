@@ -344,7 +344,19 @@ work. Every finding ID appears in exactly one item.
 > `F13` FolderCreate can report success with no ServerId. `F15` the long poll abandons its losing waits
 > instead of draining them. `F16`/`F17` unmapped backend failures reach the client as HTTP 500.
 
-**24. IMAP correctness** [LIVE] — ~~`G3`~~ ~~`G6`~~ ~~`G7`~~ ~~`G9`~~ ~~`G12`~~ ~~`G13`~~ ~~`G16`~~ ~~`G22`~~ **COMPLETE**
+**24. IMAP correctness** [LIVE] — ~~`G3`~~ ~~`G6`~~ ~~`G7`~~ ~~`G9`~~ ~~`G12`~~ ~~`G13`~~ ~~`G16`~~ `G22`
+> **`G22` was struck and then ROLLED BACK — it is open again and must be redone.** The first fix gave
+> `SnapshotStatusAsync` a brand-new IMAP connection per poll (`ConnectStandaloneAsync` → LOGIN → STATUS →
+> LOGOUT, every 30 s, for the whole heartbeat). `PollForChangesAsync` races IDLE on EVERY long-poll rather
+> than only when IDLE is down (`ImapMailBackend.Watch.cs`, `Task.WhenAny(idleTask, pollTask)`), so that is
+> ~118 logins per device per hour in the NORMAL path — aggravating the very connection-cap pressure `G6`
+> in this same item exists to survive. Reverted in `<this commit>`.
+> **Redo it as the finding actually says — "its own lightweight connection (as `ImapIdleWatcher` already
+> has)", i.e. PERSISTENT.** The defect is sharing the session GATE, not sharing a connection, so the fix
+> needs a second gate, not a new connection: a poll connection owned by `ImapBackendProvider` keyed on the
+> gateway login (one per user, shared by all their devices and folders, like `_watchers`), with its own
+> `SemaphoreSlim`, lazy start, capped-backoff reconnect, and `IPerUserResourceOwner` eviction when the
+> user's last session goes. Steady state is then 3 connections per user (session + IDLE + poll), constant.
 > `G6` one transient `AuthenticationException` (Dovecot's per-user connection cap, which this design provokes)
 > **permanently** disables IDLE push for that folder. `G7` a per-user backend change leaves a live
 > authenticated IDLE connection against the old server. `G9` a draft rewrite is append-then-delete with no
