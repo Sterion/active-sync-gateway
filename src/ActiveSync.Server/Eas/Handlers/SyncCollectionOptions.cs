@@ -33,7 +33,20 @@ internal sealed record SyncCollectionOptions(
 	{
 		SyncCollectionOptions? options = Parse(optionsElement);
 		if (options is null && state.OptionsJson is not null)
-			options = JsonSerializer.Deserialize<SyncCollectionOptions>(state.OptionsJson);
+			try
+			{
+				options = JsonSerializer.Deserialize<SyncCollectionOptions>(state.OptionsJson);
+			}
+			catch (JsonException)
+			{
+				// F23: a truncated or schema-drifted CollectionState.OptionsJson row (a shape change
+				// to this record, a partial write) must not throw out of ProcessCollectionAsync, past
+				// every catch in the handler, to the endpoint's 500 — and on every SUBSEQUENT Sync for
+				// this collection, wedging the folder permanently with no recovery path short of a DB
+				// edit. The sibling readers all defend the same way: SyncHandler.Cache.cs catches
+				// JsonException, CollectionStateStore.ReadAppliedAdds uses `?? []`. Fall back to Default.
+				options = null;
+			}
 		return options ?? Default;
 	}
 

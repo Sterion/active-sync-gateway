@@ -175,6 +175,23 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Equal(0, resolved.MimeSupport);
 	}
 
+	// ---- item 23 F23: a malformed/truncated persisted OptionsJson must not wedge the collection ----
+	[Fact]
+	public void F23_MalformedPersistedOptionsJson_FallsBackToDefault_DoesNotThrow()
+	{
+		// No client-supplied <Options> element, so Resolve falls through to the persisted
+		// CollectionState.OptionsJson — a schema-drifted or truncated row (a shape change to this
+		// record, a partial write) rather than valid JSON.
+		CollectionState state = new() { CollectionId = "1", OptionsJson = "{not valid json" };
+
+		SyncCollectionOptions resolved = SyncCollectionOptions.Resolve(null, state);
+
+		// The sibling readers all defend this way (SyncHandler.Cache.cs catches JsonException;
+		// CollectionStateStore.ReadAppliedAdds uses ?? []) — unguarded here, this throws and wedges
+		// the folder permanently (every subsequent Sync for this collection hits the same row).
+		Assert.Equal(SyncCollectionOptions.Default, resolved);
+	}
+
 	// ---- F7: a client Change to an item the backend moved on must return Status 7, not overwrite ----
 	[Fact]
 	public async Task F7_ClientChangeAgainstMovedBackend_ReturnsStatus7_DoesNotOverwrite()

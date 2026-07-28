@@ -338,7 +338,7 @@ work. Every finding ID appears in exactly one item.
 
 ## Phase 3 — Correctness
 
-**23. Sync handler status & lifecycle** [LIVE] — ~~`F13`~~ ~~`F14`~~ ~~`F15`~~ ~~`F16`~~ ~~`F17`~~ `F18` `F23` `F27`
+**23. Sync handler status & lifecycle** [LIVE] — ~~`F13`~~ ~~`F14`~~ ~~`F15`~~ ~~`F16`~~ ~~`F17`~~ `F18` ~~`F23`~~ `F27`
 > `F14` the 16.1 account-only wipe is delivered to pre-16.1 devices that cannot decode it — a permanent 449
 > loop, so the operator's wipe silently never completes on exactly the old devices most likely to need it.
 > `F13` FolderCreate can report success with no ServerId. `F15` the long poll abandons its losing waits
