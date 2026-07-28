@@ -450,7 +450,7 @@ work. Every finding ID appears in exactly one item.
 > schema-exposed IMAP option nothing reads. `G14` folder listing is one LIST per folder, unbounded depth,
 > under the session gate.
 
-**36. Contracts, crypto & plugin nits** — ~~`K8`~~ ~~`K9`~~ ~~`K10`~~ ~~`K12`~~ ~~`K14`~~ ~~`K15`~~ ~~`K16`~~ `K17` `K20` `K22` `K23`
+**36. Contracts, crypto & plugin nits** — ~~`K8`~~ ~~`K9`~~ ~~`K10`~~ ~~`K12`~~ ~~`K14`~~ ~~`K15`~~ ~~`K16`~~ ~~`K17`~~ `K20` `K22` `K23`
 > **Touches the published contract — mind the version gate.** `K12` `TransientRetry` defaults to *replaying*,
 > so a plugin author who omits one argument gets at-least-once on a non-idempotent send. `K9` `DelaysMs` is a
 > publicly mutable static array any plugin can retune process-wide. `K8` the `enc:v1:` scheme has no domain

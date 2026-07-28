@@ -45,19 +45,23 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 	///   false — never throws — on any malformed or unauthenticated input.
 	///
 	///   <para>
-	///     K16: this method enforces the timestamp WINDOW only — it does not by itself make an
-	///     envelope single-use. "An envelope runs exactly once" (see the type doc) is a property of
-	///     the CALLER's replay tracking (e.g. <c>LocalCliEndpoint.ReplayCache</c>), not of
-	///     <see cref="TryOpen(string?, byte[], long, long, out LocalCliEnvelope?)" /> itself — a
-	///     caller that omits its own nonce tracking silently loses single-use, keeping only the
-	///     time bound. Pass <paramref name="seenNonces" /> to make THIS call self-enforcing: a nonce
-	///     already present is rejected as a replay and a fresh one is recorded atomically with the
-	///     open, so the contract no longer depends on the caller remembering to wire its own set.
+	///     This method enforces the timestamp WINDOW only — it does not by itself make an envelope
+	///     single-use. "An envelope runs exactly once" (see the type doc) is a property of the
+	///     CALLER's replay tracking, which is <c>LocalCliEndpoint.ReplayCache</c> (a locked,
+	///     window-pruned single-use table) — the ONLY enforcement mechanism, not a convenience on
+	///     top of one.
+	///   </para>
+	///   <para>
+	///     K17: this used to take an optional <c>ISet&lt;string&gt; seenNonces</c> to make one call
+	///     self-enforcing. It was dead code — the only production caller
+	///     (<c>LocalCliEndpoint.TryAuthorize</c>) always used <c>ReplayCache</c> instead — and unsafe
+	///     if it had ever been wired up: a plain <c>ISet&lt;string&gt;</c> is not thread-safe under
+	///     concurrent <c>/cli</c> posts, and it never evicts, so it would grow without bound for the
+	///     life of the process (unlike <c>ReplayCache</c>, which prunes past its own window). Removed
+	///     rather than fixed in place: the seam this codebase already trusts is strictly stronger.
 	///   </para>
 	/// </summary>
-	public static bool TryOpen(
-		string? sealedValue, byte[] key, long nowUnixMs, long windowMs, out LocalCliEnvelope? envelope,
-		ISet<string>? seenNonces = null)
+	public static bool TryOpen(string? sealedValue, byte[] key, long nowUnixMs, long windowMs, out LocalCliEnvelope? envelope)
 	{
 		envelope = null;
 		if (string.IsNullOrEmpty(sealedValue))
@@ -85,10 +89,6 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 		if (decoded.TimestampUnixMs - nowUnixMs > FutureSkewMs)
 			return false;
 		if (nowUnixMs - decoded.TimestampUnixMs > windowMs)
-			return false;
-		// Self-enforcing single-use: Add returns false when the nonce is already present, so a
-		// replayed envelope is rejected here even if the caller never wired its own tracking.
-		if (seenNonces is not null && !seenNonces.Add(decoded.Nonce))
 			return false;
 
 		envelope = decoded;
