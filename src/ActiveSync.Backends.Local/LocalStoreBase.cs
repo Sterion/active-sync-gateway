@@ -135,6 +135,13 @@ public abstract class LocalStoreBase(
 			{
 				continue;
 			}
+			catch (DbUpdateConcurrencyException ex)
+			{
+				// G19: retries are exhausted — surface the store's own exception type (every
+				// other IContentStore failure funnels through BackendException) instead of
+				// leaking an EF Core type across the store boundary.
+				throw new BackendException($"Local {Collection} item {itemKey} is being modified concurrently; retry.", ex);
+			}
 
 			notifier.NotifyChanged(userId, Collection);
 			return row.Version.ToString();

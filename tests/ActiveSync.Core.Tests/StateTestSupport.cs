@@ -94,6 +94,35 @@ internal sealed class CountingDbContextFactory(SqliteConnection connection, Save
 	public SyncDbContext CreateDbContext() => StateTestSupport.NewContext(connection, counter);
 }
 
+/// <summary>Hands out short-lived contexts that all carry the given interceptor.</summary>
+internal sealed class InterceptedDbContextFactory(SqliteConnection connection, IInterceptor interceptor)
+	: ISyncDbContextFactory
+{
+	public SyncDbContext CreateDbContext() => StateTestSupport.NewContext(connection, interceptor);
+}
+
+/// <summary>
+///   Like <see cref="ConcurrentWriteInterceptor" />, but injects a competing write on EVERY save
+///   rather than only the first — for reproducing a retry loop that is genuinely exhausted (every
+///   attempt races a fresh conflict) rather than one that recovers after a single collision.
+/// </summary>
+internal sealed class AlwaysConflictInterceptor(Action inject) : SaveChangesInterceptor
+{
+	public override InterceptionResult<int> SavingChanges(
+		DbContextEventData eventData, InterceptionResult<int> result)
+	{
+		inject();
+		return base.SavingChanges(eventData, result);
+	}
+
+	public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+		DbContextEventData eventData, InterceptionResult<int> result, CancellationToken ct = default)
+	{
+		inject();
+		return base.SavingChangesAsync(eventData, result, ct);
+	}
+}
+
 /// <summary>
 ///   Simulates a genuine interleaved writer: the FIRST time the intercepted context saves, runs a
 ///   caller-supplied action (typically inserting/committing a competing row on a SEPARATE context
