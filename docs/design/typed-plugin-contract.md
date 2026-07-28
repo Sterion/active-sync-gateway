@@ -1114,26 +1114,39 @@ this mechanically (and its history block is append-only), so phases landing betw
 tags still each record their own bump; only the tag publishes.
 
 **Execution model (owner's choice, 2026-07-29).** All five phases land on one long-lived
-branch, **`plugin-restructure`** (created from `main` if absent), as **exactly one commit per
-phase** — five commits total, each leaving the tree green per its phase's verification line.
-Phases are sequential: Phase N assumes commits 1…N−1 are already on the branch.
+branch, **`plugin-restructure`** (created from `main` if absent), as **one commit per phase —
+except Phase 3, which is two** (the 3a checkpoint and the 3b completion; see the phase's own
+orchestration below). Six commits total. Each *phase* ends with the tree green per its
+verification line; the 3a checkpoint is the plan's ONE deliberately-red intermediate commit
+and is never pushed on its own. Phases are sequential: Phase N assumes the prior phases'
+commits are already on the branch.
 
 **Phase 3 — and only Phase 3 — pushes and waits for CI.** The GitHub pipeline's integration
 matrix is the ONLY place the full backend barrage runs (five active stacks; locally
 `scripts/test-fast` covers stalwart + axigen alone), and Phase 3 is the one that changes the
 data path for every class on every backend — so Phase 3 is **done** only when its branch push's
-Actions run is green (the push carries commits 1–3, so the matrix validates the accumulated
-branch). A red run is fixed by **amending the phase commit and force-pushing** (the branch is
-worked sequentially by one agent at a time, so force-push is safe), preserving one commit per
-phase. Every other phase commits locally and does **not** push — its own verification line is
+Actions run is green (the push carries everything up through the 3b commit, so the matrix
+validates the accumulated branch). A red run is fixed by **amending the 3b commit and
+force-pushing** (the branch is worked sequentially by one session at a time, so force-push is
+safe). Every other phase commits locally and does **not** push — its own verification line is
 sufficient, and gating each phase on a full CI round-trip would add significant wall-clock
 waiting for no coverage gain. Branch pushes are publish-safe: the pack/NuGet steps are
 tag-gated (§ 5.6), so nothing is released by pushing. Merging to `main` and raising 2.0
 afterwards remain the owner's own acts (decision 14).
 
-**Operator note — the prompt for a clean agent, one line, substitute the phase number:**
+**Model assignment (owner's choice):** Phase 1 → Sonnet · Phase 2 → Opus · Phase 3 → **Fable
+as the orchestrating session, one Opus subagent as the 3b worker** · Phase 4 → Opus ·
+Phase 5 → Opus. All at high effort. The rationale: Fable is spent only on the judgment-dense
+core of Phase 3 (3a + the review), never on the token-heavy bulk conversion.
 
-> Read `AGENTS.md` (coding conventions, invariants, testing expectations) and `docs/design/typed-plugin-contract.md` in full and follow the design document's authority rules, then implement Phase N of its § 9 plan exactly as specified, working on the `plugin-restructure` branch (create it from `main` if it does not exist), and finish with that phase's verification gates green and the phase's work as exactly one commit on that branch — if and only if this is Phase 3, also push the branch and confirm the GitHub Actions run for that push completes green (fix failures by amending the phase commit and force-pushing), otherwise do not push — do not touch `ContractVersionMajor`, and do not start any other phase.
+**Operator note — the prompt for a clean agent. Phases 1, 2, 4 and 5, one line, substitute
+the phase number:**
+
+> Read `AGENTS.md` (coding conventions, invariants, testing expectations) and `docs/design/typed-plugin-contract.md` in full and follow the design document's authority rules, then implement Phase N of its § 9 plan exactly as specified, working on the `plugin-restructure` branch (create it from `main` if it does not exist), and finish with that phase's verification gates green and the phase's work as exactly one commit on that branch — do not push, do not touch `ContractVersionMajor`, and do not start any other phase.
+
+**Phase 3 has its own prompt — run it in a Fable session:**
+
+> Read `AGENTS.md` (coding conventions, invariants, testing expectations) and `docs/design/typed-plugin-contract.md` in full and follow the design document's authority rules, then execute Phase 3 of its § 9 plan per that phase's 3a/3b orchestration: implement Phase 3a yourself and make the 3a checkpoint commit on the `plugin-restructure` branch, spawn exactly one Opus subagent to implement Phase 3b per its work list, adversarially review the worker's complete diff against § 5, § 7.1 and your 3a exemplars and fix what the review finds, make the 3b commit, then push the branch and confirm the GitHub Actions run for that push completes green (fix failures by amending the 3b commit and force-pushing) — do not touch `ContractVersionMajor`, and do not start any other phase.
 
 ### Phase 1 — typed primitives, and sever Protocol
 
@@ -1180,6 +1193,15 @@ afterwards remain the owner's own acts (decision 14).
 
 ### Phase 3 — item currency (the substantial one)
 
+**Orchestration (owner's choice, 2026-07-29): one Fable session runs this phase end-to-end.**
+Fable implements 3a (the judgment-dense core) and makes the checkpoint commit, spawns **exactly
+one Opus subagent** to implement 3b (the token-heavy bulk, following 3a's exemplars),
+adversarially reviews the worker's complete diff, fixes what the review finds, makes the 3b
+commit, pushes, and gates on the CI matrix. The split exists because the expensive part and the
+hard part of this phase are different code: the semantics concentrate in 3a, the tokens in 3b.
+
+**Phase 3a — the orchestrator (Fable) implements:**
+
 - Introduce `MailItem`, `CalendarItem`, `TaskItem`, `ContactItem`, `NoteItem`, `MailFlagsPatch`
   + `Optional<T>`, `MailFetchOptions`; delete `BodyPreference` from the contract (host-side now).
 - Split `IContentStore` into the generic form and per-class aliases — and the **separate
@@ -1187,22 +1209,51 @@ afterwards remain the owner's own acts (decision 14).
   `ReplaceDraftAsync` (the 16.x draft paths, key-change explicit). Mail is the class most
   likely to be quietly wedged into the generic shape it does not fit; it is a named line item
   so it cannot be.
-- **Convert the side operations and capabilities too (§ 5.8)** — this is half the work. The
-  checklist is the mechanical sweep, not a list: every `string` naming a folder/item/revision,
-  every same-typed tuple. Highlights: rename to `IMailboxOperations`/`IMeetingOperations`/
-  `IDirectoryOperations`; `SearchGalAsync` → `GalEntry` with `GalPictureResult` (the typed
-  photo statuses — a bare nullable cannot carry 173 vs 174/175); `MeetingResponseKind`;
-  `RespondToMeetingAsync` → `ItemKey?`; `SearchHit` replacing the untyped `(string, string)`
-  pair, with `SearchAsync`'s whole-mailbox `FolderKey?` and `GetRawMessageAsync`'s nullability
-  preserved; **deletion** of both
+- **Convert the side operations and capabilities too (§ 5.8)** — the contract surface in full.
+  The checklist is the mechanical sweep, not a list: every `string` naming a
+  folder/item/revision, every same-typed tuple. Highlights: rename to
+  `IMailboxOperations`/`IMeetingOperations`/`IDirectoryOperations`; `SearchGalAsync` →
+  `GalEntry` with `GalPictureResult` (the typed photo statuses — a bare nullable cannot carry
+  173 vs 174/175); `MeetingResponseKind`; `RespondToMeetingAsync` → `ItemKey?`; `SearchHit`
+  replacing the untyped `(string, string)` pair, with `SearchAsync`'s whole-mailbox
+  `FolderKey?` and `GetRawMessageAsync`'s nullability preserved; **deletion** of both
   `ICalendarOperations.GetRawEventAsync` and `IMailStoreOperations.GetAttachmentAsync` (host
   extracts from the raw message — verified equivalent, § 5.8); typed keys through
   `IItemMoveOperations` / `IFolderOperations` / `IReadOnlyCollectionSource` /
   `ICalendarAttachmentSource` / `IFreeBusySource`.
 - Add `BackendPreconditionFailedException` and the § 6.3 conditional-update semantics
   (host re-fetch + one retry; stores may ignore `expected`).
-- Move ghosting/merge host-side; add the payload cache and `expected` revision.
-- Convert all six in-repo providers to the new seam.
+- Move ghosting/merge host-side; add the payload cache and `expected` revision — including the
+  `SyncHandler` interplay (echo suppression, the draft Delete+Add path, read-only revert).
+- Raise `ContractVersionMinor` and regenerate the surface snapshot **here** — the contract
+  surface is complete after 3a; 3b touches providers only.
+- **Exemplar conversions, in full: `imap` and `local`.** `imap` because every mail subtlety
+  lives there (the flags patch, both draft paths, `CategoryKeywords`); `local` because it is
+  the smallest complete payload-class store (calendar/contacts/tasks/notes incl. the
+  `NoteItem` ⇄ VJOURNAL mapping, § 7.1). These are the worker's reference implementations.
+- **The 3a checkpoint commit — the plan's one exception to the green rule.** The unconverted
+  providers (`dav`, `jmap`, `sieve`, `smtp`) will not compile against the new seam; that is
+  expected, and their compile errors ARE 3b's work list. This commit is never pushed alone.
+
+**Phase 3b — one Opus subagent (spawned by the session) implements, and does NOT commit:**
+
+- Convert `dav`, `jmap`, `sieve`/`smtp` and every remaining side-operation implementation to
+  the new seam, following the exemplars (`imap` for mail semantics, `local` for payload
+  classes).
+- This includes the **jmap retargets** (§ 7.1's jmap consequence lands HERE, not Phase 4,
+  because the new seam demands payloads): `JsContactConverter` produces/consumes vCard,
+  `JmapCalendarStore` stops at the iCalendar it already builds, `JmapMailStore` hands over the
+  raw RFC822 blob and drops its EAS body-shaping tail.
+- GAL search and ResolveRecipients paths wired through `GalEntry`/`GalPictureResult`.
+- Solution builds at 0 warnings; unit suite + `scripts/test-fast` green. Work is left
+  **uncommitted** so the orchestrator reviews a clean working-tree diff.
+
+**Review and close — the orchestrator (Fable), same session:**
+
+- Adversarially review the worker's complete diff against § 5, § 7.1 and the 3a exemplars.
+  Priority order: GAL/ResolveRecipients (the least-covered paths), the DAV merge paths, the
+  jmap retargets, every echo-suppression call site. Fix what the review finds.
+- Make the 3b commit, push the branch, and gate on the Actions run (amend + force-push on red).
 - **Verification:** full integration suite across every enabled stack — this phase changes the
   data path for every class on every backend. The full matrix runs via this phase's branch push
   and its green Actions run (the § 9 execution model — Phase 3 is the only phase that pushes);
@@ -1222,9 +1273,9 @@ afterwards remain the owner's own acts (decision 14).
   `ExtractUid` family) and MailKit for `MailKitWireLogger`/`MailTransportSecurity` — an earlier
   draft expected it to shed the domain libraries entirely, which § 7.1's evidence disproves.
   What it sheds is the EAS half: `EasNamespaces`/`EasDateTime` usage drops to near zero.
-- Retarget the jmap provider's own converters per § 7.1: `JsContactConverter` to
-  JSContact ⇄ vCard, `JmapCalendarStore` stopping at iCalendar, `JmapMailStore` dropping its
-  EAS body-shaping tail.
+- Confirm the jmap retargets already landed in Phase 3b (`JsContactConverter` ⇄ vCard,
+  `JmapCalendarStore` stopping at iCalendar, `JmapMailStore` raw RFC822 — they belong to the
+  seam change, not the relocation): no EAS XML production remains anywhere in `Backends.Jmap`.
 - **Inventory the converter-behaviour knobs that live in provider config sections.** Example:
   `Backends:Calendar:CalendarAttachments` (Auto/On/Off) is bound by the caldav provider but
   governs what the *converter* emits — once conversion is host-side, each such knob either
