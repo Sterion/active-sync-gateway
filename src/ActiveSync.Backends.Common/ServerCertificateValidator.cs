@@ -12,8 +12,13 @@ namespace ActiveSync.Backends.Common;
 /// </summary>
 public static class ServerCertificateValidator
 {
-	private static readonly ConcurrentDictionary<string, X509Certificate2Collection> CaCache =
-		new(StringComparer.OrdinalIgnoreCase);
+	// D27: keyed on (path, last-write time, length) rather than the path alone. CaCertificatePath
+	// is a live, DB-settable option that otherwise applies on session recycle (~1 s, per AGENTS.md)
+	// — a path-only key meant a rotated CA bundle at the same path was cached FOREVER, including
+	// past the point the old root expires, with no way for an operator to fix it short of a
+	// process restart. A stat per handler creation is negligible next to a TLS handshake.
+	private static readonly ConcurrentDictionary<(string Path, DateTime LastWriteUtc, long Length),
+		X509Certificate2Collection> CaCache = new();
 
 	/// <summary>
 	///   Builds the validation callback, or null when neither knob is set so the caller
@@ -77,24 +82,32 @@ public static class ServerCertificateValidator
 		return chain.Build(certificate);
 	}
 
-	/// <summary>Loads (and caches) the CA PEM file. Throws with a clear message when unreadable.</summary>
+	/// <summary>
+	///   Loads (and caches) the CA PEM file. Throws with a clear message when unreadable. The cache
+	///   key folds in the file's last-write time and length (D27) so a rotated bundle at the same
+	///   path is picked up on the next call rather than serving the collection loaded years ago.
+	/// </summary>
 	public static X509Certificate2Collection LoadCaCertificates(string path)
 	{
-		return CaCache.GetOrAdd(path, p =>
+		FileInfo info = new(path);
+		(string Path, DateTime LastWriteUtc, long Length) key =
+			(path, info.Exists ? info.LastWriteTimeUtc : DateTime.MinValue, info.Exists ? info.Length : -1);
+
+		return CaCache.GetOrAdd(key, _ =>
 		{
 			X509Certificate2Collection collection = new();
 			try
 			{
-				collection.ImportFromPemFile(p);
+				collection.ImportFromPemFile(path);
 			}
 			catch (Exception ex)
 			{
 				throw new InvalidOperationException(
-					$"CaCertificatePath '{p}' could not be loaded as PEM certificates: {ex.Message}", ex);
+					$"CaCertificatePath '{path}' could not be loaded as PEM certificates: {ex.Message}", ex);
 			}
 
 			if (collection.Count == 0)
-				throw new InvalidOperationException($"CaCertificatePath '{p}' contains no certificates.");
+				throw new InvalidOperationException($"CaCertificatePath '{path}' contains no certificates.");
 			return collection;
 		});
 	}

@@ -232,6 +232,44 @@ public class ServerCertificateValidatorTests : IDisposable
 		Assert.True(result);
 	}
 
+	// D27: LoadCaCertificates keyed its cache on the path alone with no invalidation, so an
+	// operator rotating a private CA at the same CaCertificatePath (a live, DB-settable option
+	// that otherwise applies on session recycle per AGENTS.md) kept seeing the OLD CA forever --
+	// including past the point the old root expires, with no configuration change able to fix it.
+	[Fact]
+	public void LoadCaCertificates_PicksUpARotatedFileAtTheSamePath()
+	{
+		string path = Path.Combine(Path.GetTempPath(), $"as-test-rotate-{Guid.NewGuid():N}.pem");
+		using RSA firstKey = RSA.Create(2048);
+		CertificateRequest firstRequest = new(
+			"CN=Rotate Test CA First", firstKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+		using X509Certificate2 first = firstRequest.CreateSelfSigned(
+			DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+		File.WriteAllText(path, first.ExportCertificatePem());
+
+		try
+		{
+			X509Certificate2Collection loadedFirst = ServerCertificateValidator.LoadCaCertificates(path);
+			Assert.Equal(first.Thumbprint, Assert.Single(loadedFirst.Cast<X509Certificate2>()).Thumbprint);
+
+			// Rotate: a brand-new CA written to the SAME path (an operator re-issuing their
+			// private root and rewriting the PEM file in place).
+			using RSA secondKey = RSA.Create(2048);
+			CertificateRequest secondRequest = new(
+				"CN=Rotate Test CA Second", secondKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+			using X509Certificate2 second = secondRequest.CreateSelfSigned(
+				DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+			File.WriteAllText(path, second.ExportCertificatePem());
+
+			X509Certificate2Collection loadedSecond = ServerCertificateValidator.LoadCaCertificates(path);
+			Assert.Equal(second.Thumbprint, Assert.Single(loadedSecond.Cast<X509Certificate2>()).Thumbprint);
+		}
+		finally
+		{
+			File.Delete(path);
+		}
+	}
+
 	[Fact]
 	public void CreateCallback_WithoutAnyHandshakeCertificates_StillRejectsTheIntermediateLeaf()
 	{
