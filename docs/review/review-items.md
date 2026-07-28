@@ -357,6 +357,12 @@ work. Every finding ID appears in exactly one item.
 > gateway login (one per user, shared by all their devices and folders, like `_watchers`), with its own
 > `SemaphoreSlim`, lazy start, capped-backoff reconnect, and `IPerUserResourceOwner` eviction when the
 > user's last session goes. Steady state is then 3 connections per user (session + IDLE + poll), constant.
+> **The test must pin connection REUSE, not just non-blocking.** The first attempt passed a live suite and
+> a full unit suite while opening a connection every 30 s, because nothing counted connections — that is
+> exactly how the regression shipped. Required: a test that drives several poll iterations and asserts the
+> number of IMAP connections opened stays CONSTANT (one), so a future per-call reconnect fails the build.
+> Keep the non-blocking assertion too — the original defect (queuing behind the whole-mailbox FETCH) still
+> has to be proven fixed, red-first.
 > `G6` one transient `AuthenticationException` (Dovecot's per-user connection cap, which this design provokes)
 > **permanently** disables IDLE push for that folder. `G7` a per-user backend change leaves a live
 > authenticated IDLE connection against the old server. `G9` a draft rewrite is append-then-delete with no
