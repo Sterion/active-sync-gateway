@@ -13,8 +13,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   F22 (round 3) — a mail-attachment FileReference ("{imapBackendKey}|{uid}|{attachmentIndex}")
-///   is client-supplied and names a backend folder directly, exactly like the Search LongId F46
+///   A mail-attachment FileReference ("{imapBackendKey}|{uid}|{attachmentIndex}")
+///   is client-supplied and names a backend folder directly, exactly like the Search LongId
 ///   (see ItemOperationsFetchTests) already guards — but the FileReference path skipped the same
 ///   per-user folder-registry check, in both ItemOperations Fetch and the legacy GetAttachment
 ///   command.

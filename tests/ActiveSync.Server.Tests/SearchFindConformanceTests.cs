@@ -10,9 +10,8 @@ namespace ActiveSync.Server.Tests;
 
 /// <summary>
 ///   Search (2.2.1.16) and Find (2.2.1.2) paging/shape conformance: Total reports the number of
-///   matches, not the served page size (F36); Find omits Range when empty (F37) and orders its
-///   Result children per spec (F38); paging past the fetch cap is refused without a backend call
-///   (F41).
+///   matches, not the served page size; Find omits Range when empty and orders its
+///   Result children per spec; paging past the fetch cap is refused without a backend call.
 /// </summary>
 public sealed class SearchFindConformanceTests : IDisposable
 {
@@ -58,7 +57,7 @@ public sealed class SearchFindConformanceTests : IDisposable
 			_harness.Session.Mail.SearchHits.Add(("imap:INBOX", i.ToString()));
 	}
 
-	// F36 — Search Total must report the number of matches found, not the served page size. With
+	// Search Total must report the number of matches found, not the served page size. With
 	// 4 hits and a page of 2 at offset 2, the served page is 2 but Total must reflect the 4 found.
 	[Fact]
 	public async Task Search_Total_ReportsHitCount_NotPageSize()
@@ -77,7 +76,7 @@ public sealed class SearchFindConformanceTests : IDisposable
 		Assert.Equal("4", store?.Element(S + "Total")?.Value);
 	}
 
-	// F40 — a Search page of several same-folder hits is fetched in ONE batched call, not a
+	// A Search page of several same-folder hits is fetched in ONE batched call, not a
 	// sequential GetItemAsync per hit.
 	[Fact]
 	public async Task Search_FetchesThePageInOneBatch_NotPerHit()
@@ -99,7 +98,7 @@ public sealed class SearchFindConformanceTests : IDisposable
 		Assert.Equal(["1", "2", "3"], _harness.Session.Store.BatchFetched[0].OrderBy(k => k));
 	}
 
-	// F36 — Find Total must not overreport past the end of the hit set. With 3 hits, a request for
+	// Find Total must not overreport past the end of the hit set. With 3 hits, a request for
 	// offset 5 serves nothing; Total must be the 3 found, not start (5).
 	[Fact]
 	public async Task Find_Total_ReportsHitCount_NotStartPlusServed()
@@ -119,7 +118,7 @@ public sealed class SearchFindConformanceTests : IDisposable
 		Assert.Equal("3", resp?.Element(F + "Total")?.Value);
 	}
 
-	// F37 — Find must omit Range when there are no results; "0-0" claims one result was returned.
+	// Find must omit Range when there are no results; "0-0" claims one result was returned.
 	[Fact]
 	public async Task Find_NoResults_OmitsRange()
 	{
@@ -138,7 +137,7 @@ public sealed class SearchFindConformanceTests : IDisposable
 		Assert.Null(resp?.Element(F + "Range"));
 	}
 
-	// F38 — Find Result child order must be Class, ServerId, CollectionId, Properties (MS-ASCMD),
+	// Find Result child order must be Class, ServerId, CollectionId, Properties (MS-ASCMD),
 	// not the ServerId, CollectionId, Class, Properties the double-AddFirst produced.
 	[Fact]
 	public async Task Find_ResultChildOrder_MatchesSpec()
@@ -162,7 +161,7 @@ public sealed class SearchFindConformanceTests : IDisposable
 		Assert.Equal(new[] { "Class", "ServerId", "CollectionId", "Properties" }, order);
 	}
 
-	// F4 — a mailbox-wide Find (no CollectionId narrowing the search, or DeepTraversal) must still
+	// A mailbox-wide Find (no CollectionId narrowing the search, or DeepTraversal) must still
 	// emit ServerId/CollectionId on every Result, resolved per-hit from the folder registry, not
 	// only when a single CollectionId happened to scope the search. Without them the client has
 	// nothing to hand to ItemOperations/Sync and the result cannot be opened.
@@ -198,7 +197,7 @@ public sealed class SearchFindConformanceTests : IDisposable
 		Assert.Equal(archive.ServerId, results[1].Element(AS + "CollectionId")?.Value);
 	}
 
-	// F5 — a transient backend failure during Find must answer the retryable server-error status
+	// A transient backend failure during Find must answer the retryable server-error status
 	// (matching Search's own "3"), not the SAME terminal "2" a malformed request gets — otherwise a
 	// phone whose IMAP server blipped is told its request was invalid and never retries.
 	[Fact]
@@ -218,7 +217,7 @@ public sealed class SearchFindConformanceTests : IDisposable
 		Assert.Equal("3", response?.Root?.Element(F + "Status")?.Value);
 	}
 
-	// F6 — a 16.x client's mailbox Search must carry the same version-gated BodyPreference.Eas16
+	// A 16.x client's mailbox Search must carry the same version-gated BodyPreference.Eas16
 	// flag Sync computes, not a hard-coded false — otherwise a 16.x-only shape silently disappears
 	// from Search results the same way it would from a bare ItemOperations Fetch.
 	[Fact]
@@ -238,7 +237,7 @@ public sealed class SearchFindConformanceTests : IDisposable
 		Assert.True(_harness.Session.Store.FetchedBodyPreferences.Single().Eas16);
 	}
 
-	// F41 — a request whose offset is at/beyond the fetch cap must be refused without hitting the
+	// A request whose offset is at/beyond the fetch cap must be refused without hitting the
 	// backend (it would otherwise fetch the whole cap and Skip() it all away).
 	[Fact]
 	public async Task Search_PastFetchCap_SkipsBackend()

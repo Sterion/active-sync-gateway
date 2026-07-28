@@ -93,7 +93,7 @@ public class AuthThrottleTests
 	[Fact]
 	public void FailureTable_IsBounded_UnderUsernameRotation()
 	{
-		// K26: every distinct (address, username) pair mints a row, and the cleanup only removes
+		// Every distinct (address, username) pair mints a row, and the cleanup only removes
 		// EXPIRED windows — so an attacker rotating usernames inside one window grows the table
 		// without bound. 60k unauthenticated requests must not leave 60k rows behind.
 		AuthThrottle throttle = Create(3, 3600);
@@ -106,8 +106,8 @@ public class AuthThrottleTests
 	[Fact]
 	public void FailureTable_DoesNotRescanItself_OnEveryFailure()
 	{
-		// K26, second half: once the table is over the cleanup threshold the scan runs on EVERY
-		// subsequent failure, so the attack costs the gateway O(n) per request it sends.
+		// Once the table is over the cleanup threshold, the scan runs on EVERY subsequent failure,
+		// so the attack costs the gateway O(n) per request it sends.
 		AuthThrottle throttle = Create(3, 3600);
 		for (int i = 0; i < 60_000; i++)
 			throttle.RecordFailure($"203.0.113.9\nuser{i}@example.com");
@@ -147,7 +147,7 @@ public class AuthThrottleTests
 	[Fact]
 	public void WindowExpiry_IsDrivenByInjectedTimeProvider_NotTheWallClock()
 	{
-		// K9: AuthThrottle read DateTime.UtcNow directly, so window-expiry/retry-after/prune
+		// AuthThrottle read DateTime.UtcNow directly, so window-expiry/retry-after/prune
 		// cadence could only be exercised by waiting on the real clock (untestable
 		// deterministically). Injecting TimeProvider lets a fake clock prove expiry without
 		// any Thread.Sleep — this constructor overload does not exist on unmodified code.
@@ -167,7 +167,7 @@ public class AuthThrottleTests
 	[Fact]
 	public void TableAtCapacity_StillAdmitsANewAddressFromADifferentSource()
 	{
-		// K6: once the table hits MaxTrackedKeys, RecordFailure just returns without creating a
+		// Once the table hits MaxTrackedKeys, RecordFailure just returns without creating a
 		// new entry — so a single attacking address that fills the table by rotating usernames
 		// (10,000 distinct (address, username) keys, well within one failure window) permanently
 		// starves every OTHER address of its own per-address ceiling key until the window drains.
@@ -187,7 +187,7 @@ public class AuthThrottleTests
 	[Fact]
 	public void RecordSuccess_AddressKeyGuard_NeverClearsTheCeiling()
 	{
-		// K7: RecordSuccess cleared whichever key it was handed, so a caller could wipe the
+		// RecordSuccess cleared whichever key it was handed, so a caller could wipe the
 		// shared per-address ceiling with one valid login. The WebUi login endpoint did exactly
 		// that (RecordSuccess(userKey) AND RecordSuccess(addressKey)), voiding the class's own
 		// documented guarantee: "a valid login for one account cannot clear another account's
@@ -209,7 +209,7 @@ public class AuthThrottleTests
 	[Fact]
 	public void Prune_UnderConcurrentAccess_StaysConsistent()
 	{
-		// K8 (COVERAGE, not red-first): `_nextPruneUtc` was a plain, non-atomic `DateTime`
+		// (COVERAGE, not red-first): `_nextPruneUtc` was a plain, non-atomic `DateTime`
 		// mutated under a bare check-then-set race in Prune(). A genuine torn read of an 8-byte
 		// field needs a 32-bit process to trigger deterministically — this suite runs 64-bit, so
 		// the original symptom cannot be exhibited here. This exercises the fixed

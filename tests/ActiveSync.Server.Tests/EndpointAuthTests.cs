@@ -16,7 +16,7 @@ public class EndpointAuthTests
 		return new AuthThrottle(TestOptionsMonitor.Of(new ActiveSyncOptions()), TimeProvider.System);
 	}
 
-	// ---------- E3: the throttle key behind a reverse proxy ----------
+	// ---------- The throttle key behind a reverse proxy ----------
 
 	private static DefaultHttpContext Request(string peer, string? forwardedFor = null)
 	{

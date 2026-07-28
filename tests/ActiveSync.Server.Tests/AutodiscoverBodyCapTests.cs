@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   E11: <see cref="AutodiscoverEndpoint.ExtractEmailAsync" /> used to buffer the whole POST body
+///   <see cref="AutodiscoverEndpoint.ExtractEmailAsync" /> used to buffer the whole POST body
 ///   into one string with <c>ReadToEndAsync</c> before parsing it — an authenticated caller could
 ///   send up to <c>MaxRequestBodySize</c> (64 MB) and have it fully buffered and XML-parsed on every
 ///   request. Real Autodiscover bodies are a few hundred bytes, so the read is now capped well below

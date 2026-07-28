@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   F26 (round 3) — the 12.x raw <c>message/rfc822</c> SendMail wire form defines success as an
+///   The 12.x raw <c>message/rfc822</c> SendMail wire form defines success as an
 ///   empty 200 and errors as HTTP status codes (MS-ASHTTP); there is no WBXML body in this form at
 ///   all. ComposeMailHandlerBase.WriteErrorAsync always wrote a ComposeMail WBXML response, which
 ///   belongs to the 14.x/16.x form — a 12.x client expecting a bare status may never see the

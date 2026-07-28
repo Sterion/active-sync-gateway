@@ -13,9 +13,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   Item 32 — Sync command protocol conformance (Area F: F1, F4, F5, F6, F7, F8, F9). Drives the
-///   whole Sync handler through the production WBXML codec so the request each test posts is the
-///   one a device would send.
+///   Sync command protocol conformance. Drives the whole Sync handler through the production
+///   WBXML codec so the request each test posts is the one a device would send.
 /// </summary>
 public sealed class SyncConformanceTests : IDisposable
 {
@@ -56,9 +55,9 @@ public sealed class SyncConformanceTests : IDisposable
 		return folders.Single(f => f.BackendKey == "imap:INBOX");
 	}
 
-	// ---- F1: <Sync/> carrying a root but no Collections must replay, not answer Status 13 ----
+	// ---- <Sync/> carrying a root but no Collections must replay, not answer Status 13 ----
 	[Fact]
-	public async Task F1_SyncWithRootButNoCollections_Replays_DoesNotReturnStatus13()
+	public async Task SyncWithRootButNoCollections_Replays_DoesNotReturnStatus13()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		SyncHandler handler = NewSyncHandler();
@@ -69,7 +68,7 @@ public sealed class SyncConformanceTests : IDisposable
 			SyncRequest(inbox.ServerId, "0", new XElement(AS + "GetChanges", "0")));
 
 		// The client re-sends the documented "repeat my previous request" idiom, but as a valid
-		// WBXML body that is just the <Sync/> root with no <Collections> — the shape F1 rejects.
+		// WBXML body that is just the <Sync/> root with no <Collections> — the shape rejected above.
 		XDocument? response = await _harness.RunAsync(handler, "Sync", new XDocument(new XElement(AS + "Sync")));
 
 		// Before the fix this is a bare <Sync><Status>13</Status></Sync>. After the fix the cached
@@ -81,7 +80,7 @@ public sealed class SyncConformanceTests : IDisposable
 	// A control proving the assertion above discriminates: with no cache primed, the same
 	// no-Collections body legitimately still answers Status 13 ("no cache available").
 	[Fact]
-	public async Task F1_SyncWithRootButNoCollections_NoCache_StillReturnsStatus13()
+	public async Task SyncWithRootButNoCollections_NoCache_StillReturnsStatus13()
 	{
 		await RegisterInboxAsync();
 		SyncHandler handler = NewSyncHandler();
@@ -92,9 +91,9 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Equal("13", response!.Root!.Element(AS + "Status")?.Value);
 	}
 
-	// ---- F4: Status 3 must reset the client's sync key to 0, not echo the rejected one ----
+	// ---- Status 3 must reset the client's sync key to 0, not echo the rejected one ----
 	[Fact]
-	public async Task F4_InvalidSyncKey_Status3_ResetsSyncKeyToZero()
+	public async Task InvalidSyncKey_Status3_ResetsSyncKeyToZero()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		SyncHandler handler = NewSyncHandler();
@@ -114,9 +113,9 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Equal("0", collection.Element(AS + "SyncKey")?.Value);
 	}
 
-	// ---- F5: an out-of-range HeartbeatInterval is answered with Status 14 + Limit, not clamped ----
+	// ---- An out-of-range HeartbeatInterval is answered with Status 14 + Limit, not clamped ----
 	[Fact]
-	public async Task F5_HeartbeatBelowMinimum_ReturnsStatus14AndLimit()
+	public async Task HeartbeatBelowMinimum_ReturnsStatus14AndLimit()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		SyncHandler handler = NewSyncHandler();
@@ -144,9 +143,9 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Equal("60", response.Root.Element(AS + "Limit")?.Value);
 	}
 
-	// ---- F6: MIMESupport=2 must select the Type-4 (MIME) body, not downgrade to HTML ----
+	// ---- MIMESupport=2 must select the Type-4 (MIME) body, not downgrade to HTML ----
 	[Fact]
-	public void F6_MimeSupportAlways_SelectsMimeBodyOverHtml()
+	public void MimeSupportAlways_SelectsMimeBodyOverHtml()
 	{
 		// The client offers both HTML (2) and MIME (4) and asks for MIME on every message.
 		XElement optionsElement = new(AS + "Options",
@@ -164,7 +163,7 @@ public sealed class SyncConformanceTests : IDisposable
 
 	// MIMESupport=0 (never) keeps the historical HTML-first behaviour even when MIME is offered.
 	[Fact]
-	public void F6_MimeSupportNever_KeepsHtmlLadder()
+	public void MimeSupportNever_KeepsHtmlLadder()
 	{
 		XElement optionsElement = new(AS + "Options",
 			new XElement(ASB + "BodyPreference", new XElement(ASB + "Type", "2")),
@@ -176,9 +175,9 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Equal(0, resolved.MimeSupport);
 	}
 
-	// ---- item 23 F23: a malformed/truncated persisted OptionsJson must not wedge the collection ----
+	// ---- A malformed/truncated persisted OptionsJson must not wedge the collection ----
 	[Fact]
-	public void F23_MalformedPersistedOptionsJson_FallsBackToDefault_DoesNotThrow()
+	public void MalformedPersistedOptionsJson_FallsBackToDefault_DoesNotThrow()
 	{
 		// No client-supplied <Options> element, so Resolve falls through to the persisted
 		// CollectionState.OptionsJson — a schema-drifted or truncated row (a shape change to this
@@ -193,9 +192,9 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Equal(SyncCollectionOptions.Default, resolved);
 	}
 
-	// ---- item 23 F27: GetChanges=0 must not turn a watchdog false-positive into a tight re-poll ----
+	// ---- GetChanges=0 must not turn a watchdog false-positive into a tight re-poll ----
 	[Fact]
-	public async Task F27_GetChanges0_WatchdogFalsePositive_HonoursTheHeartbeat_NotATightRepoll()
+	public async Task GetChanges0_WatchdogFalsePositive_HonoursTheHeartbeat_NotATightRepoll()
 	{
 		_harness.Options.Eas.MinHeartbeatSeconds = 1;
 		_harness.Options.Eas.WatchdogSeconds = 1; // fires well before the 2s heartbeat deadline
@@ -232,9 +231,9 @@ public sealed class SyncConformanceTests : IDisposable
 			$"expected Sync to idle out the heartbeat (~2s), returned after {sw.ElapsedMilliseconds}ms");
 	}
 
-	// ---- F7: a client Change to an item the backend moved on must return Status 7, not overwrite ----
+	// ---- A client Change to an item the backend moved on must return Status 7, not overwrite ----
 	[Fact]
-	public async Task F7_ClientChangeAgainstMovedBackend_ReturnsStatus7_DoesNotOverwrite()
+	public async Task ClientChangeAgainstMovedBackend_ReturnsStatus7_DoesNotOverwrite()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		SyncHandler handler = NewSyncHandler();
@@ -275,9 +274,9 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Empty(_harness.Session.Store.Updated);
 	}
 
-	// ---- F8: the Collection Class is echoed as the first child on a 12.1 response ----
+	// ---- The Collection Class is echoed as the first child on a 12.1 response ----
 	[Fact]
-	public async Task F8_InitialSync_Eas121_EchoesClassFirst()
+	public async Task InitialSync_Eas121_EchoesClassFirst()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		SyncHandler handler = NewSyncHandler();
@@ -293,7 +292,7 @@ public sealed class SyncConformanceTests : IDisposable
 	}
 
 	[Fact]
-	public async Task F8_SteadyStateSync_Eas121_EchoesClassFirst()
+	public async Task SteadyStateSync_Eas121_EchoesClassFirst()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		SyncHandler handler = NewSyncHandler();
@@ -320,7 +319,7 @@ public sealed class SyncConformanceTests : IDisposable
 
 	// Gating: 14.1 (and above) must NOT emit Class — the 14.1 wire form stays byte-identical.
 	[Fact]
-	public async Task F8_InitialSync_Eas141_OmitsClass()
+	public async Task InitialSync_Eas141_OmitsClass()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		SyncHandler handler = NewSyncHandler();
@@ -332,9 +331,9 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.Null(collection.Element(AS + "Class"));
 	}
 
-	// ---- F9: MoreAvailable is emitted right after Status, before Commands/Responses ----
+	// ---- MoreAvailable is emitted right after Status, before Commands/Responses ----
 	[Fact]
-	public async Task F9_MoreAvailable_PrecedesCommands()
+	public async Task MoreAvailable_PrecedesCommands()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		SyncHandler handler = NewSyncHandler();
@@ -362,9 +361,9 @@ public sealed class SyncConformanceTests : IDisposable
 		Assert.True(moreAt < commandsAt, $"MoreAvailable (index {moreAt}) must precede Commands (index {commandsAt})");
 	}
 
-	// ---- F12: the replay rollback must not be persisted until the request commits ----
+	// ---- The replay rollback must not be persisted until the request commits ----
 	[Fact]
-	public async Task F12_ReplayRollback_IsNotPersistedBeforeCommit()
+	public async Task ReplayRollback_IsNotPersistedBeforeCommit()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		Device device = await _harness.State.GetOrCreateDeviceAsync(
@@ -381,7 +380,7 @@ public sealed class SyncConformanceTests : IDisposable
 			CancellationToken.None);
 
 		// The client re-sends the one-behind key → Replay. The rollback is DEFERRED to the round's own
-		// commit (A1): validation does not touch the tracked entity, so nothing is persisted until the
+		// commit: validation does not touch the tracked entity, so nothing is persisted until the
 		// round commits.
 		(SyncKeyValidation validation, _) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "1", CancellationToken.None);

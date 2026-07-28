@@ -36,7 +36,7 @@ public sealed class AdministrationTests
 		Assert.Contains("not a valid", error);
 	}
 
-	// L43 — the gateway-vs-backend password distinction is an explicit flag now, not inferred from
+	// The gateway-vs-backend password distinction is an explicit flag now, not inferred from
 	// whether the field key contains a ':'. This guards that the flag matches the old heuristic's
 	// (correct) answers, so callers can rely on it instead of string-sniffing.
 	[Fact]
@@ -99,7 +99,7 @@ public sealed class AdministrationTests
 		Assert.True(SettingKeys.Find("ActiveSync:Backends:MailStore:Host") is { Secret: false });
 	}
 
-	// B6 — every other AuthOptions member is catalogued; TrustedProxies (a List<string>, so neither
+	// Every other AuthOptions member is catalogued; TrustedProxies (a List<string>, so neither
 	// the bare key nor an indexed element resolves) is not, so `eas config set`/the admin Settings
 	// page answer "not a recognized setting" for a security-relevant, documented-as-DB-settable
 	// option (docs/configuration.md's Auth table, and AGENTS.md's "every setting is CLI-settable").
@@ -117,7 +117,7 @@ public sealed class AdministrationTests
 	[Fact]
 	public void SecretPolicy_GatewayPassword_HashesPlaintext_PassesHash_RejectsSealed()
 	{
-		// Behaviour change (C6): plaintext gateway passwords now have a strength floor, so this
+		// Behaviour change: plaintext gateway passwords now have a strength floor, so this
 		// sample is >= UserSecretPolicy.MinGatewayPasswordLength (it was "hunter2", now rejected).
 		UserSecretPolicy.SecretResult hashed = UserSecretPolicy.PrepareGatewayPassword("hunter2-strong");
 		Assert.Null(hashed.Error);
@@ -136,7 +136,7 @@ public sealed class AdministrationTests
 	[Fact]
 	public void SecretPolicy_GatewayPassword_EnforcesStrengthFloor()
 	{
-		// C6: the shared gateway-password policy now imposes a minimum length, so every write
+		// The shared gateway-password policy now imposes a minimum length, so every write
 		// surface — CLI 'user password', the admin API, and the self-service portal that used to
 		// call GatewayPasswordHasher.Hash directly — rejects a trivially weak password identically.
 		Assert.NotNull(UserSecretPolicy.PrepareGatewayPassword("short").Error); // below the floor
@@ -146,7 +146,7 @@ public sealed class AdministrationTests
 	[Fact]
 	public void SecretPolicy_GatewayPassword_RejectsEmpty_ClosingTheBypass()
 	{
-		// B19: an empty gateway Password used to be hashed into a valid pbkdf2$ credential.
+		// An empty gateway Password used to be hashed into a valid pbkdf2$ credential.
 		// GatewayPasswordHasher.Verify(Hash(""), "") returns true, so the account authenticated
 		// locally against a hash of the empty string and the backend was NEVER probed — a phone
 		// sending an empty Basic-auth password got in. The policy must refuse it outright.
@@ -188,7 +188,7 @@ public sealed class AdministrationTests
 	[Fact]
 	public void SecretPolicy_BackendPassword_MisconfiguredKey_RefusesPlaintext()
 	{
-		// B4: a key that is CONFIGURED but fails to load (Key and KeyFile both set) used to be
+		// A key that is CONFIGURED but fails to load (Key and KeyFile both set) used to be
 		// swallowed — TryLoadKey's error was discarded and null was read as "no key", so the
 		// backend password was silently written in plaintext under a broken encryption config.
 		EncryptionOptions broken = new() { Key = "some-key", KeyFile = "/nonexistent/key" };

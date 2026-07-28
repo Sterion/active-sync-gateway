@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   ComposeMail (SendMail / SmartReply / SmartForward) status-code conformance (round 3): F19 —
+///   ComposeMail (SendMail / SmartReply / SmartForward) status-code conformance:
 ///   an undecodable/empty-MIME send is answered with the MS-ASCMD common status 107 (InvalidMIME),
 ///   not 103 (InvalidXML, which is reserved for a genuine request-parse failure).
 /// </summary>
@@ -25,7 +25,7 @@ public sealed class ComposeMailStatusCodeTests : IDisposable
 		_harness.Dispose();
 	}
 
-	// F19 — a request that decoded fine but carries neither MIME, Forwardees nor a Source is not an
+	// A request that decoded fine but carries neither MIME, Forwardees nor a Source is not an
 	// XML problem; it is an empty/invalid MIME submission.
 	[Fact]
 	public async Task SendMail_WithNoMimeNoForwardeesNoSource_ReportsInvalidMimeNotInvalidXml()
@@ -43,7 +43,7 @@ public sealed class ComposeMailStatusCodeTests : IDisposable
 		Assert.Equal("107", response.Root.Element(CM + "Status")?.Value);
 	}
 
-	// F19 — SendMail-by-reference (Source with no Mime) whose draft cannot be resolved yields empty
+	// SendMail-by-reference (Source with no Mime) whose draft cannot be resolved yields empty
 	// outgoing bytes; that is also an empty-MIME submission, not a request-parse failure.
 	[Fact]
 	public async Task SendMail_WithUnresolvableDraftReference_ReportsInvalidMimeNotInvalidXml()

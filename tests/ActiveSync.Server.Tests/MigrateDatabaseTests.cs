@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Server.Tests;
 
-/// <summary>E22 — the migration bootstrap must honour cancellation so a killed container is interruptible.</summary>
+/// <summary>The migration bootstrap must honour cancellation so a killed container is interruptible.</summary>
 public sealed class MigrateDatabaseTests : IDisposable
 {
 	private readonly SqliteConnection _connection;

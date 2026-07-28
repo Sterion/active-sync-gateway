@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 namespace ActiveSync.Server.Tests;
 
-/// <summary>E12 — KeepAliveTimeout bounds idle time BETWEEN requests, never a request in flight.</summary>
+/// <summary>KeepAliveTimeout bounds idle time BETWEEN requests, never a request in flight.</summary>
 public sealed class KestrelLimitsTests
 {
 	[Fact]

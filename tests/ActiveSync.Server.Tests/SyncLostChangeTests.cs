@@ -11,10 +11,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   Round-3 review item 1 — F2/F3/K2: a server→client item whose render fails must never be
-///   recorded into the persisted snapshot as delivered (F3/K2), and a collection that skipped an
-///   item this round must not be offered to the long-poll wait, which would otherwise spin the
-///   watchdog against the same permanently-failing item every interval (F2).
+///   A server→client item whose render fails must never be recorded into the persisted snapshot
+///   as delivered, and a collection that skipped an item this round must not be offered to the
+///   long-poll wait, which would otherwise spin the watchdog against the same permanently-failing
+///   item every interval.
 /// </summary>
 public sealed class SyncLostChangeTests : IDisposable
 {
@@ -54,9 +54,9 @@ public sealed class SyncLostChangeTests : IDisposable
 					new XElement(AS + "CollectionId", collectionId)))));
 	}
 
-	// ---- F3/K2: a Change whose render fails must not be recorded as delivered ----
+	// ---- A Change whose render fails must not be recorded as delivered ----
 	[Fact]
-	public async Task F3_ChangeRenderFailure_IsReofferedOnNextRound_NotLostForever()
+	public async Task ChangeRenderFailure_IsReofferedOnNextRound_NotLostForever()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		// The default ItemApplicationData (an airsync:Subject) has no WBXML token and is deliberately
@@ -97,7 +97,7 @@ public sealed class SyncLostChangeTests : IDisposable
 
 		XDocument? round2 = await _harness.RunAsync(handler, "Sync", SyncRequest(inbox.ServerId, nextKey));
 
-		// F3 (unfixed): round 1 recorded newSnapshot["20"] = "new20" even though no Change was ever
+		// Unfixed: round 1 recorded newSnapshot["20"] = "new20" even though no Change was ever
 		// sent, so round 2's diff considers "20" already synced and round2 is the canonical empty
 		// "no changes" answer (null). Fixed: "20" is still pending and gets (re-)offered here.
 		Assert.NotNull(round2);
@@ -107,9 +107,9 @@ public sealed class SyncLostChangeTests : IDisposable
 		Assert.NotNull(change20);
 	}
 
-	// ---- F2: a collection with a skipped item must not be offered to the long-poll wait ----
+	// ---- A collection with a skipped item must not be offered to the long-poll wait ----
 	[Fact]
-	public async Task F2_ItemSkippedThisRound_CollectionNotOfferedToLongPollWait()
+	public async Task ItemSkippedThisRound_CollectionNotOfferedToLongPollWait()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		SyncHandler handler = NewSyncHandler();
@@ -145,7 +145,7 @@ public sealed class SyncLostChangeTests : IDisposable
 
 		await _harness.RunAsync(handler, "Sync", request);
 
-		// F2 (unfixed): ProcessCollectionAsync still marks this collection Waitable even though an
+		// Unfixed: ProcessCollectionAsync still marks this collection Waitable even though an
 		// item was skipped, so SyncHandler hands it to WaitWithWatchdogAsync, which immediately calls
 		// WaitForChangesAsync against the backend (and would do so every interval in production,
 		// forever, against an item that can never succeed). Fixed: a collection with a skipped item

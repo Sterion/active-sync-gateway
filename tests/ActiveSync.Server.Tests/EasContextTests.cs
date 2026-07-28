@@ -70,7 +70,7 @@ public sealed class EasContextTests : IDisposable
 #pragma warning restore VSTHRD103
 	}
 
-	// E1: An HTTP/2 request carries a body with no Content-Length and no Transfer-Encoding
+	// An HTTP/2 request carries a body with no Content-Length and no Transfer-Encoding
 	// header (RFC 9113 §8.2.2 forbids Transfer-Encoding). The old body-less test keyed on
 	// HTTP/1.1 framing, so ReadRequestAsync mistook every h2 EAS POST for an empty body and
 	// returned null — Sync/Ping then fell into their "missing parameters" branches.
@@ -91,7 +91,7 @@ public sealed class EasContextTests : IDisposable
 		Assert.Equal("Ping", decoded!.Root!.Name.LocalName);
 	}
 
-	// E17: _requestRead was set true before the read, so a failed read poisoned the cache —
+	// _requestRead was set true before the read, so a failed read poisoned the cache —
 	// a retry got a silent "empty body" (null) instead of the real error. After the fix the
 	// flag is only set on the happy path, so the failure re-surfaces on every attempt.
 	[Fact]
@@ -108,7 +108,7 @@ public sealed class EasContextTests : IDisposable
 		await Assert.ThrowsAsync<IOException>(() => context.ReadRequestAsync());
 	}
 
-	// E17: ReadRawBodyAsync neither checked nor set _requestRead, so a handler that called
+	// ReadRawBodyAsync neither checked nor set _requestRead, so a handler that called
 	// ReadRequestAsync first got an empty second read from the already-consumed body with no
 	// diagnostic. After the fix it fails loudly instead.
 	[Fact]

@@ -50,7 +50,7 @@ public sealed class EasHandlerHarness : IDisposable
 	/// <summary>
 	///   Number of SELECTs issued against <c>UserFolders</c> since the harness was created — a proxy
 	///   for how many times <see cref="FolderService.ResolveCollectionAsync" /> actually hit the DB
-	///   (F4: a handler that resolves the same source twice shows up as two queries, not one).
+	///   (a handler that resolves the same source twice shows up as two queries, not one).
 	/// </summary>
 	public int FolderResolutionQueries => _folderQueryCounter.Count;
 
@@ -62,7 +62,7 @@ public sealed class EasHandlerHarness : IDisposable
 	public SyncStateService State { get; }
 	public FolderService Folders { get; }
 
-	/// <summary>The tracked state DbContext, so a test can observe SaveChanges (write) count (F15).</summary>
+	/// <summary>The tracked state DbContext, so a test can observe SaveChanges (write) count.</summary>
 	public SqliteSyncDbContext Db => _db;
 	public StubSession Session { get; } = new();
 	public ActiveSyncOptions Options { get; } = new();
@@ -169,7 +169,7 @@ public sealed class EasHandlerHarness : IDisposable
 
 		/// <summary>
 		///   An optional second content store for a non-mail class (e.g. Calendar/Contacts/Tasks),
-		///   so a test can prove class-aware routing (F27). Null unless a test wires one in.
+		///   so a test can prove class-aware routing. Null unless a test wires one in.
 		/// </summary>
 		public RecordingStore? SecondaryStore { get; set; }
 
@@ -248,7 +248,7 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>
 		///   A genuinely async alternative to <see cref="WaitForChanges" />, for tests that need a
 		///   controllable delay (e.g. proving a losing per-store wait is drained rather than
-		///   abandoned — F15). Checked before <see cref="WaitForChanges" />.
+		///   abandoned). Checked before <see cref="WaitForChanges" />.
 		/// </summary>
 		public Func<IReadOnlyList<string>, CancellationToken, Task<IReadOnlyList<string>>>? WaitForChangesAsyncOverride { get; set; }
 
@@ -261,7 +261,7 @@ public sealed class EasHandlerHarness : IDisposable
 
 		/// <summary>
 		///   When set, the folder mutations (create/rename/delete) throw this instead of recording —
-		///   a backend/transport failure that is NOT a <see cref="BackendException" /> (F26).
+		///   a backend/transport failure that is NOT a <see cref="BackendException" />.
 		/// </summary>
 		public Func<Exception>? FolderOpFailWith { get; set; }
 
@@ -270,7 +270,7 @@ public sealed class EasHandlerHarness : IDisposable
 			return backendKey.StartsWith(KeyPrefix, StringComparison.Ordinal);
 		}
 
-		/// <summary>Number of hierarchy enumerations the handler drove (F28 asserts exactly one).</summary>
+		/// <summary>Number of hierarchy enumerations the handler drove (asserted to be exactly one).</summary>
 		public int ListFoldersCalls { get; private set; }
 
 		/// <summary>
@@ -279,7 +279,7 @@ public sealed class EasHandlerHarness : IDisposable
 		///   genuinely reflects the current folder set (e.g. right after a create). Left null (the
 		///   default), the listing always fails, which is how a real backend's post-create
 		///   enumeration missing the just-created folder (Axigen's async indexing lag) is
-		///   reproduced — see F13.
+		///   reproduced.
 		/// </summary>
 		public IReadOnlyList<BackendFolder>? Listing { get; set; }
 
@@ -293,7 +293,7 @@ public sealed class EasHandlerHarness : IDisposable
 
 		/// <summary>
 		///   When set, <see cref="GetItemRevisionsAsync" /> throws this instead of returning the
-		///   revision map — a flaky backend during a listing (F20).
+		///   revision map — a flaky backend during a listing.
 		/// </summary>
 		public Func<Exception>? GetRevisionsFailWith { get; set; }
 
@@ -316,21 +316,21 @@ public sealed class EasHandlerHarness : IDisposable
 
 		/// <summary>
 		///   Item keys that <see cref="GetItemAsync" /> reports as gone (returns null), standing in
-		///   for an item that vanished between the revision listing and the fetch (F13/F14).
+		///   for an item that vanished between the revision listing and the fetch.
 		/// </summary>
 		public HashSet<string> VanishedKeys { get; } = new(StringComparer.Ordinal);
 
 		/// <summary>
 		///   One entry per batched <see cref="GetItemsAsync" /> the Sync engine issued, each the
 		///   ordered key list of that call — lets a test assert the window is fetched in ONE batch
-		///   rather than a fetch per item (F13).
+		///   rather than a fetch per item.
 		/// </summary>
 		public List<IReadOnlyList<string>> BatchFetched { get; } = [];
 
 		/// <summary>
 		///   The <see cref="BodyPreference" /> each <see cref="GetItemAsync" /> call actually received,
 		///   in call order — lets a test assert the version-gated <c>Eas16</c> flag reached the store
-		///   rather than being hard-coded false (F6).
+		///   rather than being hard-coded false.
 		/// </summary>
 		public List<BodyPreference> FetchedBodyPreferences { get; } = [];
 
@@ -382,12 +382,12 @@ public sealed class EasHandlerHarness : IDisposable
 			return Task.FromResult("updated-rev");
 		}
 
-		/// <summary>Items a handler asked to delete, so a test can assert removal happened (F35).</summary>
+		/// <summary>Items a handler asked to delete, so a test can assert removal happened.</summary>
 		public List<string> Deleted { get; } = [];
 
 		/// <summary>
 		///   When set, <see cref="DeleteItemAsync" /> throws this instead of recording — a backend
-		///   hiccup on the post-send invite-mail cleanup that must NOT fail the command (F1).
+		///   hiccup on the post-send invite-mail cleanup that must NOT fail the command.
 		/// </summary>
 		public Func<Exception>? DeleteFailWith { get; set; }
 
@@ -400,7 +400,7 @@ public sealed class EasHandlerHarness : IDisposable
 		}
 
 		/// <summary>
-		///   F5: mirrors a real backend's MoveItemAsync — the moved item keeps its key and reports
+		///   Mirrors a real backend's MoveItemAsync — the moved item keeps its key and reports
 		///   whatever <see cref="Revisions" /> holds for it (defaulting to "" when a test hasn't set
 		///   one), never a manufactured placeholder.
 		/// </summary>
@@ -445,7 +445,7 @@ public sealed class EasHandlerHarness : IDisposable
 			throw new NotSupportedException();
 		}
 
-		// ICalendarOperations — lets this store stand in for a calendar backend (MeetingResponse F33).
+		// ICalendarOperations — lets this store stand in for a calendar backend (MeetingResponse).
 
 		/// <summary>The stored event iCalendar <see cref="GetRawEventAsync" /> returns.</summary>
 		public string? RawEvent { get; set; }
@@ -474,7 +474,7 @@ public sealed class EasHandlerHarness : IDisposable
 		}
 	}
 
-	/// <summary>Outbound submission; records each SendAsync and can be told to fail (F10/F30).</summary>
+	/// <summary>Outbound submission; records each SendAsync and can be told to fail.</summary>
 	public sealed class RecordingMailSubmit : IMailSubmitOperations
 	{
 		/// <summary>The MIME blobs actually submitted — a duplicate submit shows up as two entries.</summary>
@@ -500,7 +500,7 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>MIME blobs successfully filed to Sent.</summary>
 		public List<byte[]> Saved { get; } = [];
 
-		/// <summary>When true, SaveToSentAsync throws — the post-submit "best-effort" failure (F10/F30).</summary>
+		/// <summary>When true, SaveToSentAsync throws — the post-submit "best-effort" failure.</summary>
 		public bool SaveToSentShouldThrow { get; set; }
 
 		/// <summary>True once SaveToSentAsync was reached (whether or not it was told to throw).</summary>
@@ -518,7 +518,7 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>The raw MIME a MeetingResponse invite fetch returns; null throws NotSupported.</summary>
 		public byte[]? RawMessage { get; set; }
 
-		/// <summary>When set, GetRawMessageAsync throws this — a backend failure mid-request (F34).</summary>
+		/// <summary>When set, GetRawMessageAsync throws this — a backend failure mid-request.</summary>
 		public Func<Exception>? GetRawFailWith { get; set; }
 
 		public Task<byte[]?> GetRawMessageAsync(string folderBackendKey, string itemKey, CancellationToken ct)
@@ -532,11 +532,11 @@ public sealed class EasHandlerHarness : IDisposable
 
 		/// <summary>
 		///   The attachment <see cref="GetAttachmentAsync" /> returns when told to answer instead of
-		///   throwing (F22: proves whether the backend was reached at all, vs. just returning null).
+		///   throwing (proves whether the backend was reached at all, vs. just returning null).
 		/// </summary>
 		public BackendAttachment? Attachment { get; set; }
 
-		/// <summary>Number of times <see cref="GetAttachmentAsync" /> was actually invoked (F22).</summary>
+		/// <summary>Number of times <see cref="GetAttachmentAsync" /> was actually invoked.</summary>
 		public int GetAttachmentCalls { get; private set; }
 
 		public Task<BackendAttachment?> GetAttachmentAsync(string fileReference, CancellationToken ct)
@@ -548,7 +548,7 @@ public sealed class EasHandlerHarness : IDisposable
 		}
 
 		/// <summary>
-		///   Folder/item keys a handler flagged answered/forwarded — F25 asserts none happened when
+		///   Folder/item keys a handler flagged answered/forwarded, so a test can assert none happened when
 		///   the source folder is read-only-blocked.
 		/// </summary>
 		public List<string> Answered { get; } = [];
@@ -562,16 +562,16 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>
 		///   Backend hits a Search/Find will page over. <see cref="SearchAsync" /> returns the first
 		///   <c>maxResults</c> of these (the fetch cap the handler passes), so a test can make the
-		///   pre-paging hit count differ from the served page size (F36) and exercise paging (F41).
+		///   pre-paging hit count differ from the served page size and exercise paging.
 		/// </summary>
 		public List<(string FolderBackendKey, string ItemKey)> SearchHits { get; } = [];
 
-		/// <summary>Number of times the backend search was actually invoked (F41 skips it).</summary>
+		/// <summary>Number of times the backend search was actually invoked (zero when paging skips the backend call).</summary>
 		public int SearchCalls { get; private set; }
 
 		/// <summary>
 		///   When set, <see cref="SearchAsync" /> throws this instead of returning hits — a transient
-		///   backend failure mid-search (F5), distinct from a malformed request.
+		///   backend failure mid-search, distinct from a malformed request.
 		/// </summary>
 		public Func<Exception>? SearchFailWith { get; set; }
 
@@ -589,7 +589,7 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>
 		///   When set, <see cref="EmptyFolderAsync" /> throws this instead of recording — a backend
 		///   hiccup during EmptyFolderContents that must fail just that operation (a Status), not the
-		///   whole ItemOperations request (F10).
+		///   whole ItemOperations request.
 		/// </summary>
 		public Func<Exception>? EmptyFolderFailWith { get; set; }
 

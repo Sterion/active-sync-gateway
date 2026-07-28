@@ -23,7 +23,7 @@ public sealed class PublicSchemeTests
 		Assert.Equal("https", WebApplicationExtensions.ResolvePublicScheme(null, "https"));
 	}
 
-	// E16 (behaviour change): X-Forwarded-Proto used to take the LEFTMOST entry of a comma-separated
+	// Behaviour change: X-Forwarded-Proto used to take the LEFTMOST entry of a comma-separated
 	// chain, unlike X-Forwarded-For's rightmost-untrusted-hop rule (EndpointAuth.ClientKey) — behind
 	// a proxy that APPENDS rather than overwrites the header, the leftmost value is whatever the
 	// CLIENT sent, so a direct client could force the scheme downstream by sending its own
@@ -48,7 +48,7 @@ public sealed class PublicSchemeTests
 		Assert.Equal("https", WebApplicationExtensions.ResolvePublicScheme("not a url", "https"));
 	}
 
-	// ---------- E1: X-Forwarded-Proto is only honoured from a trusted proxy ----------
+	// ---------- X-Forwarded-Proto is only honoured from a trusted proxy ----------
 
 	private static HttpContext Request(string peer, string? forwardedProto = null)
 	{
@@ -62,7 +62,7 @@ public sealed class PublicSchemeTests
 	[Fact]
 	public void ForwardedProto_FromAnUntrustedPeer_IsIgnored()
 	{
-		// E1: a direct attacker must not be able to force Request.Scheme=https (which drives the
+		// A direct attacker must not be able to force Request.Scheme=https (which drives the
 		// OIDC redirect_uri and every absolute Autodiscover URL). No PublicUrl, no trusted proxies.
 		ActiveSyncOptions options = new();
 		Assert.Null(WebApplicationExtensions.ResolveRequestScheme(Request("203.0.113.9", "https"), options));

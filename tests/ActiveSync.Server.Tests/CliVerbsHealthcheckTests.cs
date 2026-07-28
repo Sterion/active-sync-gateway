@@ -3,7 +3,7 @@ using ActiveSync.Server.Cli;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   E15: `eas healthcheck` resolves the gateway base URL, but used to normalize only
+///   `eas healthcheck` resolves the gateway base URL, but used to normalize only
 ///   <c>0.0.0.0</c>/<c>[::]</c> to <c>localhost</c> rather than <c>127.0.0.1</c> — the repo's own
 ///   IPv4-only rule (see <c>EasForwardingClient.ResolveBaseUrl</c>, which the slim client's every
 ///   OTHER verb uses) says "never 'localhost' — the gateway is IPv4-only, and a `::1`-first resolve

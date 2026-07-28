@@ -2,7 +2,7 @@ using ActiveSync.Server.Cli;
 
 namespace ActiveSync.Server.Tests;
 
-/// <summary>E19 — a mistyped ActiveSync:UsersFile mount must fail with an actionable error.</summary>
+/// <summary>A mistyped ActiveSync:UsersFile mount must fail with an actionable error.</summary>
 [Collection("cli")]
 public sealed class UsersFilePathTests : IDisposable
 {
@@ -20,10 +20,10 @@ public sealed class UsersFilePathTests : IDisposable
 		Environment.SetEnvironmentVariable(name, value);
 	}
 
-	// E14: CliVerbs.BuildConfiguration is reached from every non-serve verb — including inside the
+	// CliVerbs.BuildConfiguration is reached from every non-serve verb — including inside the
 	// warm gateway via /cli (ShowBannerAsync, ProtectAsync, CliServices' two providers) — and used
 	// Path.GetFullPath + a REQUIRED AddJsonFile directly, bypassing the Program.ResolveUsersFilePath
-	// guard E19 added specifically so a typo'd mount surfaces an actionable error instead of a raw
+	// guard added specifically so a typo'd mount surfaces an actionable error instead of a raw
 	// FileNotFoundException from deep inside the configuration builder.
 	[Fact]
 	public void BuildConfiguration_MissingUsersFile_ThrowsActionableError_NotRawFileNotFoundException()
@@ -60,7 +60,7 @@ public sealed class UsersFilePathTests : IDisposable
 		}
 	}
 
-	// Before E19 the missing file surfaced as a raw FileNotFoundException from deep inside the
+	// Before this guard, the missing file surfaced as a raw FileNotFoundException from deep inside the
 	// configuration builder, with no hint that ActiveSync:UsersFile was the culprit. The guard
 	// must instead throw an error naming the setting and the resolved absolute path.
 	[Fact]

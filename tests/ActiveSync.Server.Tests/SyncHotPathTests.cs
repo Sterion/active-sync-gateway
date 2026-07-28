@@ -13,8 +13,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   Item 35 — Sync response hot path: batched item fetch (F13) and accurate
-///   server→client item metrics (F14).
+///   Sync response hot path: batched item fetch and accurate server→client item metrics.
 /// </summary>
 public sealed class SyncHotPathTests : IDisposable
 {
@@ -54,10 +53,10 @@ public sealed class SyncHotPathTests : IDisposable
 					new XElement(AS + "CollectionId", collectionId)))));
 	}
 
-	// F13: a window of several Add/Change items is fetched in ONE batched GetItemsAsync call,
+	// A window of several Add/Change items is fetched in ONE batched GetItemsAsync call,
 	// not a backend round trip per item.
 	[Fact]
-	public async Task F13_WindowIsFetchedInOneBatch_NotPerItem()
+	public async Task WindowIsFetchedInOneBatch_NotPerItem()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		_harness.Session.Store.ItemApplicationData = _ =>
@@ -81,10 +80,10 @@ public sealed class SyncHotPathTests : IDisposable
 		Assert.Equal(["10", "11", "12"], _harness.Session.Store.BatchFetched[0].OrderBy(k => k));
 	}
 
-	// F14: an Add whose item vanished mid-sync (fetch returns null) is not sent, and must NOT be
+	// An Add whose item vanished mid-sync (fetch returns null) is not sent, and must NOT be
 	// counted as a delivered item — the server→client "add" metric must equal what was sent.
 	[Fact]
-	public async Task F14_VanishedItem_IsNotCountedAsSent()
+	public async Task VanishedItem_IsNotCountedAsSent()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		_harness.Session.Store.ItemApplicationData = _ =>
@@ -142,10 +141,10 @@ public sealed class SyncHotPathTests : IDisposable
 		Assert.Equal(sentAdds, addsRecorded); // the metric counts what was sent, not what was diffed
 	}
 
-	// F15: a steady-state poll whose replayable request shape is unchanged must not re-write the
+	// A steady-state poll whose replayable request shape is unchanged must not re-write the
 	// Device row for the cache (the LastSeenUtc write is the only one that should happen).
 	[Fact]
-	public async Task F15_UnchangedReplayShape_DoesNotRewriteTheDeviceRow()
+	public async Task UnchangedReplayShape_DoesNotRewriteTheDeviceRow()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
 		SyncHandler handler = NewSyncHandler();

@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   F22: MoveItems must patch the previous (replay) snapshot as well as the current one, so a
+///   MoveItems must patch the previous (replay) snapshot as well as the current one, so a
 ///   subsequent N-1 replay does not restore the pre-move snapshot and echo the move back to the
 ///   client that made it.
 /// </summary>
@@ -27,7 +27,7 @@ public sealed class MoveItemsSnapshotTests : IDisposable
 	}
 
 	[Fact]
-	public async Task F22_Move_AlsoPatchesPreviousSnapshot()
+	public async Task Move_AlsoPatchesPreviousSnapshot()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
 			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email),
@@ -73,14 +73,14 @@ public sealed class MoveItemsSnapshotTests : IDisposable
 		Assert.DoesNotContain("10", Decompress(source.PreviousSnapshotCompressed).Keys);
 	}
 
-	// F5: the destination collection's snapshot must record the moved item's REAL post-move
+	// The destination collection's snapshot must record the moved item's REAL post-move
 	// revision (what the backend actually reports for it there — the same value
 	// GetItemRevisionsAsync would return), not a manufactured placeholder. A placeholder can
 	// never equal what the next revision listing reports for that item, so the destination diff
 	// sees "known != current" and re-sends a needless Change for an item the client just received
 	// via the Add half of the move.
 	[Fact]
-	public async Task F5_Move_StoresTheBackendsRealDestinationRevision()
+	public async Task Move_StoresTheBackendsRealDestinationRevision()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
 			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email),

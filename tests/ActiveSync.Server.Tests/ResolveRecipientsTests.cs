@@ -10,7 +10,7 @@ namespace ActiveSync.Server.Tests;
 /// <summary>
 ///   ResolveRecipients (MS-ASCMD 2.2.1.15) status conformance: an ambiguous match must report
 ///   status 2/3 (ambiguous), not 1 (single match), so the client prompts instead of silently
-///   picking one (F42).
+///   picking one.
 /// </summary>
 public sealed class ResolveRecipientsTests : IDisposable
 {
@@ -24,7 +24,7 @@ public sealed class ResolveRecipientsTests : IDisposable
 		_harness.Dispose();
 	}
 
-	// F42 — three matching contacts for one "To" is ambiguous. Status 1 tells the client there is
+	// Three matching contacts for one "To" is ambiguous. Status 1 tells the client there is
 	// exactly one and it picks arbitrarily; it must be an ambiguity status (3 = all returned).
 	[Fact]
 	public async Task AmbiguousMatch_ReportsAmbiguousStatus_NotSingleMatch()
@@ -61,7 +61,7 @@ public sealed class ResolveRecipientsTests : IDisposable
 		Assert.Equal("1", resp?.Element(RR + "Status")?.Value);
 	}
 
-	// F43 (coverage) — the per-To lookups now run concurrently (Task.WhenAll). The observable
+	// Coverage: the per-To lookups now run concurrently (Task.WhenAll). The observable
 	// contract that must survive that change is ORDER: each To's Response stays in request order and
 	// carries its own match. (The concurrency itself is not unit-observable with synchronous stubs.)
 	[Fact]
@@ -90,7 +90,7 @@ public sealed class ResolveRecipientsTests : IDisposable
 			resps[2].Element(RR + "Recipient")!.Element(RR + "EmailAddress")!.Value);
 	}
 
-	// F20 (round 3) — MS-ASCMD's Recipient sequence is Type, DisplayName, EmailAddress,
+	// MS-ASCMD's Recipient sequence is Type, DisplayName, EmailAddress,
 	// Availability, Certificates, Picture. A strict-sequence client drops the free/busy digit
 	// string it explicitly asked for if Picture arrives before Availability.
 	[Fact]

@@ -179,7 +179,7 @@ public sealed class CliConfigTests : IDisposable
 	[Fact]
 	public void Set_CatalogueSecret_IsSealedAtRest_WhenKeyConfigured()
 	{
-		// B5: `eas config set` stored catalogue secrets verbatim while the web UI sealed them.
+		// `eas config set` stored catalogue secrets verbatim while the web UI sealed them.
 		// With a master key present (bootstrap from env), a Secret catalogue key must be stored
 		// sealed (enc:v1:) at rest, not in plaintext — the same as the web settings editor.
 		SetEnv("ActiveSync__Encryption__Key", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=");
@@ -197,7 +197,7 @@ public sealed class CliConfigTests : IDisposable
 			.UseSqlite($"Data Source={_dbPath}")
 			.Options;
 		using SqliteSyncDbContext db = new(options);
-		// B7 (behaviour change): GlobalSettingStore normalizes the stored Key to lowercase (a
+		// Behaviour change: GlobalSettingStore normalizes the stored Key to lowercase (a
 		// sargable equality seek on the primary key needs the row itself normalized) — match that
 		// here since this helper reads the row directly rather than through the store.
 		string normalized = key.ToLowerInvariant();
@@ -207,12 +207,12 @@ public sealed class CliConfigTests : IDisposable
 	[Fact]
 	public void List_BackendSecretLeaves_AreMasked()
 	{
-		// L30: non-Password backend secrets (ApiKey/Token/ClientSecret) leaked in the clear because
+		// Non-Password backend secrets (ApiKey/Token/ClientSecret) leaked in the clear because
 		// only a trailing "Password" leaf was flagged secret. They must mask like Password does.
 		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:MailStore:ApiKey", "backend-api-secret").ExitCode);
 		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:Calendar:Token", "backend-token-secret").ExitCode);
 
-		// B7 (behaviour change): an "extra" (uncatalogued) key's displayed name now comes from the
+		// Behaviour change: an "extra" (uncatalogued) key's displayed name now comes from the
 		// stored, lowercase-normalized row rather than the exact casing it was written with.
 		(_, _, string listOut) = Run("config", "list");
 		Assert.Contains("activesync:backends:mailstore:apikey", listOut);
@@ -228,7 +228,7 @@ public sealed class CliConfigTests : IDisposable
 	[Fact]
 	public void Set_SecretKey_DoesNotEchoTheValue()
 	{
-		// L29: `config set` confirmed with "Set <key> = <value>", echoing the plaintext secret
+		// `config set` confirmed with "Set <key> = <value>", echoing the plaintext secret
 		// even though get/list mask it. The confirmation must mask secret values too.
 		(int exit, _, string setOut) = Run("config", "set", "ActiveSync:WebUi:Oidc:ClientSecret", "super-secret");
 		Assert.Equal(0, exit);
@@ -295,13 +295,13 @@ public sealed class CliConfigTests : IDisposable
 		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:MailStore:FutureKnob", "42").ExitCode);
 	}
 
-	// E13: `config set`'s confirmation echo masked a backend leaf purely by SettingKeys.Find's name
+	// `config set`'s confirmation echo masked a backend leaf purely by SettingKeys.Find's name
 	// heuristic (SecretRedaction.IsSecretName), while `config get`/`config list` already consult the
-	// assigned provider's own schema (BackendKeyValidator.IsSecretLeaf, B25). A plugin field declared
+	// assigned provider's own schema (BackendKeyValidator.IsSecretLeaf). A plugin field declared
 	// BackendFieldType.Secret under a name the heuristic misses ("AuthBlob" — no in-repo provider has
 	// one, so none of imap/smtp/dav/sieve/local can reproduce this) was therefore echoed in the clear
 	// by `set` even though `get` masks it. Exercised through CliHostServices' warm-host seam (the same
-	// one E5-forwarded commands use) with a hand-built provider registry, rather than staging a whole
+	// one other CLI commands are forwarded through) with a hand-built provider registry, rather than staging a whole
 	// plugin fixture assembly for one masking check.
 	[Fact]
 	public void Set_BackendLeaf_ConsultsProviderSchema_ForMasking_NotJustTheNameHeuristic()

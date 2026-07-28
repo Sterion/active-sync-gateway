@@ -49,7 +49,7 @@ public class StartupSummaryRedactionTests
 	[Fact]
 	public void DescribeUser_MasksSecretNamedRoleSettings()
 	{
-		// E15: the per-role Settings loop printed every setting verbatim; only Password was masked,
+		// The per-role Settings loop printed every setting verbatim; only Password was masked,
 		// so an ApiKey/Token in a role override leaked in full into the banner (and the DB log sink).
 		UserOptions options = new()
 		{
@@ -133,7 +133,7 @@ public class StartupSummaryRedactionTests
 	[Fact]
 	public void Sqlite_PasswordKeyword_IsMasked()
 	{
-		// E23: SQLite/SQLCipher connection strings accept a Password keyword; the banner treated
+		// SQLite/SQLCipher connection strings accept a Password keyword; the banner treated
 		// every SQLite string as "just a file path" and printed the cipher key in the clear.
 		string redacted = StartupSummary.Redact("Sqlite", "Data Source=/data/activesync.db;Password=cipherkey");
 		Assert.DoesNotContain("cipherkey", redacted);

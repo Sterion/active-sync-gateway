@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Server.Tests;
 
-/// <summary>E25 — the folder-listing fallback must not re-query the registry per failing store.</summary>
+/// <summary>The folder-listing fallback must not re-query the registry per failing store.</summary>
 public sealed class FolderServiceFallbackTests : IDisposable
 {
 	private readonly SqliteConnection _connection;
@@ -47,7 +47,7 @@ public sealed class FolderServiceFallbackTests : IDisposable
 
 		// RefreshFolderRegistry issues a constant number of registry reads regardless of the
 		// store count (all stores fail, the registry is empty); the only thing that scaled with
-		// the store count was the redundant per-store fallback read this finding removes.
+		// the store count was the redundant per-store fallback read this fix removes.
 		Assert.Equal(oneFailingStore, threeFailingStores);
 	}
 

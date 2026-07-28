@@ -3,7 +3,7 @@ using ActiveSync.Server.Eas.Handlers;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   F32 — MeetingResponse must unfold RFC 5545 folded content lines before scanning for UID and
+///   MeetingResponse must unfold RFC 5545 folded content lines before scanning for UID and
 ///   ORGANIZER. Exchange/Google UIDs and ORGANIZER values routinely exceed 75 octets and fold onto
 ///   a continuation line beginning with a space/tab; a raw split truncates the UID (event not
 ///   found) and can push the "mailto:" onto the continuation (reply mailed to the wrong address).

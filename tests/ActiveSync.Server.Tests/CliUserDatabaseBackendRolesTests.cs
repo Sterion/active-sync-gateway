@@ -7,13 +7,13 @@ using Spectre.Console.Cli.Testing;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   E4: `eas user set` (the <see cref="DatabaseCommand{TSettings}" /> pipeline, via
+///   `eas user set` (the <see cref="DatabaseCommand{TSettings}" /> pipeline, via
 ///   <see cref="ActiveSync.Server.Cli.CliServices.TryCreateAsync" />) must validate against the SAME
 ///   effective backend-role configuration the running gateway uses — including roles that live ONLY
 ///   in the database, which is exactly the documented setup path (<c>eas config set
 ///   ActiveSync:Backends:...</c>). Deliberately does NOT set MailStore/MailSubmit via file/env
 ///   (unlike <see cref="CliUserTests" />'s fixture) — they are stored via <c>eas config set</c>
-///   only, so this reproduces the standalone/stopped-gateway scenario the finding describes.
+///   only, so this reproduces the standalone/stopped-gateway scenario just described.
 /// </summary>
 [Collection("cli")]
 public sealed class CliUserDatabaseBackendRolesTests : IDisposable

@@ -25,7 +25,7 @@ public class LogTextTests
 		Assert.Equal("", LogText.Clean(null));
 	}
 
-	// E31: bidi-override characters reorder a log line's visible content (a hostile
+	// Bidi-override characters reorder a log line's visible content (a hostile
 	// username can make "admin‮ ...evil" render as if it were something else) but are
 	// Unicode format chars (Cf), NOT char.IsControl, so the control-only scan let them
 	// through. They must be neutralized too.

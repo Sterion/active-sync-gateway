@@ -9,7 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ActiveSync.Server.Tests;
 
-/// <summary>E13 — WAL is a persistent DB property; the interceptor must apply it once, not per open.</summary>
+/// <summary>WAL is a persistent DB property; the interceptor must apply it once, not per open.</summary>
 public sealed class SqlitePragmaInterceptorTests : IDisposable
 {
 	private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"eas-pragma-{Guid.NewGuid():N}.db");
@@ -58,7 +58,7 @@ public sealed class SqlitePragmaInterceptorTests : IDisposable
 		Assert.Equal("wal", ((string?)await check.ExecuteScalarAsync())?.ToLowerInvariant());
 	}
 
-	// E22: AddSyncDatabase passes the SAME `configure` delegate to both AddDbContextFactory and
+	// AddSyncDatabase passes the SAME `configure` delegate to both AddDbContextFactory and
 	// AddDbContext, but the delegate itself does `new SqlitePragmaInterceptor()` — so EF Core invokes
 	// it once per registration and mints TWO instances, each with its own `_walApplied` guard. The
 	// WAL pragma is idempotent so nothing breaks, but the "one interceptor instance per database"

@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   E11: the settings refresh poll used to `break` on ANY <see cref="OperationCanceledException" />,
+///   The settings refresh poll used to `break` on ANY <see cref="OperationCanceledException" />,
 ///   so a non-shutdown cancellation (e.g. an EF command timeout surfacing as OCE) killed live
 ///   settings refresh for the process lifetime with no log. A fault on one tick must not stop the
 ///   loop while the host is still running.

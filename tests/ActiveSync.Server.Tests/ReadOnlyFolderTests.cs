@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   F21 — a per-folder read-only grant (`IBackendSession.IsReadOnlyFolder`, how shared
+///   A per-folder read-only grant (`IBackendSession.IsReadOnlyFolder`, how shared
 ///   collections are surfaced) must block client writes in EVERY mutating handler, not only
 ///   in Sync. These drive each handler with a folder the session reports read-only and assert
 ///   the backend was never asked to perform the mutation.
@@ -82,10 +82,10 @@ public sealed class ReadOnlyFolderTests : IDisposable
 				new XElement(IO + "EmptyFolderContents",
 					new XElement(AS + "CollectionId", shared.ServerId)))));
 
-		// F11: a read-only-blocked EmptyFolderContents answers the documented TERMINAL status 2
-		// (AGENTS.md's read-only scheme), not the "3" F45 originally gave it — "3" is now reserved
-		// for F10's genuine, retryable backend failure, and a client that read a permanent refusal
-		// as retryable would retry the bulk delete forever without ever seeing it refused.
+		// A read-only-blocked EmptyFolderContents answers the documented TERMINAL status 2
+		// (AGENTS.md's read-only scheme), not "3" — "3" is reserved for a genuine, retryable
+		// backend failure, and a client that read a permanent refusal as retryable would retry
+		// the bulk delete forever without ever seeing it refused.
 		XElement? result = response?.Root?.Element(IO + "Response")?.Element(IO + "EmptyFolderContents");
 		Assert.Equal("2", result?.Element(IO + "Status")?.Value);
 		Assert.Empty(_harness.Session.Mail.Emptied);

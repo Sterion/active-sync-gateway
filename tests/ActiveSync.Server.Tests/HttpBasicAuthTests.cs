@@ -14,7 +14,7 @@ public sealed class HttpBasicAuthTests
 	[Fact]
 	public void OversizedHeader_IsRejectedBeforeDecoding()
 	{
-		// E21: the header is unauthenticated input and was base64-decoded and UTF-8 materialized
+		// The header is unauthenticated input and was base64-decoded and UTF-8 materialized
 		// whole, so one request could make the gateway allocate a header-sized string per attempt.
 		string header = Encode("user@example.com", new string('p', 512 * 1024));
 

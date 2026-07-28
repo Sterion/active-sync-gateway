@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   F10: a 16.x draft submit (email2:Send) that succeeds at the SMTP seam but then fails filing to
+///   A 16.x draft submit (email2:Send) that succeeds at the SMTP seam but then fails filing to
 ///   Sent must still be reported as success, and must record the replay marker — otherwise the per-
 ///   command catch turns an already-sent mail into Status 6, the client resends, and the recipient
 ///   gets it twice. Drives <see cref="SyncHandler.ApplyClientCommandAsync" /> directly (it is the seam
@@ -72,7 +72,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		Assert.True(ledger.AppliedAdds.ContainsKey("c1"));
 	}
 
-	// F2: a crash between the SMTP send and this collection's own CommitCollectionStateAsync
+	// A crash between the SMTP send and this collection's own CommitCollectionStateAsync
 	// leaves the SyncKey unadvanced, so a client resend validates as Current — a FRESH, EMPTY
 	// ledger, not a Replay of the one that recorded the first attempt (Replay only ever happens
 	// once the round has already committed and the key has already advanced once). Simulate the
@@ -122,11 +122,11 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		Assert.Single(_harness.Session.Submit.Sent);
 	}
 
-	// F2-followup: the crash-duplicate guard must not become a data-loss guard. A crash is not the
+	// Follow-up: the crash-duplicate guard must not become a data-loss guard. A crash is not the
 	// only way an attempt can be claimed and never complete -- an ORDINARY transient send failure
 	// (SMTP backend down, network blip) does the exact same thing: the claim lands durably, then
 	// SubmitDraftAsync throws. If the claim primitive treats "claimed" as "already sent" (the
-	// original F2 shape), the client's resend under the same unadvanced SyncKey finds the claim,
+	// naive version of that guard), the client's resend under the same unadvanced SyncKey finds the claim,
 	// skips the send entirely, and reports Status 1 -- the mail is silently lost and the client is
 	// told it went out. Prove the resend actually retries the send instead.
 	[Fact]
@@ -163,7 +163,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		Assert.Empty(_harness.Session.Submit.Sent); // nothing went out on the failed attempt
 
 		// Attempt 2: the backend recovers; the client, having never seen a response, resends the
-		// identical Add under the SAME (still unadvanced) SyncKey -- exactly the resend F2 protects
+		// identical Add under the SAME (still unadvanced) SyncKey -- exactly the resend the crash-duplicate guard above protects
 		// against duplicating, except this time the first attempt definitely did NOT send anything.
 		_harness.Session.Submit.FailWith = null;
 
@@ -179,7 +179,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		Assert.Single(_harness.Session.Submit.Sent);
 	}
 
-	// F2 (coverage): the Change/email2:Send seam (SmartReply-style draft edit-and-send) guards the
+	// Coverage: the Change/email2:Send seam (SmartReply-style draft edit-and-send) guards the
 	// identical crash window with the identical mechanism (TryClaimSendAsync), keyed by ServerId
 	// instead of ClientId. Not run through a full red-first cycle separately — the guard is the
 	// same code path proven above for Add — but this exercises it end to end to confirm the Change

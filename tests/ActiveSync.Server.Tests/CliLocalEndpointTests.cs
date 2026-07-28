@@ -122,7 +122,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	[Fact]
 	public async Task ForwardedHelp_UsesTheSamePreCliAlias_AsTheLocalDispatcher()
 	{
-		// E10: `eas help` is documented (docs/cli.md) and works locally because Program.cs's
+		// `eas help` is documented (docs/cli.md) and works locally because Program.cs's
 		// pre-parse dispatch translates ["help"] to ["--help"] before Spectre ever sees it — but
 		// LocalCliEndpoint.RunCapturedAsync applies CliApp.Configure directly to the raw forwarded
 		// args, which has no "help" command registered, so a FORWARDED `eas help` hit Spectre's
@@ -141,7 +141,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	[Fact]
 	public async Task ForwardedCommand_DoesNotSwallowConcurrentGatewayLogOutput()
 	{
-		// L25: capturing output swapped the PROCESS-GLOBAL Console.Out/Error, so for the duration of
+		// Capturing output swapped the PROCESS-GLOBAL Console.Out/Error, so for the duration of
 		// every forwarded command all gateway log output — from every concurrent request — was
 		// captured into that command's stdout and vanished from the container log. The console
 		// logger writes from a thread that exists before the command starts; simulate exactly that
@@ -179,7 +179,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 		Assert.Contains("ActiveSync:", response.Stdout);
 	}
 
-	// E3 — COVERAGE, NOT PROOF. RunCapturedAsync's writer wiring is a private local, and no command
+	// COVERAGE, NOT PROOF. RunCapturedAsync's writer wiring is a private local, and no command
 	// in the current tree fans out concurrent writes through both the Console-routing path and
 	// AnsiConsole, so the actual race can't be triggered end-to-end through ExecuteAsync. This test
 	// reproduces the FIXED wiring standalone: both paths share ONE TextWriter.Synchronized instance,
@@ -266,7 +266,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 		Assert.False(LocalCliEndpoint.IsLoopback(IPAddress.Parse("10.0.0.1")));
 	}
 
-	// E18 — COVERAGE, NOT PROOF. The finding's concern is that an unclamped, caller-supplied `width`
+	// COVERAGE, NOT PROOF. The finding's concern is that an unclamped, caller-supplied `width`
 	// reaches Spectre's layout engine unbounded, and "at worst" could drive an expensive allocation
 	// inside the long-lived gateway. Tried end-to-end first: driving every actual /cli command this
 	// tree exposes (via ExecuteAsync) with width values from 1 up to int.MaxValue produced no
@@ -291,7 +291,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 			Ansi = AnsiSupport.No, ColorSystem = ColorSystemSupport.NoColors, Interactive = InteractionSupport.No,
 			Out = new AnsiConsoleOutput(sw),
 		});
-		// The UNFIXED expression from LocalCliEndpoint.RunCapturedAsync before E18.
+		// The UNFIXED expression from LocalCliEndpoint.RunCapturedAsync before the width was clamped.
 		console.Profile.Width = attackerWidth > 0 ? attackerWidth : 200;
 		console.Write(new Rule());
 
@@ -303,7 +303,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	[Fact]
 	public void FixedWidthExpression_BoundsRuleOutput_ForAnyCallerSuppliedValue()
 	{
-		// The FIXED expression (E18): whatever the caller sends, Profile.Width never exceeds 1000.
+		// The FIXED expression: whatever the caller sends, Profile.Width never exceeds 1000.
 		foreach (int attackerWidth in new[] { 200_000, int.MaxValue - 1, -7, 0, 1 })
 		{
 			StringWriter sw = new();
@@ -369,7 +369,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	[Fact]
 	public void Authorize_NoKey_WithoutAllowPlaintext_Refuses()
 	{
-		// L22: key absence must NOT be what selects plaintext mode. A key that fails to load (an
+		// Key absence must NOT be what selects plaintext mode. A key that fails to load (an
 		// unreadable KeyFile, a mount that came up late) is indistinguishable from "no key
 		// configured", and silently degrading to loopback-only is the model the design rejects.
 		// Only an explicit ActiveSync:Encryption:AllowPlaintext may open that door.
@@ -394,7 +394,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	[Fact]
 	public void Authorize_RefusesTheSecondUseOfAnEnvelope_WithinTheWindow()
 	{
-		// L27: replay was bounded by time but not identity, so a captured envelope re-executed a
+		// Replay was bounded by time but not identity, so a captured envelope re-executed a
 		// destructive verb for as long as the window lasted. Each envelope carries a nonce and is
 		// good for exactly one execution.
 		byte[] key = NewKey();
@@ -417,7 +417,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	[Fact]
 	public void ReplayCache_CannotBeReopened_WhenClaimedEarlyByAnEnvelopeReceivedUnderClockSkew()
 	{
-		// E11: TryClaim recorded the CLAIM time (the receipt clock), not the envelope's own
+		// TryClaim recorded the CLAIM time (the receipt clock), not the envelope's own
 		// TimestampUnixMs, so an envelope received right at the earliest allowed instant (T minus
 		// the forward clock-skew allowance) had its replay-cache entry pruned up to FutureSkewMs
 		// BEFORE the envelope itself stopped being acceptable under TryOpen's own window check —
@@ -445,7 +445,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	[Fact]
 	public void Envelope_RejectsAFutureTimestamp_SoTheWindowIsNotDoubled()
 	{
-		// K54: Math.Abs treated a timestamp 60s in the FUTURE as acceptable as one 60s in the past,
+		// Math.Abs treated a timestamp 60s in the FUTURE as acceptable as one 60s in the past,
 		// so a captured envelope stayed replayable for 120s. Only a small clock skew is allowed
 		// forward.
 		byte[] key = NewKey();
@@ -461,7 +461,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 		Assert.True(LocalCliEnvelope.TryOpen(recent, key, now, LocalCliEndpoint.AuthWindowMs, out _));
 	}
 
-	// K17: the `seenNonces` self-enforcing overload this test exercised has been removed —
+	// The `seenNonces` self-enforcing overload this test exercised has been removed —
 	// it was dead code (the only production caller always used LocalCliEndpoint.ReplayCache
 	// instead) and unsafe if ever wired up (a plain ISet<string> is not thread-safe and never
 	// evicts). TryOpen now has one signature, window-only, matching what production always used;
@@ -472,7 +472,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	[Fact]
 	public void TryOpen_RejectsASealedEnvelope_WhoseArgsArrayContainsANullElement()
 	{
-		// E19: LocalCliEnvelope.Args is declared `string[]` (non-nullable elements), but that is only
+		// LocalCliEnvelope.Args is declared `string[]` (non-nullable elements), but that is only
 		// a compile-time promise — JSON happily deserializes `{"args":["users",null]}` into a
 		// string?[] masquerading as string[], and TryOpen previously checked only
 		// `decoded.Args is null` (the ARRAY reference), never its elements. A downstream consumer
@@ -497,7 +497,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	[Fact]
 	public void TryAuthorize_PlaintextMode_RejectsArgsContainingANullElement()
 	{
-		// E19, same hole in the plaintext (AllowPlaintext) branch: a CliRequest's Args come straight
+		// The same hole in the plaintext (AllowPlaintext) branch: a CliRequest's Args come straight
 		// from an unattributed JSON body with no envelope at all, so the same `[null]` shape reaches
 		// TryAuthorize's plaintext path unfiltered.
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -532,7 +532,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	[Fact]
 	public void ProtectResponse_SealsOutputWhenKeyed_AndLeavesItPlainOtherwise()
 	{
-		// L23: `eas device password` prints a live credential. Requests are sealed but responses
+		// `eas device password` prints a live credential. Requests are sealed but responses
 		// were not, so the secret travelled loopback in the clear. Seal the response with the same
 		// key whenever one is configured; the plaintext fields must be empty on the wire.
 		byte[] key = NewKey();
@@ -561,7 +561,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	[Fact]
 	public void Audit_RecordsEveryForwardedCommand_WithSecretArgumentsRedacted()
 	{
-		// L24: account deletion, device-password disclosure and password changes left no record at
+		// Account deletion, device-password disclosure and password changes left no record at
 		// all. Every forwarded command must produce one log line — and it must be safe to keep, so
 		// the value following a secret-named option or field is redacted (stdin is never logged).
 		RecordingLogger logger = new();
@@ -604,7 +604,7 @@ public sealed class CliLocalEndpointTests : IDisposable
 	[Fact]
 	public void Registrar_BreaksDependencyCycles_InsteadOfKillingTheGateway()
 	{
-		// L26: the Spectre DI bridge resolved constructor parameters recursively with no cycle
+		// The Spectre DI bridge resolved constructor parameters recursively with no cycle
 		// detection, so one command type whose graph loops back on itself takes the whole gateway
 		// process down with an uncatchable StackOverflowException. A cycle must resolve to null.
 		StringWriter sw = new();
@@ -656,12 +656,12 @@ public sealed class CliLocalEndpointTests : IDisposable
 			Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
 	}
 
-	/* ---- K7: credential-bearing verbs must not run keyless (their response can't be sealed) --- */
+	/* ---- Credential-bearing verbs must not run keyless (their response can't be sealed) --- */
 
 	[Fact]
 	public void Authorize_RefusesCredentialBearingVerbs_InAllowPlaintextMode()
 	{
-		// K7: with no master key configured, ProtectResponse has nothing to seal a response with —
+		// With no master key configured, ProtectResponse has nothing to seal a response with —
 		// so `device password` (prints an escrowed recovery password) and `user secret` (confirms a
 		// stored backend password) must not be allowed to run at all in AllowPlaintext mode, or the
 		// credential travels the /cli wire in the clear to any loopback peer, including a co-located

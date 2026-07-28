@@ -6,13 +6,13 @@ namespace ActiveSync.Server.Tests;
 /// <summary>
 ///   The shared long-poll race coordinator (<see cref="LongPollWatchdog.RaceAsync{T}" />) used by
 ///   both Ping and Sync waits. These pin its two reliability contracts:
-///   E7 — a watcher that completes "no change" early must not collapse the heartbeat into an
-///   immediate return (a tight client re-poll loop); and E8 — a single faulting watcher must not
+///   a watcher that completes "no change" early must not collapse the heartbeat into an
+///   immediate return (a tight client re-poll loop); and a single faulting watcher must not
 ///   abort the whole long-poll (a 500 to the client).
 /// </summary>
 public sealed class LongPollWatchdogTests
 {
-	// E7: with the watchdog disabled and every watcher completing "no change" the instant it is
+	// With the watchdog disabled and every watcher completing "no change" the instant it is
 	// awaited, the race must still honour the heartbeat window (idle to the deadline) rather than
 	// returning immediately — otherwise the client re-Pings back-to-back in a tight loop.
 	[Fact]
@@ -38,7 +38,7 @@ public sealed class LongPollWatchdogTests
 			$"expected the race to idle to the deadline (~400ms), returned after {sw.ElapsedMilliseconds}ms");
 	}
 
-	// E8: a watcher whose task faults (a backend exception on the wait path) must be swallowed —
+	// A watcher whose task faults (a backend exception on the wait path) must be swallowed —
 	// it must not propagate out of RaceAsync and turn the whole Ping into a 500.
 	[Fact]
 	public async Task RaceAsync_WhenAWatcherFaults_DoesNotAbortThePoll()

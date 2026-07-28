@@ -10,7 +10,7 @@ using Spectre.Console.Cli.Testing;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   E5: forwarded <c>config</c>/<c>logs</c>/<c>tls</c> commands must reuse the warm gateway's
+///   Forwarded <c>config</c>/<c>logs</c>/<c>tls</c> commands must reuse the warm gateway's
 ///   already-built provider (via <see cref="CliHostServices" />) exactly like <see cref="DatabaseCommand{TSettings}" />
 ///   already does — not rebuild a parallel standalone container (and reload plugins) on every call.
 ///   Each test builds a "host" provider bound to a SEEDED database, then repoints the ambient

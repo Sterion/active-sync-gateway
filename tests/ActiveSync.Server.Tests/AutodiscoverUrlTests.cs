@@ -6,7 +6,7 @@ namespace ActiveSync.Server.Tests;
 
 /// <summary>
 ///   <see cref="AutodiscoverEndpoint.BuildEasUrl" /> advertises the gateway's EAS URL to a phone.
-///   E10: when PublicUrl is unset, the client-supplied X-Forwarded-Proto / X-Forwarded-Host must be
+///   When PublicUrl is unset, the client-supplied X-Forwarded-Proto / X-Forwarded-Host must be
 ///   reflected into that URL ONLY from a configured Auth:TrustedProxies hop — from a direct peer they
 ///   are ignored, so an authenticated client cannot be handed an attacker-chosen sync host.
 /// </summary>
@@ -30,7 +30,7 @@ public sealed class AutodiscoverUrlTests
 	[Fact]
 	public void ForwardedHost_FromAnUntrustedPeer_IsIgnored()
 	{
-		// E10: the attacker-supplied X-Forwarded-Host must not appear in the advertised URL.
+		// The attacker-supplied X-Forwarded-Host must not appear in the advertised URL.
 		AuthOptions auth = new();
 		string url = AutodiscoverEndpoint.BuildEasUrl(
 			Request("203.0.113.9", "gateway.local", proto: "https", fwdHost: "evil.example.com"), auth, null);
@@ -59,7 +59,7 @@ public sealed class AutodiscoverUrlTests
 		Assert.Equal($"https://eas.example.com{Path}", url);
 	}
 
-	// E16: X-Forwarded-Proto may itself be a comma-separated chain (multiple proxies each appended a
+	// X-Forwarded-Proto may itself be a comma-separated chain (multiple proxies each appended a
 	// hop) — the same shape WebApplicationExtensions.ResolvePublicScheme handles by taking the LAST
 	// entry (the outermost trusted proxy's own observed value), not the first (whatever the client
 	// itself sent). BuildEasUrl used the raw header value verbatim with no split at all, so a chained

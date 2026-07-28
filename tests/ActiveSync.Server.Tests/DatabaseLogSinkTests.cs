@@ -144,7 +144,7 @@ public sealed class DatabaseLogSinkTests : IDisposable
 	[Fact]
 	public void Emit_DatabaseDisabledLive_DropsAtEmit_WithoutRenderingTheMessage()
 	{
-		// E10: the Log:Database switch was only checked in the drain, so every event was fully
+		// The Log:Database switch was only checked in the drain, so every event was fully
 		// rendered (and a LogEntry allocated) even when persistence is off. With the option
 		// visible at Emit, a disabled sink must not touch the message template at all.
 		using DatabaseLogSink sink = new();
@@ -163,7 +163,7 @@ public sealed class DatabaseLogSinkTests : IDisposable
 	[Fact]
 	public async Task Drain_PersistFailure_IsReportedToSelfLog_NotSilentlySwallowed()
 	{
-		// E9: a failing batch write was swallowed with no signal, so a persistent database
+		// A failing batch write was swallowed with no signal, so a persistent database
 		// outage silently disabled DB logging for the process lifetime. The failure must reach
 		// SelfLog (the logger itself is suspect, so it cannot be reported through Serilog).
 		List<string> selfLog = [];
@@ -199,7 +199,7 @@ public sealed class DatabaseLogSinkTests : IDisposable
 	}
 
 	/// <summary>
-	///   E4: the shutdown flush bounded only its own <c>Task.Wait(2s)</c>; no token reached
+	///   The shutdown flush bounded only its own <c>Task.Wait(2s)</c>; no token reached
 	///   <c>WaitToReadAsync</c>/<c>SaveChangesAsync</c>, so a genuinely hung write was never actually
 	///   interrupted — Dispose gave up waiting, but the drain task (and its in-flight save) kept
 	///   running, unobserved, against a disposing host. A shutdown-linked token threaded into the
@@ -280,7 +280,7 @@ public sealed class DatabaseLogSinkTests : IDisposable
 	}
 
 	/// <summary>
-	///   E13: once `Log:Database` flips off live, the drain re-read and discarded every buffered
+	///   Once `Log:Database` flips off live, the drain re-read and discarded every buffered
 	///   batch in a tight `continue` loop with no pause at all -- CPU proportional to however fast
 	///   the writer had filled the channel. Prove throttling exists (rather than a tight spin) by
 	///   timing how long it takes to discard a large pre-buffered backlog once the drain starts

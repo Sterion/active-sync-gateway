@@ -11,7 +11,7 @@ namespace ActiveSync.Server.Tests;
 /// <summary>
 ///   The folder-retention sweep. A folder that vanishes from the backend is only soft-deleted;
 ///   nothing used to remove the row, its DAV href map, or the per-device collection/device-folder
-///   state keyed by its ServerId, so those tables only grew (A35). The sweep reclaims a folder past
+///   state keyed by its ServerId, so those tables only grew. The sweep reclaims a folder past
 ///   the retention window together with all of that dependent state, and leaves fresher ones alone.
 /// </summary>
 public sealed class FolderRetentionServiceTests : IDisposable
@@ -112,7 +112,7 @@ public sealed class FolderRetentionServiceTests : IDisposable
 	}
 
 	/// <summary>
-	///   E2: the retention sweep used to `break` on ANY <see cref="OperationCanceledException" />, so a
+	///   The retention sweep used to `break` on ANY <see cref="OperationCanceledException" />, so a
 	///   non-shutdown cancellation (e.g. an EF command timeout surfacing as OCE) permanently stopped
 	///   retention for the process lifetime — not just the current sweep. A fault on one sweep must
 	///   not stop the loop while the host is still running; it should fall through to the retry path

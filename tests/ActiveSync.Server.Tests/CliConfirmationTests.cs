@@ -9,7 +9,9 @@ using Microsoft.EntityFrameworkCore;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   Item 6a of docs/design/db-restructure.md — the confirmation round-trip.
+///   The <c>ConfirmRequest</c> round-trip: <c>LocalCliResult</c> carries an optional <c>Confirm</c>
+///   field so a forwarded command can ask a question and hand back <c>ResendArgs</c> instead of
+///   failing outright, with a dry-run counting method both the CLI and the admin UI consume.
 ///   <para>
 ///     This fixes a real gap, not a hypothetical one: <c>LocalCliEndpoint</c> builds its captured
 ///     console with <c>InteractionSupport.No</c>, so a forwarded command can never prompt, and
@@ -145,9 +147,9 @@ public sealed class CliConfirmationTests : IDisposable
 	[Fact]
 	public async Task ConfirmedPurge_ReRunsTheImpactCount_AndNamesWhatItDestroys()
 	{
-		// E20: CliConfirmation's own type doc states "a command must therefore RE-CHECK on the second
-		// call — the operator confirmed a specific loss, not an open-ended one" (docs/review's finding
-		// quotes it verbatim), and UserDeleteCommand does re-count on its --yes path. PurgeCommand's
+		// CliConfirmation's own type doc states "a command must therefore RE-CHECK on the second
+		// call — the operator confirmed a specific loss, not an open-ended one", and UserDeleteCommand
+		// already re-counts on its --yes path. PurgeCommand's
 		// --yes path skipped the whole count-and-ask block (lines 33-66) and went straight to
 		// DeleteAsync, so nothing re-checked the impact or told the operator what was actually being
 		// destroyed on the confirmed call — only the ASKING call ever named the content ("3 contacts").

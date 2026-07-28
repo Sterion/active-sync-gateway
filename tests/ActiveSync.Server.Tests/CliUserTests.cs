@@ -136,7 +136,7 @@ public sealed class CliUserTests : IDisposable
 	[Fact]
 	public void Set_PlaintextGatewayPassword_IsHashed_WithWarning()
 	{
-		// Behaviour change (C6): plaintext gateway passwords now enforce a strength floor, so the
+		// Behaviour change: plaintext gateway passwords now enforce a strength floor, so the
 		// sample is >= the minimum length (was "hunter2", now below the floor and rejected).
 		(int exitCode, string stderr, string output) = Run(null, "user", "set", "u2", "Password", "hunter2-strong");
 		Assert.Equal(0, exitCode);
@@ -148,7 +148,7 @@ public sealed class CliUserTests : IDisposable
 	[Fact]
 	public void Set_WeakGatewayPassword_IsRejected()
 	{
-		// C6: below the shared strength floor — refused identically to the web surfaces.
+		// Below the shared strength floor — refused identically to the web surfaces.
 		(int exitCode, string stderr, _) = Run(null, "user", "set", "u2", "Password", "hunter2");
 		Assert.Equal(1, exitCode);
 		Assert.Contains("at least", stderr);
@@ -234,7 +234,7 @@ public sealed class CliUserTests : IDisposable
 		Assert.Contains("Backends:MailStore:Password", badKeyErr);
 	}
 
-	// L42 — COVERAGE, NOT PROOF. The fix moves the master-key ZeroMemory into a finally so a
+	// COVERAGE, NOT PROOF. The fix moves the master-key ZeroMemory into a finally so a
 	// throwing/cancelled stdin read no longer leaks the key on the heap. The key is a local byte[]
 	// with no external handle, so the zeroing itself is not observable from a test; this only
 	// exercises the failure path to prove the finally is reached and the command exits cleanly

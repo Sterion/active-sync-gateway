@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   F46 — ItemOperations Fetch by LongId (the handle Search results carry) resolves a store
+///   ItemOperations Fetch by LongId (the handle Search results carry) resolves a store
 ///   straight from the backend key inside the client-supplied id. The folder registry — the
 ///   only thing that says which folders belong to this user — was never consulted, so a
 ///   LongId naming any key the store recognizes was honoured.
@@ -27,7 +27,7 @@ public sealed class ItemOperationsFetchTests : IDisposable
 		_harness.Dispose();
 	}
 
-	// F6 — a 16.x client fetching an item outside Sync (ItemOperations Fetch by CollectionId/
+	// A 16.x client fetching an item outside Sync (ItemOperations Fetch by CollectionId/
 	// ServerId) must get the SAME version-gated BodyPreference.Eas16 flag Sync itself computes
 	// (context.Version >= EasVersion.V160), not a hard-coded false. Without it, 16.x-only shapes
 	// (airsyncbase:Location, event attachments) silently disappear from a bare Fetch.
@@ -89,9 +89,9 @@ public sealed class ItemOperationsFetchTests : IDisposable
 
 		// The control for the refusal above. It asserts the handler's DECISION rather than
 		// its response, because the success response is currently unencodable: the
-		// ItemOperations code page has no LongId tag, so `<itemoperations:LongId>` throws on
-		// the way out. That is a separate defect (filed at the bottom of Part 2 of the
-		// review) and deliberately not fixed here; when it is, this can assert Status 1.
+		// ItemOperations code page has no LongId tag (it lives on Search and ComposeMail only),
+		// so `<itemoperations:LongId>` throws encoding the response on the way out. That is a
+		// separate, known defect, deliberately not fixed here; when it is, this can assert Status 1.
 		await Assert.ThrowsAsync<WbxmlException>(() =>
 			FetchLongIdAsync(DelimitedKey.Encode("imap:INBOX", "1")));
 

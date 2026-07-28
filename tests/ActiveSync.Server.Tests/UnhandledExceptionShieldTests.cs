@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   E26 — the gateway registers no exception-handling middleware, and
+///   The gateway registers no exception-handling middleware, and
 ///   <c>WebApplication</c> auto-inserts the developer exception page when
 ///   <c>ASPNETCORE_ENVIRONMENT=Development</c>. Anything an endpoint lets escape therefore
 ///   renders a full stack trace to whoever sent the request — including an unauthenticated

@@ -12,7 +12,7 @@ using Spectre.Console.Cli.Testing;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   E17: CLI commands running INSIDE the warm gateway (via <see cref="CliHostServices" />) must read
+///   CLI commands running INSIDE the warm gateway (via <see cref="CliHostServices" />) must read
 ///   options live (<see cref="IOptionsMonitor{TOptions}" />.CurrentValue), never a captured
 ///   <see cref="IOptions{TOptions}" />.Value — the latter is a singleton bound ONCE at first
 ///   resolution and never recomputes, even though a live database settings change fires the

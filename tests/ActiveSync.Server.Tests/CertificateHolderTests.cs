@@ -5,7 +5,7 @@ using ActiveSync.Server.Setup;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   E20 — COVERAGE, not proof. The finding is a theoretical cross-thread memory-ordering gap
+///   COVERAGE, not proof. The finding is a theoretical cross-thread memory-ordering gap
 ///   (the captured-local publish had no barrier); a unit test cannot exhibit the missing barrier.
 ///   These lock in the holder's publish/read contract and that the backing field is volatile, so
 ///   the seam the fix introduced can't silently regress to a plain field.

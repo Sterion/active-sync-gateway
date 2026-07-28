@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   E4 turned per-request handler dispatch from "construct all 19 and pick one" into keyed
+///   Per-request handler dispatch went from "construct all 19 and pick one" to keyed
 ///   resolution of exactly one. That only works if three things stay in lock-step: the DI key,
 ///   the handler's own <see cref="IEasCommandHandler.Command" />, and the endpoint's advertised
 ///   command set. A drift between any two is silent in the build but shows up as a 501 for a

@@ -9,11 +9,11 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   F45 — EmptyFolderContents must report distinct statuses for its distinct failure causes
+///   EmptyFolderContents must report distinct statuses for its distinct failure causes
 ///   (6 unresolvable, 2 not a mail folder / read-only-blocked, 3 a genuine retryable backend
-///   failure) rather than collapsing them. F11: the read-only/blocked case specifically must
+///   failure) rather than collapsing them. The read-only/blocked case specifically must
 ///   answer the documented terminal status "2" (AGENTS.md's read-only scheme: "EmptyFolderContents/
-///   MeetingResponse Status 2"), not "3" — "3" is reserved for F10's genuine backend failure, which
+///   MeetingResponse Status 2"), not "3" — "3" is reserved for a genuine backend failure, which
 ///   a client may legitimately retry; a client that retries a permanently-blocked bulk delete every
 ///   sync round against a gateway that will never allow it never sees a refusal.
 /// </summary>
@@ -54,9 +54,9 @@ public sealed class ItemOperationsEmptyFolderTests : IDisposable
 		Assert.Empty(_harness.Session.Mail.Emptied);
 	}
 
-	// F11 — read-only mode's documented scheme answers EmptyFolderContents with the terminal
-	// status "2", not the retryable "3" a genuine backend failure gets (F10). Renamed from
-	// ReadOnlyFolder_ReportsStatus3: that was the finding itself — the read-only/blocked case was
+	// Read-only mode's documented scheme answers EmptyFolderContents with the terminal
+	// status "2", not the retryable "3" a genuine backend failure gets. Renamed from
+	// ReadOnlyFolder_ReportsStatus3: that name described the bug itself — the read-only/blocked case was
 	// wrongly sharing "3" with a transient failure, a BEHAVIOUR CHANGE this test now asserts.
 	[Fact]
 	public async Task ReadOnlyFolder_ReportsStatus2()
@@ -71,7 +71,7 @@ public sealed class ItemOperationsEmptyFolderTests : IDisposable
 		Assert.Empty(_harness.Session.Mail.Emptied);
 	}
 
-	// F10 — a backend failure during EmptyFolderContents must fail just that one operation with a
+	// A backend failure during EmptyFolderContents must fail just that one operation with a
 	// retryable status, not escape as an unhandled exception that turns the whole ItemOperations
 	// request into an HTTP 500 (the sibling Fetch already wraps its core for the same reason).
 	[Fact]

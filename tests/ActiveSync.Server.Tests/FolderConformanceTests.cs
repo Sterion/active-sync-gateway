@@ -11,16 +11,16 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   Item 33 — folder &amp; provision conformance.
+///   Folder &amp; provision conformance.
 ///   <list type="bullet">
-///     <item>F25: FolderSync must replay the previous generation on a lost response instead of
+///     <item>FolderSync must replay the previous generation on a lost response instead of
 ///       forcing a full hierarchy resync (Status 9 → key 0).</item>
-///     <item>F26: a folder-op failure must carry a meaningful status — a malformed request is
+///     <item>A folder-op failure must carry a meaningful status — a malformed request is
 ///       Status 10 and a backend/transport failure is Status 6, not "system folder" (3) or an
 ///       uncaught HTTP 500.</item>
-///     <item>F27: FolderCreate must honour the requested Type instead of silently creating a mail
+///     <item>FolderCreate must honour the requested Type instead of silently creating a mail
 ///       folder for a calendar/contacts/tasks request.</item>
-///     <item>F6: FolderUpdate must not silently ignore a requested parent change (folder move) —
+///     <item>FolderUpdate must not silently ignore a requested parent change (folder move) —
 ///       renaming in place while reporting success leaves the client believing it moved the folder,
 ///       and the next FolderSync re-asserts the old parent (churn).</item>
 ///   </list>
@@ -36,7 +36,7 @@ public sealed class FolderConformanceTests : IDisposable
 		_harness.Dispose();
 	}
 
-	// ---- F25 -------------------------------------------------------------------------------
+	// ---- FolderSync replay on a lost response ----------------------------------
 
 	[Fact]
 	public async Task FolderSync_ReplaysPreviousGeneration_InsteadOfForcingFullResync()
@@ -68,9 +68,9 @@ public sealed class FolderConformanceTests : IDisposable
 		Assert.Equal(3, replay?.Root?.Element(FH + "Changes")?.Elements(FH + "Add").Count());
 	}
 
-	// ---- item 23 F17 -------------------------------------------------------------------------
+	// ---- FolderSync backend-failure mapping --------------------------------
 
-	// F17: unlike its three sibling folder handlers (FolderModifyHandlerBase's ExecuteAsync/
+	// Unlike its three sibling folder handlers (FolderModifyHandlerBase's ExecuteAsync/
 	// refresh/commit path), FolderSync had no backend-failure mapping — the handler that runs on
 	// every device on every reconnect. A transport failure reaching the hierarchy refresh/commit
 	// must surface as EAS Status 6, not escape raw and become an HTTP 500 the client cannot
@@ -98,7 +98,7 @@ public sealed class FolderConformanceTests : IDisposable
 		Assert.Equal("6", response?.Root?.Element(FH + "Status")?.Value);
 	}
 
-	// ---- F26 -------------------------------------------------------------------------------
+	// ---- Folder-op failure status mapping -------------------------------------
 
 	[Fact]
 	public async Task FolderCreate_BackendTransportFailure_YieldsStatus6_NotAnUncaughtError()
@@ -130,11 +130,11 @@ public sealed class FolderConformanceTests : IDisposable
 		Assert.Empty(_harness.Session.Store.CreatedFolders);
 	}
 
-	// ---- F27 -------------------------------------------------------------------------------
+	// ---- FolderCreate honours the requested Type ------------------------------
 
-	// ---- item 23 F13 -------------------------------------------------------------------------
+	// ---- FolderCreate ServerId on a lagging post-create listing ------------
 
-	// F13: a backend whose post-create listing does not yet reflect the new folder (Axigen's
+	// A backend whose post-create listing does not yet reflect the new folder (Axigen's
 	// async indexing lag is the real-world trigger) must NOT be reported to the client as a
 	// success with no ServerId — the client would cache a folder it can never address again.
 	[Fact]
@@ -181,7 +181,7 @@ public sealed class FolderConformanceTests : IDisposable
 			KeyPrefix = "caldav:"
 		};
 		_harness.Session.SecondaryStore = calendar;
-		// F13: the post-create hierarchy refresh must find the new folder for the create to be
+		// The post-create hierarchy refresh must find the new folder for the create to be
 		// reported as a success — simulate a calendar backend whose listing keeps up.
 		calendar.Listing = [new BackendFolder("caldav:MyCalendar", "MyCalendar", null, EasFolderType.UserCalendar, EasClass.Calendar)];
 
@@ -193,7 +193,7 @@ public sealed class FolderConformanceTests : IDisposable
 				new XElement(FH + "DisplayName", "MyCalendar"))));
 
 		Assert.Equal("1", response?.Root?.Element(FH + "Status")?.Value);
-		Assert.NotNull(response?.Root?.Element(FH + "ServerId")); // F13: a real success carries a ServerId
+		Assert.NotNull(response?.Root?.Element(FH + "ServerId")); // a real success carries a ServerId
 		Assert.Single(calendar.CreatedFolders);
 		Assert.Empty(_harness.Session.Store.CreatedFolders); // mail store left untouched
 	}
@@ -202,7 +202,7 @@ public sealed class FolderConformanceTests : IDisposable
 	public async Task FolderCreate_MailType_StillCreatesInTheMailStore()
 	{
 		// Regression guard: the default class (Email / Type 12) still routes to the mail store.
-		// F13: the post-create hierarchy refresh must find the new folder for this to be reported
+		// The post-create hierarchy refresh must find the new folder for this to be reported
 		// as a success — simulate a mail backend whose listing keeps up.
 		_harness.Session.Store.Listing = [new BackendFolder("imap:Projects", "Projects", null, EasFolderType.UserMail, EasClass.Email)];
 
@@ -214,17 +214,17 @@ public sealed class FolderConformanceTests : IDisposable
 				new XElement(FH + "DisplayName", "Projects"))));
 
 		Assert.Equal("1", response?.Root?.Element(FH + "Status")?.Value);
-		Assert.NotNull(response?.Root?.Element(FH + "ServerId")); // F13: a real success carries a ServerId
+		Assert.NotNull(response?.Root?.Element(FH + "ServerId")); // a real success carries a ServerId
 		Assert.Single(_harness.Session.Store.CreatedFolders);
 	}
 
-	// F28: a FolderCreate enumerates the whole multi-backend hierarchy exactly ONCE, not twice
+	// A FolderCreate enumerates the whole multi-backend hierarchy exactly ONCE, not twice
 	// (ExecuteAsync used to refresh to map the new key to a ServerId, then HandleAsync refreshed
 	// again to commit).
 	[Fact]
 	public async Task FolderCreate_EnumeratesTheHierarchyOnlyOnce()
 	{
-		// F13: without a listing that reflects the new folder, the create is retryable (Status 6) —
+		// Without a listing that reflects the new folder, the create is retryable (Status 6) —
 		// give this test the same happy-path listing so it still measures what it is named for.
 		_harness.Session.Store.Listing = [new BackendFolder("imap:Projects", "Projects", null, EasFolderType.UserMail, EasClass.Email)];
 
@@ -239,7 +239,7 @@ public sealed class FolderConformanceTests : IDisposable
 		Assert.Equal(1, _harness.Session.Store.ListFoldersCalls);
 	}
 
-	// ---- F6 --------------------------------------------------------------------------------
+	// ---- FolderUpdate honours a parent change --------------------------------
 
 	[Fact]
 	public async Task FolderUpdate_WithADifferentParentId_IsRejected_NotSilentlyRenamedInPlace()
@@ -263,7 +263,7 @@ public sealed class FolderConformanceTests : IDisposable
 		// than believe it did.
 		Assert.NotEqual("1", response?.Root?.Element(FH + "Status")?.Value);
 		// And the backend must never have been asked to rename it in place either — a partial
-		// "renamed but not moved" outcome is exactly the silent half-success F6 flags.
+		// "renamed but not moved" outcome is exactly the silent half-success this guards against.
 		Assert.Empty(_harness.Session.Store.RenamedFolders);
 	}
 

@@ -11,13 +11,13 @@ namespace ActiveSync.Server.Tests;
 
 /// <summary>
 ///   MeetingResponse (MS-ASCMD 2.2.1.11): a transient backend failure must read as retryable
-///   status 4, not status 2 "invalid meeting request" (F34); the invitation mail is removed after
-///   a successful response (F35); a calendar-collection CollectionId reads the event instead of
-///   handing a calendar backend key to the mail store (F33); a retry after the iTIP REPLY already
-///   went out must not send a second one (F7); an InstanceId (occurrence-scoped response) must not
+///   status 4, not status 2 "invalid meeting request"; the invitation mail is removed after
+///   a successful response; a calendar-collection CollectionId reads the event instead of
+///   handing a calendar backend key to the mail store; a retry after the iTIP REPLY already
+///   went out must not send a second one; an InstanceId (occurrence-scoped response) must not
 ///   silently respond for the whole series, since RespondToMeetingAsync has no occurrence-level
-///   entry point (F8); an absent/unparsable UserResponse must not default to the most-committing
-///   answer, Accept (F9).
+///   entry point; an absent/unparsable UserResponse must not default to the most-committing
+///   answer, Accept.
 /// </summary>
 public sealed class MeetingResponseTests : IDisposable
 {
@@ -74,7 +74,7 @@ public sealed class MeetingResponseTests : IDisposable
 			new XDocument(new XElement(MR + "MeetingResponse", request)));
 	}
 
-	// F34 — a backend failure while loading the invite must be status 4 (retryable server error),
+	// A backend failure while loading the invite must be status 4 (retryable server error),
 	// not status 2 (invalid meeting request), which tells the client the request itself was bad.
 	[Fact]
 	public async Task BackendFailure_ReportsStatus4()
@@ -96,7 +96,7 @@ public sealed class MeetingResponseTests : IDisposable
 		Assert.Equal("2", StatusOf(response));
 	}
 
-	// F35 — after a successful response the invitation mail must be removed from the Inbox (as
+	// After a successful response the invitation mail must be removed from the Inbox (as
 	// Exchange does), so the user is not left with a stale "respond to this invitation" message.
 	[Fact]
 	public async Task SuccessfulResponse_RemovesInvitationMail()
@@ -111,7 +111,7 @@ public sealed class MeetingResponseTests : IDisposable
 		Assert.Equal(["imap:INBOX/42"], _harness.Session.Store.Deleted);
 	}
 
-	// F1 — once the iTIP reply has been sent, a failure removing the invite mail must NOT report
+	// Once the iTIP reply has been sent, a failure removing the invite mail must NOT report
 	// retryable status 4: the client would retry the whole MeetingResponse and the organizer would
 	// get a SECOND reply (and PARTSTAT would be written twice). The post-send tail is best-effort and
 	// still returns status 1, mirroring ComposeMail.
@@ -128,7 +128,7 @@ public sealed class MeetingResponseTests : IDisposable
 		Assert.Single(_harness.Session.Submit.Sent); // the iTIP reply went out exactly once
 	}
 
-	// F33 — a CollectionId that references a CALENDAR collection (responding to an already-filed
+	// A CollectionId that references a CALENDAR collection (responding to an already-filed
 	// meeting) must read the event from the calendar store, not hand a calendar backend key to the
 	// mail store (which fails). PARTSTAT is written to the calendar the request identified.
 	[Fact]
@@ -160,7 +160,7 @@ public sealed class MeetingResponseTests : IDisposable
 		Assert.Single(_harness.Session.Submit.Sent);
 	}
 
-	// F7 — a resent MeetingResponse (the client never saw our response) must not re-send the iTIP
+	// A resent MeetingResponse (the client never saw our response) must not re-send the iTIP
 	// REPLY: the organizer must not receive a second reply for the same request.
 	[Fact]
 	public async Task ResentMeetingResponse_DoesNotSendASecondReply()
@@ -193,7 +193,7 @@ public sealed class MeetingResponseTests : IDisposable
 		Assert.Single(_harness.Session.Submit.Sent);
 	}
 
-	// F8 — RespondToMeetingAsync has no occurrence-level entry point (only a whole-series UID), so
+	// RespondToMeetingAsync has no occurrence-level entry point (only a whole-series UID), so
 	// an InstanceId-scoped response must fail rather than silently respond (and mail the organizer)
 	// for the WHOLE series.
 	[Fact]
@@ -211,7 +211,7 @@ public sealed class MeetingResponseTests : IDisposable
 		Assert.Empty(_harness.Session.Submit.Sent);
 	}
 
-	// F9 — an absent/unparsable UserResponse must not default to Accept, the most-committing (and
+	// An absent/unparsable UserResponse must not default to Accept, the most-committing (and
 	// irreversible-mail-triggering) answer.
 	[Theory]
 	[InlineData(null)] // element omitted entirely

@@ -13,10 +13,9 @@ namespace ActiveSync.Server.Tests;
 /// <summary>
 ///   GetItemEstimate (MS-ASCMD 2.2.1.9) status-code conformance: an unprimed collection (key 0)
 ///   is status 3 (SYNCSTATENOTPRIMED) without estimating; a stale/mismatched/unparseable key is
-///   status 4 (INVALIDSYNCKEY) (F18 — round 3; this corrects an earlier round's F19, which landed
-///   the two the wrong way round, see the note on <see cref="StaleOrMismatchedSyncKey_ReportsStatus4" />);
-///   a flaky backend during the revision listing degrades that one collection to status 2 rather
-///   than 500-ing the whole request (F20, an earlier round).
+///   status 4 (INVALIDSYNCKEY) — a previous version had the two swapped, see the note on
+///   <see cref="StaleOrMismatchedSyncKey_ReportsStatus4" />; a flaky backend during the revision
+///   listing degrades that one collection to status 2 rather than 500-ing the whole request.
 /// </summary>
 public sealed class GetItemEstimateTests : IDisposable
 {
@@ -30,7 +29,7 @@ public sealed class GetItemEstimateTests : IDisposable
 		_harness.Dispose();
 	}
 
-	// F18 (round 3): the collection has never completed a Sync round (key 0) — there is no
+	// The collection has never completed a Sync round (key 0) — there is no
 	// snapshot to diff against, so MS-ASCMD Status 3 (SYNCSTATENOTPRIMED) tells the client to run
 	// an initial Sync first, rather than silently estimating against an empty baseline (which
 	// would report every item on the backend as "new" — a meaningless number for a client that
@@ -49,7 +48,7 @@ public sealed class GetItemEstimateTests : IDisposable
 		Assert.Null(resp?.Element(GIE + "Estimate"));
 	}
 
-	// F18 (round 3) — corrects an earlier round's F19, which read MS-ASCMD's GetItemEstimate
+	// Corrects a previous version that read MS-ASCMD's GetItemEstimate
 	// status table by analogy to the unrelated Sync command's table and landed the two swapped:
 	// a stale/mismatched/unparseable key was answered 3, and this test used to assert exactly
 	// that. Confirmed against the published MS-ASCMD GetItemEstimate Status element: 3 is
@@ -65,7 +64,7 @@ public sealed class GetItemEstimateTests : IDisposable
 		Assert.Equal("4", resp?.Element(GIE + "Status")?.Value);
 	}
 
-	// F20 (an earlier round) — a single flaky store must not take down the multi-collection
+	// A single flaky store must not take down the multi-collection
 	// request. The endpoint has a catch-all that would turn an unguarded throw into HTTP 500; the
 	// handler must catch it and report status 2 for that collection instead (matching
 	// SyncHandler's per-collection path).
@@ -74,7 +73,7 @@ public sealed class GetItemEstimateTests : IDisposable
 	{
 		UserFolder inbox = await InboxAsync();
 
-		// F18 (round 3): GetItemEstimate's own key-0 handling now short-circuits to Status 3
+		// GetItemEstimate's own key-0 handling now short-circuits to Status 3
 		// without ever reaching the listing, so exercising the listing failure needs a real,
 		// primed (Current) key — commit one via an actual Sync round first.
 		await _harness.RunAsync(NewSyncHandler(), "Sync", new XDocument(
@@ -92,7 +91,7 @@ public sealed class GetItemEstimateTests : IDisposable
 		Assert.Equal("2", resp?.Element(GIE + "Status")?.Value);
 	}
 
-	// F28 (round 3) — a 12.1 client identifies a collection by Class + CollectionId (mirroring the
+	// A 12.1 client identifies a collection by Class + CollectionId (mirroring the
 	// deliberate EchoClassIfLegacy handling in SyncHandler.Collection.cs), but the response never
 	// carried Class at all.
 	[Fact]

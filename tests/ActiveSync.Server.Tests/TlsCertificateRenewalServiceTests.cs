@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   K1: <see cref="GatewayCertificateStore.GetOrCreateAsync" /> already renews a self-signed
+///   <see cref="GatewayCertificateStore.GetOrCreateAsync" /> already renews a self-signed
 ///   certificate ahead of expiry, but nothing ever called it again after the one startup call —
 ///   a long-lived process rode a 397-day-capped certificate straight past expiry with no operator
 ///   signal. <see cref="TlsCertificateRenewalService" /> is the missing periodic caller: it ticks,

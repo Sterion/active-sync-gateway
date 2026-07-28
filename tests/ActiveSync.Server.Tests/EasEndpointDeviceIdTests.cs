@@ -3,7 +3,7 @@ using ActiveSync.Server.Eas;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   EasEndpoint.IsValidDeviceId (F21, round 3): an empty DeviceId used to be accepted — the
+///   EasEndpoint.IsValidDeviceId: an empty DeviceId used to be accepted — the
 ///   comment claimed some tools (OPTIONS probes) omit it, but OPTIONS is mapped separately
 ///   (EasEndpoint.HandleOptions) and never reaches this check, so the only real effect was every
 ///   POST that omitted DeviceId sharing a single "" keyed Device row for that user.

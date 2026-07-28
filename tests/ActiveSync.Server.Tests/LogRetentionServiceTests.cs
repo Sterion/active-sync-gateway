@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   E2: the retention sweep used to `break` on ANY <see cref="OperationCanceledException" />, so a
+///   The retention sweep used to `break` on ANY <see cref="OperationCanceledException" />, so a
 ///   non-shutdown cancellation (e.g. an EF command timeout surfacing as OCE) permanently stopped
 ///   retention for the process lifetime — not just the current sweep. A fault on one sweep must not
 ///   stop the loop while the host is still running; it should fall through to the retry path and

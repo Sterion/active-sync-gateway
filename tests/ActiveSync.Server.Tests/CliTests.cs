@@ -58,7 +58,7 @@ public class CliTests
 		Assert.Contains("hash-password", result.Output);
 	}
 
-	// E12: the `block` help text used to say "Refuse logins (403) for a user, or for one of their
+	// The `block` help text used to say "Refuse logins (403) for a user, or for one of their
 	// devices" — but BlockCommand refuses a bare user outright (BlockOutcome.DeviceRequired, "A
 	// device id is required: blocks are per-device"), matching docs/cli.md ("to refuse a user
 	// everywhere, use 'eas user disable'") rather than the help text an operator actually sees.
@@ -93,10 +93,10 @@ public class CliTests
 		Assert.Contains("Usage", stderr);
 	}
 
-	// E8 — COVERAGE, NOT PROOF. The fix moves the master-key ZeroMemory into a finally so the
+	// COVERAGE, NOT PROOF. The fix moves the master-key ZeroMemory into a finally so the
 	// empty-secret early return also zeroes it (previously only the successful-seal path did).
 	// The key is a local byte[] with no external handle, so the zeroing itself is not observable
-	// from a test (mirrors the L42 precedent for UserSecretCommand); this only exercises the
+	// from a test (mirroring the same precedent set for UserSecretCommand); this only exercises the
 	// early-return path to prove behavior is unchanged (still exits 1 with the usage message)
 	// with the finally now wrapping it.
 	[Fact]

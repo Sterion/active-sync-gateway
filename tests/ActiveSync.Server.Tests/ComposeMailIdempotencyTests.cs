@@ -12,17 +12,17 @@ namespace ActiveSync.Server.Tests;
 /// <summary>
 ///   ComposeMail (SendMail / SmartReply / SmartForward) send-then-fail semantics:
 ///   <list type="bullet">
-///     <item>F29 — a referenced source that cannot be resolved must fail the command, never send a
+///     <item>A referenced source that cannot be resolved must fail the command, never send a
 ///       degraded message (a forward with nothing forwarded).</item>
-///     <item>F30 — a failure AFTER a successful submit (filing to Sent, flagging the source) must
+///     <item>A failure AFTER a successful submit (filing to Sent, flagging the source) must
 ///       not be reported as a send failure, or the client resends and duplicates the mail.</item>
-///     <item>F4 — SmartReply/SmartForward must resolve the referenced source item ONCE per send:
+///     <item>SmartReply/SmartForward must resolve the referenced source item ONCE per send:
 ///       <c>BuildOutgoingAsync</c> resolves it to build the quote/attachment, and
 ///       <c>MarkSourceAsync</c> must reuse that resolution to flag it, not resolve it again.</item>
-///     <item>F1 — SendMail/SmartReply/SmartForward must dedup on <c>composemail:ClientId</c>: a
+///     <item>SendMail/SmartReply/SmartForward must dedup on <c>composemail:ClientId</c>: a
 ///       retried submit (the phone resending after it lost the 200) must not send the mail a second
 ///       time. A request with no ClientId (the 12.x raw form) always falls through to a real send.</item>
-///     <item>F12 — SendMail-by-reference (Source with no Mime) must only hard-delete the source when
+///     <item>SendMail-by-reference (Source with no Mime) must only hard-delete the source when
 ///       it is actually a Drafts item; a Source pointing at any other folder must be left untouched
 ///       after the send, not permanently deleted with no tombstone and no Trash copy.</item>
 ///   </list>
@@ -99,8 +99,8 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		Assert.True(_harness.Session.Mail.SaveToSentAttempted);
 	}
 
-	// F29 (round 3) — SendMailHandler.MarkSourceAsync bypasses the source-resolution cache
-	// ResolveSourceAsync introduced (F4, an earlier round) and its own base class documents: it
+	// SendMailHandler.MarkSourceAsync bypasses the source-resolution cache
+	// ResolveSourceAsync introduced and its own base class documents: it
 	// calls Folders.ResolveCollectionAsync/ResolveItemKeyAsync directly instead of ResolveSourceAsync,
 	// a second DB round trip per send for no reason — the sibling handlers (below) do not do this.
 	[Fact]
@@ -128,7 +128,7 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		Assert.Equal(1, _harness.FolderResolutionQueries - before);
 	}
 
-	// F4 — BuildOutgoingAsync resolves the source item (to quote/attach it); MarkSourceAsync then
+	// BuildOutgoingAsync resolves the source item (to quote/attach it); MarkSourceAsync then
 	// flags that same item (answered/forwarded). It must reuse the first resolution rather than
 	// resolving the ServerId a second time.
 	[Fact]
@@ -152,7 +152,7 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		await _harness.RunAsync(handler, "SmartForward", request);
 
 		// BuildOutgoingAsync resolves the source to fetch+attach the original; MarkSourceAsync then
-		// flags it "forwarded" — that must reuse the SAME resolution, not look it up again (F4).
+		// flags it "forwarded" — that must reuse the SAME resolution, not look it up again.
 		Assert.Equal(1, _harness.FolderResolutionQueries - before);
 	}
 
@@ -179,7 +179,7 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		Assert.Equal(1, _harness.FolderResolutionQueries - before);
 	}
 
-	// F25 (round 3) — WritePermission.IsBlocked (the per-folder read-only/share grant) exists
+	// WritePermission.IsBlocked (the per-folder read-only/share grant) exists
 	// precisely so "a handler cannot honour one write path and forget the other" (WritePermission.cs).
 	// SmartReply/SmartForward only ever checked the GLOBAL ReadOnly flag before the send; the
 	// post-send source-flagging write (SetAnsweredAsync) must also respect a per-folder read-only
@@ -234,7 +234,7 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		Assert.Empty(_harness.Session.Mail.Answered);
 	}
 
-	// F1 — MS-ASCMD makes ClientId a required child of SendMail precisely so a lost 200 can be
+	// MS-ASCMD makes ClientId a required child of SendMail precisely so a lost 200 can be
 	// retried without duplicating the mail: the server recognizes the resend and suppresses it.
 	[Fact]
 	public async Task SendMail_RetriedWithSameClientId_SendsOnlyOnce()
@@ -261,7 +261,7 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		Assert.Single(_harness.Session.Submit.Sent);
 	}
 
-	// F1 — the 12.x raw wire form (message/rfc822 body, no WBXML ClientId element at all) has
+	// The 12.x raw wire form (message/rfc822 body, no WBXML ClientId element at all) has
 	// nothing to dedup on; it must keep sending normally rather than being silently swallowed.
 	[Fact]
 	public async Task SendMail_WithoutClientId_AlwaysSends()
@@ -279,7 +279,7 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		Assert.Equal(2, _harness.Session.Submit.Sent.Count);
 	}
 
-	// F12 — a Source pointing into a NON-Drafts folder (e.g. the Inbox) must be re-sent but NOT
+	// A Source pointing into a NON-Drafts folder (e.g. the Inbox) must be re-sent but NOT
 	// hard-deleted: nothing enforces the 16.x "submit a stored draft" flow's assumption that Source
 	// names a draft, so a client (or a bug) pointing SendMail at an ordinary message must not lose
 	// it with no tombstone and no Trash copy.

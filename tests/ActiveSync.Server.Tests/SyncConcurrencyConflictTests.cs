@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   Item 23 F16: a concurrent commit race on one collection's <see cref="CollectionState" /> row
+///   A concurrent commit race on one collection's <see cref="CollectionState" /> row
 ///   (two pipelined Sync requests for the same device/collection) must answer that ONE collection
 ///   with a retryable status, not escape as an unhandled exception that discards every OTHER
 ///   collection's already-computed response in the same request.

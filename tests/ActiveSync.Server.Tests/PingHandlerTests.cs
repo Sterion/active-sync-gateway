@@ -10,8 +10,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   Ping long-poll reliability (item 27): parameter caching (F17), the folder-count cap (F18),
-///   and never silently dropping a detected change that maps to no collection (F16).
+///   Ping long-poll reliability: parameter caching, the folder-count cap, and never silently
+///   dropping a detected change that maps to no collection.
 /// </summary>
 public sealed class PingHandlerTests : IDisposable
 {
@@ -24,7 +24,7 @@ public sealed class PingHandlerTests : IDisposable
 		_harness.Dispose();
 	}
 
-	// F17: a Ping that carries Folders but omits HeartbeatInterval must reuse the cached heartbeat,
+	// A Ping that carries Folders but omits HeartbeatInterval must reuse the cached heartbeat,
 	// not answer Status 3 (which forces the client to resend the full request every cycle).
 	[Fact]
 	public async Task Ping_WithFoldersButNoHeartbeat_ReusesCachedHeartbeat()
@@ -43,7 +43,7 @@ public sealed class PingHandlerTests : IDisposable
 		Assert.Equal("2", Status(second));
 	}
 
-	// F16: the watcher detects a change but the returned backend key maps to no watched collection
+	// The watcher detects a change but the returned backend key maps to no watched collection
 	// (a store reporting at coarser granularity). The change must surface, not be silently dropped.
 	[Fact]
 	public async Task Ping_ChangeWithAnUnmappedBackendKey_IsNotSilentlyDropped()
@@ -62,7 +62,7 @@ public sealed class PingHandlerTests : IDisposable
 		Assert.Contains(inbox.ServerId, reported);
 	}
 
-	// F18: monitoring more folders than the configured cap is refused with Ping Status 6 and the
+	// Monitoring more folders than the configured cap is refused with Ping Status 6 and the
 	// limit, rather than silently spinning up an unbounded fan of watchers.
 	[Fact]
 	public async Task Ping_MonitoringMoreThanTheCap_IsRefusedWithStatus6()

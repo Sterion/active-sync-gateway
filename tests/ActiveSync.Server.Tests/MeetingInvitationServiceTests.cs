@@ -8,7 +8,7 @@ namespace ActiveSync.Server.Tests;
 
 public sealed class MeetingInvitationServiceTests
 {
-	// E24: added/removed recipients are diffed once against a single previous list. This covers the
+	// Added/removed recipients are diffed once against a single previous list. This covers the
 	// behaviour the O(n²)→O(n) hoist must preserve (it is a mechanical refactor, so this documents
 	// the contract rather than reproducing a bug).
 	[Fact]
@@ -34,7 +34,7 @@ public sealed class MeetingInvitationServiceTests
 		Assert.Empty(removed);
 	}
 
-	// E34: a failed pre-change ICS read used to be swallowed with no signal, so the change hook
+	// A failed pre-change ICS read used to be swallowed with no signal, so the change hook
 	// silently re-invited every attendee. The failure must now be logged.
 	[Fact]
 	public async Task CaptureIcsAsync_ReadFailure_IsLogged_NotSilentlySwallowed()

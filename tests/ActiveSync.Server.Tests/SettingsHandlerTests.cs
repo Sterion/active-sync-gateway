@@ -9,8 +9,8 @@ namespace ActiveSync.Server.Tests;
 
 /// <summary>
 ///   Settings (MS-ASCMD 2.2.1.18): ReadOnly mode must refuse arming a server-side out-of-office
-///   auto-reply (F47), and an unrecognized section must get its own per-section status rather than
-///   silent success (F48).
+///   auto-reply, and an unrecognized section must get its own per-section status rather than
+///   silent success.
 /// </summary>
 public sealed class SettingsHandlerTests : IDisposable
 {
@@ -29,7 +29,7 @@ public sealed class SettingsHandlerTests : IDisposable
 			LocalContentProtector.CreatePlaintext(), NullLogger<SettingsHandler>.Instance);
 	}
 
-	// F47 — a read-only gateway must not install a real ManageSieve auto-reply rule (a far more
+	// A read-only gateway must not install a real ManageSieve auto-reply rule (a far more
 	// externally-visible side effect than the writes ReadOnly already blocks).
 	[Fact]
 	public async Task ReadOnly_OofSet_IsRefused_WithoutArmingBackend()
@@ -75,7 +75,7 @@ public sealed class SettingsHandlerTests : IDisposable
 		Assert.True(oof.Enabled);
 	}
 
-	// F48 — an unrecognized section must produce a per-section status 2 (not implemented), so the
+	// An unrecognized section must produce a per-section status 2 (not implemented), so the
 	// client can tell it was not applied rather than getting a bare top-level Status 1 and silence.
 	[Fact]
 	public async Task UnknownSection_GetsPerSectionStatus()
@@ -90,7 +90,7 @@ public sealed class SettingsHandlerTests : IDisposable
 		Assert.Equal("2", section.Element(ST + "Status")?.Value);
 	}
 
-	// F24 (round 3) — a crafted WBXML document can SWITCH_PAGE inside <Settings> so a child
+	// A crafted WBXML document can SWITCH_PAGE inside <Settings> so a child
 	// element's LOCAL NAME belongs to a completely different code page (here: AirSync's "Class",
 	// page 0) while still landing in the handler's untyped `default` branch, which used to reflect
 	// section.Name.LocalName straight back as a Settings-namespaced (page 18) element name. "Class"

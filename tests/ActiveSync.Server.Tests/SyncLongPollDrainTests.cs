@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   Item 23 F15: Sync's long-poll wait races per-store watchers (<c>WaitForAnyChangeAsync</c>)
+///   Sync's long-poll wait races per-store watchers (<c>WaitForAnyChangeAsync</c>)
 ///   via <c>Task.WhenAny</c> and must drain every losing wait before returning — its
 ///   <see cref="IBackendSession" /> lease is released the moment <c>HandleAsync</c> returns, so an
 ///   abandoned watcher keeps running (or faults) against a session no longer valid, unobserved.
@@ -80,7 +80,7 @@ public sealed class SyncLongPollDrainTests : IDisposable
 			TwoCollectionRequest(inbox.ServerId, "1", cal.ServerId, "1", waitSeconds: 30));
 		DateTime returnedUtc = DateTime.UtcNow;
 
-		// F15: the response must not be written until the losing calendar wait actually completed —
+		// The response must not be written until the losing calendar wait actually completed —
 		// proving it was drained, not abandoned with an unobserved task still running against a
 		// released session lease.
 		Assert.NotNull(calendarWaitCompletedUtc);
