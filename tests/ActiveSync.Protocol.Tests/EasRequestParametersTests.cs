@@ -210,6 +210,47 @@ public class EasRequestParametersTests
 		Assert.Equal(0x01020304u, parsed.PolicyKey);
 	}
 
+	[Fact]
+	public void ToBase64_LengthPrefixedFieldOver255Bytes_IsRejected()
+	{
+		// W6: the length prefix is a single byte (byte)bytes.Length -- a 300-byte AttachmentName
+		// silently writes length 44 followed by all 300 bytes, producing a blob FromBase64 cannot
+		// read back correctly. Must fail fast instead of emitting a corrupt query.
+		EasRequestParameters original = new()
+		{
+			Command = "GetAttachment",
+			AttachmentName = new string('a', 300)
+		};
+
+		Assert.Throws<ArgumentException>(() => original.ToBase64());
+	}
+
+	[Fact]
+	public void ToBase64_DeviceIdOver255Bytes_IsRejected()
+	{
+		EasRequestParameters original = new()
+		{
+			Command = "Sync",
+			DeviceId = new string('a', 300)
+		};
+
+		Assert.Throws<ArgumentException>(() => original.ToBase64());
+	}
+
+	[Fact]
+	public void ToBase64_NonAsciiDeviceId_IsRejectedRatherThanSilentlyMangled()
+	{
+		// W6: Encoding.ASCII.GetBytes silently maps every non-ASCII character to '?' instead of
+		// failing, so a non-ASCII DeviceId round-trips to a DIFFERENT device id with no error.
+		EasRequestParameters original = new()
+		{
+			Command = "Sync",
+			DeviceId = "café"
+		};
+
+		Assert.Throws<ArgumentException>(() => original.ToBase64());
+	}
+
 	[Theory]
 	[InlineData(25, "2.5")]
 	[InlineData(120, "12.0")]

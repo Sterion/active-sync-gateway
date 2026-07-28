@@ -226,7 +226,7 @@ public sealed record EasRequestParameters
 		BinaryPrimitives.WriteUInt16LittleEndian(multi, 0x0409); // locale en-US
 		ms.Write(multi[..2]);
 
-		byte[] deviceId = Encoding.ASCII.GetBytes(DeviceId);
+		byte[] deviceId = EncodeAsciiField(nameof(DeviceId), DeviceId);
 		ms.WriteByte((byte)deviceId.Length);
 		ms.Write(deviceId);
 
@@ -241,25 +241,28 @@ public sealed record EasRequestParameters
 			ms.WriteByte(0);
 		}
 
-		byte[] deviceType = Encoding.ASCII.GetBytes(DeviceType);
+		byte[] deviceType = EncodeAsciiField(nameof(DeviceType), DeviceType);
 		ms.WriteByte((byte)deviceType.Length);
 		ms.Write(deviceType);
 
-		void Param(byte tag, string? value)
+		void Param(byte tag, string? value, string fieldName)
 		{
 			if (string.IsNullOrEmpty(value))
 				return;
 			byte[] bytes = Encoding.UTF8.GetBytes(value);
+			if (bytes.Length > MaxFieldBytes)
+				throw new ArgumentException(
+					$"{fieldName} is {bytes.Length} bytes, which exceeds the MS-ASHTTP 255-byte length-prefixed field limit.");
 			ms.WriteByte(tag);
 			ms.WriteByte((byte)bytes.Length);
 			ms.Write(bytes);
 		}
 
-		Param(0, AttachmentName);
-		Param(1, CollectionId);
-		Param(3, ItemId);
-		Param(4, LongId);
-		Param(6, Occurrence);
+		Param(0, AttachmentName, nameof(AttachmentName));
+		Param(1, CollectionId, nameof(CollectionId));
+		Param(3, ItemId, nameof(ItemId));
+		Param(4, LongId, nameof(LongId));
+		Param(6, Occurrence, nameof(Occurrence));
 		if (SaveInSent || AcceptMultiPart)
 		{
 			ms.WriteByte(7);
@@ -267,9 +270,41 @@ public sealed record EasRequestParameters
 			ms.WriteByte((byte)((SaveInSent ? 0x01 : 0) | (AcceptMultiPart ? 0x02 : 0)));
 		}
 
-		Param(8, User);
+		Param(8, User, nameof(User));
 
 		return Convert.ToBase64String(ms.ToArray());
+	}
+
+	/// <summary>
+	///   MS-ASHTTP 2.2.1.1.1.1 length-prefixed fields use a single length byte, so a value longer
+	///   than this is unrepresentable -- it must be rejected, not silently wrapped/truncated (W6).
+	/// </summary>
+	private const int MaxFieldBytes = 255;
+
+	/// <summary>
+	///   Encodes <paramref name="value" /> for the fixed-position ASCII fields (DeviceId,
+	///   DeviceType), rejecting both a non-ASCII character (the default <see cref="Encoding.ASCII" />
+	///   silently maps anything outside the ASCII range to '?', which would round-trip to a
+	///   DIFFERENT value with no error) and a value over the 255-byte length-prefix limit (W6).
+	/// </summary>
+	private static byte[] EncodeAsciiField(string fieldName, string value)
+	{
+		Encoding strictAscii = Encoding.GetEncoding(
+			"us-ascii", EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
+		byte[] bytes;
+		try
+		{
+			bytes = strictAscii.GetBytes(value);
+		}
+		catch (EncoderFallbackException ex)
+		{
+			throw new ArgumentException($"{fieldName} contains a non-ASCII character.", ex);
+		}
+
+		if (bytes.Length > MaxFieldBytes)
+			throw new ArgumentException(
+				$"{fieldName} is {bytes.Length} bytes, which exceeds the MS-ASHTTP 255-byte length-prefixed field limit.");
+		return bytes;
 	}
 
 	/// <summary>
