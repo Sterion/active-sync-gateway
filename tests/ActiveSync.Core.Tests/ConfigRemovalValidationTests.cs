@@ -1,4 +1,5 @@
 using ActiveSync.Backends.Imap;
+using ActiveSync.Backends.Sieve;
 using ActiveSync.Backends.Smtp;
 using ActiveSync.Core.Administration;
 using ActiveSync.Core.Backend;
@@ -50,6 +51,7 @@ public sealed class ConfigRemovalValidationTests : IDisposable
 		[
 			new ImapBackendProvider(TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
 			new SmtpBackendProvider(NullLoggerFactory.Instance),
+			new SieveBackendProvider(NullLoggerFactory.Instance),
 		], NullLogger<BackendProviderRegistry>.Instance);
 
 	// Config-removal example: `eas config unset ActiveSync:Backends:MailStore:Host` leaves a section the
@@ -110,6 +112,33 @@ public sealed class ConfigRemovalValidationTests : IDisposable
 			FileConfig(), db, Registry(), "ActiveSync:Tls:CertificatePath");
 		Assert.NotNull(error);
 		Assert.Contains("CertificateKeyPath is set without", error);
+	}
+
+	// The section-removal path already checks the pending removal against BackendRolesConfig.Load and
+	// each assigned provider's own ValidateConfiguration, and the WRITE path (BackendKeyValidator.Validate)
+	// already checks a pending write against UserResolver.ValidateUsers -- but the removal path never ran
+	// the declared-user check at all. Removing the only global Oof assignment while a config user's own
+	// Oof override still names no explicit Provider is exactly the scenario UserResolver flags with "no
+	// global Oof role is configured" at the next boot; the removal must surface that failure now, the
+	// same way it already surfaces a backend-section shape failure.
+	[Fact]
+	public void UnsettingTheOnlyBackendRoleAssignment_WithADeclaredUserOverride_IsRejected()
+	{
+		Dictionary<string, string?> db = new(StringComparer.OrdinalIgnoreCase)
+		{
+			["ActiveSync:Backends:Oof:Provider"] = "sieve",
+			["ActiveSync:Backends:Oof:Host"] = "sieve.example",
+			["ActiveSync:Users:bob:Backends:Oof:UserName"] = "bob-oof",
+		};
+
+		// Sanity: the pair together is valid before the removal.
+		Assert.Null(SettingKeys.ValidateRemovalImpact(FileConfig(), db, Registry(), "ActiveSync:ReadOnly"));
+
+		string? error = SettingKeys.ValidateRemovalImpact(
+			FileConfig(), db, Registry(), "ActiveSync:Backends:Oof:Provider");
+
+		Assert.NotNull(error);
+		Assert.Contains("no global Oof role is configured", error);
 	}
 
 	// A removal that changes nothing observable must not be flagged.

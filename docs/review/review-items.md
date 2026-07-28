@@ -591,7 +591,7 @@ was widened to 30 s as well, which costs nothing (the wait returns as soon as th
 covers `N3`'s original RSA-under-load theory in case it was ever a second contributor. **Production is
 untouched** — the grace-period disposal is correct, and it is what the 30 s window exists to bound.
 
-`N4` **Low** A backend-section REMOVAL is still never re-validated against declared users, even after
+~~`N4`~~ **Low — FIXED** A backend-section REMOVAL is still never re-validated against declared users, even after
 B4/B5 (item 18). B4 gave `SettingKeys.ValidateRemovalImpact` a check against
 `BackendRolesConfig.Load` + each assigned provider's `ValidateConfiguration`, and B5 gave
 `BackendKeyValidator.Validate` (the WRITE path) a check against `UserResolver.ValidateUsers` — but

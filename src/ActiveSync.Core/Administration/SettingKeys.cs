@@ -1,8 +1,10 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
+using ActiveSync.Crypto;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
@@ -367,8 +369,10 @@ internal static class SettingKeys
 		withoutRow.Remove(key);
 		IConfiguration after = EffectiveFrom(fileConfig, withoutRow);
 
-		List<string> beforeFailures = [.. HostFailures(before), .. BackendSectionFailures(before, registry)];
-		List<string> afterFailures = [.. HostFailures(after), .. BackendSectionFailures(after, registry)];
+		List<string> beforeFailures =
+			[.. HostFailures(before), .. BackendSectionFailures(before, registry), .. DeclaredUserFailures(before, registry)];
+		List<string> afterFailures =
+			[.. HostFailures(after), .. BackendSectionFailures(after, registry), .. DeclaredUserFailures(after, registry)];
 
 		List<string> introduced = afterFailures.Where(failure => !beforeFailures.Contains(failure)).ToList();
 		return introduced.Count > 0 ? string.Join(" ", introduced) : null;
@@ -399,6 +403,37 @@ internal static class SettingKeys
 			}
 
 		return failures;
+	}
+
+	/// <summary>
+	///   The declared-user half of <see cref="BackendConfigurationValidator.Validate" /> — the same
+	///   check <see cref="BackendKeyValidator" /> already runs on the WRITE path
+	///   (<c>ValidateAgainstDeclaredUsers</c>). A backend-section removal can leave a config-declared
+	///   user's role override (e.g. an Oof override naming no explicit Provider) pointed at a role
+	///   that no longer has a global assignment — <see cref="BackendRolesConfig.Load" /> alone treats
+	///   the absent role as simply "the feature is off" and records nothing, so this is the only place
+	///   that catches it for a removal, the same way it already does for a write.
+	/// </summary>
+	private static List<string> DeclaredUserFailures(IConfiguration config, BackendProviderRegistry registry)
+	{
+		ActiveSyncOptions options = Bind(config);
+		if (options.Users is not { Count: > 0 })
+			return []; // nothing declared for this removal to invalidate
+
+		List<string> ignoredRoleFailures = new();
+		BackendRolesConfig roles = BackendRolesConfig.Load(config, ignoredRoleFailures);
+		byte[]? encryptionKey = EncryptionKeyLoader.TryLoadKey(options.Encryption, out _);
+		try
+		{
+			List<string> failures = new();
+			UserResolver.ValidateUsers(options, roles, registry, encryptionKey, failures);
+			return failures;
+		}
+		finally
+		{
+			if (encryptionKey is not null)
+				CryptographicOperations.ZeroMemory(encryptionKey);
+		}
 	}
 
 	private static ActiveSyncOptions Bind(IConfiguration config) =>
