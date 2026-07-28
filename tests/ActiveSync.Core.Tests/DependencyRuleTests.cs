@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Text.RegularExpressions;
 
 using ActiveSync.Backends.Common;
 using ActiveSync.Contracts;
@@ -225,6 +226,84 @@ public sealed class DependencyRuleTests
 
 		Assert.DoesNotContain(method.GetParameters(),
 			p => p.ParameterType == typeof(ActiveSync.Core.Options.ActiveSyncOptions));
+	}
+
+	/// <summary>
+	///   Shipped code must be self-contained: nothing under src/, tests/, AGENTS.md, README.md or the
+	///   user-facing docs may point at the temporary review/design scaffolding, or name one of its
+	///   interim finding IDs.
+	///   <para>
+	///     Two independent reasons, and the first bites today: those IDs are per-round and they COLLIDE
+	///     — two different rounds each have an "F13", so a reader who greps one gets two answers and no
+	///     way to choose. The second is that the scaffolding directories are deleted once their round
+	///     is finished, which turns every reference into a pointer at nothing. Either way the fix is
+	///     the same: write the EXPLANATION into the comment. A reader must never need a document that
+	///     may not exist.
+	///   </para>
+	///   <para>
+	///     This file excludes itself, since it has to name the forbidden patterns in order to forbid
+	///     them, and the scaffolding directories are excluded outright — they may reference each other
+	///     freely.
+	///   </para>
+	/// </summary>
+	[Fact]
+	public void ShippedCode_DoesNotReferenceTemporaryScaffolding()
+	{
+		string root = FindRepoRoot();
+		string[] forbiddenLiterals =
+		[
+			"docs/review", "docs\\review", "docs/design", "docs\\design",
+			"db-restructure", "review-items", "fix-review", "review-results", "conduct-review"
+		];
+		// An interim finding ID: an area letter plus 1-2 digits, used as a citation — "F13:", "(A18)",
+		// "H5 —". Deliberately narrow so hex bytes, RFC numbers and identifiers do not trip it.
+		Regex idCitation = new(@"(?<![A-Za-z0-9])[ABCDEFGHKLNSW][0-9]{1,2}(?![A-Za-z0-9])\s*(:|\)|—)", RegexOptions.Compiled);
+		Regex idTestName = new(@"\b(?:Task|void)\s+[ABCDEFGHKLNSW][0-9]{1,2}_", RegexOptions.Compiled);
+
+		List<string> scanned = [];
+		foreach (string dir in (string[])["src", "tests"])
+			scanned.AddRange(Directory.EnumerateFiles(Path.Combine(root, dir), "*.*", SearchOption.AllDirectories)
+				.Where(f => f.EndsWith(".cs", StringComparison.Ordinal) || f.EndsWith(".js", StringComparison.Ordinal))
+				.Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+				         && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)));
+		scanned.Add(Path.Combine(root, "AGENTS.md"));
+		scanned.Add(Path.Combine(root, "README.md"));
+		scanned.AddRange(Directory.EnumerateFiles(Path.Combine(root, "docs"), "*.md", SearchOption.TopDirectoryOnly));
+
+		List<string> violations = [];
+		foreach (string file in scanned)
+		{
+			// This test names the forbidden patterns in order to forbid them.
+			if (Path.GetFileName(file) == "DependencyRuleTests.cs")
+				continue;
+
+			string[] lines = File.ReadAllLines(file);
+			for (int i = 0; i < lines.Length; i++)
+			{
+				string line = lines[i];
+				string? hit = Array.Find(forbiddenLiterals, l => line.Contains(l, StringComparison.OrdinalIgnoreCase));
+				if (hit is not null)
+					violations.Add($"{Path.GetRelativePath(root, file)}:{i + 1}: points at temporary scaffolding (\"{hit}\")");
+				else if (idTestName.IsMatch(line))
+					violations.Add($"{Path.GetRelativePath(root, file)}:{i + 1}: test name carries an interim finding ID");
+				else if (IsCommentLine(line) && idCitation.IsMatch(line))
+					violations.Add($"{Path.GetRelativePath(root, file)}:{i + 1}: comment cites an interim finding ID");
+			}
+		}
+
+		Assert.True(violations.Count == 0,
+			$"{violations.Count} reference(s) to temporary review/design scaffolding remain. Write the " +
+			$"explanation into the comment instead of citing a document that will be deleted:\n  " +
+			string.Join("\n  ", violations.Take(40)) +
+			(violations.Count > 40 ? $"\n  ... and {violations.Count - 40} more" : ""));
+	}
+
+	private static bool IsCommentLine(string line)
+	{
+		string t = line.TrimStart();
+		return t.StartsWith("//", StringComparison.Ordinal)
+		    || t.StartsWith("*", StringComparison.Ordinal)
+		    || t.StartsWith("/*", StringComparison.Ordinal);
 	}
 
 	private static string FindRepoRoot()
