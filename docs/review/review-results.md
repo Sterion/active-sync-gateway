@@ -1464,3 +1464,51 @@ the skip was safe, but that is now verified rather than assumed.
 - **The seam-vs-reversal problem is now the norm, not the exception** — four items running
   (F17, G7, G22, and here G18/G21). Reversal only works for commits that add no test-visible surface;
   everything else needs targeted mutation. Worth doing mutation-first from here.
+
+## Item 26 — Calendar & contact converter correctness [LIVE]
+**Findings:** `D4` `D6` `D7` `D8` `D9` `D10` `D17` `D18` `D19` `D21`
+**Commits:** `b98310c` (D4, D9, D10) · `baa158d` (D6, D7, D8, D18, D19, D21 — tight cluster) ·
+`6e70ba2` (D17)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 27 ✓ · strike shipped with all three commits ✓ · build 0 warnings ✓ ·
+unit **1449 passed, 0 failed** (Cli 16 · Protocol 99 · Core 881 · WebUi 120 · Server 333) ✓ ·
+live **150 passed, 0 skipped** ✓
+
+**The two tight clusters were read as whole commits against every ID in their subject**, as the protocol
+requires when per-finding diffs are not separable. `baa158d`'s clustering is justified rather than lazy:
+`D7` adds an `actingUserMailAddress` parameter to `ToApplicationData` that the other five findings' tests
+need merely to compile, so splitting would have required either faked red state or a scaffolding commit
+that fixes nothing.
+
+**Red-first re-proved independently for all ten**, by reversing the two signature-neutral commits and
+applying seven targeted single-line mutations to the cluster (TRANSP-only busy status, always-organizer
+meeting status, unfiltered alarm action, `Math.Abs` trigger, UTC recurrence anchor, always-UTC EXDATE,
+no master-first selector) → **12 failures, covering every finding**: `D4` `D9` `D10` (contacts), `D6` (two
+tests), `D7`, `D8`, `D17`, `D18`, `D19`, `D21`. One extra failure,
+`Change_OmittingAllDayEvent_PreservesStoredAllDayness`, is collateral from my blunt string replacement
+hitting a second `HasTime` site — a mutation artefact, not a finding's test.
+
+**Notes:**
+- **`D7` and `D8` change what goes on the wire.** An invitee's own copy now reports `MeetingStatus=3`
+  instead of `1`, and Tentative/OOF round-trip through a new `X-MICROSOFT-CDO-BUSYSTATUS` property in the
+  stored ICS rather than collapsing to Busy. `D7` deliberately keeps the historical "assume organizer" `1`
+  when no acting identity is threaded, so a caller that has not been updated behaves exactly as before —
+  a good default, and the three in-repo call sites were all updated.
+- **`D6` includes a fix the finding described but never prescribed.** The entry notes in passing that the
+  same line "loses the trigger sign" without giving it a `FIX:`. The worker fixed it and chose to emit no
+  `Reminder` at all for an alarm scheduled AFTER the start (a shape the write path never produces) rather
+  than invent EAS semantics for it. Defensible and disclosed; the alternative reading would have been to
+  leave the sign alone as out of scope.
+- **`D19` took the required half and not the optional half.** Its FIX says master-first "and consider
+  applying the PARTSTAT to *every* VEVENT sharing the UID so overrides stay consistent with the series".
+  Only master-first landed, so an override VEVENT can still carry a stale PARTSTAT relative to its master.
+  That is within the finding's letter but the series-consistency question is still open.
+- **`D17` is not a converter fix at all** — it threads the TLS handshake's own `X509Chain` into
+  `ServerCertificateValidator` so a leaf signed by a private intermediate validates against a custom CA.
+  Its test drives the real `RemoteCertificateValidationCallback` delegate, whose signature is fixed by the
+  BCL, so it achieved genuine red-first with no new seam.
+- **`N6` filed by ME, not the worker.** The worker noticed that `TasksConverter.cs:101` has exactly `D21`'s
+  UTC-instant anchor bug, correctly declined to fix it under "stay inside the item" — and then did not file
+  it, which is the other half of protocol step 8. I have added it to "Found while working the queue" so it
+  is not lost. Worth watching: this is the second worker this run to notice something and report it only in
+  prose.

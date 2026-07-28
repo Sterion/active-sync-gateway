@@ -609,3 +609,14 @@ connection cap (the `G6` scenario). Not a correctness defect — the poller is t
 `TrimUserResources` sweep, so nothing leaks. FIX: either add a sibling gauge/observer for the poll
 connections, or generalise `WatcherInfo`/`SnapshotWatchers` to report a kind ("idle" | "poll") and
 have the gauge group by it.
+
+`N6` **Low** `TasksConverter` derives its recurrence day/month fallbacks from the UTC instant, exactly as
+`CalendarConverter` did before `D21` — `src/ActiveSync.Backends.Common/Converters/TasksConverter.cs:101`.
+`D21` fixed the calendar side by anchoring `RecurrenceMapper.Build` on `master.Start.Value` (the event's
+own zone) rather than the UTC value, because a wall-clock-local Monday can be a Sunday in UTC and the
+emitted `DayOfWeek`/`DayOfMonth`/`MonthOfYear` shifted across the boundary. `TasksConverter` calls the same
+shared `RecurrenceMapper` with the same UTC-instant shape, so a VTODO whose start sits near midnight in a
+non-UTC zone mis-reports its recurrence day the same way. Noticed by the item 26 worker while fixing `D21`
+and correctly left unfixed under "stay inside the item", but not filed — recorded here by the orchestrator
+so it is not lost. FIX: anchor the `RecurrenceMapper.Build` call on the task's local wall-clock start,
+mirroring `D21`.
