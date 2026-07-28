@@ -379,7 +379,7 @@ work. Every finding ID appears in exactly one item.
 > write landing between a Ping's check and its wait is invisible for a full watchdog interval. `G20` the
 > meeting-response path lacks the concurrency retry every sibling has.
 
-**26. Calendar & contact converter correctness** [LIVE] — ~~`D4`~~ ~~`D6`~~ ~~`D7`~~ ~~`D8`~~ ~~`D9`~~ ~~`D10`~~ `D17` ~~`D18`~~ ~~`D19`~~ ~~`D21`~~
+**26. Calendar & contact converter correctness** [LIVE] — ~~`D4`~~ ~~`D6`~~ ~~`D7`~~ ~~`D8`~~ ~~`D9`~~ ~~`D10`~~ ~~`D17`~~ ~~`D18`~~ ~~`D19`~~ ~~`D21`~~ **COMPLETE**
 > `D9` the vCard phone-type read is not the inverse of the write, so HOME-FAX and CAR numbers **migrate to
 > other fields on the first unrelated edit** — permanent, silent, on the user's CardDAV server. `D4` a
 > URI-valued PHOTO is deleted on any edit. `D7` every meeting is advertised as organized by the syncing user.

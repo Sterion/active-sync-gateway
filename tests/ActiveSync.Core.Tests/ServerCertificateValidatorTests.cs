@@ -13,6 +13,8 @@ public class ServerCertificateValidatorTests : IDisposable
 	private readonly string _caPemPath;
 	private readonly X509Certificate2 _leaf;
 	private readonly X509Certificate2 _unrelated;
+	private readonly X509Certificate2 _intermediate;
+	private readonly X509Certificate2 _leafViaIntermediate;
 
 	public ServerCertificateValidatorTests()
 	{
@@ -37,6 +39,26 @@ public class ServerCertificateValidatorTests : IDisposable
 		_unrelated = otherRequest.CreateSelfSigned(
 			DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(10));
 
+		// D17: a private PKI with an ISSUING (intermediate) CA — the documented CaCertificatePath
+		// use case is trusting a private ROOT, not every intermediate it ever issues.
+		using RSA intermediateKey = RSA.Create(2048);
+		CertificateRequest intermediateRequest = new(
+			"CN=ActiveSync Test Intermediate CA", intermediateKey, HashAlgorithmName.SHA256,
+			RSASignaturePadding.Pkcs1);
+		intermediateRequest.CertificateExtensions.Add(
+			new X509BasicConstraintsExtension(true, true, 0, true));
+		using X509Certificate2 intermediatePublic = intermediateRequest.Create(
+			_ca, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(20),
+			Guid.NewGuid().ToByteArray()[..16]);
+		_intermediate = intermediatePublic.CopyWithPrivateKey(intermediateKey);
+
+		using RSA leafViaIntermediateKey = RSA.Create(2048);
+		CertificateRequest leafViaIntermediateRequest = new(
+			"CN=mail2.test.local", leafViaIntermediateKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+		_leafViaIntermediate = leafViaIntermediateRequest.Create(
+			_intermediate, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(10),
+			Guid.NewGuid().ToByteArray()[..16]);
+
 		_caPemPath = Path.Combine(Path.GetTempPath(), $"as-test-ca-{Guid.NewGuid():N}.pem");
 		File.WriteAllText(_caPemPath, _ca.ExportCertificatePem());
 	}
@@ -46,6 +68,8 @@ public class ServerCertificateValidatorTests : IDisposable
 		_ca.Dispose();
 		_leaf.Dispose();
 		_unrelated.Dispose();
+		_intermediate.Dispose();
+		_leafViaIntermediate.Dispose();
 		try
 		{
 			File.Delete(_caPemPath);
@@ -61,6 +85,22 @@ public class ServerCertificateValidatorTests : IDisposable
 	private X509Certificate2Collection CustomCas()
 	{
 		return ServerCertificateValidator.LoadCaCertificates(_caPemPath);
+	}
+
+	/// <summary>
+	///   Simulates the X509Chain the TLS stack itself builds from the certificates the server
+	///   presented during the handshake (leaf + intermediate) — the argument
+	///   RemoteCertificateValidationCallback receives as its 3rd parameter.
+	/// </summary>
+	private X509Chain BuildHandshakeChain()
+	{
+		X509Chain chain = new();
+		chain.ChainPolicy.ExtraStore.Add(_intermediate);
+		chain.ChainPolicy.ExtraStore.Add(_ca);
+		chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+		chain.ChainPolicy.VerificationFlags = X509VerificationFlags.AllowUnknownCertificateAuthority;
+		chain.Build(_leafViaIntermediate);
+		return chain;
 	}
 
 	[Fact]
@@ -168,5 +208,44 @@ public class ServerCertificateValidatorTests : IDisposable
 		List<string> failures = new();
 		BackendSettingsValidation.CaPath(_caPemPath, "imap (MailStore)", failures);
 		Assert.Empty(failures);
+	}
+
+	// D17 — CreateCallback's returned delegate discarded its own 3rd parameter (the X509Chain the
+	// TLS stack built from the handshake's own certificates), then built a FRESH chain with only
+	// the custom-CA PEM and no ExtraStore. A leaf signed by a private INTERMEDIATE (not directly
+	// by the trusted root — CaCertificatePath's documented use case is trusting a private ROOT)
+	// therefore failed validation unless the intermediate happened to be cached locally or
+	// fetchable via AIA. Invoking the callback delegate directly — its signature is fixed by
+	// RemoteCertificateValidationCallback regardless of the fix — proves this red-first without
+	// needing any new parameter on the public surface.
+	[Fact]
+	public void CreateCallback_UsesTheHandshakeChain_ToAcceptALeafSignedThroughAnIntermediate()
+	{
+		RemoteCertificateValidationCallback? callback =
+			ServerCertificateValidator.CreateCallback(false, _caPemPath);
+		Assert.NotNull(callback);
+		using X509Chain handshakeChain = BuildHandshakeChain();
+
+		bool result = callback!(
+			this, _leafViaIntermediate, handshakeChain, SslPolicyErrors.RemoteCertificateChainErrors);
+
+		Assert.True(result);
+	}
+
+	[Fact]
+	public void CreateCallback_WithoutAnyHandshakeCertificates_StillRejectsTheIntermediateLeaf()
+	{
+		// Coverage: pins that a callback receiving no chain information at all (an empty chain,
+		// as some callers might legitimately pass) still fails closed — the fix's benefit comes
+		// specifically from the handshake chain's own ChainElements, not from some other change.
+		RemoteCertificateValidationCallback? callback =
+			ServerCertificateValidator.CreateCallback(false, _caPemPath);
+		Assert.NotNull(callback);
+		using X509Chain emptyChain = new();
+
+		bool result = callback!(
+			this, _leafViaIntermediate, emptyChain, SslPolicyErrors.RemoteCertificateChainErrors);
+
+		Assert.False(result);
 	}
 }
