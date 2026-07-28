@@ -291,4 +291,49 @@ public class ImapMailBackendCorrectnessTests
 			await session.DisposeAsync();
 		}
 	}
+
+	// G22 ----------------------------------------------------------------------------------
+
+	/// <summary>
+	///   G22: <c>SnapshotStatusAsync</c> (the STATUS-poll fallback that backs a Ping's push
+	///   detection) goes through the SAME per-session gate as <c>GetItemRevisionsAsync</c>'s
+	///   whole-mailbox FETCH, so a long-held FETCH on one device blocks another device's Ping
+	///   STATUS poll for the same user behind it. Proven deterministically: hold the session's gate
+	///   with an artificial delay (standing in for a slow FETCH — the mechanism, not the timing, is
+	///   what's under test) and measure whether a concurrent <c>WaitForChangesAsync</c> call is
+	///   blocked behind it.
+	/// </summary>
+	[BackendFact]
+	public async Task WaitForChangesAsync_IsNotBlockedBehindAConcurrentLongHeldSessionGate()
+	{
+		string user = TestBackend.User1;
+		CancellationToken ct = CancellationToken.None;
+		(ImapSession session, ImapMailBackend backend) = CreateBackend(user);
+		try
+		{
+			string folderKey = ImapSession.ToBackendKey("INBOX");
+
+			// Stands in for GetItemRevisionsAsync's long-held whole-mailbox FETCH: any operation
+			// that occupies the session's gate for a while.
+			Task slowHold = session.RunAsync(
+				async _ => { await Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None); return true; }, ct);
+			await Task.Delay(TimeSpan.FromMilliseconds(200), ct); // let it win the gate first
+
+			System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+			await backend.WaitForChangesAsync([folderKey], TimeSpan.FromMilliseconds(200), ct);
+			stopwatch.Stop();
+
+			await slowHold;
+
+			// A push-detection poll for one device must not queue behind another device's
+			// long-running backend call on the same session gate.
+			Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1.5),
+				$"WaitForChangesAsync took {stopwatch.Elapsed} while a 2s operation held the session gate " +
+				"-- it should use its own connection, not queue behind it.");
+		}
+		finally
+		{
+			await session.DisposeAsync();
+		}
+	}
 }

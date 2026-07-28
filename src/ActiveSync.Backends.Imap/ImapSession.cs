@@ -24,6 +24,18 @@ public sealed class ImapSession(
 	/// <summary>The IMAP login this session authenticates as (for log lines).</summary>
 	public string UserName => credentials.UserName;
 
+	/// <summary>
+	///   G22: a standalone connection that does NOT go through <see cref="RunAsync{T}" />'s gate —
+	///   for callers that must not queue behind a long-held operation on the SAME session (e.g. a
+	///   Ping's STATUS-poll fallback racing another device's whole-mailbox FETCH). The caller owns
+	///   the returned client (disconnect/dispose it), the same contract as
+	///   <see cref="ImapConnectionFactory.ConnectAsync" /> itself.
+	/// </summary>
+	public Task<ImapClient> ConnectStandaloneAsync(CancellationToken ct)
+	{
+		return ImapConnectionFactory.ConnectAsync(options, credentials, ct, wireLogger);
+	}
+
 	public async ValueTask DisposeAsync()
 	{
 		// D28: idempotent — a second dispose (or one racing a store's own teardown) must not hit the
