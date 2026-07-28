@@ -657,7 +657,7 @@ recorded here so it is not lost. FIX: reword the "Database-declared accounts" pa
 `B10` fixes did for `UserOptions`/`ResolvedUser`), and reword "mirroring the accounts store" to name
 `UserStore` (or drop the comparison).
 
-`N9` **Low** `WbxmlCodePages`'s Search code page (15) carries two tokens — `Schema` (0x1C) and
+~~`N9`~~ **Low** `WbxmlCodePages`'s Search code page (15) carries two tokens — `Schema` (0x1C) and
 `Supported` (0x1D) — that do not exist in the published `[MS-ASWBXML]` specification (verified
 against revision 24.0, 2025-05-20): the real table goes straight from `GreaterThan` (0x1B) to
 `UserName` (0x1E), with 0x1C/0x1D genuinely unassigned, exactly like the gap at 0x06 on the same

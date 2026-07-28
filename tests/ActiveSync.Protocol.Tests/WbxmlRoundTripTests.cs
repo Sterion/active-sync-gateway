@@ -135,22 +135,19 @@ public class WbxmlRoundTripTests
 	}
 
 	[Fact]
-	public void SearchSchemaAndSupported_RoundTrip()
+	public void SearchSchemaAndSupported_AreNotEncodable()
 	{
-		// Tokens 0x1C/0x1D — previously missing from the Search page, so a client that
-		// tokenized these would have been rejected with a 400.
-		XDocument doc = new(
-			new XElement(Search + "Search",
-				new XElement(Search + "Store",
-					new XElement(Search + "Name", "Mailbox"),
-					new XElement(Search + "Options",
-						new XElement(Search + "Schema",
-							new XElement(Search + "Supported"))))));
+		// 0x1C/0x1D are unassigned on the Search page in the published [MS-ASWBXML] (rev 24.0,
+		// 2025-05-20) — the table goes GreaterThan (0x1B) straight to UserName (0x1E). This page
+		// previously carried "Schema"/"Supported" here as if they were real Search tokens; those
+		// names ARE real tokens, but on other pages entirely (ItemOperations 0x10, AirSync 0x20).
+		// Behavior change: encoding either under the Search namespace must now fail instead of
+		// silently emitting bytes for a token that was never defined here.
+		XDocument schemaDoc = new(new XElement(Search + "Search", new XElement(Search + "Schema")));
+		XDocument supportedDoc = new(new XElement(Search + "Search", new XElement(Search + "Supported")));
 
-		XDocument result = RoundTrip(doc);
-		XElement schema = result.Root!.Element(Search + "Store")!.Element(Search + "Options")!
-			.Element(Search + "Schema")!;
-		Assert.NotNull(schema.Element(Search + "Supported"));
+		Assert.Throws<WbxmlException>(() => WbxmlEncoder.Encode(schemaDoc));
+		Assert.Throws<WbxmlException>(() => WbxmlEncoder.Encode(supportedDoc));
 	}
 
 	[Fact]

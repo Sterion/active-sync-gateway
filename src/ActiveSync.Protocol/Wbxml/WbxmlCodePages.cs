@@ -212,14 +212,16 @@ public static class WbxmlCodePages
 
 			// Page 15: Search. 0x06 has no entry in the published spec (verified against
 			// revision 24.0, 2025-05-20) — genuinely unassigned between Search and Store, not a
-			// transcription gap or a retired token with a lost name.
+			// transcription gap or a retired token with a lost name. 0x1C/0x1D are likewise
+			// unassigned — the table goes GreaterThan (0x1B) straight to UserName (0x1E); do not
+			// restore "Schema"/"Supported" here from a third-party table, they belong on other
+			// pages entirely (ItemOperations 0x10, AirSync 0x20).
 			new(15, EasNamespaces.Search, T(
 				(0x05, "Search"), (0x07, "Store"), (0x08, "Name"), (0x09, "Query"), (0x0A, "Options"),
 				(0x0B, "Range"), (0x0C, "Status"), (0x0D, "Response"), (0x0E, "Result"),
 				(0x0F, "Properties"), (0x10, "Total"), (0x11, "EqualTo"), (0x12, "Value"), (0x13, "And"),
 				(0x14, "Or"), (0x15, "FreeText"), (0x17, "DeepTraversal"), (0x18, "LongId"),
 				(0x19, "RebuildResults"), (0x1A, "LessThan"), (0x1B, "GreaterThan"),
-				(0x1C, "Schema"), (0x1D, "Supported"),
 				(0x1E, "UserName"), (0x1F, "Password"), (0x20, "ConversationId"),
 				(0x21, "Picture"), (0x22, "MaxSize"), (0x23, "MaxPictures"))),
 

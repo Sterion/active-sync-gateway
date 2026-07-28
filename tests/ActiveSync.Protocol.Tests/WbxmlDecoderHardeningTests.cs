@@ -233,6 +233,26 @@ public class WbxmlDecoderHardeningTests
 		Assert.Equal("unknown-0-2a", placeholder.Name.LocalName);
 	}
 
+	[Theory]
+	[InlineData(0x1C)]
+	[InlineData(0x1D)]
+	public void SearchPage_UnassignedSchemaSupportedTokens_DecodeAsPlaceholders(byte token)
+	{
+		// 0x1C/0x1D are unassigned on the Search page (code page 15) in the published
+		// [MS-ASWBXML] — the table goes GreaterThan (0x1B) straight to UserName (0x1E). This page
+		// previously mapped these two bytes to "Schema"/"Supported" as if they were real Search
+		// tokens. A decode of either byte under page 15 must not silently produce those tag
+		// names — it must degrade to the same unknown-token placeholder as any other unassigned
+		// byte (see UnknownTagToken_BecomesPlaceholderInsteadOfAbortingTheDocument above).
+		byte[] doc = Doc([0x00], [0x0F], [token]); // SWITCH_PAGE to 15 (Search), then the bare token
+
+		XDocument result = WbxmlDecoder.Decode(doc);
+
+		XElement root = result.Root!;
+		Assert.Equal(EasNamespaces.WbxmlInternal, root.Name.Namespace);
+		Assert.Equal($"unknown-15-{token:x2}", root.Name.LocalName);
+	}
+
 	[Fact]
 	public void UnknownCodePage_StillAbortsTheDocument()
 	{
