@@ -1552,3 +1552,47 @@ apply after the neighbouring hunks moved. 9 + 2 failures, every finding covered.
 - **`D25` is tested through private reflection.** Precedented in this suite and it targets the offending
   expression precisely, but it means the guard is coupled to the method name rather than to observable
   behaviour.
+
+## Item 28 — JMAP mapping & watcher [LIVE]
+**Findings:** `H4` `H7` `H11` `H12` `H14` `H19` `H21` `H25` `H26`
+**Commits:** `0ce0376` (H4) · `f0fbcb1` (H7) · `6000375` (H11) · `7adbd79` (H12) · `3ad725b` (H14) ·
+`8c3ffe7` (H19) · `e0bbcfd` (H21) · `47e805e` (H25, H26 — cluster, read against both IDs)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 29 ✓ · strike shipped with every commit ✓ · build 0 warnings ✓ ·
+unit **1474 passed, 0 failed** (Cli 16 · Protocol 99 · Core 906 · WebUi 120 · Server 333) ✓ ·
+live **150 passed, 0 skipped** ✓ · scope confined to `Backends.Jmap` + tests + `docs/backends.md` ✓
+
+**Red-first re-proved independently for all seven that claimed it** — reversal of the eight commits' `src`
+gave **13 failures**: `H4` (2), `H7` (4 — both stores, both the once-per-account download and the paging
+assertion), `H11` (3 theory cases), `H12`, `H19`, `H21`, `H26`. `H14` (coverage) and `H25` (doc-only) are
+correctly absent.
+
+**Notes:**
+- **`H7` was proved by the sequence `fix-review.md` explicitly bans, and the worker described it plainly:
+  "wrote fix+test, stashed only the source file, ran red, popped stash, ran green."** That is
+  write-fix-and-test-together → revert → see red → re-apply, which the protocol forbids because a test
+  written alongside the fix tends to assert what the new code does rather than the symptom. **In this case
+  the tests survive the objection**: they count `ids:null` full downloads across two calendars and assert
+  paging appears when `maxObjectsInGet` is finite — both symptom-shaped, both red under my own independent
+  reversal. So the strike stands on evidence, not on the worker's procedure. Recording it because the
+  ordering rule is the most-violated in this programme and a worker disclosing it honestly is the only
+  reason it is visible at all.
+- **`H14` is coverage, and the worker's reasoning is the best on this queue so far.** It first wrote a
+  concurrent stress test, observed that it passed identically on unfixed code — because a continuous
+  stream of `Signal()` calls masks the single-signal loss the fix closes — and *discarded it* rather than
+  banking a test that proves nothing. The shipped test pins the two observable contracts instead and says
+  so in both the comment and the commit message. That is exactly the judgement the protocol asks for.
+- **`H7` deviates from its FIX and the deviation is load-bearing.** The finding says to cache and to page
+  via `*/query` when `maxObjectsInGet` is finite; but this repo's own AGENTS.md warns JMAP `*/query` is
+  FTS-backed and eventually consistent, which is why listing uses `ids:null`. The worker paged **with a
+  catch-and-fallback to the unbounded get on any `BackendException`**, which keeps the always-consistent
+  path as the backstop. Sound, and the live suite exercises it — but on a server that answers a paged
+  query with silently *stale* data rather than an error, the fallback never triggers and the diff engine
+  sees a partial revision map. Stalwart answers `serverUnavailable`, so the tested stack is safe.
+- **`H21` removes a capability declaration rather than implementing it.** `JmapCalendarStore` no longer
+  claims `IReadOnlyCollectionSource`; the finding offered either that or implementing it against
+  `Calendar/get`'s `myRights`. Nothing regressed — the capability was never enforced — but a shared JMAP
+  calendar is still writable, and now the code no longer pretends otherwise. `docs/backends.md` updated to
+  match.
+- **`H19` emits the "no photo" status (173) without delivering photos**, which is correct: `H25` (doc-only)
+  corrects the class summary that claimed photo coverage JMAP does not actually have.
