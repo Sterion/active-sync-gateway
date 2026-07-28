@@ -116,14 +116,14 @@ public sealed class LocalCalendarStore(
 			LocalItem? row = await Rows(db).FirstOrDefaultAsync(i => i.Uid == eventUid, ct).ConfigureAwait(false);
 			if (row is null)
 				return null;
-			string plain = Protector.Unprotect(row.Content, UserId, "calendar");
+			string plain = Protector.Unprotect(row.Content, UserId, Collection);
 			// partStatIdentity = mail address ?? gateway login; the row scope and encryption AAD
 			// above stay on the gateway UserId.
 			string? updated = CalendarConverter.SetPartStat(plain, userResponse, partStatIdentity);
 			if (updated is null)
 				return row.Id.ToString();
 
-			row.Content = Protector.Protect(updated, UserId, "calendar");
+			row.Content = Protector.Protect(updated, UserId, Collection);
 			row.Version++;
 			row.LastModifiedUtc = DateTime.UtcNow;
 			try
@@ -149,7 +149,7 @@ public sealed class LocalCalendarStore(
 	{
 		await using SyncDbContext db = DbFactory.CreateDbContext();
 		LocalItem? row = await FindAsync(db, itemKey, ct).ConfigureAwait(false);
-		return row is null ? null : Protector.Unprotect(row.Content, UserId, "calendar");
+		return row is null ? null : Protector.Unprotect(row.Content, UserId, Collection);
 	}
 
 	public Task<bool> ShouldSendInvitationsAsync(CancellationToken ct)
@@ -179,7 +179,7 @@ public sealed class LocalCalendarStore(
 		LocalItem? row = await FindAsync(db, itemKey, ct).ConfigureAwait(false);
 		if (row is null)
 			return null;
-		string ics = Protector.Unprotect(row.Content, UserId, "calendar");
+		string ics = Protector.Unprotect(row.Content, UserId, Collection);
 		return CalendarConverter.ExtractAttachment(ics, index);
 	}
 
