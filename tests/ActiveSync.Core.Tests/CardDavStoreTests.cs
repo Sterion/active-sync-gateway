@@ -63,6 +63,78 @@ public sealed class CardDavStoreTests
 		Assert.Equal("Alpha", def.DisplayName);
 	}
 
+	// H6: a server can accept the addressbook-query REPORT and return a well-formed 207 whose
+	// propstats carry getetag but no address-data (unsupported or silently dropped) — that yields an
+	// EMPTY-BUT-NON-NULL card list, indistinguishable from "the REPORT threw" only in that
+	// QueryGalCardsAsync's caller treats it as "genuinely zero matches" instead of falling back to
+	// the per-contact enumeration path. GAL search then permanently returns nothing, silently, for
+	// every query on that server. Proven by making the REPORT return a response with getetag but no
+	// address-data: unmodified code returns 0 results and issues 0 GETs; the fix must fall back to
+	// enumeration (GetCardsByEnumerationAsync) and find the contact via a per-contact GET.
+	[Fact]
+	public async Task SearchGal_ReportOmitsAddressData_FallsBackToEnumeration()
+	{
+		const string aliceCard =
+			"BEGIN:VCARD\nVERSION:3.0\nFN:Alice Example\nN:Example;Alice;;;\nEMAIL:alice@example.com\nEND:VCARD\n";
+
+		string homeSet =
+			"""
+			<D:multistatus xmlns:D="DAV:" xmlns:CR="urn:ietf:params:xml:ns:carddav">
+			  <D:response>
+			    <D:href>/dav/ab/default/</D:href>
+			    <D:propstat><D:status>HTTP/1.1 200 OK</D:status>
+			      <D:prop>
+			        <D:resourcetype><D:collection/><CR:addressbook/></D:resourcetype>
+			        <D:displayname>Default</D:displayname>
+			      </D:prop>
+			    </D:propstat>
+			  </D:response>
+			</D:multistatus>
+			""";
+		string etagList =
+			"""
+			<D:multistatus xmlns:D="DAV:">
+			  <D:response><D:href>/dav/ab/default/a.vcf</D:href>
+			    <D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop><D:getetag>"e1"</D:getetag></D:prop></D:propstat>
+			  </D:response>
+			</D:multistatus>
+			""";
+		// Well-formed 207: getetag present, address-data ABSENT (a server that accepted the REPORT
+		// but does not honour address-data) — must be told apart from "the REPORT threw".
+		string queryResultNoAddressData =
+			"""
+			<D:multistatus xmlns:D="DAV:" xmlns:CR="urn:ietf:params:xml:ns:carddav">
+			  <D:response><D:href>/dav/ab/default/a.vcf</D:href>
+			    <D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop><D:getetag>"e1"</D:getetag></D:prop></D:propstat>
+			  </D:response>
+			</D:multistatus>
+			""";
+
+		int getCount = 0;
+		StubHandler stub = new(request =>
+		{
+			string method = request.Method.Method;
+			string path = request.RequestUri!.AbsolutePath;
+			if (method == "REPORT")
+				return Xml(queryResultNoAddressData);
+			if (method == "GET")
+			{
+				getCount++;
+				return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(aliceCard) };
+			}
+			return Xml(path == "/dav/ab/" ? homeSet : etagList);
+		});
+		using WebDavClient dav = new(Base, new HttpClient(stub));
+		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
+		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+
+		IReadOnlyList<IReadOnlyList<XElement>> results =
+			await store.SearchGalAsync("Alice", 25, null, CancellationToken.None);
+
+		Assert.Single(results); // found via the enumeration fallback, not silently empty
+		Assert.Equal(1, getCount); // fell back to a per-contact GET
+	}
+
 	// H14: GAL search issued one HTTP GET per contact (a 5000-contact book = 5000 serial round
 	// trips per keystroke). A single addressbook-query REPORT returns the matching vCards inline, so
 	// no per-contact GET is needed. Proven by counting GETs: unmodified code fetches every card,

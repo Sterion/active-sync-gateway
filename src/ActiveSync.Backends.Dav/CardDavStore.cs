@@ -99,13 +99,29 @@ public sealed class CardDavStore(
 		}
 
 		List<string> cards = new();
+		int nonCollectionResponses = 0;
 		foreach (DavResource resource in resources)
 		{
 			if (PathsEqual(resource.Href, collection))
 				continue;
+			nonCollectionResponses++;
 			string? data = resource.Propstat.Descendants(DavNs.CardDav + "address-data").FirstOrDefault()?.Value;
 			if (!string.IsNullOrWhiteSpace(data))
 				cards.Add(data);
+		}
+
+		// H6: a server can accept the REPORT and answer a well-formed 207 whose propstats carry
+		// getetag but no address-data at all (unsupported or silently dropped) — that is an
+		// EMPTY-BUT-NON-NULL list, indistinguishable here from "genuinely zero matches". The caller
+		// (SearchGalAsync) treats null as "fall back to per-contact enumeration" and a non-null empty
+		// list as "no results" — so without this check, GAL search returns nothing, forever, with no
+		// error and no log line, against any server that behaves this way.
+		if (nonCollectionResponses > 0 && cards.Count == 0)
+		{
+			Logger.LogDebug(
+				"CardDAV: addressbook-query REPORT for {Collection} returned {Count} resource(s) but no " +
+				"address-data body; falling back to per-contact GET", collection, nonCollectionResponses);
+			return null;
 		}
 
 		return cards;
