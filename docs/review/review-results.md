@@ -1681,3 +1681,49 @@ live **150 passed, 0 skipped** ✓
   even though the ID is struck.
 - **`SyncStateService`'s constructor gained an optional `ILogger` parameter** for A9's warning; backward
   compatible, no call site needed updating.
+
+## Item 31 — Protocol support types
+**Findings:** `W3` `W6` `W12` `W13` `W17` `W18` `W19`
+**Commits:** `009d4f8` (W3) · `6b93343` (W6) · `fe8150f` (W12) · `3147645` (W13) · `358a424` (W17) ·
+`4a37127` (W18) · `5bae70f` (W19)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 32 ✓ · strike shipped with every commit ✓ · build 0 warnings ✓ ·
+unit **1501 passed, 0 failed** (Cli 16 · Protocol 108 · Core 924 · WebUi 120 · Server 333) ✓ ·
+live **150 passed, 0 skipped** ✓
+
+**Protocol hard gate checked explicitly**, since this item touches `src/ActiveSync.Protocol/`:
+- **No code-page table changed** (`WbxmlCodePages.cs` untouched), so the "every table change needs a
+  round-trip test" rule does not bite here.
+- **The published surface did not move**: neither `ContractSurface.approved.txt` nor
+  `Directory.Build.props` was touched, and the 17 `ContractSurface*` tests pass — so the surface hash still
+  matches its pinned contract version and no `ContractVersionMinor` bump was owed. These are
+  behaviour-only changes to existing members.
+
+**Red-first re-proved independently for all seven** — reversal gave 12 failures across both suites:
+Protocol.Tests 10 (`W6` ×3, `W12` ×2, `W13` ×2, `W18`, `W19` ×2) and Core.Tests 2
+(`MixedNumericAndNonNumericIds_SortOrderIsIndependentOfInputOrder` W3,
+`CallerSuppliedCaseInsensitiveComparer_DoesNotForkTheSnapshot` W17).
+
+**The live suite was run although the item is unmarked**, because `EasRequestParameters.FromBase64` parses
+the packed query string of **every** EAS 12.1+ request — `W13` adding a `FormatException` there is a
+change on the hot request path, not an isolated support type.
+
+**Notes:**
+- **`W18` is breaking and the worker chose the stricter of two options for a good reason.**
+  `EasDateTime.TryParse`/`Parse` no longer accept the non-conforming no-`Z` basic form. The alternative —
+  exposing the tolerance as an opt-in `TryParseLenient` — would have added a public member to
+  `ActiveSync.Protocol`, i.e. a published-package surface change requiring a `ContractVersionMinor` bump
+  that item 31 does not authorize. Dropping the format keeps the item inside its mandate. No in-repo caller
+  needed the tolerance.
+- **`W6`/`W12`/`W13` turn silent corruption into exceptions.** `ToBase64` now throws `ArgumentException`
+  on an over-length, non-ASCII or unknown-version field instead of emitting a blob its own parser cannot
+  read; `FromBase64` throws `FormatException` on a control character in a tag field. Every in-repo caller
+  already sends well-formed values, and the live suite confirms no real client path trips it — but a
+  malformed client that previously got silently-mangled behaviour now gets a hard failure.
+- **`W12` is deliberately stronger than its finding.** The worker validated the pre-cast `int` rather than
+  the cast byte, so a value that wraps around onto an allowed version byte is caught too — a case the
+  finding's literal check would have missed. `ToBase64_ProtocolVersionByteOverflow_DoesNotWrapIntoAnAllowedByte`
+  is the test for it.
+- **`W17` is a no-op on every current call path** and is defence for future ones: it normalizes to an
+  ordinal-keyed dictionary when the caller's is not already `StringComparer.Ordinal`. The worker verified
+  `SnapshotCodec` and `DavItemMap` both already construct with ordinal keys.
