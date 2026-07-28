@@ -5,9 +5,11 @@ namespace ActiveSync.Core.Accounts;
 
 /// <summary>
 ///   Everything a backend session needs for one gateway user: each role resolved to its
-///   provider, effective settings and backend credentials. <see cref="GatewayLogin" /> is
-///   THE identity: DB row scoping, change-notifier keys, encryption AAD and session/watcher
-///   cache keys are all derived from it — per-backend user names never leak into those.
+///   provider, effective settings and backend credentials. <see cref="GatewayLogin" /> is the
+///   login the phone presents and the key of the ephemeral, credential-bearing session/watcher
+///   caches — per-backend user names never leak into those. Durable identity is <c>UserId</c>
+///   (carried on <c>IBackendSession</c>): DB row scoping, change-notifier keys and encryption
+///   AAD are all derived from it instead.
 /// </summary>
 public sealed record ResolvedUser(
 	string GatewayLogin,
