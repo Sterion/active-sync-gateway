@@ -100,8 +100,10 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 		{
 			e.HasIndex(u => u.Login).IsUnique();
 			// Two users bound to one identity-provider subject is an account-takeover vector, so
-			// the binding is enforced by the database rather than by whoever writes it. Filtered
-			// on both providers so the (many) unbound users don't collide on null.
+			// the binding is enforced by the database rather than by whoever writes it. No filter
+			// needed — both providers treat NULLs as distinct in a unique index, so the (many)
+			// unbound users don't collide on null; HasFilter(null) only suppresses the SQL Server
+			// default (an implicit "WHERE x IS NOT NULL"), which neither provider here applies.
 			e.HasIndex(u => u.OidcSubject).IsUnique().HasFilter(null);
 			e.HasMany(u => u.BackendRoles).WithOne(r => r.User).HasForeignKey(r => r.UserId)
 				.OnDelete(DeleteBehavior.Cascade);
