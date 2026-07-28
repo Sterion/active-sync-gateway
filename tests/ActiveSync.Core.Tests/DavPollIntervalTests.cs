@@ -47,6 +47,45 @@ public sealed class DavPollIntervalTests
 			$"change was not detected until {sw.Elapsed.TotalSeconds:F1}s — the poll interval is not honoured");
 	}
 
+	// H5: AGENTS.md documents the full-enumeration posture's cost bound as "one Depth:1 ctag
+	// PROPFIND per home set, not per folder" (the H12 mitigation list) — but the poller issued one
+	// PROPFIND (sometimes two, when getctag is absent) per WATCHED FOLDER. Five calendars sharing
+	// one home set must therefore cost one PROPFIND per snapshot (baseline + one poll = 2 requests
+	// total), not one per folder per snapshot (5 * 2 = 10 on the unmodified loop). A short,
+	// generous-relative-to-pollSeconds timeout (900 ms with a 1 s poll interval) forces exactly one
+	// poll iteration: Math.Max(1, remaining) always delays at least 1 s, so the 900 ms deadline is
+	// exceeded before the loop re-checks, regardless of scheduler jitter.
+	[Fact]
+	public async Task PollCtags_MultipleFoldersUnderOneHomeSet_UsesOnePropfindPerHomeSet()
+	{
+		string[] hrefs =
+			["/dav/home/cal1/", "/dav/home/cal2/", "/dav/home/cal3/", "/dav/home/cal4/", "/dav/home/cal5/"];
+		string[] keys = hrefs.Select(h => "caldav:" + h).ToArray();
+
+		int requestCount = 0;
+		HomeSetHandler stub = new(() =>
+		{
+			Interlocked.Increment(ref requestCount);
+			return HomeSetXml(hrefs, "same-ctag");
+		});
+		using WebDavClient dav = new(Base, new HttpClient(stub));
+
+		await DavDiscovery.PollCtagsAsync(
+			dav,
+			keys,
+			key => key["caldav:".Length..],
+			timeout: TimeSpan.FromMilliseconds(900),
+			pollSeconds: 1,
+			NullLogger.Instance,
+			"CalDAV",
+			"user",
+			CancellationToken.None);
+
+		Assert.True(requestCount <= 3,
+			$"expected ~1 grouped PROPFIND per snapshot (<=3 total for baseline+poll), got {requestCount} " +
+			"— folders sharing a home set are still being polled one PROPFIND per folder");
+	}
+
 	private static HttpResponseMessage Xml(string ctag)
 	{
 		string multistatus =
@@ -66,12 +105,43 @@ public sealed class DavPollIntervalTests
 		};
 	}
 
+	private static HttpResponseMessage HomeSetXml(IReadOnlyList<string> hrefs, string ctag)
+	{
+		string responses = string.Join("\n", hrefs.Select(h => $"""
+		<D:response>
+		  <D:href>{h}</D:href>
+		  <D:propstat><D:status>HTTP/1.1 200 OK</D:status>
+		    <D:prop><CS:getctag>{ctag}</CS:getctag></D:prop>
+		  </D:propstat>
+		</D:response>
+		"""));
+		string multistatus =
+			$"""
+			<D:multistatus xmlns:D="DAV:" xmlns:CS="http://calendarserver.org/ns/">
+			{responses}
+			</D:multistatus>
+			""";
+		return new HttpResponseMessage((HttpStatusCode)207)
+		{
+			Content = new StringContent(multistatus, Encoding.UTF8, "application/xml")
+		};
+	}
+
 	private sealed class CtagHandler(Func<string> nextCtag) : HttpMessageHandler
 	{
 		protected override Task<HttpResponseMessage> SendAsync(
 			HttpRequestMessage request, CancellationToken cancellationToken)
 		{
 			return Task.FromResult(Xml(nextCtag()));
+		}
+	}
+
+	private sealed class HomeSetHandler(Func<HttpResponseMessage> responder) : HttpMessageHandler
+	{
+		protected override Task<HttpResponseMessage> SendAsync(
+			HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			return Task.FromResult(responder());
 		}
 	}
 }

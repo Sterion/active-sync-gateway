@@ -108,7 +108,57 @@ public static class DavDiscovery
 		{
 			Dictionary<string, string?> map = new(StringComparer.Ordinal);
 			HashSet<string> failed = new(StringComparer.Ordinal);
-			foreach (string key in folderBackendKeys)
+
+			// H5: AGENTS.md states the cost bound for the full-enumeration posture as "one Depth:1
+			// ctag PROPFIND per home set, not per folder" — this loop used to do the opposite (one
+			// PROPFIND, sometimes two, per watched folder). Group the watched folders by their
+			// containing collection (the home set) and issue one Depth:1 PROPFIND per group,
+			// requesting getctag AND sync-token together so the group query never needs a second
+			// round trip either. A folder whose parent could not be derived, or whose href the
+			// home-set listing does not cover (e.g. a shared collection living outside it), falls
+			// back to the original per-key PROPFIND below.
+			foreach (IGrouping<string?, string> group in folderBackendKeys.ToLookup(k => ParentOf(hrefFromKey(k))))
+			{
+				if (group.Key is not { } parent)
+				{
+					foreach (string key in group)
+						await SnapshotOneAsync(key).ConfigureAwait(false);
+					continue;
+				}
+
+				List<DavResource> resources;
+				try
+				{
+					resources = await dav.PropfindAsync(parent, 1, CtagAndSyncTokenBody, ct).ConfigureAwait(false);
+				}
+				catch (BackendException)
+				{
+					foreach (string key in group)
+						await SnapshotOneAsync(key).ConfigureAwait(false);
+					continue;
+				}
+
+				foreach (string key in group)
+				{
+					string href = hrefFromKey(key);
+					DavResource? resource = resources.FirstOrDefault(r => HrefsEqual(r.Href, href));
+					if (resource is null)
+					{
+						// Not covered by the home-set listing — fall back to the direct read.
+						await SnapshotOneAsync(key).ConfigureAwait(false);
+						continue;
+					}
+
+					map[key] =
+						resource.Propstat.Descendants(DavNs.CalendarServer + "getctag").FirstOrDefault()?.Value
+						?? resource.Propstat.Descendants(DavNs.D + "sync-token").FirstOrDefault()?.Value;
+				}
+			}
+
+			return (map, failed);
+
+			async Task SnapshotOneAsync(string key)
+			{
 				try
 				{
 					map[key] =
@@ -125,9 +175,28 @@ public static class DavDiscovery
 					// every DAV hiccup.
 					failed.Add(key);
 				}
-
-			return (map, failed);
+			}
 		}
+	}
+
+	private static readonly XElement CtagAndSyncTokenBody = new(DavNs.D + "propfind",
+		new XElement(DavNs.D + "prop",
+			new XElement(DavNs.CalendarServer + "getctag"),
+			new XElement(DavNs.D + "sync-token")));
+
+	/// <summary>The href of the collection directly containing <paramref name="href" />, or null when
+	/// it has no derivable parent (a root-level href).</summary>
+	private static string? ParentOf(string href)
+	{
+		string trimmed = href.TrimEnd('/');
+		int lastSlash = trimmed.LastIndexOf('/');
+		return lastSlash <= 0 ? null : trimmed[..(lastSlash + 1)];
+	}
+
+	/// <summary>Href equality that ignores a trailing slash — mirrors DavStoreBase.PathsEqual.</summary>
+	private static bool HrefsEqual(string a, string b)
+	{
+		return a.TrimEnd('/').Equals(b.TrimEnd('/'), StringComparison.Ordinal);
 	}
 
 	/// <summary>
