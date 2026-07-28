@@ -618,7 +618,7 @@ connection cap (the `G6` scenario). Not a correctness defect — the poller is t
 connections, or generalise `WatcherInfo`/`SnapshotWatchers` to report a kind ("idle" | "poll") and
 have the gauge group by it.
 
-`N6` **Low** `TasksConverter` derives its recurrence day/month fallbacks from the UTC instant, exactly as
+~~`N6`~~ **Low — FIXED** `TasksConverter` derives its recurrence day/month fallbacks from the UTC instant, exactly as
 `CalendarConverter` did before `D21` — `src/ActiveSync.Backends.Common/Converters/TasksConverter.cs:101`.
 `D21` fixed the calendar side by anchoring `RecurrenceMapper.Build` on `master.Start.Value` (the event's
 own zone) rather than the UTC value, because a wall-clock-local Monday can be a Sunday in UTC and the

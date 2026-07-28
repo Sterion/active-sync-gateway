@@ -98,7 +98,13 @@ public static class TasksConverter
 		{
 			CalDateTime? anchor = todo.DtStart ?? todo.Due;
 			DateTime anchorUtc = anchor?.AsUtc ?? DateTime.UtcNow.Date;
-			XElement? recurrence = RecurrenceMapper.Build(Tasks, rule, anchorUtc, true);
+			// The DayOfWeek/DayOfMonth/MonthOfYear fallbacks (when the RRULE carries no
+			// explicit BYDAY/BYMONTHDAY) must derive from the anchor's weekday/day/month IN
+			// ITS OWN ZONE (RFC 5545), not from the UTC instant — a wall-clock-local Monday
+			// can be a Sunday in UTC, which shifted the emitted day/month across the
+			// boundary. Mirrors the equivalent fix in CalendarConverter.
+			DateTime recurrenceAnchor = anchor?.Value ?? anchorUtc;
+			XElement? recurrence = RecurrenceMapper.Build(Tasks, rule, recurrenceAnchor, true);
 			if (recurrence is not null)
 			{
 				// MS-ASTASK requires a Start child inside Recurrence — nominal wall-clock,

@@ -337,4 +337,54 @@ public class TasksConverterTests
 		Assert.Contains("RRULE", ics);
 		Assert.Contains("DTSTART;VALUE=DATE:20260803", ics); // RRULE without an anchor is ill-defined
 	}
+
+	[Fact]
+	public void WeeklyRecurrence_WithNoExplicitByDay_AnchorsOnTheTasksLocalWeekday_NotTheUtcInstant()
+	{
+		// A weekly RRULE with no BYDAY defaults (per RFC 5545) to DTSTART's weekday IN
+		// DTSTART'S OWN ZONE. The mapper anchored on the UTC instant instead: a 00:30
+		// Copenhagen (CEST, UTC+2) task on a Monday is 22:30Z the previous day (Sunday), so
+		// the emitted DayOfWeek mask was Sunday's, not Monday's.
+		const string tzBlock = """
+		                        BEGIN:VTIMEZONE
+		                        TZID:Europe/Copenhagen
+		                        X-LIC-LOCATION:Europe/Copenhagen
+		                        BEGIN:STANDARD
+		                        DTSTART:19701025T030000
+		                        TZNAME:CET
+		                        TZOFFSETFROM:+0200
+		                        TZOFFSETTO:+0100
+		                        RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=10;WKST=SU
+		                        END:STANDARD
+		                        BEGIN:DAYLIGHT
+		                        DTSTART:19700329T020000
+		                        TZNAME:CEST
+		                        TZOFFSETFROM:+0100
+		                        TZOFFSETTO:+0200
+		                        RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=3;WKST=SU
+		                        END:DAYLIGHT
+		                        END:VTIMEZONE
+		                        """;
+		string ics = $"""
+		              BEGIN:VCALENDAR
+		              VERSION:2.0
+		              {tzBlock}
+		              BEGIN:VTODO
+		              UID:weekly-local-anchor
+		              DTSTART;TZID=Europe/Copenhagen:20260803T003000
+		              SUMMARY:Standup prep
+		              RRULE:FREQ=WEEKLY
+		              END:VTODO
+		              END:VCALENDAR
+		              """;
+
+		List<XElement>? data = TasksConverter.ToApplicationData(ics, new BodyPreference(1, null, false));
+
+		Assert.NotNull(data);
+		XElement? recurrence = data!.FirstOrDefault(e => e.Name == Tasks + "Recurrence");
+		Assert.NotNull(recurrence);
+		string? dayOfWeek = recurrence!.Element(Tasks + "DayOfWeek")?.Value;
+		// 2026-08-03 is a Monday: mask bit 2 (1 << 1). Sunday (the UTC-instant weekday) is bit 1.
+		Assert.Equal("2", dayOfWeek);
+	}
 }
