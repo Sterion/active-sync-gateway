@@ -72,7 +72,10 @@ public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> l
 
 			// Build the recipient skeletons first, collecting the email of each so the free/busy
 			// lookups for the whole match set can run concurrently rather than one after another.
-			List<(XElement Recipient, string Email)> built = new();
+			// F20: MS-ASCMD's Recipient sequence is Type, DisplayName, EmailAddress, Availability,
+			// Certificates, Picture — Picture is held aside and appended AFTER Availability below,
+			// rather than added here where it would land ahead of it (WBXML is order-sensitive).
+			List<(XElement Recipient, string Email, XElement? Picture)> built = new();
 			foreach (IReadOnlyList<XElement> hit in hits)
 			{
 				string display = hit.FirstOrDefault(e => e.Name == GAL + "DisplayName")?.Value ?? to;
@@ -84,16 +87,16 @@ public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> l
 					new XElement(RR + "DisplayName", display),
 					new XElement(RR + "EmailAddress", email));
 				// The GAL photo element translates into the RR-namespace shape.
+				XElement? rrPicture = null;
 				if (hit.FirstOrDefault(e => e.Name == GAL + "Picture") is XElement galPicture)
 				{
-					XElement rrPicture = new(RR + "Picture",
+					rrPicture = new XElement(RR + "Picture",
 						new XElement(RR + "Status", galPicture.Element(GAL + "Status")?.Value ?? "173"));
 					if (galPicture.Element(GAL + "Data") is XElement data)
 						rrPicture.Add(new XElement(RR + "Data", data.Value));
-					recipient.Add(rrPicture);
 				}
 
-				built.Add((recipient, email));
+				built.Add((recipient, email, rrPicture));
 			}
 
 			if (availabilityWindow is { } window)
@@ -103,6 +106,10 @@ public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> l
 				for (int i = 0; i < built.Count; i++)
 					built[i].Recipient.Add(availabilities[i]);
 			}
+
+			foreach ((XElement recipient, _, XElement? picture) in built)
+				if (picture is not null)
+					recipient.Add(picture);
 
 			recipients.AddRange(built.Select(b => b.Recipient));
 		}

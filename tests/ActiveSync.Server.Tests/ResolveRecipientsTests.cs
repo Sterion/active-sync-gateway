@@ -90,9 +90,52 @@ public sealed class ResolveRecipientsTests : IDisposable
 			resps[2].Element(RR + "Recipient")!.Element(RR + "EmailAddress")!.Value);
 	}
 
+	// F20 (round 3) — MS-ASCMD's Recipient sequence is Type, DisplayName, EmailAddress,
+	// Availability, Certificates, Picture. A strict-sequence client drops the free/busy digit
+	// string it explicitly asked for if Picture arrives before Availability.
+	[Fact]
+	public async Task RecipientWithPictureAndAvailability_EmitsAvailabilityBeforePicture()
+	{
+		_harness.Session.Contacts = new StubContacts(HitWithPicture("Jon Alpha", "jon.alpha@example.test"));
+
+		XDocument? response = await _harness.RunAsync(
+			new ResolveRecipientsHandler(NullLogger<ResolveRecipientsHandler>.Instance),
+			"ResolveRecipients",
+			new XDocument(new XElement(RR + "ResolveRecipients",
+				new XElement(RR + "To", "Jon"),
+				new XElement(RR + "Options",
+					new XElement(RR + "Picture",
+						new XElement(RR + "MaxSize", "0")),
+					new XElement(RR + "Availability",
+						new XElement(RR + "StartTime", "2026-07-28T00:00:00.000Z"),
+						new XElement(RR + "EndTime", "2026-07-29T00:00:00.000Z"))))));
+
+		XElement recipient = response!.Root!.Element(RR + "Response")!.Element(RR + "Recipient")!;
+		List<string> childNames = recipient.Elements().Select(e => e.Name.LocalName).ToList();
+
+		int availabilityIndex = childNames.IndexOf("Availability");
+		int pictureIndex = childNames.IndexOf("Picture");
+		Assert.True(availabilityIndex >= 0, "Availability must be present");
+		Assert.True(pictureIndex >= 0, "Picture must be present");
+		Assert.True(availabilityIndex < pictureIndex,
+			$"Availability (index {availabilityIndex}) must precede Picture (index {pictureIndex})");
+	}
+
 	private static IReadOnlyList<XElement> Hit(string display, string email)
 	{
 		return [new XElement(GAL + "DisplayName", display), new XElement(GAL + "EmailAddress", email)];
+	}
+
+	private static IReadOnlyList<XElement> HitWithPicture(string display, string email)
+	{
+		return
+		[
+			new XElement(GAL + "DisplayName", display),
+			new XElement(GAL + "EmailAddress", email),
+			new XElement(GAL + "Picture",
+				new XElement(GAL + "Status", "1"),
+				new XElement(GAL + "Data", Convert.ToBase64String("fake-photo-bytes"u8.ToArray())))
+		];
 	}
 
 	/// <summary>A GAL that answers each query with its own configured match set.</summary>
