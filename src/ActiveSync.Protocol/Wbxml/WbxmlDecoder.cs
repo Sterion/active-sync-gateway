@@ -44,8 +44,22 @@ public static class WbxmlDecoder
 	private const int MaxTextRuns = 200_000;
 	private const int MaxTextChars = 8 * 1024 * 1024;
 
+	// W21: the DEFAULT value on DecodeAsync's `maxBytes` parameter must itself be a compile-time
+	// constant (a C# language rule), so this private const carries the literal; the PUBLIC field
+	// below is a genuine `static readonly` built from it, not the const directly, so an external
+	// reader of MaxDocumentBytes (a plugin computing its own buffer sizing, say) resolves the
+	// host's current value at run time instead of baking in whatever value it saw at ITS build
+	// time.
+	private const int DefaultMaxDocumentBytes = 64 * 1024 * 1024;
+
 	/// <summary>Default ceiling for <see cref="DecodeAsync" />; matches Kestrel's request body limit.</summary>
-	public const int MaxDocumentBytes = 64 * 1024 * 1024;
+	// W21: this is a policy knob, not a frozen protocol constant (unlike EasFolderType/EasClass),
+	// so it is `static readonly` rather than `const` — a `const` is inlined into the consumer's IL
+	// at compile time, so a plugin built against contract 1.x would keep passing the OLD ceiling
+	// after the host raised it, appearing to report the host's current value while actually
+	// reporting its own build-time one (the same hazard AGENTS.md documents for
+	// ContractVersion.Major/Minor).
+	public static readonly int MaxDocumentBytes = DefaultMaxDocumentBytes;
 
 	/// <summary>
 	///   Buffers <paramref name="stream" /> and decodes it, refusing anything over
@@ -54,7 +68,7 @@ public static class WbxmlDecoder
 	///   is a memory-exhaustion primitive by itself — independent of what the bytes decode to.
 	/// </summary>
 	public static async Task<XDocument> DecodeAsync(
-		Stream stream, CancellationToken ct, int maxBytes = MaxDocumentBytes)
+		Stream stream, CancellationToken ct, int maxBytes = DefaultMaxDocumentBytes)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
 

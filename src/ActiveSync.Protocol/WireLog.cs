@@ -6,16 +6,28 @@ namespace ActiveSync.Protocol;
 /// <summary>
 ///   Helpers for the Verbose (Trace) wire-logging tier. Payload dumps are size-capped so a
 ///   large Sync response or MIME body cannot turn one log event into megabytes (the cap is
-///   deliberately a constant — wire logging is a debugging tool, not a tunable feature),
-///   and unsafe characters are neutralized so hostile content cannot smuggle terminal escape
-///   sequences or visually reorder a log line.
+///   deliberately fixed, not a config-settable tunable — wire logging is a debugging tool, not
+///   a tunable feature; see the W21 note on <see cref="MaxChars" /> for why it is nonetheless
+///   <c>static readonly</c> rather than <c>const</c>), and unsafe characters are neutralized so
+///   hostile content cannot smuggle terminal escape sequences or visually reorder a log line.
 /// </summary>
 public static class WireLog
 {
-	public const int MaxChars = 16 * 1024;
+	// W21: the DEFAULT value on Truncate/Payload's `max` parameter must itself be a compile-time
+	// constant (a C# language rule), so this private const carries the literal; the PUBLIC field
+	// below is a genuine `static readonly` built from it, not the const directly. MaxChars is a
+	// policy knob on a published MIT package (unlike EasFolderType/EasClass, genuinely frozen
+	// protocol constants, which stay `const`) — a `const` here is inlined into a plugin's IL at
+	// compile time, so raising it later would leave an already-built plugin still reading its own
+	// build-time value while appearing to read the host's current one (the same hazard AGENTS.md
+	// documents for ContractVersion.Major/Minor). This does not make the value config-settable —
+	// it is still fixed for the process lifetime — only readable live rather than baked in.
+	private const int DefaultMaxChars = 16 * 1024;
+
+	public static readonly int MaxChars = DefaultMaxChars;
 
 	/// <summary>Truncates a dump to <see cref="MaxChars" /> with an explicit marker.</summary>
-	public static string Truncate(string text, int max = MaxChars)
+	public static string Truncate(string text, int max = DefaultMaxChars)
 	{
 		// W11: without this, a negative max still throws — but as an accident of Range/Substring
 		// internals, naming ITS OWN "length" parameter rather than the "max" the caller actually
@@ -46,7 +58,7 @@ public static class WireLog
 	///     so whether they were sanitized on the way is unobservable.
 	///   </para>
 	/// </summary>
-	public static string Payload(string text, int max = MaxChars)
+	public static string Payload(string text, int max = DefaultMaxChars)
 	{
 		text = Truncate(text, max);
 		if (text.Any(static c => IsUnsafe(c, allowLineStructure: true)))

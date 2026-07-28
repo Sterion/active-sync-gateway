@@ -42,9 +42,11 @@ public sealed class ContractSurfaceTests
 	[Fact]
 	public void ContractVersion_IsTheExpectedSurfaceVersion()
 	{
-		// K9 (item 36): TransientRetry.DelaysMs retyped from int[] to ImmutableArray<int> so the
-		// shared retry backoff can no longer be rewritten process-wide by any caller/plugin.
-		Assert.Equal(new Version(1, 2), ContractVersion.Current);
+		// W16/W21 (item 37): WbxmlCodePages.Pages/Tokens/Reverse became genuinely immutable
+		// (FrozenDictionary/AsReadOnly instead of a castable-back List/Dictionary), and
+		// WbxmlDecoder.MaxDocumentBytes / WireLog.MaxChars became `static readonly` instead of
+		// `const` so a plugin cannot inline a policy knob's build-time value.
+		Assert.Equal(new Version(1, 3), ContractVersion.Current);
 	}
 
 	// K67: BackendItemNotFoundException derived straight from Exception, so the codebase-wide

@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Reflection;
 using System.Text;
 using System.Xml.Linq;
 using ActiveSync.Protocol.Wbxml;
@@ -280,5 +281,20 @@ public class WbxmlDecoderHardeningTests
 		{
 			ArrayPool<byte>.Shared.Return(rented);
 		}
+	}
+
+	// W21: MaxDocumentBytes is a policy knob (unlike EasFolderType/EasClass, which are genuinely
+	// frozen protocol constants), but it was declared `public const`, so a plugin built against
+	// contract 1.x — ActiveSync.Protocol is a published MIT package — has it INLINED into its own
+	// IL. If the host later raises the ceiling, the plugin keeps passing the OLD value wherever it
+	// reads WbxmlDecoder.MaxDocumentBytes as a `maxBytes` argument, while appearing (to a reader of
+	// the plugin's source) to report the host's current limit. AGENTS.md documents this exact
+	// hazard for ContractVersion.Major/Minor; this is the same hazard on a different member.
+	[Fact]
+	public void MaxDocumentBytes_IsNotAConstField()
+	{
+		FieldInfo field = typeof(WbxmlDecoder).GetField(nameof(WbxmlDecoder.MaxDocumentBytes))!;
+		Assert.False(field.IsLiteral, "MaxDocumentBytes is `const` — its value gets inlined into every external caller's IL.");
+		Assert.True(field.IsStatic && field.IsInitOnly, "Expected a `public static readonly` field.");
 	}
 }

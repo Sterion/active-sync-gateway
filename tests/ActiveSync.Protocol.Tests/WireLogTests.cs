@@ -133,6 +133,18 @@ public sealed class WireLogTests
 			Assert.DoesNotContain(char.ConvertFromUtf32(codePoint), source, StringComparison.Ordinal);
 	}
 
+	// W21: MaxChars is a policy knob, but it was declared `public const`, so a plugin built against
+	// contract 1.x — ActiveSync.Protocol is a published MIT package — has it INLINED into its own
+	// IL rather than reading the host's current value at run time (the same hazard AGENTS.md
+	// documents for ContractVersion.Major/Minor).
+	[Fact]
+	public void MaxChars_IsNotAConstField()
+	{
+		System.Reflection.FieldInfo field = typeof(WireLog).GetField(nameof(WireLog.MaxChars))!;
+		Assert.False(field.IsLiteral, "MaxChars is `const` — its value gets inlined into every external caller's IL.");
+		Assert.True(field.IsStatic && field.IsInitOnly, "Expected a `public static readonly` field.");
+	}
+
 	private static string FindRepoRoot()
 	{
 		DirectoryInfo? dir = new(AppContext.BaseDirectory);
