@@ -1,7 +1,14 @@
+using ActiveSync.Contracts;
+using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
+using ActiveSync.Core.Settings;
 using ActiveSync.Core.State;
 using ActiveSync.Server.Cli;
+using ActiveSync.Server.Setup;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console.Cli.Testing;
 
 namespace ActiveSync.Server.Tests;
@@ -286,5 +293,66 @@ public sealed class CliConfigTests : IDisposable
 
 		// A key imap does not describe stays settable: plugin providers may describe nothing.
 		Assert.Equal(0, Run("config", "set", "ActiveSync:Backends:MailStore:FutureKnob", "42").ExitCode);
+	}
+
+	// E13: `config set`'s confirmation echo masked a backend leaf purely by SettingKeys.Find's name
+	// heuristic (SecretRedaction.IsSecretName), while `config get`/`config list` already consult the
+	// assigned provider's own schema (BackendKeyValidator.IsSecretLeaf, B25). A plugin field declared
+	// BackendFieldType.Secret under a name the heuristic misses ("AuthBlob" — no in-repo provider has
+	// one, so none of imap/smtp/dav/sieve/local can reproduce this) was therefore echoed in the clear
+	// by `set` even though `get` masks it. Exercised through CliHostServices' warm-host seam (the same
+	// one E5-forwarded commands use) with a hand-built provider registry, rather than staging a whole
+	// plugin fixture assembly for one masking check.
+	[Fact]
+	public void Set_BackendLeaf_ConsultsProviderSchema_ForMasking_NotJustTheNameHeuristic()
+	{
+		IConfiguration fixtureConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:MailStore:Provider"] = "plug",
+		}).Build();
+
+		ServiceCollection services = new();
+		services.AddLogging();
+		services.AddSingleton(fixtureConfig);
+		services.AddSingleton<IConfiguration>(fixtureConfig);
+		services.AddOptions<ActiveSyncOptions>()
+			.Configure(o => o.Database.ConnectionString = $"Data Source={_dbPath}");
+		services.AddSyncDatabase("Sqlite");
+		services.AddSingleton<GlobalSettingStore>();
+		services.AddSingleton<IBackendProvider>(new SecretSchemaProvider());
+		services.AddSingleton<BackendProviderRegistry>();
+		using ServiceProvider hostProvider = services.BuildServiceProvider();
+
+		CliHostServices.Enter(hostProvider);
+		try
+		{
+			(int exit, _, string setOut) =
+				Run("config", "set", "ActiveSync:Backends:MailStore:AuthBlob", "shh-secret");
+			Assert.Equal(0, exit);
+			Assert.DoesNotContain("shh-secret", setOut);
+			Assert.Contains("***", setOut);
+		}
+		finally
+		{
+			CliHostServices.Enter(null);
+		}
+	}
+
+	/// <summary>A minimal provider whose only interesting surface is a Secret field the name heuristic would miss.</summary>
+	private sealed class SecretSchemaProvider : IBackendProvider
+	{
+		public string Name => "plug";
+		public IReadOnlySet<BackendRole> SupportedRoles { get; } = new HashSet<BackendRole> { BackendRole.MailStore };
+
+		public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role) =>
+		[
+			new BackendConfigField("AuthBlob", "Auth blob", BackendFieldType.Secret),
+		];
+
+		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures) { }
+		public string DescribeRole(BackendRole role, ProviderSettings settings) => "plug fixture";
+
+		public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct) =>
+			throw new NotSupportedException();
 	}
 }

@@ -252,7 +252,14 @@ internal sealed class ConfigSetCommand(IAnsiConsole terminal) : SettingsCommandB
 		}
 
 		await store.UpsertAsync(definition.Key, valueToStore, cancellationToken);
-		Terminal.WriteLine($"Set {definition.Key} = {Mask(definition, settings.Value)}. {PickupNote(definition.Restart)}");
+		// E13: a catalogue key carries its own Secret flag, but a backend leaf's secrecy is
+		// authoritative from its PROVIDER'S schema (B25) — SettingKeys.Find's Secret flag for a
+		// leaf is only ever the SecretRedaction name-heuristic fallback, exactly what `config
+		// get`/`config list` already refuse to rely on alone via BackendKeyValidator.IsSecretLeaf.
+		bool secret = SettingKeys.IsCatalogueKey(definition.Key)
+			? definition.Secret
+			: BackendKeyValidator.IsSecretLeaf(Registry, effective, definition.Key);
+		Terminal.WriteLine($"Set {definition.Key} = {Mask(secret, settings.Value)}. {PickupNote(definition.Restart)}");
 		return 0;
 	}
 }
