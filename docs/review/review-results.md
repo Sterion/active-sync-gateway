@@ -1857,3 +1857,74 @@ commit" is not the same as "proves nothing".
   grant cannot leak into a published package — I verified that rather than assuming.
 - **`D27` closes a genuine operational trap**: a rotated CA bundle at the same path was cached forever;
   the cache now keys on `(path, lastWriteUtc, length)`, mirroring `BackendSettingsValidation.CaCache`.
+
+## Item 35 — Hosting, CLI & backend nits
+**Findings:** `E9` `E12` `E13` `E15` `E16` `E21` `E22` `E23` `G8` `G11` `G14` `G15` `G25` `G27` `G28` `G29`
+**Commits:** `b02db79` (E9) · `87fc2f6` (E12) · `97e1c5d` (E13) · `27ca4b8` (E15) · `540037d` (E16) ·
+`98d74d5` (E21) · `b08bbfb` (E22) · `f88146d` (E23) · `83f8243` (G8) · `0efb39c` (G11) · `1018f59` (G14) ·
+`97875ed` (G15) · `07810bb` (G25) · `3120d14` (G27) · `8f3473d` (G28) · `318b121` (G29)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 36 ✓ · one commit per finding, strike shipped with every one ✓ · build 0 warnings ✓ ·
+unit **1550 passed, 0 failed** (Cli 18 · Protocol 108 · Core 943 · WebUi 123 · Server 358) ✓ ·
+live **152 passed, 0 skipped** ✓
+
+**This item was run twice.** The first attempt was killed by orchestrator error — see the incident note
+below. It landed **no commits**; its uncommitted work was discarded and a false `E9` strike reverted, so
+this entry covers a single clean run from `e8883f8`.
+
+**Red-first re-proved independently for 11 of 16**: reversal of 14 commits gave 11 failures
+(`E12`, `E13`, `E16` ×2, `E22`, `E23` ×2, `G11`, `G27`, `G28`, `G29`), and **`G14` was re-proved live**
+(`ListFoldersAsync_ListCommandCount_DoesNotScaleWithFolderCount` → expected 82, actual 88 LIST commands).
+The five absentees are all expected: `G8`/`G25` are dead-code deletions, `E21` is doc-only, `G15` is
+coverage, and `E9`/`E15` were proved by **compile failure** (each adds a member that did not exist), which
+is the weaker form but has precedent in this programme (`K1`, `K19`) — reversing them stops the test
+assembly compiling, so no runtime red exists to reproduce.
+
+**Notes:**
+- **`G8` deletes a configuration key outright.** `ActiveSync:Backends:MailStore:PathSeparator` is gone —
+  property, schema field and doc row. An existing config carrying it is now an unrecognised setting. The
+  finding offered "delete or implement"; the worker deleted, on the grounds it had been flagged twice
+  before (round 1 `D8`, round 2 `D19`) and never had a consumer. Reasonable, but this is the item's one
+  genuinely operator-visible break.
+- **`E16` rewrote a pre-existing test that asserted the wrong behaviour.** `X-Forwarded-Proto` chains now
+  take the LAST entry; `PublicSchemeTests.ForwardedProto_ChainTakesTheFirst` encoded the old semantics and
+  became `...TakesTheLast`. That is the protocol's "rewrite it and call it out" case and the worker did
+  call it out — both it and the Autodiscover equivalent go red under reversal, so the new expectation is
+  genuinely load-bearing.
+- **`G15` is coverage, and the reason is environmental**: Stalwart advertises SPECIAL-USE, so the expensive
+  no-SPECIAL-USE fallback the finding is about is never exercised on this stack — the LIST-count assertion
+  is identical fixed or unfixed. The test still pins real functional behaviour (two deletes route to Trash).
+  A stack without SPECIAL-USE would be needed to prove it.
+- **`G14`'s test asserts constant cost, not "exactly one LIST".** MailKit's `GetFoldersAsync` issues a
+  small fixed number of LISTs of its own (INBOX probe + SPECIAL-USE pre-scan) on top of the full-tree LIST;
+  the worker corrected an initial "exactly 1" assertion before landing. The property that matters — cost
+  does not scale with folder count — is what is pinned.
+- **`E21` deliberately left its finding's optional half undone**: the shield's own `LogError` was NOT
+  downgraded to `LogDebug`, because `UnhandledExceptionShieldTests.UnhandledException_IsLogged` asserts
+  that line is visible at Error. Disclosed rather than silently dropped.
+
+### Incident — orchestrator error during item 35 (first attempt)
+Recorded because it nearly corrupted the cursor and it is the kind of mistake the protocol exists to catch.
+
+Three runaway `find /` processes (a recurring Windows trap, now documented in `review-items.md`'s
+environment gotchas, commit `e8883f8`) were consuming CPU. While clearing them I called `TaskList`, got
+"No tasks found", and treated that as proof the item 35 worker was dead. It was not — it was mid-flight.
+On that false premise I (a) ran `git checkout -- .`, destroying its in-progress `E9` work, and (b) spawned
+a SECOND worker on the same item, briefly running two agents on one branch — the collision the protocol
+forbids outright. The live worker then staged its `E9` strike, leaving **`E9` struck with no `E9` fix in
+the tree**: a cursor that lies, which would have made a later resume skip `E9` permanently.
+
+Caught by the human, not by me. Both agents stopped, the false strike reverted, the tree returned to
+`e8883f8` clean, and no commits from either attempt reached history.
+
+**Two signals were available and I discounted both:** the human's own screen showed the agent Running, and
+the working tree held uncommitted edits to exactly the files of `E9`, the item's FIRST finding — live work
+in progress, which I relabelled "leftovers from a dead worker" because it fitted the conclusion I had
+already drawn.
+
+**What is actually reliable:** an agent is finished when its **completion notification arrives** — nothing
+else. `TaskList` returned "No tasks found" for a live agent, and output-file mtime is no better (this
+run's file was last written 4111 s ago while the agent ran 4083 s, i.e. written once near the start).
+**Rule for any future orchestrator: never mutate the working tree — `checkout`, `reset`, `stash` — and
+never spawn a worker for an item, while that item's completion notification has not arrived. Contradicting
+evidence means stop and ask, not pick the convenient signal.**
