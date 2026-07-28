@@ -36,13 +36,13 @@ public abstract class ComposeMailHandlerBase(
 			(string to, string subject) = await PeekHeadersAsync(request?.Mime, ct);
 			logger.LogInformation("Read-only: rejecting {Command} from {User}: to {To}, subject {Subject}",
 				Command, context.UserName, to, subject);
-			await WriteErrorAsync(context, "120"); // mail submission failed
+			await WriteErrorAsync(context, "120", request); // mail submission failed
 			return;
 		}
 
 		if (request is null)
 		{
-			await WriteErrorAsync(context, "103"); // invalid XML: the request itself did not parse
+			await WriteErrorAsync(context, "103", request); // invalid XML: the request itself did not parse
 			return;
 		}
 
@@ -52,7 +52,7 @@ public abstract class ComposeMailHandlerBase(
 		// empty/invalid MIME submission (F19: MS-ASCMD common status 107, not 103).
 		if (request.Mime.Length == 0 && request.Forwardees.Count == 0 && request.SourceItemId is null)
 		{
-			await WriteErrorAsync(context, "107"); // invalid MIME
+			await WriteErrorAsync(context, "107", request); // invalid MIME
 			return;
 		}
 
@@ -69,7 +69,7 @@ public abstract class ComposeMailHandlerBase(
 		{
 			logger.LogError(ex, "{Command}: building the outgoing message failed for {User}",
 				Command, context.UserName);
-			await WriteErrorAsync(context, "120"); // mail submission failed
+			await WriteErrorAsync(context, "120", request); // mail submission failed
 			return;
 		}
 
@@ -81,13 +81,13 @@ public abstract class ComposeMailHandlerBase(
 			logger.LogWarning(
 				"{Command} for {User}: the referenced source item could not be resolved; not sending a degraded message",
 				Command, context.UserName);
-			await WriteErrorAsync(context, "150"); // MS-ASCMD: the referenced original item was not found
+			await WriteErrorAsync(context, "150", request); // MS-ASCMD: the referenced original item was not found
 			return;
 		}
 
 		if (outgoing.Length == 0)
 		{
-			await WriteErrorAsync(context, "107"); // F19: empty MIME, not an XML problem
+			await WriteErrorAsync(context, "107", request); // F19: empty MIME, not an XML problem
 			return;
 		}
 
@@ -115,7 +115,7 @@ public abstract class ComposeMailHandlerBase(
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
 			logger.LogError(ex, "{Command} failed for {User}", Command, context.UserName);
-			await WriteErrorAsync(context, "120"); // mail submission failed
+			await WriteErrorAsync(context, "120", request); // mail submission failed
 			return;
 		}
 
@@ -195,9 +195,12 @@ public abstract class ComposeMailHandlerBase(
 				context.Parameters.SaveInSent,
 				false,
 				context.Parameters.CollectionId,
-				context.Parameters.ItemId);
-			// 12.x carries no ClientId anywhere (options ride the query string) — the record's
-			// ClientId stays null, so the F1 dedup guard above always falls through to a real send.
+				context.Parameters.ItemId,
+				[],
+				// 12.x carries no ClientId anywhere (options ride the query string) — the record's
+				// ClientId stays null, so the F1 dedup guard above always falls through to a real send.
+				null,
+				IsRawForm: true);
 		}
 
 		XDocument? doc = await context.ReadRequestAsync();
@@ -254,8 +257,23 @@ public abstract class ComposeMailHandlerBase(
 		}
 	}
 
-	private async Task WriteErrorAsync(EasContext context, string status)
+	private async Task WriteErrorAsync(EasContext context, string status, ComposeRequest? request)
 	{
+		// F26: the 12.x raw message/rfc822 form has no ComposeMail WBXML response shape at all —
+		// MS-ASHTTP defines success as an empty 200 and failures as HTTP status codes for that form.
+		// A null request (the request itself failed to parse) never reaches here as a raw form —
+		// ParseAsync's 12.x branch always returns a non-null ComposeRequest.
+		if (request?.IsRawForm == true)
+		{
+			context.Http.Response.StatusCode = status switch
+			{
+				"103" or "107" => StatusCodes.Status400BadRequest, // malformed / empty MIME
+				"150" => StatusCodes.Status404NotFound, // referenced source item not found
+				_ => StatusCodes.Status500InternalServerError // mail submission failed, etc.
+			};
+			return;
+		}
+
 		await context.WriteResponseAsync(new XDocument(
 			new XElement(CM + Command, new XElement(CM + "Status", status))));
 	}
@@ -295,7 +313,11 @@ public abstract class ComposeMailHandlerBase(
 		IReadOnlyList<(string Name, string Email)> Forwardees,
 		// F1: null on the 12.x raw wire form (which carries no ClientId anywhere) — the dedup guard
 		// in HandleAsync always falls through to a real send in that case.
-		string? ClientId = null)
+		string? ClientId = null,
+		// F26: true for the 12.x raw message/rfc822 form. MS-ASHTTP defines that form's errors as
+		// HTTP status codes with no body — WriteErrorAsync must not write a 14.x/16.x ComposeMail
+		// WBXML response for it.
+		bool IsRawForm = false)
 	{
 		public ComposeRequest(
 			byte[] mime, bool saveInSent, bool replaceMime, string? sourceFolderId, string? sourceItemId)
