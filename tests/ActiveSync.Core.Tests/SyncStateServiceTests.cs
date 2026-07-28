@@ -336,6 +336,31 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task RefreshFolderRegistry_DuplicateBackendKey_DedupesInsteadOfPermanentlyFailing()
+	{
+		// A9: a duplicate BackendKey in one store's listing (a plugin bug, or a misbehaving store)
+		// used to take the insert branch twice — byKey is built once at the top of the loop, so
+		// the second occurrence of the SAME key is never recognised as "already staged" — tripping
+		// the unique index on every one of the four retry attempts identically, so the LAST
+		// attempt's DbUpdateException escaped uncaught and every FolderSync for this user 500s
+		// until the backend stops emitting the duplicate. Deduping (keeping the first occurrence)
+		// must make this a no-op instead.
+		Device device = await _service.GetOrCreateDeviceAsync(
+			await UserAsync("u@a9dup"), "DEV1", "Phone", CancellationToken.None);
+		List<BackendFolder> folders =
+		[
+			new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
+			new BackendFolder("imap:INBOX", "Inbox (duplicate)", null, 2, "Email"),
+		];
+
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(
+			await UserAsync("u@a9dup"), folders, CancellationToken.None);
+
+		UserFolder kept = Assert.Single(registry);
+		Assert.Equal("Inbox", kept.DisplayName); // first occurrence wins
+	}
+
+	[Fact]
 	public async Task FolderDiff_ReportsAddsUpdatesDeletes()
 	{
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@x"), "DEV1", "Phone", CancellationToken.None);

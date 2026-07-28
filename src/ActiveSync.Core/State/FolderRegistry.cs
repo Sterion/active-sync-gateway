@@ -1,6 +1,7 @@
 using ActiveSync.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Core.State;
 
@@ -9,7 +10,7 @@ namespace ActiveSync.Core.State;
 ///   diff against each device's acknowledged view. One of the collaborators composed by
 ///   <see cref="SyncStateService" />, sharing its request-scoped <see cref="SyncDbContext" />.
 /// </summary>
-internal sealed class FolderRegistry(SyncDbContext db)
+internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>? logger = null)
 {
 	/// <summary>
 	///   Reconciles the per-user folder registry with the folders currently reported by the
@@ -18,6 +19,19 @@ internal sealed class FolderRegistry(SyncDbContext db)
 	public async Task<List<UserFolder>> RefreshFolderRegistryAsync(
 		int userId, IReadOnlyList<BackendFolder> backendFolders, CancellationToken ct)
 	{
+		// A9: a duplicate BackendKey from any store (a plugin, or a store bug) would otherwise
+		// take the insert branch twice below and trip the unique index on every attempt — the
+		// retry loop re-reads but the rolled-back insert is still absent, so all four attempts
+		// fail identically and every FolderSync for this user 500s until the backend stops
+		// emitting the duplicate. Dedupe first, keeping the first occurrence, and log so the
+		// offending store is diagnosable rather than silently dropping folders forever.
+		List<BackendFolder> deduped = backendFolders.DistinctBy(f => f.BackendKey, StringComparer.Ordinal).ToList();
+		if (deduped.Count != backendFolders.Count)
+			logger?.LogWarning(
+				"Backend folder listing for user {UserId} contained duplicate BackendKey values; " +
+				"keeping the first occurrence of each and dropping the rest", userId);
+		backendFolders = deduped;
+
 		// The registry is per-user and shared across devices, so two devices' first sync can
 		// race to insert the same (UserId, BackendKey). On a unique-constraint failure,
 		// re-read (the concurrent inserts are now visible, so they reconcile as updates) and

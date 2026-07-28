@@ -1,5 +1,6 @@
 using ActiveSync.Contracts;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Core.State;
 
@@ -76,10 +77,11 @@ public sealed record FolderHierarchyDiff(
 ///     fields (last-seen, cached request shape, policy key).
 ///   </para>
 /// </summary>
-public sealed class SyncStateService(SyncDbContext db, ISyncDbContextFactory? dbContextFactory = null)
+public sealed class SyncStateService(
+	SyncDbContext db, ISyncDbContextFactory? dbContextFactory = null, ILogger<SyncStateService>? logger = null)
 {
 	private readonly DeviceStore _devices = new(db);
-	private readonly FolderRegistry _folders = new(db);
+	private readonly FolderRegistry _folders = new(db, logger);
 	private readonly CollectionStateStore _collections = new(db);
 	private readonly DavItemMap _davItems = new(db, dbContextFactory);
 	private readonly SendDedupStore _sendDedup = new(db, dbContextFactory);
