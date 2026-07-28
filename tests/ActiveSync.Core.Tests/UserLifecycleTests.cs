@@ -172,6 +172,31 @@ public sealed class UserLifecycleTests : IDisposable
 	}
 
 	[Fact]
+	public async Task CountDeletionImpact_IncludesOofSettingsAndWebSessionRevocations()
+	{
+		// B18: OofSetting and WebSessionRevocation both carry a UserId FK with cascade delete —
+		// the same shape as the other rows already counted (devices, folders, collection states,
+		// shared-calendar grants, device blocks) — but were silently absent from the operator's
+		// "what will be lost" summary, understating the impact.
+		int userId = await SeedAsync("anna", contacts: 0, notes: 0);
+		await using (SyncDbContext db = _factory.CreateDbContext())
+		{
+#pragma warning disable VSTHRD103
+			db.OofSettings.Add(new OofSetting { UserId = userId, State = 1, Message = "away", UpdatedUtc = DateTime.UtcNow });
+			db.WebSessionRevocations.Add(new WebSessionRevocation { UserId = userId, ValidAfterUtc = DateTime.UtcNow });
+#pragma warning restore VSTHRD103
+			await db.SaveChangesAsync();
+		}
+
+		DeviceAdminService devices = new(_factory, _store);
+		DeviceAdminService.DeletionImpact impact =
+			await devices.CountDeletionImpactAsync("anna", null, CancellationToken.None);
+
+		Assert.Equal(1, impact.SyncState.Single(c => c.Table == "oof settings").Count);
+		Assert.Equal(1, impact.SyncState.Single(c => c.Table == "web session revocations").Count);
+	}
+
+	[Fact]
 	public async Task CountDeletionImpact_OfAContentlessUser_SaysNothingIsAtRisk()
 	{
 		await SeedAsync("bob", contacts: 0, notes: 0);

@@ -186,10 +186,20 @@ public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, Use
 	}
 
 	/// <summary>
-	///   Delete all gateway SYNC state for a user, or a single device's state when
-	///   <paramref name="deviceId" /> is set. Children are counted before ON DELETE CASCADE removes
-	///   them. The user's identity row itself survives — purging state is not deleting the user.
-	///   Returns one row per affected table (Devices first) so the caller can report it.
+	///   Delete gateway state for a user, or a single device's state when <paramref name="deviceId" />
+	///   is set. Children are counted before ON DELETE CASCADE removes them. The user's identity row
+	///   itself survives — purging is not deleting the user. Returns one row per affected table
+	///   (Devices first) so the caller can report it.
+	///   <para>
+	///     B16: the DEVICE-scoped form (<paramref name="deviceId" /> set) really is reclaimable sync
+	///     state only. The USER-scoped form (<paramref name="deviceId" /> null) is NOT — it also
+	///     deletes every <see cref="LocalItem" /> the user owns (contacts/calendar/tasks/notes
+	///     content, which in a local-stores deployment exists nowhere else) via
+	///     <c>db.LocalItems...ExecuteDeleteAsync</c> below. Both callers already gate the user-scoped
+	///     form on <see cref="CountDeletionImpactAsync" /> plus operator confirmation
+	///     (<c>PurgeCommands.cs</c>, <c>DevicesEndpoints.cs</c>) — do not add a third caller of the
+	///     user-scoped form without the same guard.
+	///   </para>
 	/// </summary>
 	public async Task<IReadOnlyList<PurgeCount>> PurgeAsync(string user, string? deviceId, CancellationToken ct)
 	{
@@ -299,6 +309,13 @@ public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, Use
 				.CountAsync(g => g.UserId == userId, ct).ConfigureAwait(false)),
 			new PurgeCount("device blocks", await db.LoginBlocks
 				.CountAsync(b => b.Device.UserId == userId, ct).ConfigureAwait(false)),
+			// B18: OofSetting and WebSessionRevocation both carry a UserId FK with cascade delete,
+			// the same shape as every other row counted above — they were silently absent, which
+			// understated what the operator's confirmation prompt claims to be the full impact.
+			new PurgeCount("oof settings", await db.OofSettings
+				.CountAsync(o => o.UserId == userId, ct).ConfigureAwait(false)),
+			new PurgeCount("web session revocations", await db.WebSessionRevocations
+				.CountAsync(w => w.UserId == userId, ct).ConfigureAwait(false)),
 		]);
 	}
 
