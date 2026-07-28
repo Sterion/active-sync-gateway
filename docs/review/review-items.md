@@ -420,7 +420,7 @@ work. Every finding ID appears in exactly one item.
 ## Phase 4 — Structure, docs and cleanup
 *By area. Safe to reorder or skip; nothing else depends on these.*
 
-**32. Structural & schema documentation** — ~~`S1`~~ ~~`S2`~~ ~~`A11`~~ ~~`A12`~~ ~~`A13`~~ ~~`B9`~~ ~~`B10`~~ `B19`
+**32. Structural & schema documentation** — ~~`S1`~~ ~~`S2`~~ ~~`A11`~~ ~~`A12`~~ ~~`A13`~~ ~~`B9`~~ ~~`B10`~~ ~~`B19`~~ **COMPLETE**
 > `S1` AGENTS.md's dependency table says `Backends.Common` depends on Core; it does not, and an enforced test
 > asserts the opposite — a contributor following the document gets a red build. `A11` the per-user-scoping
 > entity list contradicts the schema it documents (names `LoginBlock`, omits `UserBackendRole`, still cites

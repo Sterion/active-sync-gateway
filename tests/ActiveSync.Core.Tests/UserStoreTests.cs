@@ -269,22 +269,18 @@ public sealed class UserStoreTests : IDisposable
 		// Item 6: an edit must record only DEVIATIONS. Starting from a copy of the config entry
 		// (which is what a whole-entry-replacement world needed) would freeze every config value
 		// as a database override, so a later configuration change would stop reaching the user.
-		ActiveSyncOptions options = new()
-		{
-			// Ordinal comparer, exactly what ConfigurationBinder produces.
-			Users = new Dictionary<string, UserOptions> { ["phone1"] = new() { MailAddress = "config@x" } },
-		};
-
+		// B19: the method takes no ActiveSyncOptions at all -- it never consulted config, so there
+		// is nothing here that could copy one.
 		UserOptions fresh = await UserEditing.LoadStartingEntryAsync(
-			_store, options, "PHONE1", CancellationToken.None);
+			_store, "PHONE1", CancellationToken.None);
 		Assert.Null(fresh.MailAddress);
 
 		// An existing database declaration IS the starting point, matched case-insensitively (B8).
 		await _store.UpsertAsync("phone1", new UserOptions { Admin = true }, CancellationToken.None);
 		UserOptions existing = await UserEditing.LoadStartingEntryAsync(
-			_store, options, "PHONE1", CancellationToken.None);
+			_store, "PHONE1", CancellationToken.None);
 		Assert.True(existing.Admin);
-		Assert.Null(existing.MailAddress);   // still config's to supply
+		Assert.Null(existing.MailAddress);
 	}
 
 	[Fact]

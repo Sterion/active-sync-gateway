@@ -350,7 +350,7 @@ internal static class UsersEndpoints
 		IOptionsMonitor<ActiveSyncOptions> options, CancellationToken ct)
 	{
 		ActiveSyncOptions current = options.CurrentValue;
-		UserOptions entry = await UserEditing.LoadStartingEntryAsync(store, current, login, ct);
+		UserOptions entry = await UserEditing.LoadStartingEntryAsync(store, login, ct);
 		if (await LastAdminProblemAsync(resolver, login, enable && entry.Admin == true, ct) is { } conflict)
 			return conflict;
 		entry.Enabled = enable ? null : false;

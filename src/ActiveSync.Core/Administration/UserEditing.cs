@@ -27,7 +27,7 @@ internal static class UserEditing
 
 	/// <summary>The database declaration, else a fresh empty one (never a copy of config).</summary>
 	internal static async Task<UserOptions> LoadStartingEntryAsync(
-		UserStore store, ActiveSyncOptions options, string login, CancellationToken ct)
+		UserStore store, string login, CancellationToken ct)
 	{
 		return await store.GetAsync(login, ct).ConfigureAwait(false) ?? new UserOptions();
 	}

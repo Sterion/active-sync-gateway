@@ -48,9 +48,9 @@ internal abstract class UserCommandBase<TSettings>(IAnsiConsole terminal) : Data
 
 	/// <summary>The database declaration, else a fresh one (never a copy of config — item 6).</summary>
 	protected static Task<UserOptions> LoadStartingEntryAsync(
-		UserStore store, ActiveSyncOptions options, string login, CancellationToken ct)
+		UserStore store, string login, CancellationToken ct)
 	{
-		return UserEditing.LoadStartingEntryAsync(store, options, login, ct);
+		return UserEditing.LoadStartingEntryAsync(store, login, ct);
 	}
 
 	/// <summary>Validates, saves and reports; refuses invalid entries with config-grade messages.</summary>
@@ -343,7 +343,7 @@ internal sealed class UserDisableCommand(IAnsiConsole terminal) : UserCommandBas
 	protected override async Task<int> RunAsync(
 		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
-		UserOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+		UserOptions entry = await LoadStartingEntryAsync(store, settings.Login, cancellationToken);
 		entry.Enabled = false;
 		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 	}
@@ -362,7 +362,7 @@ internal sealed class UserEnableCommand(IAnsiConsole terminal) : UserCommandBase
 		UserStore store, ActiveSyncOptions options, Settings settings, CancellationToken cancellationToken)
 	{
 		// Enabled is the default, so re-enabling clears the flag rather than storing an explicit true.
-		UserOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+		UserOptions entry = await LoadStartingEntryAsync(store, settings.Login, cancellationToken);
 		entry.Enabled = null;
 		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 	}
@@ -408,7 +408,7 @@ internal sealed class UserSetCommand(IAnsiConsole terminal) : UserCommandBase<Us
 			return 1;
 		}
 
-		UserOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+		UserOptions entry = await LoadStartingEntryAsync(store, settings.Login, cancellationToken);
 		field.Set(entry, value);
 		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 	}
@@ -472,7 +472,7 @@ internal sealed class UserUnsetCommand(IAnsiConsole terminal) : UserCommandBase<
 			return 1;
 		}
 
-		UserOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+		UserOptions entry = await LoadStartingEntryAsync(store, settings.Login, cancellationToken);
 		field.Set(entry, null);
 		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 	}
@@ -505,7 +505,7 @@ internal sealed class UserPasswordCommand(IAnsiConsole terminal)
 			return 1;
 		}
 
-		UserOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+		UserOptions entry = await LoadStartingEntryAsync(store, settings.Login, cancellationToken);
 		entry.Password = prepared.Value;
 		return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 	}
@@ -557,7 +557,7 @@ internal sealed class UserSecretCommand(IAnsiConsole terminal)
 			}
 
 			string sealedValue = SecretValue.Seal(secret, key);
-			UserOptions entry = await LoadStartingEntryAsync(store, options, settings.Login, cancellationToken);
+			UserOptions entry = await LoadStartingEntryAsync(store, settings.Login, cancellationToken);
 			field.Set(entry, sealedValue);
 			return await ValidateAndSaveAsync(store, options, settings.Login, entry, cancellationToken);
 		}

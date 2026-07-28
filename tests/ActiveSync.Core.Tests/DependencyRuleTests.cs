@@ -211,6 +211,22 @@ public sealed class DependencyRuleTests
 		Assert.False(anyBeforeNamespace, $"{file}: CS0618 is disabled ahead of the namespace declaration (file-wide).");
 	}
 
+	// B19: UserEditing.LoadStartingEntryAsync carried an ActiveSyncOptions parameter left over from
+	// the deleted config-cloning behaviour (deviation 2/item 6) -- every caller still threads an
+	// ActiveSyncOptions through it for nothing, which reads as "config is consulted here" when it
+	// is not. This pins the signature clean.
+	[Fact]
+	public void LoadStartingEntryAsync_DoesNotTakeAnUnusedOptionsParameter()
+	{
+		System.Reflection.MethodInfo method = typeof(ActiveSync.Core.Accounts.UserStore).Assembly
+			.GetType("ActiveSync.Core.Administration.UserEditing")!
+			.GetMethod("LoadStartingEntryAsync",
+				System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+
+		Assert.DoesNotContain(method.GetParameters(),
+			p => p.ParameterType == typeof(ActiveSync.Core.Options.ActiveSyncOptions));
+	}
+
 	private static string FindRepoRoot()
 	{
 		DirectoryInfo? dir = new(AppContext.BaseDirectory);

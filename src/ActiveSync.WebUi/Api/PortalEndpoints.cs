@@ -163,7 +163,7 @@ internal static class PortalEndpoints
 
 			throttle.RecordSuccess(throttleKey);
 			ActiveSyncOptions current = options.CurrentValue;
-			UserOptions entry = await UserEditing.LoadStartingEntryAsync(store, current, login, ct);
+			UserOptions entry = await UserEditing.LoadStartingEntryAsync(store, login, ct);
 			// C6: go through the ONE shared gateway-password policy (strength floor, empty/sealed
 			// rejection) instead of hashing directly, so the portal cannot set a weaker password
 			// than the CLI or admin API would accept. Stored as a pbkdf2$ hash, decoupling the
@@ -201,7 +201,7 @@ internal static class PortalEndpoints
 				return roleError!;
 
 			ActiveSyncOptions current = options.CurrentValue;
-			UserOptions entry = await UserEditing.LoadStartingEntryAsync(store, current, login, ct);
+			UserOptions entry = await UserEditing.LoadStartingEntryAsync(store, login, ct);
 			entry.Backends ??= new Dictionary<string, BackendRoleOverride>(StringComparer.OrdinalIgnoreCase);
 			if (!entry.Backends.TryGetValue(role.ToString(), out BackendRoleOverride? @override))
 				entry.Backends[role.ToString()] = @override = new BackendRoleOverride();
