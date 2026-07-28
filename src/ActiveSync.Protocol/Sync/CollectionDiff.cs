@@ -7,6 +7,14 @@ namespace ActiveSync.Protocol.Sync;
 
 public sealed record ItemChange(string ServerId, string Revision);
 
+/// <summary>
+///   <see cref="NewSnapshot" /> is deliberately a mutable <see cref="Dictionary{TKey, TValue}" />,
+///   not <see cref="IReadOnlyList{T}" /> like its siblings — callers (e.g. the sync handler's echo
+///   suppression) patch it in place before persisting. It is always keyed with
+///   <see cref="StringComparer.Ordinal" />, regardless of what comparer either input to
+///   <see cref="CollectionDiff.Compute" /> used (W17) — do not rely on any other comparer surviving
+///   into it.
+/// </summary>
 public sealed record CollectionChanges(
 	IReadOnlyList<ItemChange> Adds,
 	IReadOnlyList<ItemChange> Changes,
@@ -23,11 +31,24 @@ public sealed record CollectionChanges(
 /// </summary>
 public static class CollectionDiff
 {
+	/// <param name="snapshot">
+	///   The previously-acknowledged id → revision map. Ids are always compared with
+	///   <see cref="StringComparer.Ordinal" /> regardless of the comparer the supplied dictionary
+	///   happens to use — a non-ordinal comparer here would make id lookups agree with
+	///   <paramref name="current" /> but disagree with the persisted <see cref="CollectionChanges.NewSnapshot" />
+	///   (itself always ordinal), which forks one logical item into two permanent entries across
+	///   rounds (W17). Normalized internally; callers do not need to pre-normalize, but should not
+	///   rely on any other comparer's semantics (e.g. case-insensitivity) being honored.
+	/// </param>
+	/// <param name="current">The backend's current id → revision map. Same comparer note as <paramref name="snapshot" />.</param>
 	public static CollectionChanges Compute(
 		IReadOnlyDictionary<string, string> snapshot,
 		IReadOnlyDictionary<string, string> current,
 		int windowSize)
 	{
+		snapshot = AsOrdinal(snapshot);
+		current = AsOrdinal(current);
+
 		List<ItemChange> adds = new();
 		List<ItemChange> changes = new();
 		List<string> deletes = new();
@@ -116,5 +137,19 @@ public static class CollectionDiff
 		if (aNumeric != bNumeric)
 			return aNumeric ? -1 : 1;
 		return string.CompareOrdinal(a, b);
+	}
+
+	/// <summary>
+	///   Normalizes to an ordinal-keyed dictionary so every lookup in <see cref="Compute" /> and
+	///   the persisted <see cref="CollectionChanges.NewSnapshot" /> agree on comparer, regardless
+	///   of what the caller happened to pass (W17). A dictionary already keyed on
+	///   <see cref="StringComparer.Ordinal" /> is returned as-is to avoid the copy.
+	/// </summary>
+	private static IReadOnlyDictionary<string, string> AsOrdinal(IReadOnlyDictionary<string, string> source)
+	{
+		return source is Dictionary<string, string> { Comparer: StringComparer comparer } dictionary
+		       && ReferenceEquals(comparer, StringComparer.Ordinal)
+			? dictionary
+			: new Dictionary<string, string>(source, StringComparer.Ordinal);
 	}
 }

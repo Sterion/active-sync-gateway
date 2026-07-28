@@ -156,4 +156,32 @@ public class CollectionDiffTests
 		// And the numeric ids must still sort as a block ahead of the non-numeric one.
 		Assert.Equal(["9", "10", "1a"], orderA);
 	}
+
+	[Fact]
+	public void CallerSuppliedCaseInsensitiveComparer_DoesNotForkTheSnapshot()
+	{
+		// W17: Compute reads membership via snapshot.TryGetValue/current.ContainsKey using EACH
+		// dictionary's OWN comparer, then always materializes NewSnapshot with
+		// StringComparer.Ordinal -- so a caller passing an OrdinalIgnoreCase map gets a diff
+		// computed case-insensitively but a snapshot persisted case-sensitively.
+		//
+		// Round 1: "ABC" is genuinely new -- one Add, one snapshot entry.
+		Dictionary<string, string> round1Current = new(StringComparer.OrdinalIgnoreCase) { ["ABC"] = "r1" };
+		CollectionChanges round1 = CollectionDiff.Compute(Map(), round1Current, 100);
+		Assert.Single(round1.Adds);
+		Assert.Single(round1.NewSnapshot);
+
+		// Round 2: the backend hands the SAME item back with different casing (same revision) --
+		// under the OrdinalIgnoreCase comparer the caller consistently uses, this is the same
+		// logical item, not a new one.
+		Dictionary<string, string> round2Current = new(StringComparer.OrdinalIgnoreCase) { ["abc"] = "r1" };
+		CollectionChanges round2 = CollectionDiff.Compute(round1.NewSnapshot, round2Current, 100);
+
+		// The persisted snapshot must never fork into two entries ("ABC" AND "abc") for one
+		// logical item -- either it is recognized as unchanged (0 adds, 0 deletes) or, if the
+		// engine deliberately treats every id ordinally throughout, it is a clean delete-of-old
+		// plus add-of-new. What must not happen is the OLD entry surviving un-deleted while a
+		// SECOND entry is added alongside it.
+		Assert.Single(round2.NewSnapshot);
+	}
 }
