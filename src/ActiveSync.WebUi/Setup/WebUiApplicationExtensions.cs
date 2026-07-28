@@ -76,6 +76,9 @@ public static class WebUiApplicationExtensions
 					"base-uri 'none'; form-action 'self'; object-src 'none'";
 				context.Response.Headers.XFrameOptions = "DENY";
 				context.Response.Headers["Referrer-Policy"] = "no-referrer";
+				// C22: cheap defence-in-depth for the JSON API + static-module SPA — stops a
+				// browser second-guessing a response's declared content type.
+				context.Response.Headers.XContentTypeOptions = "nosniff";
 				return Task.CompletedTask;
 			});
 			await next();

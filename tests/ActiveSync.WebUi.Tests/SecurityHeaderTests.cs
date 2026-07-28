@@ -31,4 +31,22 @@ public sealed class SecurityHeaderTests
 		Assert.Contains("form-action 'self'", csp, StringComparison.Ordinal);
 		Assert.Contains("object-src 'none'", csp, StringComparison.Ordinal);
 	}
+
+	// C22 (round 3) — the UI prefixes set CSP, X-Frame-Options and Referrer-Policy but not
+	// X-Content-Type-Options, the standard companion for a JSON API plus a static-module SPA and
+	// cheap defence-in-depth against a response whose content type a browser might second-guess.
+	[Theory]
+	[InlineData("/admin")]
+	[InlineData("/user")]
+	[InlineData("/shared/app.css")]
+	public async Task UiResponses_CarryNoSniff(string path)
+	{
+		await using WebUiHost host = await WebUiHost.StartAsync(
+			WebUiHost.Users(("alice", new UserOptions { Admin = true })));
+		using HttpClient client = host.Anonymous();
+
+		HttpResponseMessage response = await client.GetAsync(path);
+
+		Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+	}
 }
