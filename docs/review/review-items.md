@@ -597,3 +597,15 @@ prose names ("`eas config set`/`unset` that drops the global Oof role assignment
 boot. FIX: have `ValidateRemovalImpact`'s before/after diff also run `UserResolver.ValidateUsers`
 over the candidate `BackendRolesConfig` (mirroring what B5 added to the write path), the same way it
 already runs `BackendSectionFailures`.
+
+`N5` **Nit** The IMAP live-connection observability surface still knows only about IDLE watchers, so
+G22's new per-user `ImapStatusPoller` is invisible. `ImapBackendProvider`'s
+`GatewayMetrics.SetIdleWatchersObserver` gauge (`activesync_idle_watchers`) and `SnapshotWatchers()`
+— which feeds the admin dashboard's watcher list — both enumerate `_watchers` only, while the
+provider now also holds one persistent authenticated IMAP connection per gateway user in `_pollers`.
+Steady state per user is three connections (session + IDLE + poll) and the operator-visible count is
+one, which matters exactly where it is most likely to be looked at: diagnosing a server-side per-user
+connection cap (the `G6` scenario). Not a correctness defect — the poller is trimmed by the same
+`TrimUserResources` sweep, so nothing leaks. FIX: either add a sibling gauge/observer for the poll
+connections, or generalise `WatcherInfo`/`SnapshotWatchers` to report a kind ("idle" | "poll") and
+have the gauge group by it.
