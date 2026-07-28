@@ -123,6 +123,51 @@ public class EasRequestParametersTests
 		Assert.Equal(Convert.ToHexString(guidBytes), p.DeviceId);
 	}
 
+	[Fact]
+	public void Base64Query_DeviceTypeWithControlCharacters_IsHexEncoded_LikeDeviceId()
+	{
+		// W13: DeviceId goes through DecodeIdField (hex-encoded whenever not fully printable
+		// ASCII), but DeviceType, two lines later in FromBase64, was handed out via a bare
+		// Encoding.ASCII.GetString -- \r/\n/ESC survived into a value that is persisted on the
+		// Device row and rendered in the admin UI and startup banner.
+		MemoryStream ms = new();
+		ms.WriteByte(141);
+		ms.WriteByte(9); // FolderSync
+		ms.Write(BitConverter.GetBytes((ushort)0));
+		ms.WriteByte(0); // no device id
+		ms.WriteByte(0); // no policy key
+		byte[] hostileDeviceType = "Evil\r\nInjected"u8.ToArray();
+		ms.WriteByte((byte)hostileDeviceType.Length);
+		ms.Write(hostileDeviceType);
+
+		EasRequestParameters p = EasRequestParameters.FromBase64(Convert.ToBase64String(ms.ToArray()));
+
+		Assert.Equal(Convert.ToHexString(hostileDeviceType), p.DeviceType);
+	}
+
+	[Fact]
+	public void Base64Query_TagFieldWithControlCharacter_IsRejected()
+	{
+		// W13: AttachmentName/CollectionId/ItemId/LongId/Occurrence/User are UTF-8 decoded with
+		// no character validation at all -- unlike DeviceId/DeviceType, a control character in
+		// one of these is neither filtered nor hex-encoded, it is handed straight to callers
+		// (including whatever wire-logs or renders it).
+		MemoryStream ms = new();
+		ms.WriteByte(141);
+		ms.WriteByte(0); // Sync
+		ms.Write(BitConverter.GetBytes((ushort)0));
+		ms.WriteByte(0); // no device id
+		ms.WriteByte(0); // no policy key
+		ms.WriteByte(0); // no device type
+		byte[] hostileCollectionId = "5bell"u8.ToArray();
+		ms.WriteByte(1); // CollectionId tag
+		ms.WriteByte((byte)hostileCollectionId.Length);
+		ms.Write(hostileCollectionId);
+
+		Assert.Throws<FormatException>(
+			() => EasRequestParameters.FromBase64(Convert.ToBase64String(ms.ToArray())));
+	}
+
 	[Theory]
 	[InlineData("Sync", "Sync")]
 	[InlineData("fOlDeRsYnC", "FolderSync")]

@@ -152,8 +152,12 @@ public sealed record EasRequestParameters
 			? BinaryPrimitives.ReadUInt32LittleEndian(NextSpan(4))
 			: 0;
 
+		// DeviceType is an ASCII token like "iPhone"/"WindowsOutlook15" -- the same shape as
+		// DeviceId, so it goes through the same sanitizing boundary (W13) rather than a bare
+		// Encoding.ASCII.GetString, which would pass C0 control characters (\r, \n, ESC) straight
+		// through into a value persisted on the Device row and rendered in the admin UI/banner.
 		byte deviceTypeLength = Next();
-		string deviceType = Encoding.ASCII.GetString(NextSpan(deviceTypeLength));
+		string deviceType = DecodeIdField(NextSpan(deviceTypeLength));
 
 		string? attachmentName = null, collectionId = null, itemId = null, longId = null, occurrence = null, user = null;
 		bool saveInSent = false, acceptMultiPart = false;
@@ -165,19 +169,19 @@ public sealed record EasRequestParameters
 			ReadOnlySpan<byte> value = NextSpan(length);
 			switch (tag)
 			{
-				case 0: attachmentName = Encoding.UTF8.GetString(value); break;
-				case 1: collectionId = Encoding.UTF8.GetString(value); break;
+				case 0: attachmentName = DecodeUtf8Field("AttachmentName", value); break;
+				case 1: collectionId = DecodeUtf8Field("CollectionId", value); break;
 				case 2: break; // CollectionName (2.x only)
-				case 3: itemId = Encoding.UTF8.GetString(value); break;
-				case 4: longId = Encoding.UTF8.GetString(value); break;
+				case 3: itemId = DecodeUtf8Field("ItemId", value); break;
+				case 4: longId = DecodeUtf8Field("LongId", value); break;
 				case 5: break; // ParentId (2.x only)
-				case 6: occurrence = Encoding.UTF8.GetString(value); break;
+				case 6: occurrence = DecodeUtf8Field("Occurrence", value); break;
 				case 7:
 					byte options = value.Length > 0 ? value[0] : (byte)0;
 					saveInSent = (options & 0x01) != 0;
 					acceptMultiPart = (options & 0x02) != 0;
 					break;
-				case 8: user = Encoding.UTF8.GetString(value); break;
+				case 8: user = DecodeUtf8Field("User", value); break;
 				default:
 					// An unknown tag means the cursor is either misaligned (a length byte read as a
 					// tag) or the request is hand-crafted. Either way the remaining fields can no
@@ -350,5 +354,21 @@ public sealed record EasRequestParameters
 			}
 
 		return printable ? Encoding.ASCII.GetString(bytes) : Convert.ToHexString(bytes);
+	}
+
+	/// <summary>
+	///   Decodes one of the UTF-8 tag-value fields (AttachmentName, CollectionId, ItemId, LongId,
+	///   Occurrence, User), rejecting any decoded character <see cref="WireLog.IsUnsafe" /> flags
+	///   (control characters, bidi-override/isolate format characters) rather than handing it
+	///   straight to callers unfiltered (W13) -- these values flow into wire logs, the admin UI
+	///   and, for CollectionId/ItemId, backend keys.
+	/// </summary>
+	private static string DecodeUtf8Field(string fieldName, ReadOnlySpan<byte> bytes)
+	{
+		string text = Encoding.UTF8.GetString(bytes);
+		foreach (char c in text)
+			if (WireLog.IsUnsafe(c, allowLineStructure: false))
+				throw new FormatException($"{fieldName} contains an unsafe character.");
+		return text;
 	}
 }
