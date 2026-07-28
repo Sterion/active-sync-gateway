@@ -398,7 +398,7 @@ work. Every finding ID appears in exactly one item.
 > `H7` contacts/calendar re-download the entire account per folder per round. `H12` the SSE stream has no
 > size cap.
 
-**29. DAV polling & folder shape** [LIVE] — ~~`H5`~~ ~~`H6`~~ ~~`H15`~~ ~~`H16`~~ ~~`H17`~~ `H22` `H23`
+**29. DAV polling & folder shape** [LIVE] — ~~`H5`~~ ~~`H6`~~ ~~`H15`~~ ~~`H16`~~ ~~`H17`~~ ~~`H22`~~ `H23`
 > `H5` ctag polling does one PROPFIND **per folder**, contradicting the documented H12 mitigation (one
 > `Depth:1` per home set) — 7–14 round trips per poll interval per device. `H6` GAL silently returns nothing
 > against a server that omits `address-data`. `H16` transport failures escape the "never break folder sync

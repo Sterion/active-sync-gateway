@@ -171,8 +171,16 @@ public sealed class CalDavStore(
 		List<string> collections = new();
 		if (self)
 		{
+			// H22: a folder that is itself a share (granted to this user, not owned by them) must
+			// not be folded into the user's OWN availability — ResolveRecipients would otherwise
+			// report the user busy whenever a colleague's/team calendar shared to them is busy.
 			foreach (BackendFolder folder in await ListFoldersAsync(ct).ConfigureAwait(false))
-				collections.Add(FromBackendKey(folder.BackendKey));
+			{
+				string href = FromBackendKey(folder.BackendKey);
+				if (_sharedCollections.Any(c => SharedHrefEquals(c.Href, href)))
+					continue;
+				collections.Add(href);
+			}
 		}
 		else if (!string.IsNullOrEmpty(Options.HomeSetPath))
 		{
