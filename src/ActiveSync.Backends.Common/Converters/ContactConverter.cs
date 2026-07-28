@@ -79,9 +79,21 @@ public static class ContactConverter
 			{
 				AddFirst(Contacts + "MobilePhoneNumber", number);
 			}
+			// D9: these two must precede the generic Fax/untyped branches below — the writer
+			// emits TEL;TYPE=HOME,FAX for HomeFaxNumber and TEL;TYPE=CAR for CarPhoneNumber, so
+			// the read has to recognise both slots or Ghost() migrates them to the wrong field
+			// (BusinessFaxNumber / HomePhoneNumber) on the next unrelated edit.
+			else if (types.IsSet(Tel.Fax) && phone.Parameters.PropertyClass.IsSet(PCl.Home))
+			{
+				AddFirst(Contacts + "HomeFaxNumber", number);
+			}
 			else if (types.IsSet(Tel.Fax))
 			{
 				AddFirst(Contacts + "BusinessFaxNumber", number);
+			}
+			else if (types.IsSet(Tel.Car))
+			{
+				AddFirst(Contacts + "CarPhoneNumber", number);
 			}
 			else if (types.IsSet(Tel.Pager))
 			{
@@ -104,12 +116,19 @@ public static class ContactConverter
 			}
 		}
 
+		// D10: MS-ASCNTC's Home*/Business* address fields are single-instance, but there is no
+		// Home2/Business2 fallback the way phones have — so once a slot is filled, a second
+		// address of the same class must be skipped ENTIRELY (not field-by-field), or its
+		// fields would blend with the first address's into one inconsistent record.
+		HashSet<string> filledAddressSlots = new(StringComparer.Ordinal);
 		foreach (var address in vcard.Addresses.OrderByPref())
 		{
 			if (address?.Value is not { } adr)
 				continue;
 			bool isWork = address.Parameters.PropertyClass.IsSet(PCl.Work);
 			string prefix = isWork ? "Business" : "Home";
+			if (!filledAddressSlots.Add(prefix))
+				continue;
 			Add(Contacts + $"{prefix}Street", string.Join(", ", adr.Street));
 			Add(Contacts + $"{prefix}City", adr.Locality.FirstOrDefault());
 			Add(Contacts + $"{prefix}State", adr.Region.FirstOrDefault());
@@ -221,10 +240,10 @@ public static class ContactConverter
 		if (categories is { Count: > 0 })
 			AppendLine(sb, "CATEGORIES", string.Join(",", categories.Select(Escape)), true);
 
-		AppendPhoto(sb, V("Picture"));
+		bool photoWritten = AppendPhoto(sb, V("Picture"));
 
 		if (existingVcard is not null)
-			AppendPreserved(sb, existingVcard);
+			AppendPreserved(sb, existingVcard, photoWritten);
 
 		sb.Append("END:VCARD\r\n");
 		return sb.ToString();
@@ -270,9 +289,19 @@ public static class ContactConverter
 	///   correct exclusion set is the stored card's OWN top-3-by-pref addresses, independent of
 	///   what the client did with those slots afterward.
 	/// </summary>
-	private static void AppendPreserved(StringBuilder sb, string existingVcard)
+	private static void AppendPreserved(StringBuilder sb, string existingVcard, bool photoWritten)
 	{
 		HashSet<string> top3 = TopEmailAddresses(existingVcard, 3);
+		// D4: PHOTO is normally "managed" (rewritten from V("Picture") only), but the only value
+		// ToApplicationData can ever produce for Picture comes from decodable BYTES — a
+		// URI-valued PHOTO (verified against FolkerKinzel.VCards 8.2.0: Value.Bytes is null for
+		// PHOTO;VALUE=URI) never round-trips through Picture at all, so treating it as "managed"
+		// silently deletes it on the next unrelated edit. Preserve the raw stored PHOTO line
+		// verbatim when nothing else wrote a photo AND the stored one carries no decodable bytes
+		// — i.e. it is exactly the case ToApplicationData/AppendPhoto can never reproduce. When
+		// the stored photo DOES carry bytes, an explicit clear (empty <Picture/>) must still work,
+		// so this never preserves a byte-backed photo.
+		bool preservePhoto = !photoWritten && !StoredPhotoHasDecodableBytes(existingVcard);
 		foreach (string line in UnfoldLines(existingVcard))
 		{
 			string name = PropertyNameOf(line);
@@ -286,9 +315,23 @@ public static class ContactConverter
 				continue;
 			}
 
+			if (name.Equals("PHOTO", StringComparison.OrdinalIgnoreCase))
+			{
+				if (preservePhoto)
+					AppendFolded(sb, line);
+				continue;
+			}
+
 			if (!ManagedProperties.Contains(name))
 				AppendFolded(sb, line);
 		}
+	}
+
+	private static bool StoredPhotoHasDecodableBytes(string vcf)
+	{
+		if (Vcf.Parse(vcf).FirstOrDefault() is not { } vcard)
+			return false;
+		return vcard.Photos?.FirstOrDefault(p => p is not null)?.Value?.Bytes is { Length: > 0 };
 	}
 
 	private static HashSet<string> TopEmailAddresses(string vcf, int count)
@@ -453,14 +496,15 @@ public static class ContactConverter
 	///   arbitrary properties into the stored card and, via CardDAV, onto the DAV server.
 	///   Re-encoding makes that structurally impossible. Undecodable input is skipped.
 	/// </summary>
-	private static void AppendPhoto(StringBuilder sb, string? picture)
+	/// <summary>Returns true when an actual PHOTO line was written (used by D4's preservation guard).</summary>
+	private static bool AppendPhoto(StringBuilder sb, string? picture)
 	{
 		if (string.IsNullOrWhiteSpace(picture))
-			return;
+			return false;
 
 		byte[] buffer = new byte[picture.Length]; // decoded bytes are always fewer than base64 chars
 		if (!Convert.TryFromBase64String(picture.Trim(), buffer, out int written) || written == 0)
-			return;
+			return false;
 
 		ReadOnlySpan<byte> bytes = buffer.AsSpan(0, written);
 		string type = bytes switch
@@ -471,6 +515,7 @@ public static class ContactConverter
 			_ => "" // unrecognised: no parameter beats a wrong one
 		};
 		AppendFolded(sb, $"PHOTO;ENCODING=b{type}:{Convert.ToBase64String(bytes)}");
+		return true;
 	}
 
 	private static void AppendAdr(

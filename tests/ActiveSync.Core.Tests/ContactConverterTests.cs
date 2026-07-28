@@ -259,4 +259,97 @@ public class ContactConverterTests
 		Assert.DoesNotContain("that continues folded", updated);
 		Assert.Contains("X-CUSTOM:first part of a custom value that also continues", updated);
 	}
+
+	[Fact]
+	public void Update_PreservesUriPhoto_WhenAnUnrelatedFieldChanges()
+	{
+		// D4 — PHOTO is a "managed" property, so AppendPreserved never copies the stored line
+		// verbatim; the only source of a re-emitted PHOTO is V("Picture"), filled by
+		// ToApplicationData from decoded bytes. A URI-valued PHOTO (verified against
+		// FolkerKinzel.VCards 8.2.0: Value.Bytes is null for PHOTO;VALUE=URI) produces no
+		// Picture element at all, so Ghost has nothing to carry forward and the stored PHOTO
+		// line is silently dropped on the very next unrelated edit.
+		const string existingWithUriPhoto =
+			"BEGIN:VCARD\r\n" +
+			"VERSION:3.0\r\n" +
+			"UID:c-photo\r\n" +
+			"N:Person;Test;;;\r\n" +
+			"FN:Test Person\r\n" +
+			"TEL;TYPE=CELL:+4512345678\r\n" +
+			"PHOTO;VALUE=URI:https://example.com/photo.jpg\r\n" +
+			"END:VCARD\r\n";
+
+		string updated = ContactConverter.FromApplicationData(AppData(
+			new XElement(Contacts + "MobilePhoneNumber", "+4599999999")), "c-photo", existingWithUriPhoto);
+
+		Assert.Contains("PHOTO;VALUE=URI:https://example.com/photo.jpg", updated);
+	}
+
+	[Fact]
+	public void Update_ClearingAByteBackedPhoto_StillWorks_EvenWithTheUriPreservationGuard()
+	{
+		// The URI-preservation fix (D4) must not defeat an explicit clear of a REAL (byte-backed)
+		// stored photo: the guard only preserves PHOTO when the stored card carries no decodable
+		// bytes, so a byte photo the client omits keeps ghosting through Picture as before, and an
+		// explicit empty <Picture/> still clears it.
+		string updated = ContactConverter.FromApplicationData(AppData(
+			new XElement(Contacts + "FirstName", "Solo"),
+			new XElement(Contacts + "Picture", "")), "c-1", ExistingVcard);
+
+		Assert.DoesNotContain("PHOTO", updated);
+	}
+
+	[Fact]
+	public void Read_HomeFaxAndCarNumbers_RoundTripToTheSameSlotTheyWereWrittenTo()
+	{
+		// D9 — the read side is not the inverse of the write side. The writer emits
+		// TEL;TYPE=HOME,FAX for HomeFaxNumber and TEL;TYPE=CAR for CarPhoneNumber, but the
+		// reader had no branch for either: a HOME+FAX number fell through to the generic Fax
+		// branch (BusinessFaxNumber) and a CAR number fell through to the untyped fallback
+		// (HomePhoneNumber, since the CELL slot was free). Ghost() rebuilds the payload from
+		// this same lossy read, so the very next unrelated edit permanently migrates both
+		// numbers to the wrong EAS slot on the CardDAV server.
+		const string vcard =
+			"BEGIN:VCARD\r\n" +
+			"VERSION:3.0\r\n" +
+			"UID:c-tel\r\n" +
+			"N:Person;Test;;;\r\n" +
+			"FN:Test Person\r\n" +
+			"TEL;TYPE=HOME,FAX:+4511110000\r\n" +
+			"TEL;TYPE=CAR:+4522220000\r\n" +
+			"END:VCARD\r\n";
+
+		List<XElement>? data = ContactConverter.ToApplicationData(vcard, BodyPreference.PlainText);
+
+		Assert.NotNull(data);
+		Assert.Equal("+4511110000", data!.FirstOrDefault(e => e.Name == Contacts + "HomeFaxNumber")?.Value);
+		Assert.Equal("+4522220000", data.FirstOrDefault(e => e.Name == Contacts + "CarPhoneNumber")?.Value);
+		Assert.Null(data.FirstOrDefault(e => e.Name == Contacts + "BusinessFaxNumber"));
+		Assert.Null(data.FirstOrDefault(e => e.Name == Contacts + "HomePhoneNumber"));
+	}
+
+	[Fact]
+	public void Read_TwoWorkAddresses_EmitOnlyOneSetOfBusinessAddressElements()
+	{
+		// D10 — the address loop used the plain `Add` local (unconditional append), unlike the
+		// phone loop's AddFirst, so a card with two WORK addresses produced two
+		// BusinessStreet/BusinessCity/... elements in one ApplicationData. MS-ASCNTC declares
+		// these single-instance and iOS is strict about repeated elements.
+		const string vcard =
+			"BEGIN:VCARD\r\n" +
+			"VERSION:3.0\r\n" +
+			"UID:c-adr\r\n" +
+			"N:Person;Test;;;\r\n" +
+			"FN:Test Person\r\n" +
+			"ADR;TYPE=WORK:;;First Street 1;Copenhagen;;2100;DK\r\n" +
+			"ADR;TYPE=WORK:;;Second Street 2;Aarhus;;8000;DK\r\n" +
+			"END:VCARD\r\n";
+
+		List<XElement>? data = ContactConverter.ToApplicationData(vcard, BodyPreference.PlainText);
+
+		Assert.NotNull(data);
+		Assert.Single(data!, e => e.Name == Contacts + "BusinessStreet");
+		Assert.Single(data, e => e.Name == Contacts + "BusinessCity");
+		Assert.Equal("First Street 1", data.First(e => e.Name == Contacts + "BusinessStreet").Value);
+	}
 }
