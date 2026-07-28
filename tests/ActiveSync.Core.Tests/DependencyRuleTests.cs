@@ -255,9 +255,15 @@ public sealed class DependencyRuleTests
 			"docs/review", "docs\\review", "docs/design", "docs\\design",
 			"db-restructure", "review-items", "fix-review", "review-results", "conduct-review"
 		];
-		// An interim finding ID: an area letter plus 1-2 digits, used as a citation — "F13:", "(A18)",
-		// "H5 —". Deliberately narrow so hex bytes, RFC numbers and identifiers do not trip it.
-		Regex idCitation = new(@"(?<![A-Za-z0-9])[ABCDEFGHKLNSW][0-9]{1,2}(?![A-Za-z0-9])\s*(:|\)|—)", RegexOptions.Compiled);
+		// An interim finding ID: an area letter plus 1-2 digits, as a standalone word. Matched BARE
+		// rather than only when punctuated, because the citations run to prose — "see C10", "the same
+		// rule G7 gave the IDLE watcher", "Mirrors the mail store's H19 token" — and an earlier,
+		// punctuation-anchored version of this rule missed 168 of them.
+		Regex idCitation = new(@"(?<![A-Za-z0-9])[ABCDEFGHKLNSW][0-9]{1,2}(?![A-Za-z0-9])", RegexOptions.Compiled);
+		// The one false positive that shape produces is a hex dump in a comment, where a byte like
+		// "B7" reads as an ID (e.g. the MS-OXOMSG class-id "0x04000000 82 00 E0 00 74 C5 B7 10 ...").
+		// Three or more space-separated two-digit hex groups is a dump, not prose.
+		Regex hexRun = new(@"(?:\b[0-9A-F]{2}\b[ ]){3,}", RegexOptions.Compiled);
 		Regex idTestName = new(@"\b(?:Task|void)\s+[ABCDEFGHKLNSW][0-9]{1,2}_", RegexOptions.Compiled);
 
 		List<string> scanned = [];
@@ -286,7 +292,7 @@ public sealed class DependencyRuleTests
 					violations.Add($"{Path.GetRelativePath(root, file)}:{i + 1}: points at temporary scaffolding (\"{hit}\")");
 				else if (idTestName.IsMatch(line))
 					violations.Add($"{Path.GetRelativePath(root, file)}:{i + 1}: test name carries an interim finding ID");
-				else if (IsCommentLine(line) && idCitation.IsMatch(line))
+				else if (IsCommentLine(line) && idCitation.IsMatch(line) && !hexRun.IsMatch(line))
 					violations.Add($"{Path.GetRelativePath(root, file)}:{i + 1}: comment cites an interim finding ID");
 			}
 		}

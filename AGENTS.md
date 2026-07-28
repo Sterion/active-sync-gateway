@@ -471,8 +471,10 @@ It runs on the MERGED user (config ⊕ database), because the two halves may arr
 levels; `ValidateEntry` merges before validating for the same reason. Violating rows fail closed
 (`Invalid`), and `BackendSessionFactory` probes with the presented password explicitly as a second
 line. Content-role secrets are exempt — MailStore is the probe target. Do NOT "fix" a future gap
-here by comparing the presented password against a stored backend secret: that is the pin this rule
-deliberately replaced (see `docs/design/db-restructure.md`, deviation 1).
+here by comparing the presented password against a stored backend secret: an earlier design did
+exactly that (a timing-safe compare against the configured MailStore `Password`) and it was removed
+on purpose, because a backend credential must never decide a device login. The probe invariant above
+is what preserves the property that compare was protecting.
 **`AutoProvisionUsers` (default true) is the single switch over undeclared logins** — it absorbed
 the deleted `RequireDeclaredUsers`, keeping its name but sharpening its meaning. `true`: any login
 that authenticates gets a user row on first sign-in (a fresh immutable `UserId` plus an
