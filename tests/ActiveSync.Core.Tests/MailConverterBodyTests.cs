@@ -51,10 +51,11 @@ public class MailConverterBodyTests
 		Assert.Equal("0", truncatedFlag); // never truncated for type 4
 		Assert.True(Encoding.UTF8.GetByteCount(data) >= fullSize - 16); // full MIME survives (± CRLF normalization)
 		Assert.Contains("Subject: full mime body", data);
-		// BuildBody now calls Prepare(SevenBit) before writing, so a 2000-char run with no
-		// whitespace is quoted-printable soft-wrapped ("=\r\n" every ~76 octets) rather than
-		// streamed as one unbroken line -- unfold before checking the text survived intact.
-		Assert.Contains(longText, data.Replace("=\r\n", ""));
+		// BuildBody calls Prepare(SevenBit) before writing, so a 2000-char run with no whitespace is
+		// quoted-printable soft-wrapped every ~76 octets rather than streamed as one unbroken line --
+		// unfold before checking the text survived intact. Unfold BOTH line endings: MimeKit emits
+		// "=\r\n" on Windows and "=\n" on Linux, so matching only CRLF passes locally and fails in CI.
+		Assert.Contains(longText, data.Replace("=\r\n", "").Replace("=\n", ""));
 	}
 
 	[Fact]

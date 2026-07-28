@@ -278,9 +278,17 @@ public sealed class DependencyRuleTests
 				.Where(f => extensions.Any(e => f.EndsWith(e, StringComparison.Ordinal)))
 				.Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
 				         && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)));
-		scanned.Add(Path.Combine(root, "AGENTS.md"));
-		scanned.Add(Path.Combine(root, "README.md"));
-		scanned.AddRange(Directory.EnumerateFiles(Path.Combine(root, "docs"), "*.md", SearchOption.TopDirectoryOnly));
+		// The repository-root docs are scanned when present but must not be REQUIRED: the container
+		// test stage copies only src/ and tests/ (plus a few root files), so `docs/`, AGENTS.md and
+		// README.md genuinely do not exist there. An earlier version enumerated them unconditionally
+		// and died with DirectoryNotFoundException in CI while passing locally. The src/tests scan
+		// above — the part that actually guards shipped code — is unaffected either way.
+		foreach (string doc in (string[])["AGENTS.md", "README.md"])
+			if (File.Exists(Path.Combine(root, doc)))
+				scanned.Add(Path.Combine(root, doc));
+		string docsDir = Path.Combine(root, "docs");
+		if (Directory.Exists(docsDir))
+			scanned.AddRange(Directory.EnumerateFiles(docsDir, "*.md", SearchOption.TopDirectoryOnly));
 
 		List<string> violations = [];
 		foreach (string file in scanned)
