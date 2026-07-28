@@ -1354,3 +1354,64 @@ Server.Tests 333 (334 minus the deleted test).
 `E18`: a test that reproduces a pattern instead of exercising the code.** Worth a rule for the remaining
 queue — if a test does not execute production code, it is documentation, and it must never be able to fail
 nondeterministically.
+
+### `G22` redone — item 24 is COMPLETE again
+**Commits:** `e581846` (G22) · `50c1b64` (files `N5`). Worker run on **Opus**, not the pinned Sonnet — a
+human decision, taken openly, under `fix-review.md`'s carve-out for structural work: this was ownership,
+lifetime, eviction and a second gate, i.e. architecture execution rather than spec execution.
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 25 ✓ · strike shipped with the fix ✓ · build 0 warnings ✓ ·
+unit **1426 passed, 0 failed** (Cli 16 · Protocol 99 · Core 858 · WebUi 120 · Server 333) ✓ ·
+live **150 passed, 0 skipped** ✓
+
+**What landed:** `ImapStatusPoller` — one persistent client per gateway login, shared by all the user's
+devices and folders, owned by `ImapBackendProvider._pollers` beside `_watchers`, with its **own**
+`SemaphoreSlim` (the defect was the shared GATE, not a shared connection), lazy connect, capped backoff
+that refuses without opening a socket, the same credential-or-`ConnectionMatches` rebuild rule `G7` gave
+the watcher with the same atomic compare-and-set, and eviction through the same `TrimUserResources` sweep.
+Steady state: 3 connections per user, constant.
+
+**Both halves proved by MY OWN mutation experiments, not the worker's report** — this is the verification
+that was missing the first time, when both suites passed a version opening ~118 connections/device/hour
+because nothing counted connections:
+- **Reuse:** disabling the `_client is { IsConnected: true, IsAuthenticated: true }` short-circuit makes
+  the test report **expected 2, actual 9** — it detects exactly the rolled-back shape.
+- **Non-blocking:** forcing `SnapshotStatusAsync` back down the session path makes the test take **11 s**
+  against its 6 s bound and fail, reproducing the original defect and matching the worker's reported
+  11.03 s red on unmodified code.
+
+**Reversal was impossible here, and that is now a pattern worth naming.** `git apply -R` of this commit
+deletes `ImapStatusPoller`, which BOTH test assemblies reference, so nothing compiles — and my first
+attempt at it ran `--no-build` over stale binaries and produced a result identical to the mutation run,
+which I nearly recorded as proof. **Targeted mutation is the better tool whenever a fix introduces a type
+the tests name**: it keeps the tree compiling and isolates one behaviour. Third occurrence in Phase 3
+(`F17`, `G7`, now `G22`).
+
+**Notes:**
+- **The per-user floor moved from 2 connections to 3** (session + IDLE + poll). Bounded and constant, and
+  the alternative shapes are the pre-fix gate contention or the rolled-back churn — but operators sizing
+  Dovecot's `mail_max_userip_connections` need to know, and `G6` is the finding that cares.
+- **One gate now serialises all of a user's devices' polls.** Strictly better than before (they previously
+  queued behind the same session gate that also holds the whole-mailbox FETCH) and bounded by the poller's
+  30 s per-op timeout, but it is a shared resource across devices where none existed.
+- **A narrow leak on eviction-vs-in-flight, which I checked and the worker did not raise.** `DisposeAsync`
+  waits at most 5 s for the gate and then disposes the client **anyway**; `StatusAsync` only tests
+  `_disposed` at entry, so an in-flight poll that outlives that wait can have its client disposed
+  underneath it, treat the failure as transient, retry, and `EnsureConnectedAsync` will open a NEW
+  connection that nothing owns. It needs a hung STATUS coinciding with the user's last session going, and
+  the bounded dispose is a deliberate choice (an unbounded wait would block eviction forever) — but a
+  `_disposed` re-check inside the retry would close it. Worth a finding if anyone touches this file again.
+- **`N5` filed by the worker** (`50c1b64`): the `activesync_idle_watchers` gauge and the admin dashboard's
+  watcher list enumerate `_watchers` only, so the new poll connection is invisible — the operator sees 1
+  where reality is 3, precisely when diagnosing a per-user connection cap.
+- **`AGENTS.md` and `docs/configuration.md` were updated in the fix commit**, so the "all IMAP access goes
+  through `ImapSession.RunAsync`" convention now names the two provider-owned background connections as
+  its deliberate exceptions. Without that the next contributor reads the poller as a violation.
+- **`ImapMailBackend`'s constructor gained a trailing optional parameter** — source-compatible,
+  binary-breaking, and outside `Contracts`/`Protocol`, so no contract bump; `ContractSurfaceApprovalTests`
+  stayed green.
+- **On the model question:** the first attempt did not fail from lack of capability — that worker named the
+  correct design and traded it away on scope, and *I* struck it anyway. What changed here is that the
+  design constraint and the connection-count requirement were written into `review-items.md` before
+  spawning, so they could not be lost to a paraphrase or a scope judgment. The stronger model helped; the
+  written constraint is what made it reproducible.
