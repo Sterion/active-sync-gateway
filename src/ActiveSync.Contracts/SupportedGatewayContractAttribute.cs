@@ -6,7 +6,7 @@ namespace ActiveSync.Contracts;
 /// <summary>
 ///   Declares which gateway plugin contract a plugin assembly supports. Apply it once, to the
 ///   plugin's ENTRY assembly:
-///   <code>[assembly: SupportedGatewayContract(1, 0)]</code>
+///   <code>[assembly: SupportedGatewayContract(1, 2)] // must equal ActiveSync.Contracts.ContractVersion.Major/Minor</code>
 ///   <para>
 ///     This is a DECLARATION, not an inference. A plugin's own version is its own business — a
 ///     plugin may be at 3.7.2 and support contract 1.0 — and which package version it happened

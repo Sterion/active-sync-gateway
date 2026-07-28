@@ -260,7 +260,7 @@ evolve with new EAS features.
 **Declare the contract you support.** Every plugin entry assembly must carry:
 
 ```csharp
-[assembly: SupportedGatewayContract(1, 0)]
+[assembly: SupportedGatewayContract(1, 2)] // must equal ActiveSync.Contracts.ContractVersion.Major/Minor
 ```
 
 The loader reads that declaration from metadata *before loading anything* and refuses the
