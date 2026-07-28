@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Text;
 using System.Xml.Linq;
 using ActiveSync.Protocol.Wbxml;
 
@@ -249,5 +251,34 @@ public class WbxmlDecoderHardeningTests
 		Array.Fill(text, (byte)'a');
 		byte[] doc = Doc([0x45], [0x03], text, [0x00], [0x01]);
 		Assert.Throws<WbxmlException>(() => WbxmlDecoder.Decode(doc));
+	}
+
+	// W15: DecodeAsync's 80 KB scratch buffer holds one user's raw request bytes — including any
+	// plaintext SyncKey/ClientId/etc it carries — and ArrayPool<byte>.Shared is process-global, so
+	// an unscrubbed Return leaves that plaintext readable by the next renter of the same size
+	// class, potentially a different user's request on the same worker. Best-effort (ArrayPool does
+	// not contractually guarantee returning the same array on the next Rent of the same size), but
+	// reliable in practice for a single-threaded, uncontended Rent/Return/Rent in one test method —
+	// the same technique is the standard way to test pool-scrubbing behavior.
+	[Fact]
+	public async Task DecodeAsync_ReturnsItsScratchBufferScrubbed()
+	{
+		const string marker = "W15SCRATCHBUFFERMARKERVALUE";
+		byte[] markerBytes = Encoding.ASCII.GetBytes(marker);
+		byte[] doc = Doc([0x45], [0x4B], [0x03], markerBytes, [0x00], [0x01], [0x01]);
+
+		using MemoryStream stream = new(doc);
+		await WbxmlDecoder.DecodeAsync(stream, CancellationToken.None);
+
+		byte[] rented = ArrayPool<byte>.Shared.Rent(81920); // same size DecodeAsync itself rents
+		try
+		{
+			string asText = Encoding.ASCII.GetString(rented);
+			Assert.DoesNotContain(marker, asText, StringComparison.Ordinal);
+		}
+		finally
+		{
+			ArrayPool<byte>.Shared.Return(rented);
+		}
 	}
 }

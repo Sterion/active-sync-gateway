@@ -170,7 +170,10 @@ public static class WbxmlEncoder
 		}
 		finally
 		{
-			ArrayPool<byte>.Shared.Return(scratch);
+			// W15: this buffer just held one user's decoded MIME/attachment plaintext, and
+			// ArrayPool<byte>.Shared is process-global — the next renter of the same size class
+			// (potentially a different user's request) would otherwise read the tail of it.
+			ArrayPool<byte>.Shared.Return(scratch, clearArray: true);
 		}
 	}
 

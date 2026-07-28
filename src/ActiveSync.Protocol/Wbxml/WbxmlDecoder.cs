@@ -76,7 +76,11 @@ public static class WbxmlDecoder
 		}
 		finally
 		{
-			ArrayPool<byte>.Shared.Return(scratch);
+			// W15: this buffer just held one user's raw request bytes — including any plaintext
+			// SyncKey/ClientId/etc it carries — and ArrayPool<byte>.Shared is process-global, so
+			// the next renter of the same size class (potentially a different user's request on
+			// the same worker) would otherwise read the tail of it.
+			ArrayPool<byte>.Shared.Return(scratch, clearArray: true);
 		}
 
 		// maxBytes is an int and the loop above enforces it, so this cast cannot truncate.

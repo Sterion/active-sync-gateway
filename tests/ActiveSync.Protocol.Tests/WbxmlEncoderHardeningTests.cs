@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Text;
 using System.Xml.Linq;
 using ActiveSync.Protocol.Wbxml;
 
@@ -64,6 +66,38 @@ public class WbxmlEncoderHardeningTests
 
 		Assert.Equal(payload, Convert.FromBase64String(
 			result.Root!.Element(EasNamespaces.ComposeMail + "Mime")!.Value));
+	}
+
+	// W15: WriteOpaque's rented scratch buffer holds one user's decoded MIME/attachment plaintext,
+	// and ArrayPool<byte>.Shared is process-global — unscrubbed, the next renter of the same size
+	// class (potentially a different user's request on the same worker) can read the tail of it.
+	// Best-effort (ArrayPool does not contractually guarantee returning the same array on the next
+	// Rent of the same size), but reliable in practice for a single-threaded, uncontended
+	// Rent/Return/Rent in one test method.
+	[Fact]
+	public void Encode_ReturnsItsOpaqueScratchBufferScrubbed()
+	{
+		const string marker = "W15OPAQUESCRATCHMARKERVALUEXYZ";
+		byte[] payload = Encoding.ASCII.GetBytes(marker);
+		string base64 = Convert.ToBase64String(payload);
+		XElement mime = new(EasNamespaces.ComposeMail + "Mime", base64);
+		mime.SetAttributeValue(EasNamespaces.OpaqueAttribute, "1");
+		XDocument doc = new(new XElement(EasNamespaces.ComposeMail + "SendMail", mime));
+
+		_ = WbxmlEncoder.Encode(doc);
+
+		// Same sizing formula WriteOpaque itself rents with.
+		int rentSize = (base64.Length / 4 + 1) * 3;
+		byte[] rented = ArrayPool<byte>.Shared.Rent(rentSize);
+		try
+		{
+			string asText = Encoding.ASCII.GetString(rented);
+			Assert.DoesNotContain(marker, asText, StringComparison.Ordinal);
+		}
+		finally
+		{
+			ArrayPool<byte>.Shared.Return(rented);
+		}
 	}
 
 	[Fact]
