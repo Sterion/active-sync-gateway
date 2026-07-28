@@ -150,6 +150,61 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		Assert.Equal(1, _harness.FolderResolutionQueries - before);
 	}
 
+	// F25 (round 3) — WritePermission.IsBlocked (the per-folder read-only/share grant) exists
+	// precisely so "a handler cannot honour one write path and forget the other" (WritePermission.cs).
+	// SmartReply/SmartForward only ever checked the GLOBAL ReadOnly flag before the send; the
+	// post-send source-flagging write (SetAnsweredAsync) must also respect a per-folder read-only
+	// grant, the same way SendMailHandler's post-send delete already does.
+	[Fact]
+	public async Task SmartReply_WithReadOnlyBlockedSource_DoesNotFlagTheSource()
+	{
+		UserFolder inbox = await InboxAsync();
+		_harness.Session.ReadOnlyBackendKeys.Add(inbox.BackendKey); // a shared, read-only grant
+		_harness.Session.Mail.RawMessage = Encoding.UTF8.GetBytes(
+			"From: sender@example.test\r\nTo: u@example.test\r\nSubject: original\r\n\r\noriginal body\r\n");
+
+		XDocument request = new(new XElement(CM + "SmartReply",
+			new XElement(CM + "Source",
+				new XElement(CM + "FolderId", inbox.ServerId),
+				new XElement(CM + "ItemId", $"{inbox.ServerId}:42")),
+			OpaqueMime("From: u@example.test\r\nTo: sender@example.test\r\nSubject: re: original\r\n\r\nmy reply\r\n")));
+
+		SmartReplyHandler handler = new(
+			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<SmartReplyHandler>.Instance);
+
+		XDocument? response = await _harness.RunAsync(handler, "SmartReply", request);
+
+		Assert.Null(response); // the reply itself is still sent — only the source flag is blocked
+		Assert.Single(_harness.Session.Submit.Sent);
+		Assert.Empty(_harness.Session.Mail.Answered);
+	}
+
+	[Fact]
+	public async Task SmartForward_WithReadOnlyBlockedSource_DoesNotFlagTheSource()
+	{
+		UserFolder inbox = await InboxAsync();
+		_harness.Session.ReadOnlyBackendKeys.Add(inbox.BackendKey);
+		_harness.Session.Mail.RawMessage = Encoding.UTF8.GetBytes(
+			"From: sender@example.test\r\nTo: u@example.test\r\nSubject: original\r\n\r\noriginal body\r\n");
+
+		XDocument request = new(new XElement(CM + "SmartForward",
+			new XElement(CM + "Source",
+				new XElement(CM + "FolderId", inbox.ServerId),
+				new XElement(CM + "ItemId", $"{inbox.ServerId}:42")),
+			OpaqueMime("From: u@example.test\r\nTo: dest@example.com\r\nSubject: fwd\r\n\r\nsee below\r\n")));
+
+		SmartForwardHandler handler = new(
+			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<SmartForwardHandler>.Instance);
+
+		XDocument? response = await _harness.RunAsync(handler, "SmartForward", request);
+
+		Assert.Null(response);
+		Assert.Single(_harness.Session.Submit.Sent);
+		Assert.Empty(_harness.Session.Mail.Answered);
+	}
+
 	// F1 — MS-ASCMD makes ClientId a required child of SendMail precisely so a lost 200 can be
 	// retried without duplicating the mail: the server recognizes the resend and suppresses it.
 	[Fact]

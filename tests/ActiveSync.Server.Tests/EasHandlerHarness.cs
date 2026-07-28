@@ -547,9 +547,16 @@ public sealed class EasHandlerHarness : IDisposable
 			throw new NotSupportedException();
 		}
 
+		/// <summary>
+		///   Folder/item keys a handler flagged answered/forwarded — F25 asserts none happened when
+		///   the source folder is read-only-blocked.
+		/// </summary>
+		public List<string> Answered { get; } = [];
+
 		public Task SetAnsweredAsync(string folderBackendKey, string itemKey, bool forwarded, CancellationToken ct)
 		{
-			throw new NotSupportedException();
+			Answered.Add($"{folderBackendKey}/{itemKey}:{forwarded}");
+			return Task.CompletedTask;
 		}
 
 		/// <summary>

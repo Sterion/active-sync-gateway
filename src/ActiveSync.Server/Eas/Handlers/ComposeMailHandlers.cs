@@ -426,7 +426,10 @@ public sealed class SmartReplyHandler(
 	protected override async Task MarkSourceAsync(EasContext context, ComposeRequest request, CancellationToken ct)
 	{
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
-		if (source is not null)
+		// F25: the global ReadOnly check above only covers the SEND — this post-send write into the
+		// source folder must honour a per-folder read-only/share grant too, the same way
+		// SendMailHandler's post-send delete already does.
+		if (source is not null && !WritePermission.IsBlocked(context, Options.Value, source.Value.FolderBackendKey))
 			await context.Session.MailStore.SetAnsweredAsync(
 				source.Value.FolderBackendKey, source.Value.ItemKey, forwarded: false, ct);
 	}
@@ -520,7 +523,9 @@ public sealed class SmartForwardHandler(
 	protected override async Task MarkSourceAsync(EasContext context, ComposeRequest request, CancellationToken ct)
 	{
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
-		if (source is not null)
+		// F25: see SmartReplyHandler.MarkSourceAsync — the same per-folder grant must gate this
+		// post-send write, not just the global ReadOnly flag the send itself already checked.
+		if (source is not null && !WritePermission.IsBlocked(context, Options.Value, source.Value.FolderBackendKey))
 			await context.Session.MailStore.SetAnsweredAsync(
 				source.Value.FolderBackendKey, source.Value.ItemKey, forwarded: true, ct);
 	}
