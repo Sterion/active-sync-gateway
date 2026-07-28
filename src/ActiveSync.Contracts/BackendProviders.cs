@@ -108,6 +108,10 @@ public interface IBackendConnection : IAsyncDisposable
 ///   <paramref name="ownedResources" />. The parameter stays <c>object</c>-typed because the owned
 ///   resources are a mix of <see cref="IAsyncDisposable" /> (ImapSession) and <see cref="IDisposable" />
 ///   (WebDavClient, JmapClient), which no single disposable interface covers.
+///   K20: the idempotence guard is an <c>int</c> flipped with <see cref="Interlocked.Exchange(ref int, int)" />,
+///   not a plain <c>bool</c> read-then-write — two callers racing DisposeAsync (a session-eviction
+///   sweep vs. a request completing, both plausible in <c>BackendSessionFactory</c>) could otherwise
+///   both observe "not yet disposed" and both dispose the same owned resource.
 /// </remarks>
 public sealed class BackendConnection(
 	IReadOnlyList<IContentStore> stores,
@@ -115,7 +119,7 @@ public sealed class BackendConnection(
 	IOofBackend? oof = null,
 	IReadOnlyList<object>? ownedResources = null) : IBackendConnection
 {
-	private bool _disposed;
+	private int _disposed;
 
 	public IReadOnlyList<IContentStore> Stores => stores;
 	public IMailSubmitOperations? MailSubmit => mailSubmit;
@@ -123,11 +127,18 @@ public sealed class BackendConnection(
 
 	public async ValueTask DisposeAsync()
 	{
-		if (_disposed)
+		// K20: Interlocked.Exchange makes the check-and-set a single atomic operation — only the
+		// caller that flips 0 -> 1 proceeds, however many race in concurrently.
+		if (Interlocked.Exchange(ref _disposed, 1) != 0)
 			return;
-		_disposed = true;
 
 		List<Exception>? failures = null;
+
+		// K20: build the owned-resource identity set ONCE (reference equality) instead of an
+		// O(stores × ownedResources) Any(ReferenceEquals) scan inside the store loop below.
+		HashSet<object> owned = ownedResources is { Count: > 0 }
+			? new HashSet<object>(ownedResources, ReferenceEqualityComparer.Instance)
+			: [];
 
 		// Dispose every owned resource, plus any store that owns a connection — never let one
 		// throwing disposal strand the rest (a live IMAP/HTTP socket leaks otherwise).
@@ -135,8 +146,7 @@ public sealed class BackendConnection(
 			await SafeDisposeAsync(resource).ConfigureAwait(false);
 		foreach (IContentStore store in stores)
 			// A store explicitly listed as an owned resource is disposed once, above.
-			if (store is not IAsyncDisposable and not IDisposable ||
-			    (ownedResources?.Any(r => ReferenceEquals(r, store)) ?? false))
+			if (store is not IAsyncDisposable and not IDisposable || owned.Contains(store))
 				continue;
 			else
 				await SafeDisposeAsync(store).ConfigureAwait(false);
