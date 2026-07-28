@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Xml.Linq;
 using ActiveSync.Contracts;
@@ -237,7 +238,7 @@ public static class ContactConverter
 
 		string? birthday = V("Birthday");
 		if (birthday is not null && EasDateTime.TryParse(birthday, out DateTime bday))
-			AppendLine(sb, "BDAY", bday.ToString("yyyy-MM-dd"));
+			AppendLine(sb, "BDAY", bday.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
 
 		string? body = merged.Element(AirSyncBase + "Body")?.Element(AirSyncBase + "Data")?.Value;
 		AppendLine(sb, "NOTE", body);

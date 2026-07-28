@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
@@ -373,5 +374,28 @@ public class ContactConverterTests
 
 		Assert.Equal("1", truncatedFlag);
 		Assert.True(Encoding.UTF8.GetByteCount(sent) <= 256);
+	}
+
+	[Fact]
+	public void Update_Birthday_IsFormattedInvariantly_RegardlessOfTheServerCulture()
+	{
+		// D12 — AppendLine(sb, "BDAY", bday.ToString("yyyy-MM-dd")) used no
+		// CultureInfo.InvariantCulture, so DateTime.ToString honoured the thread's calendar. On a
+		// host whose culture defaults to a non-Gregorian calendar (th-TH -> ThaiBuddhist) the
+		// emitted BDAY is off by centuries.
+		CultureInfo original = CultureInfo.CurrentCulture;
+		try
+		{
+			CultureInfo.CurrentCulture = new CultureInfo("th-TH");
+			string updated = ContactConverter.FromApplicationData(AppData(
+				new XElement(Contacts + "FirstName", "Cal"),
+				new XElement(Contacts + "Birthday", "1980-04-05T12:00:00.000Z")), "c-cal", null);
+
+			Assert.Contains("BDAY:1980-04-05", updated);
+		}
+		finally
+		{
+			CultureInfo.CurrentCulture = original;
+		}
 	}
 }
