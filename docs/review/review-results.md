@@ -1237,3 +1237,70 @@ shape: a test observing **process-global** state — a static `Meter`, a certifi
 owns, a `StringBuilder` under a deliberate race — while the suite runs in parallel. That is a category,
 not three coincidences, and it is worth a targeted sweep rather than waiting for each one to surface
 mid-verification and cost an item's worth of bisecting.
+
+## Item 24 — IMAP correctness [LIVE]
+**Findings:** `G3` `G6` `G7` `G9` `G12` `G13` `G16` `G22`
+**Commits:** `bbff8fe` (G3) · `40b5797` (G7) · `e3b040a` (G12) · `af859e0` (G16) · `3854bc7` (G13) ·
+`91ce0cc` (G22) · `07c5111` (G6) · `37860e7` (G9)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 25 ✓ · one commit per finding, **strike shipped with every one** ✓ · build 0 warnings ✓ ·
+unit **1424 passed, 0 failed** (Cli 16 · Protocol 99 · Core 855 · WebUi 120 · Server 334) ✓ ·
+live **150 passed, 0 skipped** on a clean-volume Stalwart ✓ · scope confined to `Backends.Imap` + tests ✓
+
+**Red-first re-proved independently for 7 of 8**, in three passes, because two commits add internal test
+seams and reversing them breaks the test assemblies:
+- **Live, all 8 reversed** (the Integration project's build graph excludes `Core.Tests`, so this compiles):
+  5 failures, no others — `DeleteItemAsync_UnqualifiedItemKey_IsRejected_NotSilentlyResolved` (G3),
+  `ListFoldersAsync_NestedDraftsFolder_IsClassifiedConsistentlyWithTheWritePath` (G12),
+  `SearchAsync_UsesTheSameWidenedFloor_AsGetItemRevisionsAsync` (G13),
+  `UpdateItemAsync_ContentChangeOutsideDrafts_IsRejected_NotSilentlyDiscarded` (G16),
+  `WaitForChangesAsync_IsNotBlockedBehindAConcurrentLongHeldSessionGate` (G22).
+- **Unit, G6+G9 reversed:** `WaitForChangeAsync_TransientAuthFailureThenSuccess_DoesNotLatchUnavailable`
+  (G6) and `UpdateItemAsync_InterruptedAfterAppend_ThenRetried_ConvergesToOneDraft` (G9).
+- **`G7` is the one strike not independently re-proved:** its commit makes `GetOrCreateWatcher` internal
+  for the test, so reversing it stops `Core.Tests` compiling. Diff read instead — it compares the whole
+  `BackendCredentials` record plus a `ConnectionMatches` field list, which is the finding's remedy.
+
+> **A false green to remember, hit twice in this item and once in item 23.** Reverse-applying a commit that
+> added a test seam leaves the test assembly uncompilable, and `dotnet test --no-build` then runs the
+> STALE binaries and reports a full pass. It looks exactly like "the fix wasn't needed". Both times the
+> only tell was the `error CS` lines above the green summary. Always read the build result before the test
+> result when re-proving.
+
+**Notes:**
+- **`G22`'s fix is a connection-churn regression that lands in the same item as `G6`, which is about
+  connection pressure. This is the one thing in item 24 a human should look at.** The finding says to give
+  `SnapshotStatusAsync` "its own lightweight connection (**as `ImapIdleWatcher` already has**)" — the
+  watcher's is *persistent*, lazily started and reused. What landed opens a **fresh IMAP connection per
+  poll**: `ConnectStandaloneAsync` → LOGIN → STATUS(×folders) → LOGOUT → dispose, inside a 30-second loop
+  (`ImapMailBackend.Watch.cs:84`). A Ping can run ~59 minutes, so that is on the order of **~118
+  connect+login cycles per Ping per user** — and it only runs when IDLE is unavailable, which is precisely
+  the state `G6` in this same item exists to survive. `G6`'s own text names Dovecot's
+  `mail_max_userip_connections` (default 10) as a cap *this design already provokes*. The two fixes are
+  individually correct and interact badly. Mitigating facts: it is one connection per poll cycle, not per
+  folder (all folder keys share the connection), and it is short-lived. The worker disclosed the deviation
+  as a "scope trade-off" but did not connect it to `G6`. **Recommend filing a follow-up finding** to make
+  the poll connection persistent-and-reused, as the finding originally asked.
+- **`G9` trades duplication for loss, and the finding sanctions exactly that.** I checked, because "a
+  mid-failure loses the edit" is a serious property to accept on a worker's say-so: `G9`'s FIX reads
+  "reverse the order where possible (flag+expunge the old UID first, then append) so a mid-failure loses an
+  edit rather than duplicating it, **or** route the rewrite through a `SentCommandToken`-style claim". The
+  worker took the first option. The second would have neither lost nor duplicated, and the finding lists it
+  as an equal alternative — so this is a judgment call that could reasonably have gone the other way, and
+  the losing case is a user's draft edit.
+- **`G6`'s retry bound (3) is the worker's number, not the finding's.** The finding says "a bounded number
+  of auth failures" without specifying. Consequence, disclosed: a genuinely wrong password now takes up to
+  ~15 s of capped backoff before IDLE is reported permanently unavailable, instead of failing at once.
+- **`G3` and `G16` are breaking in the client-visible sense.** `G3`: an unqualified item key now throws
+  `BackendItemNotFoundException` instead of being resolved against the current UIDVALIDITY — the finding
+  argues the only remaining sources are a stale or hostile client, since the schema reinit removed the
+  legacy data, and such a client now gets a clean Delete+Add. `G16`: a content-bearing Change outside
+  Drafts now throws rather than silently discarding the user's edit while reporting success.
+- **`ConnectionMatches` is a hand-maintained field list** (`Host`, `Port`, `UseSsl`, `Security`,
+  `AllowInvalidCertificates`, `CaCertificatePath`, `CheckRevocation`, `PathSeparator`). If `ImapOptions`
+  gains a connection-affecting field, nothing fails — the watcher just silently keeps the stale connection,
+  which is the exact defect `G7` fixes. No test pins the list against the options type.
+- **Test approach worth carrying forward:** `G6` and `G9` were proved against two purpose-built fake IMAP
+  servers that close the connection at an exact protocol boundary, because a real network fault cannot be
+  timed deterministically. That is the right answer for fault-injection findings and mirrors the existing
+  `RawSieveServer` pattern — no coverage-only tests were needed anywhere in this item.
