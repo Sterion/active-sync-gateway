@@ -349,11 +349,15 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	{
 		DateTime cutoff = DateTime.UtcNow.AddMinutes(-_options.CurrentValue.Eas.SessionIdleMinutes);
 		foreach ((string key, Lazy<Task<CompositeBackendSession>> lazy) in _sessions)
+			// A6: value-compared removal, like every other TryRemove in this file — a concurrent
+			// replacement installed under the same key (password rotation, or a rebuild after a
+			// failed TryAcquireLease) between this enumeration and the removal must be left alone,
+			// not evicted just because it currently occupies the slot the sweep judged idle.
 			if (IsBuilt(lazy) && Built(lazy).LastUsedUtc < cutoff &&
-			    _sessions.TryRemove(key, out Lazy<Task<CompositeBackendSession>>? removed))
+			    _sessions.TryRemove(new KeyValuePair<string, Lazy<Task<CompositeBackendSession>>>(key, lazy)))
 			{
 				_logger.LogDebug("Evicting idle backend session {Key}", key.Replace('\n', '/'));
-				_ = DisposeLazyAsync(removed);
+				_ = DisposeLazyAsync(lazy);
 			}
 			else if (IsFaulted(lazy) &&
 			         _sessions.TryRemove(new KeyValuePair<string, Lazy<Task<CompositeBackendSession>>>(key, lazy)))

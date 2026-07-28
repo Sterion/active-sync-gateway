@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Xml.Linq;
 using ActiveSync.Contracts;
@@ -227,6 +228,47 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		InvokeEvictIdleSessions(factory);
 
 		Assert.False(SessionsContainsKey(factory, key)); // the sweep removed it
+	}
+
+	[Fact]
+	public void IdleSweep_RemovalMustBeValueCompared_NotKeyOnly_COVERAGE()
+	{
+		// A6 — COVERAGE, not red-first proof. EvictIdleSessionsCore's foreach captures (key, lazy)
+		// from ONE enumeration pass over the live _sessions ConcurrentDictionary, then a few
+		// instructions later removes by KEY ALONE: `_sessions.TryRemove(key, out removed)`. If a
+		// concurrent installer (GetSessionAsync's password-rotation path, or a rebuild after a
+		// failed TryAcquireLease) replaces _sessions[key] with a freshly-installed, DIFFERENT Lazy
+		// in that window, the key-only removal evicts and (if built) tears down whatever is
+		// CURRENTLY there — not the stale entry the sweep actually judged idle — silently losing
+		// the replacement session. Every other removal in this file (the faulted-slot branch ten
+		// lines below the buggy one, and all three in GetSessionAsync) uses the value-compared
+		// TryRemove(KeyValuePair) overload precisely so a concurrent replacement is left alone.
+		//
+		// This is a genuine two-thread race with NO deterministic trigger reachable from a test:
+		// the gap between the enumeration read and the TryRemove call is a handful of CPU
+		// instructions with no await point (EvictIdleSessionsCore is fully synchronous) to gate a
+		// test on, unlike e.g. AuthCache_RejectsAVerdictStampedWithAnOlderSnapshotVersion above,
+		// which can pause the racing method at a real `await`. Reproducing it end-to-end would
+		// need either a production-only test seam or a probabilistic stress loop — neither
+		// appropriate for a Low-severity, single-line fix. So this test instead pins the exact
+		// removal-semantics contract the fix (and its three siblings) relies on, using the same
+		// ConcurrentDictionary<TKey,TValue> type _sessions is: a value-compared TryRemove is a
+		// no-op once the slot has moved on, while a key-only TryRemove is not.
+		ConcurrentDictionary<string, int> sessions = new();
+		sessions["k"] = 1; // what the sweep's enumeration captured as "idle-eligible"
+		sessions["k"] = 2; // a concurrent installer replaced it before the sweep's removal ran
+
+		// The buggy shape (BackendSessionFactory.cs:353 before the fix): removes whatever is
+		// there NOW, tearing down the concurrently-installed replacement instead of leaving it.
+		Assert.True(sessions.TryRemove("k", out int removedByKeyOnly));
+		Assert.Equal(2, removedByKeyOnly);
+		sessions["k"] = 2; // reset for the fixed shape below
+
+		// The fixed shape: only removes when the CURRENT value still matches the stale one that
+		// was captured — the replacement survives untouched.
+		Assert.False(sessions.TryRemove(new KeyValuePair<string, int>("k", 1)));
+		Assert.True(sessions.TryGetValue("k", out int survivor));
+		Assert.Equal(2, survivor);
 	}
 
 	private static bool SessionsContainsKey(BackendSessionFactory factory, string key)
