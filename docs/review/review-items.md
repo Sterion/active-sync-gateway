@@ -629,7 +629,7 @@ and correctly left unfixed under "stay inside the item", but not filed — recor
 so it is not lost. FIX: anchor the `RecurrenceMapper.Build` call on the task's local wall-clock start,
 mirroring `D21`.
 
-`N7` **Low** `AGENTS.md` now states an absolute that `H23` (item 29) deliberately made false — `AGENTS.md`
+~~`N7`~~ **Low** `AGENTS.md` now states an absolute that `H23` (item 29) deliberately made false — `AGENTS.md`
 § *Sync model*, "Default-calendar pick is deterministic": "a collection matching a share grant **NEVER**
 claims the default slot (it's a share, not the user's primary calendar)". `H23`'s fix
 (`CalDavStore.ListFoldersAsync`, commit `d01c290`) adds exactly the exception the finding asked for: when
@@ -642,7 +642,7 @@ The item 29 commit did not touch AGENTS.md. FIX: reword the sentence to "a colle
 grant never claims the default slot **unless every calendar in the home set is granted, in which case one
 is promoted so a default always exists (H23)**".
 
-`N8` **Low** `AGENTS.md`'s "Database-declared accounts" paragraph (§ *State store*, right after the
+~~`N8`~~ **Low** `AGENTS.md`'s "Database-declared accounts" paragraph (§ *State store*, right after the
 `eas`/`/cli` forwarding notes) describes a class of types that no longer exist — `AccountEntry` rows
 (serialized `AccountOptions` JSON), `AccountStore`, and `AccountResolver`. The db-restructure renamed
 these to `User` (per-field columns, not a JSON blob), `UserStore`, and `UserResolver` — `grep`
@@ -685,3 +685,16 @@ matching assertions; this is a different file with the same defect, noticed whil
 fix but out of that finding's stated scope. FIX: replace the four raw literals in
 `LogTextTests.cs` with `\uXXXX` escapes, the same way `W9`'s fix did for `WireLog.cs`/
 `WireLogTests.cs`.
+
+`N11` **Nit** `SettingsRefresher`'s doc comment points at a type that no longer exists —
+`src/ActiveSync.Core/Settings/SettingsRefresher.cs:8`: `Polls the <see
+cref="ActiveSync.Core.State.SettingsStamp" />`. `SettingsStamp` was folded into the single
+`DataChange` table during the db-restructure (the same drift `A11`/`A13` corrected elsewhere and `N8`
+corrects in `AGENTS.md`), so this `cref` resolves to nothing — `grep` finds no such type under
+`src/`. It does not fail the build because XML documentation generation is off, so `CS1574` never
+fires; it is a dangling reference an IDE shows as unresolved and a reader follows nowhere. Found by
+the orchestrator while fixing `N8`, and left for a separate change rather than fixed inline because a
+worker was concurrently editing `src/ActiveSync.Core/`. FIX: point the `cref` at
+`ActiveSync.Core.State.DataChange` (or name the `"settings"` change-stamp row in prose), and
+consider whether enabling XML doc generation — or at least `CS1574` as a warning — is worth it so
+the next dangling `cref` fails the build instead of rotting silently.

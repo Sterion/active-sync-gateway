@@ -392,8 +392,12 @@ licence is held.
 - **Default-calendar pick is deterministic**: DAV multistatus order is server whim (a
   CI Stalwart once listed a freshly MKCALENDARed collection first), so `ListFoldersAsync`
   sorts the home set by href before crowning the first VEVENT collection Type 8 — and a
-  collection matching a share grant NEVER claims the default slot (it's a share, not the
-  user's primary calendar).
+  collection matching a share grant does not claim the default slot (it's a share, not the
+  user's primary calendar). **One deliberate exception, and it is a floor rather than a
+  loophole:** if EVERY calendar in the home set is granted, one is promoted anyway, because
+  a delegate account with no Type 8 folder at all breaks iOS, which expects a default
+  Calendar to exist. Non-granted collections are always preferred; a share is the fallback,
+  never the first choice.
 
 ## State store
 
@@ -514,10 +518,12 @@ and a `::1`-first resolve costs a ~2 s failed connect) and falls back to `dotnet
 ActiveSync.Server.dll` when no gateway answers; `serve`/`protect` always run locally,
 `EAS_NO_FORWARD=1` forces all-local. `EncryptionKeyLoader`/`SecretValue` live in the BCL-only
 `ActiveSync.Crypto` assembly (shared by Core + the client; in-repo only, not published).
-**Database-declared accounts**: `AccountEntry` rows (serialized `AccountOptions` JSON,
-managed by `AccountStore` / the `eas user` branch) REPLACE the whole config entry for the
-same login. Every store mutation bumps the single `AccountsStamp` row in the same
-SaveChanges; `AccountResolver` point-reads it at most every `Auth:UsersRefreshSeconds`
+**Database-declared accounts**: `User` rows carry the declaration in **per-field columns**
+(not a serialized JSON blob), managed by `UserStore` / the `eas user` branch. Resolution is
+per FIELD, most-specific-wins — a database value overrides the config value for THAT field
+alone and the rest still come from configuration; a database row does not replace the whole
+config entry. Every declaration mutation bumps the `"users"` row of `DataChanges` in the same
+SaveChanges; `UserResolver` point-reads it at most every `Auth:UsersRefreshSeconds`
 (lazily, on the request path via `EnsureFreshAsync`) and swaps an immutable snapshot;
 `BackendSessionFactory` subscribes to `SnapshotChanged` and clears both auth caches.
 Invalid/malformed DB rows are skipped with a warning — never let one row break auth. The
@@ -604,7 +610,8 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   logins; a provider without it means declared-users-only), `IPerUserResourceOwner`
   (per-user cache trim on the eviction sweep), `IReadinessSource` (/readyz probe).
 - **DB-backed global settings**: every setting is CLI-settable (`eas config set`) and stored in
-  the state DB (`GlobalSetting` rows + a single-row `SettingsStamp`, mirroring the accounts store).
+  the state DB (`GlobalSetting` rows + the `"settings"` row of `DataChanges`, the same
+  change-stamp mechanism `UserStore` uses for declarations).
   A `DbSettingsConfigurationProvider` is layered LAST in configuration so the DB wins over
   appsettings/env, which win over code (POCO) defaults; `SettingsRefresher` polls the stamp
   (`Auth:UsersRefreshSeconds`, ~1s) and swaps the provider snapshot, firing the config reload token
