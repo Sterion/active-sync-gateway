@@ -26,16 +26,17 @@ public static class TransientRetry
 
 	/// <summary>
 	///   Runs <paramref name="action" />, replaying it on a transient failure up to the
-	///   <see cref="DelaysMs" /> budget. When <paramref name="idempotent" /> is false the action
-	///   runs exactly once (the predicate is never consulted) — the caller has judged a replay
-	///   unsafe. <paramref name="onRetry" /> is invoked with the failing exception and the 1-based
-	///   retry number just before each backoff.
+	///   <see cref="DelaysMs" /> budget. K12: <paramref name="idempotent" /> defaults to false — a
+	///   caller who omits it gets the SAFE behavior (the action runs exactly once, the predicate
+	///   never consulted); replay must be opted into explicitly by whoever has judged the action
+	///   safe to run twice. <paramref name="onRetry" /> is invoked with the failing exception and
+	///   the 1-based retry number just before each backoff.
 	/// </summary>
 	public static async Task<T> RunAsync<T>(
 		Func<Task<T>> action,
 		Func<Exception, bool> isTransient,
 		CancellationToken ct,
-		bool idempotent = true,
+		bool idempotent = false,
 		Action<Exception, int>? onRetry = null)
 	{
 		for (int attempt = 0; ; attempt++)
@@ -52,12 +53,12 @@ public static class TransientRetry
 		}
 	}
 
-	/// <summary>Void-returning overload for actions with no result.</summary>
+	/// <summary>Void-returning overload for actions with no result. K12: idempotent defaults to false.</summary>
 	public static Task RunAsync(
 		Func<Task> action,
 		Func<Exception, bool> isTransient,
 		CancellationToken ct,
-		bool idempotent = true,
+		bool idempotent = false,
 		Action<Exception, int>? onRetry = null)
 	{
 		return RunAsync(async () =>
@@ -69,14 +70,15 @@ public static class TransientRetry
 
 	/// <summary>
 	///   HTTP specialisation shared by the DAV and JMAP clients: retries on a transient transport
-	///   failure OR a replayable 5xx, disposing each discarded response first. <paramref name="send" />
+	///   failure OR a replayable 5xx, disposing each discarded response first. K12: idempotent
+	///   defaults to false, same reasoning as <see cref="RunAsync{T}" />. <paramref name="send" />
 	///   is the underlying (redirect-following) send; <paramref name="onRetry" /> gets a short reason
 	///   token (exception type name or status code) and the 1-based retry number.
 	/// </summary>
 	public static async Task<HttpResponseMessage> SendHttpAsync(
 		Func<Task<HttpResponseMessage>> send,
 		CancellationToken ct,
-		bool idempotent = true,
+		bool idempotent = false,
 		Action<string, int>? onRetry = null)
 	{
 		for (int attempt = 0; ; attempt++)

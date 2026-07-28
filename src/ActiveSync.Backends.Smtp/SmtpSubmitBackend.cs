@@ -45,6 +45,9 @@ public sealed class SmtpSubmitBackend(
 		// Connect + authenticate are side-effect-free (nothing is submitted yet), so the whole setup
 		// is retried on a transient blip. The DATA phase below runs EXACTLY ONCE — replaying a
 		// completed submission would duplicate the mail — so it is deliberately outside the retry.
+		// K12: idempotent must be explicit now that TransientRetry.RunAsync's default is false —
+		// connect+auth is genuinely replayable (nothing has been submitted yet), unlike the DATA
+		// phase below.
 		await TransientRetry.RunAsync(async () =>
 		{
 			// A retry may find the client mid-connected (auth threw after connect); reset first so
@@ -54,7 +57,7 @@ public sealed class SmtpSubmitBackend(
 			await smtp.ConnectAsync(options.Host, options.Port, MailTransportSecurity.ForSmtp(options), ct)
 				.ConfigureAwait(false);
 			await smtp.AuthenticateAsync(credentials.UserName, credentials.Password, ct).ConfigureAwait(false);
-		}, ex => IsTransientSmtp(ex, ct), ct, onRetry: (ex, attempt) =>
+		}, ex => IsTransientSmtp(ex, ct), ct, idempotent: true, onRetry: (ex, attempt) =>
 		{
 			Core.Observability.GatewayMetrics.RecordBackendRetry("smtp");
 			logger.LogWarning(ex, "SMTP connect/auth transient failure for {User}; retry {Attempt}/{Max}",

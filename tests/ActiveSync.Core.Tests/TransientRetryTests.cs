@@ -76,10 +76,27 @@ public class TransientRetryTests
 				if (calls == 1)
 					throw new IOException("blip");
 				return Task.FromResult(7);
-			}, ex => ex is IOException, CancellationToken.None);
+			}, ex => ex is IOException, CancellationToken.None, idempotent: true);
 
 		Assert.Equal(7, result);
 		Assert.Equal(2, calls);
+	}
+
+	// K12: the idempotent parameter used to default to true — a caller who omitted it (the easy,
+	// natural-looking call) silently got at-least-once replay on a possibly non-idempotent
+	// operation. The safe default is NOT to replay unless the caller says so explicitly.
+	[Fact]
+	public async Task RunAsync_IdempotentOmitted_DefaultsToFalse()
+	{
+		int calls = 0;
+		await Assert.ThrowsAsync<IOException>(() => TransientRetry.RunAsync<int>(
+			() =>
+			{
+				calls++;
+				throw new IOException("blip");
+			}, _ => true, CancellationToken.None)); // idempotent deliberately omitted
+
+		Assert.Equal(1, calls);
 	}
 
 	[Fact]
@@ -119,7 +136,7 @@ public class TransientRetryTests
 			{
 				calls++;
 				throw new IOException("always");
-			}, _ => true, CancellationToken.None));
+			}, _ => true, CancellationToken.None, idempotent: true));
 
 		// The initial attempt plus one retry per backoff step.
 		Assert.Equal(TransientRetry.DelaysMs.Length + 1, calls);
@@ -136,7 +153,7 @@ public class TransientRetryTests
 			{
 				calls++;
 				throw new IOException("blip");
-			}, _ => true, cts.Token));
+			}, _ => true, cts.Token, idempotent: true));
 
 		Assert.Equal(1, calls); // ran once, then the cancelled backoff aborted the retry
 	}
@@ -152,7 +169,7 @@ public class TransientRetryTests
 			TrackingResponse response = new(calls == 1 ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK);
 			issued.Add(response);
 			return Task.FromResult<HttpResponseMessage>(response);
-		}, CancellationToken.None);
+		}, CancellationToken.None, idempotent: true);
 
 		Assert.Equal(HttpStatusCode.OK, final.StatusCode);
 		Assert.Equal(2, calls);
@@ -172,6 +189,21 @@ public class TransientRetryTests
 		}, CancellationToken.None, idempotent: false);
 
 		Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+		Assert.Equal(1, calls);
+	}
+
+	// K12: same defect, HTTP side — SendHttpAsync's idempotent default must not silently replay.
+	[Fact]
+	public async Task SendHttpAsync_IdempotentOmitted_DefaultsToFalse()
+	{
+		int calls = 0;
+		using HttpResponseMessage response = await TransientRetry.SendHttpAsync(() =>
+		{
+			calls++;
+			return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+		}, CancellationToken.None); // idempotent deliberately omitted
+
+		Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
 		Assert.Equal(1, calls);
 	}
 
