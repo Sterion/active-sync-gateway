@@ -14,7 +14,7 @@ namespace ActiveSync.Backends.Jmap;
 ///   JSContact (RFC 9553) ⇄ EAS Contacts-class ApplicationData (MS-ASCNTC). Covers the fields
 ///   the EAS Contacts class carries (name parts, file-as, up to three emails, typed phones,
 ///   home/work addresses, organization/department/title, nickname, birthday, note, categories).
-///   H25: this bridge does NOT cover photo — "media" is Managed (see below) but nothing reads it
+///   This bridge does NOT cover photo — "media" is Managed (see below) but nothing reads it
 ///   into a contacts:Picture element or writes one back (the EAS Contacts view neither reads nor
 ///   writes the photo; see the ClearedOnUpdate comment). On write, unknown JSContact members of
 ///   an existing card are preserved so editing one EAS field never drops data the Contacts class
@@ -236,7 +236,7 @@ public static class JsContactConverter
 		if (addresses.Count > 0)
 			card["addresses"] = addresses;
 
-		// H26: `V(...) is { }` matches any NON-NULL string, including an empty one — a present but
+		// `V(...) is { }` matches any NON-NULL string, including an empty one — a present but
 		// cleared <CompanyName/> (distinct from an absent element) produced an organization with an
 		// empty name instead of leaving the member unset. Blank-check both values instead.
 		string? company = V("CompanyName");
@@ -266,7 +266,7 @@ public static class JsContactConverter
 		// kind (e.g. a wedding anniversary — EAS carries it as contacts2:Anniversary, which this
 		// bridge does not read/write) has no EAS-side representation to rebuild it from, so it is
 		// carried over from the existing card rather than dropped — "anniversaries" is Managed,
-		// so without this it is nulled/overwritten on every edit (H4).
+		// so without this it is nulled/overwritten on every edit.
 		Dictionary<string, object?> anniversaries = new();
 		if (existing is { ValueKind: JsonValueKind.Object } priorCard &&
 		    priorCard.TryGetProperty("anniversaries", out JsonElement priorAnniversaries) &&
@@ -429,7 +429,7 @@ public static class JsContactConverter
 
 	private static string StripEmailDisplay(string value)
 	{
-		// H11: a malformed "<" with no matching ">" (or the brackets swapped) used to fall through
+		// A malformed "<" with no matching ">" (or the brackets swapped) used to fall through
 		// to returning the WHOLE string, display-name text and stray bracket included — not a valid
 		// email. MimeKit's mailbox parser is lenient enough to recover the intended address from a
 		// truncated "Name <addr" shape; only genuinely unparseable input (no recognizable address at

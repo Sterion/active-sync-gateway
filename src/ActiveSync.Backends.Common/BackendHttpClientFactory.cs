@@ -19,7 +19,7 @@ namespace ActiveSync.Backends.Common;
 public static class BackendHttpClientFactory
 {
 	/// <summary>
-	///   Hard ceiling on a buffered backend response body (H24). Applied as
+	///   Hard ceiling on a buffered backend response body. Applied as
 	///   <see cref="HttpClient.MaxResponseContentBufferSize" /> on the long-lived DAV/JMAP clients so
 	///   a malicious or malfunctioning server cannot stream an unbounded body into memory via the
 	///   buffering read methods (<c>ReadAsStringAsync</c> etc.). It does NOT apply to a
@@ -30,7 +30,7 @@ public static class BackendHttpClientFactory
 
 	// Probe handlers are keyed by their TLS shape and reused across calls so a periodic
 	// readiness probe does not build and discard a handler (and its connection pool) every
-	// time (H26). The HttpClient wrapping them is cheap and created disposable per call.
+	// time. The HttpClient wrapping them is cheap and created disposable per call.
 	private static readonly ConcurrentDictionary<(bool AllowInvalid, string? CaPath, bool CheckRevocation),
 		SocketsHttpHandler> ProbeHandlers = new();
 
@@ -74,7 +74,7 @@ public static class BackendHttpClientFactory
 	/// <summary>
 	///   An unauthenticated client for a readiness probe. The underlying handler is pooled and
 	///   shared per TLS shape, so repeated probes reuse one connection pool rather than churning a
-	///   handler each call (H26); the returned client does not dispose it.
+	///   handler each call; the returned client does not dispose it.
 	/// </summary>
 	public static HttpClient CreateProbeClient(
 		bool allowInvalidCertificates, string? caCertificatePath, TimeSpan timeout, bool checkRevocation = false)

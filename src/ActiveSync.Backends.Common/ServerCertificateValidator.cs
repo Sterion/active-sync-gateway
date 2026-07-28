@@ -12,7 +12,7 @@ namespace ActiveSync.Backends.Common;
 /// </summary>
 public static class ServerCertificateValidator
 {
-	// D27: keyed on (path, last-write time, length) rather than the path alone. CaCertificatePath
+	// Keyed on (path, last-write time, length) rather than the path alone. CaCertificatePath
 	// is a live, DB-settable option that otherwise applies on session recycle (~1 s, per AGENTS.md)
 	// — a path-only key meant a rotated CA bundle at the same path was cached FOREVER, including
 	// past the point the old root expires, with no way for an operator to fix it short of a
@@ -33,7 +33,7 @@ public static class ServerCertificateValidator
 			return null;
 
 		X509Certificate2Collection cas = LoadCaCertificates(caCertificatePath);
-		// D17: thread the TLS stack's OWN chain (built from whatever the server presented during
+		// Thread the TLS stack's OWN chain (built from whatever the server presented during
 		// the handshake) through to Validate instead of discarding it — that chain is the only
 		// place an intermediate certificate the server sent is ever available.
 		return (_, certificate, chain, errors) =>
@@ -63,7 +63,7 @@ public static class ServerCertificateValidator
 		using X509Chain chain = new();
 		chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
 		chain.ChainPolicy.CustomTrustStore.AddRange(customCas);
-		// D17: seed ExtraStore with whatever intermediates the TLS handshake itself presented —
+		// Seed ExtraStore with whatever intermediates the TLS handshake itself presented —
 		// the chain argument the callback used to discard — so a leaf signed by a private
 		// intermediate (not directly by the trusted root) can still complete the chain. Without
 		// this, CaCertificatePath's documented "private PKI" use case fails closed whenever the
@@ -73,7 +73,7 @@ public static class ServerCertificateValidator
 			foreach (X509ChainElement element in handshakeChain.ChainElements)
 				if (!element.Certificate.Equals(certificate))
 					chain.ChainPolicy.ExtraStore.Add(element.Certificate);
-		// K13: NoCheck by default — most private CAs behind a custom-CA path publish no CRL/OCSP,
+		// NoCheck by default — most private CAs behind a custom-CA path publish no CRL/OCSP,
 		// so unconditionally checking would fail every connection closed. CheckRevocation is the
 		// operator's explicit opt-in for a private PKI that DOES publish revocation, so a revoked
 		// backend certificate is no longer silently accepted just because it chains to a trusted CA.
@@ -84,7 +84,7 @@ public static class ServerCertificateValidator
 
 	/// <summary>
 	///   Loads (and caches) the CA PEM file. Throws with a clear message when unreadable. The cache
-	///   key folds in the file's last-write time and length (D27) so a rotated bundle at the same
+	///   key folds in the file's last-write time and length so a rotated bundle at the same
 	///   path is picked up on the next call rather than serving the collection loaded years ago.
 	/// </summary>
 	public static X509Certificate2Collection LoadCaCertificates(string path)

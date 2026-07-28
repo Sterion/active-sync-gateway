@@ -30,7 +30,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 	private readonly ConcurrentDictionary<string, Lazy<ImapIdleWatcher>> _watchers = new();
 
 	/// <summary>
-	///   G22: one persistent STATUS-poll connection per gateway user, shared by every device and
+	///   One persistent STATUS-poll connection per gateway user, shared by every device and
 	///   every folder of that user (the watcher cache's shape, minus the per-folder dimension —
 	///   a STATUS costs one round trip per folder on one connection). Trimmed by the same
 	///   <see cref="TrimUserResources" /> sweep.
@@ -43,7 +43,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		_logger = loggerFactory.CreateLogger<ImapBackendProvider>();
 		// Verbose wire logging gets a per-backend category so one backend can be traced alone.
 		_wireLogger = loggerFactory.CreateLogger("ActiveSync.Backends.Imap");
-		// Per-user live-count gauge. Keys are "user\nfolder"; G27: a materialized Lazy is not
+		// Per-user live-count gauge. Keys are "user\nfolder"; a materialized Lazy is not
 		// enough — GetOrCreateWatcher dereferences .Value on every call just to compare
 		// credentials/options, so the watcher object always exists well before any connection is
 		// attempted. Only a STARTED watcher (WaitForChangeAsync ran at least once) is a live count.
@@ -95,7 +95,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 			return GetOrCreateWatcher(gatewayLogin, options, role.Credentials, folderFullName);
 		}
 
-		// G22: resolved through a closure (not captured once) so a credential/connection rotation
+		// Resolved through a closure (not captured once) so a credential/connection rotation
 		// that rebuilds the poller is picked up by an already-open session's next poll.
 		ImapStatusPoller PollerProvider()
 		{
@@ -136,7 +136,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		return true;
 	}
 
-	/// <summary>Live (started, not just materialized — G27) IDLE watchers for the admin dashboard.</summary>
+	/// <summary>Live (started, not just materialized) IDLE watchers for the admin dashboard.</summary>
 	public IReadOnlyList<WatcherInfo> SnapshotWatchers()
 	{
 		List<WatcherInfo> watchers = new();
@@ -158,7 +158,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		// A user's shared IDLE watchers live exactly as long as any of their sessions.
 		foreach ((string key, Lazy<ImapIdleWatcher> lazy) in _watchers)
 		{
-			// G28: defensive against a missing separator, matching SnapshotWatchers below — this
+			// Defensive against a missing separator, matching SnapshotWatchers below — this
 			// runs on the eviction sweep's background timer thread, whose escaping exceptions
 			// BackendSessionFactory.EvictIdleSessions explicitly guards against (an escaping
 			// exception there terminates the process).
@@ -172,7 +172,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 			}
 		}
 
-		// G22: and so does the shared STATUS-poll connection (keyed on the login alone).
+		// And so does the shared STATUS-poll connection (keyed on the login alone).
 		foreach ((string user, Lazy<ImapStatusPoller> _) in _pollers)
 			if (!activeGatewayLogins.Contains(user) && _pollers.TryRemove(user, out Lazy<ImapStatusPoller>? removed))
 			{
@@ -197,7 +197,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 
 	/// <summary>
 	///   One shared IDLE watcher per (gateway user, folder) — all of the user's devices reuse
-	///   it. Rebuilt on credential OR resolved-connection-options change (G7 — a per-user
+	///   it. Rebuilt on credential OR resolved-connection-options change (a per-user
 	///   host/port/security edit must not leave a live watcher connected to the old server, the
 	///   same way a password rotation already rebuilds it); null when IDLE is disabled by
 	///   configuration.
@@ -216,7 +216,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		if (current.Value.Credentials == credentials && ConnectionMatches(current.Value.Options, options))
 			return current.Value;
 
-		// D27: credential/connection rotation — swap the stale lazy for a fresh one with an atomic compare-and-set,
+		// Credential/connection rotation — swap the stale lazy for a fresh one with an atomic compare-and-set,
 		// so only the thread that wins the swap disposes the stale watcher, and a loser never
 		// materializes (and thus orphans) a freshly-built watcher outside the map. The replacement
 		// lazy is deferred, so a loser that never installs it builds nothing.
@@ -234,7 +234,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 	}
 
 	/// <summary>
-	///   G22: one shared STATUS-poll connection per gateway user — all of the user's devices and
+	///   One shared STATUS-poll connection per gateway user — all of the user's devices and
 	///   folders poll over it, and it is opened lazily on the first poll (constructing the poller
 	///   does no I/O). Rebuilt on the same credential-OR-connection-change rule as the IDLE
 	///   watcher, so a per-user host/port/security edit cannot leave an authenticated connection
@@ -264,7 +264,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 	}
 
 	/// <summary>
-	///   G7: the connection-affecting subset of <see cref="ImapOptions" /> — everything a
+	///   The connection-affecting subset of <see cref="ImapOptions" /> — everything a
 	///   per-user backend edit could change that would leave a cached watcher pointed at the
 	///   wrong server or with the wrong transport/certificate policy.
 	/// </summary>

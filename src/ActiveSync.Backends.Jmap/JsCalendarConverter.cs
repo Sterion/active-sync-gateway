@@ -45,7 +45,7 @@ public static class JsCalendarConverter
 	];
 
 	// Server-managed / read-only members: never echoed back in an update (invalidProperties).
-	// H11: "utcStart"/"utcEnd" (server-computed) and "baseEventId" (server-set) per
+	// "utcStart"/"utcEnd" (server-computed) and "baseEventId" (server-set) per
 	// draft-ietf-jmap-calendars — omitting them from this denylist meant a server that returns
 	// them got them echoed straight back in the update patch, failing EVERY event edit against
 	// that server with invalidProperties.
@@ -177,7 +177,7 @@ public static class JsCalendarConverter
 			if (!allDay && start.TzId is { Length: > 0 } tz)
 				js["timeZone"] = tz;
 			if (evt.End is { } end)
-				// H3: subtracting the floating wall-clock Values is wrong across a DST boundary —
+				// Subtracting the floating wall-clock Values is wrong across a DST boundary —
 				// go through the UTC instants instead (all-day values carry no zone, so Value is
 				// already zone-free and stays exact).
 				js["duration"] = XmlConvert.ToString(allDay ? end.Value - start.Value : end.AsUtc - start.AsUtc);
@@ -353,7 +353,7 @@ public static class JsCalendarConverter
 
 	/// <summary>
 	///   RFC 8984 §4.3.4: <c>until</c> is a LocalDateTime in the event's OWN zone — unlike an
-	///   iCalendar RRULE <c>UNTIL</c>, which is always UTC once DTSTART carries a TZID (H8). The
+	///   iCalendar RRULE <c>UNTIL</c>, which is always UTC once DTSTART carries a TZID. The
 	///   parsed <paramref name="until" /> is that UTC instant; converting it into
 	///   <paramref name="tzId" /> before formatting keeps the written wall-clock time consistent
 	///   with the event's own start/end. A floating event (no zone) or an unresolvable zone id

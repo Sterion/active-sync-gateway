@@ -60,7 +60,7 @@ public abstract class LocalStoreBase(
 		string folderBackendKey, ContentFilter filter, CancellationToken ct)
 	{
 		await using SyncDbContext db = dbFactory.CreateDbContext();
-		// D19: AsNoTracking — a read-only revision listing must not populate the change tracker.
+		// AsNoTracking — a read-only revision listing must not populate the change tracker.
 		IQueryable<LocalItem> query = Rows(db).AsNoTracking();
 		if (filter.SinceUtc is { } since)
 			query = query.Where(i => i.ItemDateUtc == null || i.ItemDateUtc >= since);
@@ -137,7 +137,7 @@ public abstract class LocalStoreBase(
 			}
 			catch (DbUpdateConcurrencyException ex)
 			{
-				// G19: retries are exhausted — surface the store's own exception type (every
+				// Retries are exhausted — surface the store's own exception type (every
 				// other IContentStore failure funnels through BackendException) instead of
 				// leaking an EF Core type across the store boundary.
 				throw new BackendException($"Local {Collection} item {itemKey} is being modified concurrently; retry.", ex);
@@ -159,14 +159,14 @@ public abstract class LocalStoreBase(
 		notifier.NotifyChanged(userId, Collection);
 	}
 
-	// K58: local stores expose a single fixed folder and cannot move items — so they implement
+	// Local stores expose a single fixed folder and cannot move items — so they implement
 	// neither IItemMoveOperations nor IFolderOperations rather than carrying throw-stubs. The host
 	// answers MoveItems/Folder* with the unsupported status when the capability is absent.
 
 	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
 		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
 	{
-		// G21: captured as early as possible — mirrors ImapMailBackend.WaitForChangesAsync's own
+		// Captured as early as possible — mirrors ImapMailBackend.WaitForChangesAsync's own
 		// watchStartUtc — so a write that latched between the caller's entry check (e.g.
 		// PingHandler.CheckPendingAsync) and this wait's registration is still observed.
 		DateTime watchStartUtc = DateTime.UtcNow;

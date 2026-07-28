@@ -10,7 +10,7 @@ public sealed class LocalChangeNotifier
 	private readonly Lock _lock = new();
 	private readonly Dictionary<string, List<TaskCompletionSource>> _waiters = new(StringComparer.Ordinal);
 
-	// G21: the last time each key changed, updated on EVERY NotifyChanged call — including when
+	// The last time each key changed, updated on EVERY NotifyChanged call — including when
 	// nobody is currently waiting. Mirrors ImapIdleWatcher.LastChangeUtc: a write that lands
 	// between a caller's entry check and this wait's registration must still be visible to that
 	// wait instead of being silently dropped for lack of a registered listener.

@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace ActiveSync.Backends.Imap;
 
 /// <summary>
-///   G22: the dedicated connection the Ping/Sync STATUS poll runs on. One per gateway user,
+///   The dedicated connection the Ping/Sync STATUS poll runs on. One per gateway user,
 ///   shared by all of that user's devices and folders (exactly like <see cref="ImapIdleWatcher" />),
 ///   owned by <see cref="ImapBackendProvider" /> and evicted when the user's last session goes.
 ///   <para>
@@ -20,7 +20,7 @@ namespace ActiveSync.Backends.Imap;
 ///     30 s for the whole heartbeat, on every long-poll (<c>WaitForChangesAsync</c> races the poll
 ///     against IDLE rather than using it only as an IDLE fallback), so reconnecting per call would
 ///     be ~118 logins per device per hour and would aggravate the very per-user connection cap
-///     <see cref="ImapIdleWatcher" />'s G6 retry budget exists to survive. Steady state is three
+///     <see cref="ImapIdleWatcher" />'s transient-auth retry budget exists to survive. Steady state is three
 ///     connections per user: session + IDLE + poll.
 ///   </para>
 /// </summary>
@@ -46,7 +46,7 @@ public sealed class ImapStatusPoller(
 	///   The resolved connection options this poller was built with — compared alongside
 	///   <see cref="Credentials" /> by <see cref="ImapBackendProvider.GetOrCreatePoller" /> so a
 	///   per-user host/port/security change rebuilds it instead of leaving a live connection
-	///   pointed at the old server (the same rule G7 gave the IDLE watcher).
+	///   pointed at the old server (the same rule the IDLE watcher's connection options follow).
 	/// </summary>
 	internal ImapOptions Options { get; } = options;
 

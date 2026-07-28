@@ -61,7 +61,7 @@ public static class DavDiscovery
 	/// <summary>
 	///   Polls collection ctags/sync-tokens until one changes or the timeout elapses. The interval
 	///   between polls is <paramref name="pollSeconds" /> (the operator's <c>Eas:DavPollSeconds</c>) —
-	///   H11: it was hardcoded to 60 s here, so the configured value was documented and settable but
+	///   It was hardcoded to 60 s here, so the configured value was documented and settable but
 	///   never actually shortened DAV change detection.
 	/// </summary>
 	public static async Task<IReadOnlyList<string>> PollCtagsAsync(
@@ -109,7 +109,7 @@ public static class DavDiscovery
 			Dictionary<string, string?> map = new(StringComparer.Ordinal);
 			HashSet<string> failed = new(StringComparer.Ordinal);
 
-			// H5: AGENTS.md states the cost bound for the full-enumeration posture as "one Depth:1
+			// AGENTS.md states the cost bound for the full-enumeration posture as "one Depth:1
 			// ctag PROPFIND per home set, not per folder" — this loop used to do the opposite (one
 			// PROPFIND, sometimes two, per watched folder). Group the watched folders by their
 			// containing collection (the home set) and issue one Depth:1 PROPFIND per group,
@@ -169,7 +169,7 @@ public static class DavDiscovery
 				}
 				catch (BackendException)
 				{
-					// H12: a transient read failure is "unknown", NOT "changed". Track it so the diff
+					// A transient read failure is "unknown", NOT "changed". Track it so the diff
 					// skips this key — the old code stuffed the sentinel "error" into the map, which
 					// then compared unequal to the real baseline ctag and forced a full re-sync on
 					// every DAV hiccup.
@@ -203,7 +203,7 @@ public static class DavDiscovery
 	///   Collections whose ctag/sync-token changed between two poll snapshots. A key that failed to
 	///   read in either snapshot is treated as unknown (never changed): the Ping entry check and the
 	///   watchdog re-check are the correctness guarantee, so a transient DAV error must not masquerade
-	///   as a change and trigger a full re-sync (H12).
+	///   as a change and trigger a full re-sync.
 	/// </summary>
 	internal static List<string> DetectChanges(
 		IReadOnlyList<string> folderBackendKeys,

@@ -58,7 +58,7 @@ public static class TimeZoneBlob
 	}
 
 	/// <summary>
-	///   D3: reads the offset that actually applies to <paramref name="utcInstant" /> — the base
+	///   Reads the offset that actually applies to <paramref name="utcInstant" /> — the base
 	///   <c>Bias</c> plus <c>DaylightBias</c> when the instant falls inside the zone's daylight
 	///   window, determined from the two SYSTEMTIME transition records (StandardDate at byte
 	///   offset 68, DaylightDate at 152). <see cref="ReadBaseOffset" /> reads only the standard
@@ -152,7 +152,7 @@ public static class TimeZoneBlob
 		return candidate.AddHours(rule.Hour).AddMinutes(rule.Minute).AddSeconds(rule.Second);
 	}
 
-	// D32: internal (not private) so tests can drive it directly with a real surrogate pair —
+	// Internal (not private) so tests can drive it directly with a real surrogate pair —
 	// TimeZoneInfo.CreateCustomTimeZone itself sanitizes such a name to U+FFFD before it would
 	// ever reach here, so the defect this fixes is only reachable by calling this method itself.
 	internal static void WriteName(Span<byte> destination, string name)
@@ -160,7 +160,7 @@ public static class TimeZoneBlob
 		byte[] bytes = Encoding.Unicode.GetBytes(name);
 		int take = Math.Min(bytes.Length, destination.Length - 2);
 		take -= take % 2; // stay on a UTF-16 code-unit boundary
-		// D32: if the last unit inside the cut is an unpaired high surrogate, drop it too —
+		// If the last unit inside the cut is an unpaired high surrogate, drop it too —
 		// otherwise the written field ends mid-surrogate-pair, which is invalid UTF-16.
 		if (take >= 2 && char.IsHighSurrogate((char)BitConverter.ToUInt16(bytes, take - 2)))
 			take -= 2;

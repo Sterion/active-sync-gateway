@@ -13,15 +13,15 @@ internal static class DavReadiness
 		// has no endpoint of its own to probe — the paired role covers it.
 		if (string.IsNullOrWhiteSpace(baseUrl))
 			return true;
-		// H1: honor the operator's TLS trust settings instead of blanket-accepting every
+		// Honor the operator's TLS trust settings instead of blanket-accepting every
 		// certificate. Reachability only — DAV endpoints legitimately answer 401 without creds —
 		// but a self-signed certificate the operator did NOT opt into (AllowInvalidCertificates /
 		// CaCertificatePath) must still fail, exactly as a real request would. The pooled probe
-		// handler (H26) is reused per TLS shape rather than built and discarded each call.
+		// handler is reused per TLS shape rather than built and discarded each call.
 		using HttpClient http = BackendHttpClientFactory.CreateProbeClient(
 			allowInvalidCertificates, caCertificatePath, TimeSpan.FromSeconds(5), checkRevocation);
 		using HttpRequestMessage request = new(HttpMethod.Options, baseUrl);
-		// H31: the response is needed only for disposal — any HTTP status means the server
+		// The response is needed only for disposal — any HTTP status means the server
 		// answered — so it is a throwaway, not a read local.
 		using HttpResponseMessage _ = await http.SendAsync(request, ct).ConfigureAwait(false);
 		return true;

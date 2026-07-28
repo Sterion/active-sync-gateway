@@ -143,12 +143,12 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 		JmapOptions options = settings.Bind<JmapOptions>();
 		if (!Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out Uri? baseUri))
 			return true; // misconfiguration is a startup-validation concern, not a readiness failure
-		// H26: reuse a pooled handler per TLS shape instead of building and discarding one (with
+		// Reuse a pooled handler per TLS shape instead of building and discarding one (with
 		// its connection pool) on every readiness sweep.
 		using HttpClient http = BackendHttpClientFactory.CreateProbeClient(
 			options.AllowInvalidCertificates, options.CaCertificatePath, TimeSpan.FromSeconds(5),
 			options.CheckRevocation);
-		// H31: the response is needed only for disposal (any HTTP answer = reachable), so it is a
+		// The response is needed only for disposal (any HTTP answer = reachable), so it is a
 		// throwaway rather than a read local.
 		using HttpResponseMessage _ = await http.GetAsync(
 			new Uri(baseUri, "/.well-known/jmap"), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
@@ -181,7 +181,7 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 		JmapEventSourceWatcher Build()
 		{
 			// Infinite HTTP timeout: this client holds a long-lived EventSource (SSE) stream open, so
-			// the default 100 s request cap would abort it mid-flight every ~100 s (H17). The stream's
+			// the default 100 s request cap would abort it mid-flight every ~100 s. The stream's
 			// own ping keep-alive and the watcher's cancellation token bound its lifetime instead.
 			JmapClient watcherClient = new(
 				new Uri(options.BaseUrl), credentials,

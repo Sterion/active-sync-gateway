@@ -137,7 +137,7 @@ public sealed class CalDavStore(
 
 	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
 	{
-		// D7: partStatIdentity is the acting user's mail address, so MeetingStatus can tell
+		// partStatIdentity is the acting user's mail address, so MeetingStatus can tell
 		// "I am the organizer" apart from "I am an invitee".
 		return CalendarConverter.ToApplicationData(content, bodyPreference, partStatIdentity);
 	}
@@ -171,7 +171,7 @@ public sealed class CalDavStore(
 		List<string> collections = new();
 		if (self)
 		{
-			// H22: a folder that is itself a share (granted to this user, not owned by them) must
+			// A folder that is itself a share (granted to this user, not owned by them) must
 			// not be folded into the user's OWN availability — ResolveRecipients would otherwise
 			// report the user busy whenever a colleague's/team calendar shared to them is busy.
 			foreach (BackendFolder folder in await ListFoldersAsync(ct).ConfigureAwait(false))
@@ -281,7 +281,7 @@ public sealed class CalDavStore(
 				first = false;
 		}
 
-		// H23: "a share never claims the default slot" is deliberate (AGENTS.md), but it has no
+		// "A share never claims the default slot" is deliberate (AGENTS.md), but it has no
 		// floor — a delegate account whose home set contains only granted collections would
 		// otherwise get ZERO folders of type 8 (Calendar), and iOS in particular expects a default
 		// calendar folder to exist. If nothing was promoted above, promote the first (already

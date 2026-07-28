@@ -29,7 +29,7 @@ public sealed class ImapIdleWatcher(
 	private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(60);
 
 	/// <summary>
-	///   G6: MailKit raises <see cref="AuthenticationException" /> for ANY negative LOGIN/
+	///   MailKit raises <see cref="AuthenticationException" /> for ANY negative LOGIN/
 	///   AUTHENTICATE reply, not only a genuinely wrong password — including a transient one
 	///   (Dovecot's "NO [UNAVAILABLE] Maximum number of connections from user+IP exceeded", which
 	///   this watcher's dedicated-connection-per-(user,folder) shape provokes). Retry with the
@@ -48,7 +48,7 @@ public sealed class ImapIdleWatcher(
 	public BackendCredentials Credentials { get; } = credentials;
 
 	/// <summary>
-	///   The resolved connection options this watcher was built with (G7) — compared alongside
+	///   The resolved connection options this watcher was built with — compared alongside
 	///   <see cref="Credentials" /> by <see cref="ImapBackendProvider.GetOrCreateWatcher" /> so a
 	///   per-user host/port/security change rebuilds the watcher instead of reusing one still
 	///   pointed at the old server.
@@ -59,7 +59,7 @@ public sealed class ImapIdleWatcher(
 	public DateTime LastChangeUtc => new(Interlocked.Read(ref _lastChangeTicks), DateTimeKind.Utc);
 
 	/// <summary>
-	///   G27: whether the background IDLE loop has actually been started (a connection either is or
+	///   Whether the background IDLE loop has actually been started (a connection either is or
 	///   is being established) — as opposed to merely CONSTRUCTED. <see cref="ImapBackendProvider" />
 	///   dereferences its cached <c>Lazy&lt;ImapIdleWatcher&gt;</c> on every
 	///   <c>GetOrCreateWatcher</c> call just to compare credentials/options, so the watcher object

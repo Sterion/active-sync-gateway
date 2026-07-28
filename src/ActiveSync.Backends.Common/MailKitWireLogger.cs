@@ -67,7 +67,7 @@ public sealed class MailKitWireLogger(ILogger logger) : IProtocolLogger
 	}
 
 	// MailKit hands arbitrary chunks; accumulate per direction and emit whole lines.
-	// D28: scan the StringBuilder's own indexer for '\n' instead of calling pending.ToString()
+	// Scan the StringBuilder's own indexer for '\n' instead of calling pending.ToString()
 	// (twice) per line found -- the old code re-stringified the WHOLE remaining buffer on every
 	// iteration, so a chunk of N lines allocated on the order of N copies of the (shrinking)
 	// buffer, i.e. roughly O(N^2) bytes total rather than O(N). A large FETCH response delivered

@@ -35,7 +35,7 @@ public sealed partial class ImapMailBackend(
 	private static readonly string[] DraftsNames = ["Drafts", "INBOX.Drafts"];
 
 	/// <summary>
-	///   G15: <see cref="FindSpecialFolderAsync" /> result, memoized per resolved <see cref="ImapClient" />
+	///   <see cref="FindSpecialFolderAsync" /> result, memoized per resolved <see cref="ImapClient" />
 	///   instance — stable for the connection's lifetime, invalidated by comparing against the
 	///   CURRENT client (a fresh instance after <see cref="ImapSession" /> reconnects, so the cache
 	///   entry for the old, disposed client is simply never matched again rather than needing an
@@ -58,7 +58,7 @@ public sealed partial class ImapMailBackend(
 		{
 			List<BackendFolder> result = new();
 
-			// G14: fetch the WHOLE tree in one LIST ("" "namespace/*") instead of walking one level
+			// Fetch the WHOLE tree in one LIST ("" "namespace/*") instead of walking one level
 			// at a time (one GetSubfoldersAsync round trip per folder, recursively) — a mailbox with
 			// N folders used to cost N round trips per FolderSync, all held under the per-user
 			// session gate, blocking every other device's Sync and the Ping STATUS poll for the
@@ -111,7 +111,7 @@ public sealed partial class ImapMailBackend(
 			IList<UniqueId> uids = await folder.SearchAsync(query, ct).ConfigureAwait(false);
 			if (uids.Count == 0)
 				return new Dictionary<string, string>();
-			// D15: unlike JMAP's Email/get (bounded by maxObjectsInGet, which forces the H8
+			// Unlike JMAP's Email/get (bounded by maxObjectsInGet, which forces its own
 			// page-at-500 mitigation), IMAP has no per-command object cap, and this FETCH asks
 			// only for UID+Flags — no bodies — so even a large mailbox is cheap. Splitting it
 			// into multiple session.RunAsync calls would release ImapSession's per-session gate
@@ -120,7 +120,7 @@ public sealed partial class ImapMailBackend(
 			// different mailbox states, silently breaking the "the revision map is the whole
 			// truth" invariant (AGENTS.md, Sync model) that the diff engine relies on. One atomic
 			// FETCH trades a longer single gate hold for a revision map that is always internally
-			// consistent — deliberately not paged, unlike the H8 mail *listing* it otherwise
+			// consistent — deliberately not paged, unlike the paginated mail *listing* it otherwise
 			// mirrors.
 			IList<IMessageSummary> summaries = await folder
 				.FetchAsync(uids, MessageSummaryItems.UniqueId | MessageSummaryItems.Flags, ct)
@@ -199,7 +199,7 @@ public sealed partial class ImapMailBackend(
 				.ConfigureAwait(false);
 			UniqueId uid = ParseUid(folder, itemKey);
 
-			// G16: a content-bearing Change outside Drafts must be refused, mirroring
+			// A content-bearing Change outside Drafts must be refused, mirroring
 			// CreateItemAsync's explicit refusal of the analogous case (AGENTS.md: Sync Add/Change
 			// of Email is allowed ONLY in the Drafts folder). Falling through to the Read/Flag/
 			// Categories handling below would silently discard the edit while still returning
@@ -223,7 +223,7 @@ public sealed partial class ImapMailBackend(
 					// merge-from-nothing is fine — the payload becomes the whole draft
 				}
 
-				// G9: build the merged content in memory FIRST (the GetMessageAsync fetch above is
+				// Build the merged content in memory FIRST (the GetMessageAsync fetch above is
 				// non-mutating, so it is always safe to run before touching the old message), then
 				// delete the OLD uid before appending the new one — the reverse of the historical
 				// append-then-delete order. A fault after the fetch/build has no I/O to undo; a
@@ -387,7 +387,7 @@ public sealed partial class ImapMailBackend(
 				validity = destination.UidValidity;
 			}
 
-			// F5: fetch the moved message's flags at the destination so the caller can store the
+			// Fetch the moved message's flags at the destination so the caller can store the
 			// item's REAL revision, not a placeholder that can never match the next listing. FETCH
 			// requires the folder to be open (STATUS above does not), so open it read-only first.
 			if (!destination.IsOpen)
@@ -602,7 +602,7 @@ public sealed partial class ImapMailBackend(
 	}
 
 	/// <summary>
-	///   G12: one predicate per special folder (SPECIAL-USE attribute ∪ FullName ∪ leaf Name), so
+	///   One predicate per special folder (SPECIAL-USE attribute ∪ FullName ∪ leaf Name), so
 	///   FolderSync's classification (<see cref="ClassifyFolder" />) and the Sync write-path gates
 	///   (<see cref="IsDraftsFolder" />, and Sent/Trash here) agree. Matching only FullName let a
 	///   server without SPECIAL-USE that nests a special folder under a non-INBOX parent (e.g.
@@ -617,7 +617,7 @@ public sealed partial class ImapMailBackend(
 	}
 
 	/// <summary>
-	///   D2: RFC 3501's SEARCH SINCE compares only the calendar date and "disregard[s] ...
+	///   RFC 3501's SEARCH SINCE compares only the calendar date and "disregard[s] ...
 	///   timezone" of the server's own INTERNALDATE — which is not necessarily UTC. A UTC
 	///   <paramref name="sinceUtc" /> truncated straight to <c>.Date</c> can therefore land one
 	///   calendar day later than the server's own idea of that boundary (a message delivered at
@@ -657,7 +657,7 @@ public sealed partial class ImapMailBackend(
 	///   controls, specials) is DROPPED — the empty string, which the caller filters out. The old
 	///   char-by-char '_' substitution collapsed distinct categories ("a b" and "a_b") onto the same
 	///   keyword: the server-derived category then never matched the client's original, thrashing the
-	///   mail revision string every Sync (D6). Dropping a non-round-trippable category loses it (IMAP
+	///   mail revision string every Sync. Dropping a non-round-trippable category loses it (IMAP
 	///   keywords fundamentally cannot carry spaces/specials) but never corrupts a *different*
 	///   category, so the diff no longer churns. Server→client needs no inverse — every stored atom is
 	///   already a valid category string.
@@ -709,7 +709,7 @@ public sealed partial class ImapMailBackend(
 	}
 
 	/// <summary>
-	///   G3: the qualified "&lt;uidvalidity&gt;:&lt;uid&gt;" form is REQUIRED — an unqualified key
+	///   The qualified "&lt;uidvalidity&gt;:&lt;uid&gt;" form is REQUIRED — an unqualified key
 	///   (no ':') used to have the folder's CURRENT UidValidity stamped onto it unconditionally,
 	///   which is exactly the hazard <see cref="ToItemKey" /> exists to close: RFC 3501 lets a
 	///   server reset UIDVALIDITY (mailbox recreated, restored, migrated, index rebuilt), after
@@ -740,7 +740,7 @@ public sealed partial class ImapMailBackend(
 	private async Task<IMailFolder?> FindSpecialFolderAsync(
 		ImapClient client, SpecialFolder special, string[] fallbackNames, CancellationToken ct)
 	{
-		// G15: the result is stable for the connection's lifetime (SPECIAL-USE flags/folder names
+		// The result is stable for the connection's lifetime (SPECIAL-USE flags/folder names
 		// don't change mid-session) — on a server without SPECIAL-USE, resolving it used to cost a
 		// full namespace LIST on EVERY delete/save-to-Sent (50 messages == 50 extra LISTs, all under
 		// the session gate). Reusing an entry from a PRIOR client instance would be wrong (a

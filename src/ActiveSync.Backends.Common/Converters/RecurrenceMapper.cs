@@ -126,7 +126,7 @@ internal static class RecurrenceMapper
 		if (int.TryParse(V("Interval"), out int interval) && interval > 1)
 			pattern.Interval = interval;
 
-		// D13: RRULE (and Ical.Net's RecurrencePattern) allows only one of COUNT/UNTIL, so a
+		// RRULE (and Ical.Net's RecurrencePattern) allows only one of COUNT/UNTIL, so a
 		// client that sends both forces a choice — checking Occurrences first (as this used to)
 		// always silently dropped Until, which can leave an effectively unbounded series if
 		// Occurrences is large/careless with no date backstop. Until is checked first instead:

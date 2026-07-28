@@ -28,7 +28,7 @@ public sealed record JmapCall(string Name, IReadOnlyDictionary<string, object?> 
 /// <summary>
 ///   The server-advertised limits from the <c>urn:ietf:params:jmap:core</c> capability object
 ///   (RFC 8620 §2). A caller MUST NOT batch more ids into one <c>Foo/get</c> than
-///   <see cref="MaxObjectsInGet" /> or the server answers <c>requestTooLarge</c> (H8). A server
+///   <see cref="MaxObjectsInGet" /> or the server answers <c>requestTooLarge</c>. A server
 ///   that omits the core capability (or a field) yields <see cref="Unknown" />, whose sentinels
 ///   are <see cref="int.MaxValue" />/<see cref="long.MaxValue" /> so a <c>Math.Min</c> against a
 ///   caller's own page size is a no-op — the historical behaviour, never a larger request.
@@ -68,7 +68,7 @@ public sealed record JmapSessionResource(
 	/// <summary>
 	///   Fails fast with a named error when the server does not advertise a capability a store
 	///   depends on. Without this a store issues a request with <c>using:[…]</c> the server cannot
-	///   honour and gets an opaque <c>400</c> back (H9); the caller learns exactly what is missing.
+	///   honour and gets an opaque <c>400</c> back; the caller learns exactly what is missing.
 	/// </summary>
 	public void RequireCapability(string urn)
 	{
@@ -169,7 +169,7 @@ public sealed class JmapClient : IDisposable
 		// session resource, and HttpClient's auto-redirect strips auth on it. The factory builds
 		// the handler (no auto-redirect, operator TLS) and Basic auth. The default request/response
 		// cap is 100 s; the EventSource watcher passes an infinite timeout so its long-lived SSE
-		// stream is not aborted mid-flight (H17).
+		// stream is not aborted mid-flight.
 		return BackendHttpClientFactory.CreateClient(
 			credentials, allowInvalidCertificates, caCertificatePath, httpTimeout, checkRevocation);
 	}
@@ -215,7 +215,7 @@ public sealed class JmapClient : IDisposable
 			["methodCalls"] = calls.Select(c => new object?[] { c.Name, c.Arguments, c.Id }).ToArray()
 		};
 		string json = JsonSerializer.Serialize(payload, SerializerOptions);
-		// H24: the other three credential-attaching call sites (download/upload/eventSource) all
+		// The other three credential-attaching call sites (download/upload/eventSource) all
 		// re-assert RequireSameOrigin even though Rebase already forces every advertised URL onto
 		// this client's own origin at session-parse time — pure defence in depth against a future
 		// Rebase regression. This call site is the api URL and was the one left unguarded.
@@ -282,7 +282,7 @@ public sealed class JmapClient : IDisposable
 		}
 		catch
 		{
-			response.Dispose(); // H17: don't leak the response (and its connection) on the error path
+			response.Dispose(); // Don't leak the response (and its connection) on the error path
 			throw;
 		}
 
@@ -343,8 +343,8 @@ public sealed class JmapClient : IDisposable
 			{
 				foreach (JsonProperty p in caps.EnumerateObject())
 					capabilities.Add(p.Name);
-				// The core capability object carries the request-shaping limits (H9); keeping only
-				// the URN name discarded them, so H8 could not size its pages to the server.
+				// The core capability object carries the request-shaping limits; keeping only
+				// the URN name discarded them, so callers could not size their paging to the server.
 				if (caps.TryGetProperty(JmapCapabilities.Core, out JsonElement core) &&
 				    core.ValueKind == JsonValueKind.Object)
 					limits = ParseCoreLimits(core);
@@ -452,7 +452,7 @@ public sealed class JmapClient : IDisposable
 	}
 
 	/// <summary>
-	///   H9: <see cref="Rebase" /> already forces every advertised URL (download/upload/eventSource)
+	///   <see cref="Rebase" /> already forces every advertised URL (download/upload/eventSource)
 	///   onto this client's own origin at session-parse time, so this should never fire through the
 	///   public API today — but Basic auth is about to be attached at each of these three call
 	///   sites, so the same-origin invariant is re-asserted at the point of use rather than trusted

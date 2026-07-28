@@ -20,7 +20,7 @@ public static class MailConverter
 
 	/// <param name="receivedUtc">
 	///   The backend's own delivery timestamp — IMAP INTERNALDATE or JMAP receivedAt — preferred
-	///   over the sender-supplied Date: header for MS-ASEMAIL DateReceived (D14). Null when the
+	///   over the sender-supplied Date: header for MS-ASEMAIL DateReceived. Null when the
 	///   caller has none; falls back to <paramref name="message" />'s Date header, and only to that
 	///   when it is itself non-default (a parsed message with no Date: header reports
 	///   <c>default(DateTimeOffset)</c>, i.e. year 0001 — never emitted verbatim).
@@ -99,7 +99,7 @@ public static class MailConverter
 		string conversationSeed = message.References.FirstOrDefault() ?? NormalizeTopic(message.Subject);
 		if (!string.IsNullOrEmpty(conversationSeed))
 		{
-			// D23: ConversationIndex used to be written here as a 5-byte stub, 17 bytes short of
+			// ConversationIndex used to be written here as a 5-byte stub, 17 bytes short of
 			// the MS-OXOMSG 2.2.1.3 22-byte header (5 time bytes + a 16-byte GUID) and with its own
 			// comment contradicting the bytes it wrote (claimed the high 4 bytes of the message
 			// time, wrote the low 32 bits). No real client can thread on a shape that is neither —
@@ -129,7 +129,7 @@ public static class MailConverter
 			case 4: // full MIME
 				using (MemoryStream ms = new())
 				{
-					// D15: a serialized RFC 822 stream is a byte stream, not UTF-8 text --
+					// A serialized RFC 822 stream is a byte stream, not UTF-8 text --
 					// stringifying it via Encoding.UTF8.GetString mangles any 8-bit/non-UTF-8
 					// part (invalid sequences become U+FFFD) and the NUL-strip below then
 					// corrupts any part carrying raw bytes (Content-Transfer-Encoding: binary).
@@ -154,14 +154,14 @@ public static class MailConverter
 				break;
 		}
 
-		// D15: only the plain-text/HTML branches can carry a stray NUL from HTML-to-text
+		// Only the plain-text/HTML branches can carry a stray NUL from HTML-to-text
 		// conversion or a permissive backend; type 4 is now ASCII-safe by construction (Prepare
 		// above) and stripping NULs from it would corrupt a legitimately NUL-bearing binary part.
 		if (type != 4)
 			content = content.Replace("\0", "");
 		long estimated = Encoding.UTF8.GetByteCount(content);
 		bool truncated = false;
-		// D4: type 4 is the serialized message/rfc822 stream — cutting it at an arbitrary byte
+		// Type 4 is the serialized message/rfc822 stream — cutting it at an arbitrary byte
 		// offset lands mid-header or mid-part and hands the client unparsable MIME (base64
 		// attachment parts split mid-line, headers truncated). A MIME fetch is all-or-nothing,
 		// so it is exempt from the TruncationSize byte budget the plain-text/HTML bodies honor.
@@ -234,7 +234,7 @@ public static class MailConverter
 			.Replace("\r\n ", "").Replace("\r\n\t", "")
 			.Replace("\n ", "").Replace("\n\t", "");
 
-		// D1: Outlook/Google/Exchange all emit BEGIN:VTIMEZONE before BEGIN:VEVENT, and its
+		// Outlook/Google/Exchange all emit BEGIN:VTIMEZONE before BEGIN:VEVENT, and its
 		// STANDARD/DAYLIGHT subcomponents each carry a bare (no-Z, no-TZID) DTSTART for the
 		// 1970 DST transition. Scanning the whole ICS from the top let that line be mistaken
 		// for the real VEVENT DTSTART, so restrict every property lookup to the VEVENT block.
@@ -271,7 +271,7 @@ public static class MailConverter
 		DateTime? dtStart = ParseIcsDate(startProp);
 		DateTime? dtEnd = ParseIcsDate(endProp);
 		string location = Prop("LOCATION")?.Value ?? "";
-		// D30: a prefix strip (CalendarConverter.StripMailto), not a substring Replace — the literal
+		// A prefix strip (CalendarConverter.StripMailto), not a substring Replace — the literal
 		// text "mailto:" must only ever be removed from the front of the value.
 		string organizer = CalendarConverter.StripMailto(Prop("ORGANIZER")?.Value) ?? "";
 		bool allDay = startProp is { } sp &&
@@ -385,7 +385,7 @@ public static class MailConverter
 		{
 			if (part.Content is null)
 				return 0;
-			// D16: decoding into a MemoryStream just to read its Length materializes the whole
+			// Decoding into a MemoryStream just to read its Length materializes the whole
 			// attachment in memory, per message per windowed Sync batch. Count the decoded bytes
 			// through a write-only sink instead -- DecodeTo still runs the transfer decoder, but
 			// nothing beyond its own small internal buffer is ever held at once.
@@ -400,7 +400,7 @@ public static class MailConverter
 	}
 
 	/// <summary>
-	///   A write-only sink that counts bytes without buffering them (D16) -- used to size a MIME
+	///   A write-only sink that counts bytes without buffering them -- used to size a MIME
 	///   part's decoded content without materializing it in memory.
 	/// </summary>
 	private sealed class CountingStream : Stream
@@ -460,7 +460,7 @@ public static class MailConverter
 	}
 
 	/// <summary>
-	///   D25 — a naive `value[..max]` can cut a UTF-16 surrogate pair in half, producing a lone
+	///   A naive `value[..max]` can cut a UTF-16 surrogate pair in half, producing a lone
 	///   surrogate that <see cref="System.Xml.XmlWriter" /> rejects when the response is encoded
 	///   -- sinking the whole Sync response over one oversized header rather than one message.
 	///   Route through the byte-budgeted, code-point-aligned truncation the body text already

@@ -124,7 +124,7 @@ public abstract class DavStoreBase(
 	}
 
 	/// <summary>
-	///   H20: fallback revision when the server exposes no ETag at all for a just-created/updated
+	///   Fallback revision when the server exposes no ETag at all for a just-created/updated
 	///   item — neither on the PUT/response headers nor via a direct <c>getetag</c> PROPFIND. A
 	///   fresh <c>Guid.NewGuid()</c> here looked exactly like a genuine opaque ETag while being
 	///   unable to ever equal one (indistinguishable in a snapshot dump or log line from a real
@@ -139,14 +139,14 @@ public abstract class DavStoreBase(
 		return dav.DeleteAsync(itemKey, ct); // DAV deletes are always permanent
 	}
 
-	// K58: DAV stores support neither cross-collection item move nor client folder mutation over
+	// DAV stores support neither cross-collection item move nor client folder mutation over
 	// ActiveSync, so they implement neither IItemMoveOperations nor IFolderOperations (rather than
 	// carrying throw-stubs). The host answers MoveItems/Folder* with the unsupported status.
 
 	public Task<IReadOnlyList<string>> WaitForChangesAsync(
 		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
 	{
-		// H11: hand the operator's Eas:DavPollSeconds to the poller instead of the old hardcoded 60 s.
+		// Hand the operator's Eas:DavPollSeconds to the poller instead of the old hardcoded 60 s.
 		return DavDiscovery.PollCtagsAsync(
 			dav, folderBackendKeys, FromBackendKey, timeout, pollSeconds, logger, CtagLabel,
 			credentials.UserName, ct);
@@ -200,7 +200,7 @@ public abstract class DavStoreBase(
 	///   servers (Axigen) rewrite the PUT target to their own canonical href — tracked blindly,
 	///   the next diff would see an alien Add plus a Delete of the item the client just created,
 	///   duplicating it on the device. Tries a UID query first; a hit at a different href is
-	///   verified by fetching and checking its content (H2 follow-up — a full listing fetched
+	///   verified by fetching and checking its content (a full listing fetched
 	///   AFTER the PUT already contains the new resource under whatever href it landed at, so
 	///   presence in that listing can no longer distinguish "genuinely new" from "pre-existing";
 	///   there is no valid pre-PUT baseline left to diff against once that fetch is lazy, so
@@ -231,7 +231,7 @@ public abstract class DavStoreBase(
 			}
 		}
 
-		// H2: try the PUT target directly before paying for a full listing. On a server whose
+		// Try the PUT target directly before paying for a full listing. On a server whose
 		// listings AND UID-query index lag a PUT (Axigen indexes asynchronously — see AGENTS.md),
 		// the UID query above and the listing below can both miss the item for up to ~a minute,
 		// but a direct GET of putHref does not depend on either index — it resolves the common
@@ -252,7 +252,7 @@ public abstract class DavStoreBase(
 		// href, not just index lag), and the naive href isn't in the listing either — the only
 		// remaining way to identify our item is by content, scanning the candidates the post-PUT
 		// listing gave us. Bounded so a large collection cannot turn one create into thousands of
-		// GETs (H2) when the server neither honoured the PUT target nor supports a UID query.
+		// GETs when the server neither honoured the PUT target nor supports a UID query.
 		foreach (string candidate in after.Keys.Take(ContentScanCeiling))
 		{
 			(bool verified, string? verifiedETag) = await TryVerifyByContentAsync(candidate, uid, ct)
@@ -274,8 +274,8 @@ public abstract class DavStoreBase(
 	}
 
 	/// <summary>
-	///   Ceiling on the last-resort per-item content scan in <see cref="ResolveStoredHrefAsync" />
-	///   (H2) — bounds the worst case (server neither honours the PUT target nor supports a UID
+	///   Ceiling on the last-resort per-item content scan in <see cref="ResolveStoredHrefAsync" /> —
+	///   bounds the worst case (server neither honours the PUT target nor supports a UID
 	///   query) to a small, fixed number of GETs rather than one per item in the collection.
 	/// </summary>
 	private const int ContentScanCeiling = 50;

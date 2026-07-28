@@ -77,7 +77,7 @@ public static class DraftMessageBuilder
 	}
 
 	/// <summary>
-	///   D20 — a fresh <see cref="MimeMessage" /> starts with an empty header list; only
+	///   A fresh <see cref="MimeMessage" /> starts with an empty header list; only
 	///   From/To/Cc/Bcc/Subject/Importance/Date are rebuilt above from the payload/existing draft.
 	///   Everything else on the stored draft — In-Reply-To, References, Message-Id, any custom
 	///   header — must survive a Change or a reply thread started elsewhere (webmail) and merely
@@ -107,7 +107,7 @@ public static class DraftMessageBuilder
 			return;
 		}
 
-		// D2: Email:To/Cc (and Email2:Bcc) are RFC-5322 comma-separated address lists — this
+		// Email:To/Cc (and Email2:Bcc) are RFC-5322 comma-separated address lists — this
 		// repo's own emitter produces exactly that shape (MailConverter.cs, message.To.ToString()
 		// -> "Alice" <a@x>, "Bob" <b@y>). Try the whole value as one list first; MimeKit's
 		// InternetAddressList.TryParse handles both quoted display names and bare addresses.

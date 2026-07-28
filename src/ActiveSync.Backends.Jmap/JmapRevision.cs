@@ -6,10 +6,10 @@ namespace ActiveSync.Backends.Jmap;
 
 /// <summary>
 ///   Computes a content revision for a JMAP object (contact card / calendar event) that the diff
-///   engine can treat as the whole truth (H16).
+///   engine can treat as the whole truth.
 /// </summary>
 /// <remarks>
-///   H5: a naive <c>SHA-256(element.GetRawText())</c> is sensitive to JSON member ORDER and
+///   A naive <c>SHA-256(element.GetRawText())</c> is sensitive to JSON member ORDER and
 ///   whitespace, both of which a server may vary between two <c>*/get</c> calls (a JSON object is
 ///   an unordered set — RFC 8259 §4). When it does, every item's revision flips and the diff
 ///   re-sends the entire collection. Hashing a CANONICAL form instead — object members sorted by

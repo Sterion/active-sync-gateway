@@ -18,7 +18,7 @@ namespace ActiveSync.Backends.Dav;
 public sealed class WebDavClient : IDisposable
 {
 	/// <summary>
-	///   Ceiling on a single DAV response body (H24, narrowed by H17). Multistatus listings for a
+	///   Ceiling on a single DAV response body. Multistatus listings for a
 	///   large collection are legitimately several MB, so the cap is generous — its job is to bound a
 	///   malicious or malfunctioning server that would otherwise stream an unbounded body into memory,
 	///   not to second-guess a real listing. Deliberately decoupled from and lower than
@@ -39,7 +39,7 @@ public sealed class WebDavClient : IDisposable
 	internal long MaxResponseBytes { get; set; } = DefaultMaxResponseBytes;
 
 	/// <summary>
-	///   Ceiling on XML character count during parse (H17) — decoupled from
+	///   Ceiling on XML character count during parse — decoupled from
 	///   <see cref="MaxResponseBytes" />: a response can be well within the byte ceiling and still
 	///   expand into an excessive character count once XDocument materializes an XElement/XAttribute/
 	///   XText per node. A few million is far above any real multistatus listing. Exposed internally
@@ -167,8 +167,8 @@ public sealed class WebDavClient : IDisposable
 		// Servers disagree on the status for a failed If-None-Match:*: Stalwart answers 412
 		// Precondition Failed (RFC 7232) — unambiguously the If-* precondition itself, so no further
 		// check is needed. This reinterpretation is gated on ifNoneMatch (create-only); an
-		// update-PUT's own 412 handling (a real ETag conflict OR a lost-response replay, H13) is
-		// below. (H18)
+		// update-PUT's own 412 handling (a real ETag conflict OR a lost-response replay) is
+		// below.
 		if (ifNoneMatch && response.StatusCode is HttpStatusCode.PreconditionFailed)
 		{
 			_wireLogger?.LogDebug(
@@ -180,9 +180,9 @@ public sealed class WebDavClient : IDisposable
 		// Axigen answers the identical replayed-create condition with 409 Conflict instead of 412.
 		// Unlike 412, RFC 4918 §9.7.1 defines 409 on PUT as "the parent collection does not exist" —
 		// it is NOT inherently "already exists", so blindly reinterpreting every create-PUT 409 as
-		// success (as H18 originally did) hid a genuine failure: a collection deleted/renamed
-		// server-side while the session was cached. Narrow it: only accept the replay reading when a
-		// GET confirms the target is actually there (H10).
+		// success hid a genuine failure: a collection deleted/renamed server-side while the session
+		// was cached. Narrow it: only accept the replay reading when a GET confirms the target is
+		// actually there.
 		if (ifNoneMatch && response.StatusCode is HttpStatusCode.Conflict &&
 			await GetAsync(href, ct).ConfigureAwait(false) is not null)
 		{
@@ -193,7 +193,7 @@ public sealed class WebDavClient : IDisposable
 			return null;
 		}
 
-		// H13: every DAV verb funnels through the same fast transient retry (SendAsync). If an
+		// Every DAV verb funnels through the same fast transient retry (SendAsync). If an
 		// update-PUT's write actually landed but its response was lost (a reset, or a 503 from a
 		// load balancer after the write), the retry replays the SAME If-Match header — which the
 		// first attempt's own write has already invalidated, so the replay genuinely 412s even
@@ -219,7 +219,7 @@ public sealed class WebDavClient : IDisposable
 	/// <summary>
 	///   Builds an <c>If-Match</c> value from a stored ETag. Servers routinely hand back a bare,
 	///   unquoted ETag; <see cref="EntityTagHeaderValue.TryParse" /> rejects that, so the old code
-	///   silently omitted the header and issued an unconditional PUT — a lost update (H3). A tag
+	///   silently omitted the header and issued an unconditional PUT — a lost update. A tag
 	///   that already parses is used as-is (preserving weak/strong); otherwise it is normalized to
 	///   a quoted strong (or weak, for a "W/" prefix) tag.
 	/// </summary>
@@ -281,7 +281,7 @@ public sealed class WebDavClient : IDisposable
 		}
 		catch (Exception ex) when (ex is HttpRequestException or IOException)
 		{
-			// H16: TransientRetry rethrows the ORIGINAL transport exception once its retry budget is
+			// TransientRetry rethrows the ORIGINAL transport exception once its retry budget is
 			// spent — every DAV call site funnels through this one seam, but several of them (the
 			// shared-collection probe, the ctag poll, FindByUidAsync, the CardDAV GAL fallback) only
 			// ever catch BackendException, so a raw HttpRequestException/IOException escaped every
@@ -342,20 +342,20 @@ public sealed class WebDavClient : IDisposable
 			string? href = responseElement.Element(DavNs.D + "href")?.Value;
 			if (href is null)
 				continue;
-			// H27: select the propstat by its actual 2xx status code, not a fragile
+			// Select the propstat by its actual 2xx status code, not a fragile
 			// substring match on "200" (which also treated a status-less propstat as OK and
 			// dropped a legitimate 2xx such as 204).
 			XElement? okPropstat = responseElement.Elements(DavNs.D + "propstat")
 				.FirstOrDefault(p => IsOkStatus(p.Element(DavNs.D + "status")?.Value));
 			if (okPropstat is not null)
-				// H2: keep the href exactly as the server percent-encoded it. It is used verbatim
+				// Keep the href exactly as the server percent-encoded it. It is used verbatim
 				// as a request path (Resolve → new Uri(base, href)); unescaping it here turned a
 				// resource named "a#b.ics" into path "/…/a" with "#b.ics" as a URI fragment, so
 				// every GET/PUT/DELETE hit the wrong resource. Href comparison against share grants
 				// unescapes on its own side (SharedHrefEquals), so it does not depend on this.
 				result.Add(new DavResource(href, okPropstat));
 			else
-				// H27: a <response> with no 2xx propstat is a per-resource failure inside an
+				// A <response> with no 2xx propstat is a per-resource failure inside an
 				// otherwise-207 multistatus (403/404/507…). It used to vanish without a trace,
 				// hiding a permission/quota problem behind a "shorter than expected" listing.
 				// Log the status codes only — the href can carry PII.
@@ -371,8 +371,8 @@ public sealed class WebDavClient : IDisposable
 	}
 
 	/// <summary>
-	///   Parses a DAV multistatus response by STREAMING it (H24) with external-entity resolution and
-	///   DTD processing explicitly disabled (H28). The body is read through a size-capped stream so a
+	///   Parses a DAV multistatus response by STREAMING it with external-entity resolution and
+	///   DTD processing explicitly disabled. The body is read through a size-capped stream so a
 	///   malicious/malfunctioning server cannot buffer an unbounded response into memory; the XXE
 	///   hardening (DtdProcessing.Prohibit, XmlResolver null) is a stated, review-visible property
 	///   rather than a silent inheritance of a framework default a future refactor could flip.
@@ -403,7 +403,7 @@ public sealed class WebDavClient : IDisposable
 	}
 
 	/// <summary>
-	///   Opens the response content stream behind a hard byte ceiling (H24). A declared
+	///   Opens the response content stream behind a hard byte ceiling. A declared
 	///   Content-Length over the ceiling is rejected before a single byte is read; a chunked body
 	///   with no declared length is capped mid-read by <see cref="LengthCapStream" /> so it cannot
 	///   grow without bound either.

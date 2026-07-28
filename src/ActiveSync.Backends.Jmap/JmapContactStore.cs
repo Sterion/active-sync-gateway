@@ -23,7 +23,7 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 
 	private string? _account;
 
-	// H7: the full account listing (state + cards) cached on the store instance. GetItemRevisionsAsync
+	// The full account listing (state + cards) cached on the store instance. GetItemRevisionsAsync
 	// is invoked once PER FOLDER within one Sync round, and SearchGalAsync adds another caller — without
 	// this, M address books cost M full downloads of the same N cards. A cheap state-only check
 	// (StateAsync) decides whether the cached list is still current before paying for a real download.
@@ -65,7 +65,7 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string bookId = FromKey(folderBackendKey);
-		// H29: Contacts have no EAS FilterType, so ContentFilter.ForClass(Contacts, …) is always
+		// Contacts have no EAS FilterType, so ContentFilter.ForClass(Contacts, …) is always
 		// ContentFilter.All — there is no date window to apply here (CardDavStore likewise doesn't
 		// filter contacts). Only the JMAP calendar store gained a filter.
 		_ = filter;
@@ -147,13 +147,13 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 			}
 		}, ct).ConfigureAwait(false);
 		EnsureNotIn(response.Arguments("0"), "notUpdated", itemKey);
-		// F5: report the item's REAL revision at the destination, not a placeholder the caller
+		// Report the item's REAL revision at the destination, not a placeholder the caller
 		// would otherwise have to invent (see UpdateItemAsync above for the identical shape).
 		JsonElement? full = await GetCardAsync(itemKey, ct).ConfigureAwait(false);
 		return (itemKey, full is { } f ? Revision(f) : "0");
 	}
 
-	// K58: JMAP address-book folder mutation over ActiveSync is not supported, so this store does
+	// JMAP address-book folder mutation over ActiveSync is not supported, so this store does
 	// not implement IFolderOperations (it does support item move — IItemMoveOperations above).
 
 	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
@@ -200,10 +200,10 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 			bool matches = entry.Any(e => e.Value.Contains(query, StringComparison.OrdinalIgnoreCase));
 			if (matches)
 			{
-				// H19: every other GAL implementation routes through
+				// Every other GAL implementation routes through
 				// ContactConverter.AppendGalPicture, which emits the MS-ASCMD photo status (173 no
 				// photo / 174 over MaxSize / 175 count limit) even when it grants no data. This
-				// bridge never reads a JSContact "media" member into a picture at all (H25), so a
+				// bridge never reads a JSContact "media" member into a picture at all, so a
 				// requested photo is always "no photo" — but the client asked and must get an
 				// explicit status element, not silence.
 				if (photos is not null)
@@ -259,11 +259,11 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 	private async Task<Dictionary<string, string>> TokensAsync(
 		string account, IReadOnlyList<string> folderBackendKeys, CancellationToken ct)
 	{
-		// H15: the wait token is the account-level ContactCard state instead of a SHA-256 over the
+		// The wait token is the account-level ContactCard state instead of a SHA-256 over the
 		// full body of every card, which used to be re-downloaded on every poll tick. The state is
 		// account-wide, so a change in one address book shifts every watched book's token — the
-		// wait over-notifies rather than misses (the safe direction). Mirrors the mail store's H19
-		// token.
+		// wait over-notifies rather than misses (the safe direction). Mirrors the mail store's own
+		// state-token wait.
 		string state = await StateAsync(account, ct).ConfigureAwait(false);
 		Dictionary<string, string> tokens = new(StringComparer.Ordinal);
 		foreach (string folderKey in folderBackendKeys)
@@ -271,7 +271,7 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		return tokens;
 	}
 
-	// H7: ContactCard/get with an empty id list returns just the current account-level state — no
+	// ContactCard/get with an empty id list returns just the current account-level state — no
 	// card bodies — so this is cheap enough to call before every full download to decide whether
 	// the cache is still current.
 	private async Task<string> StateAsync(string account, CancellationToken ct)
@@ -285,7 +285,7 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		return args.TryGetProperty("state", out JsonElement s) ? s.GetString() ?? "" : "";
 	}
 
-	// H7: caches the full account listing on the store instance, keyed by the ContactCard state, so
+	// Caches the full account listing on the store instance, keyed by the ContactCard state, so
 	// a Sync round with M address books (GetItemRevisionsAsync is invoked once per folder, and
 	// SearchGalAsync adds another caller) costs at most one real download, not M.
 	private async Task<List<JsonElement>> AllCardsAsync(string account, CancellationToken ct)
@@ -308,9 +308,9 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 
 		try
 		{
-			// H7: a server that declares a finite maxObjectsInGet answers requestTooLarge to a
+			// A server that declares a finite maxObjectsInGet answers requestTooLarge to a
 			// blind "ids:null" over a large address book — page the ids through ContactCard/query
-			// (position-based, restarting on a queryState shift, same H3 protection the mail store's
+			// (position-based, restarting on a queryState shift, the same protection the mail store's
 			// Email/query paging uses) and fetch each page's bodies in maxObjectsInGet batches.
 			return await FetchAllCardsPagedAsync(account, session, ct).ConfigureAwait(false);
 		}
@@ -360,7 +360,7 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 			using JmapResponse response = await client.InvokeAsync(Cap, [query, get], ct).ConfigureAwait(false);
 			JsonElement queryArgs = response.Arguments("0");
 
-			// Same defence as the mail store's H3 fix: a concurrent write can shift the (unsorted,
+			// Same defence as the mail store's paging: a concurrent write can shift the (unsorted,
 			// server-defined) result order between pages, so a queryState change restarts the whole
 			// enumeration from position 0 instead of risking a dropped or duplicated card.
 			string? currentState =
@@ -415,13 +415,13 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		if (_account is not null)
 			return _account;
 		JmapSessionResource session = await client.GetSessionAsync(ct).ConfigureAwait(false);
-		// H9: a server without the contacts capability gets a clear error, not an opaque 400 from
+		// A server without the contacts capability gets a clear error, not an opaque 400 from
 		// a request built with using:[…contacts] it never advertised support for.
 		session.RequireCapability(JmapCapabilities.Contacts);
 		return _account = session.PrimaryAccount(JmapCapabilities.Contacts);
 	}
 
-	// H5: hash a canonical form (members sorted), not the raw text, so a server re-ordering the same
+	// Hash a canonical form (members sorted), not the raw text, so a server re-ordering the same
 	// card JSON does not flip the revision and re-sync the whole address book.
 	private static string Revision(JsonElement card) => JmapRevision.Compute(card);
 
@@ -431,7 +431,7 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		    failures.ValueKind == JsonValueKind.Object && failures.TryGetProperty(id, out JsonElement error))
 		{
 			string type = error.TryGetProperty("type", out JsonElement t) ? t.GetString() ?? "unknown" : "unknown";
-			// H20: a notFound SetError means the card is gone; surface it as not-found so the host
+			// A notFound SetError means the card is gone; surface it as not-found so the host
 			// reconciles (re-add/delete) rather than treating the update/delete as a transient error.
 			throw string.Equals(type, "notFound", StringComparison.Ordinal)
 				? new BackendItemNotFoundException($"JMAP ContactCard {id} no longer exists.")

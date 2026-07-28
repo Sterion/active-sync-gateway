@@ -45,7 +45,7 @@ public sealed class SmtpSubmitBackend(
 		// Connect + authenticate are side-effect-free (nothing is submitted yet), so the whole setup
 		// is retried on a transient blip. The DATA phase below runs EXACTLY ONCE — replaying a
 		// completed submission would duplicate the mail — so it is deliberately outside the retry.
-		// K12: idempotent must be explicit now that TransientRetry.RunAsync's default is false —
+		// Idempotent must be explicit now that TransientRetry.RunAsync's default is false —
 		// connect+auth is genuinely replayable (nothing has been submitted yet), unlike the DATA
 		// phase below.
 		await TransientRetry.RunAsync(async () =>
@@ -64,20 +64,20 @@ public sealed class SmtpSubmitBackend(
 				credentials.UserName, attempt, TransientRetry.DelaysMs.Length);
 		}).ConfigureAwait(false);
 
-		// RFC 1870 SIZE preflight (D1): if the server advertised a maximum message size and this
+		// RFC 1870 SIZE preflight: if the server advertised a maximum message size and this
 		// message exceeds it, the send is doomed — but SendAsync would stream the entire DATA body
 		// first, and the resulting 552 is indistinguishable from a transient blip. Fail fast with a
 		// distinct, non-retryable BackendException carrying the size hint; at the EAS layer this maps
 		// to ComposeMail Status 120 (permanent), which is correct — a too-big message never succeeds
 		// on retry, and the DATA transfer is spared.
-		// G29: measure what will ACTUALLY be transmitted, not the caller-supplied `mime` bytes —
+		// Measure what will ACTUALLY be transmitted, not the caller-supplied `mime` bytes —
 		// smtp.SendAsync below re-serializes `message`, which differs from the input whenever
 		// ForceFrom rewrote the headers (above) or MimeKit re-encoded a part. A stale length can
 		// wrongly pass a message the server will reject, or wrongly fail one that would have fit.
 		long transmittedLength = await SerializedLengthAsync(message, ct).ConfigureAwait(false);
 		EnsureWithinMaxSize(transmittedLength, smtp.Capabilities, smtp.MaxSize);
 
-		// G4: once the DATA phase starts, the exchange must not observe the caller's own request
+		// Once the DATA phase starts, the exchange must not observe the caller's own request
 		// abort — if the phone drops the connection between the server durably accepting the final
 		// "." and MailKit reading the "250", cancelling here would surface as OperationCanceledException,
 		// which ComposeMailHandlerBase deliberately does NOT catch (a cancelled request must not turn
@@ -90,7 +90,7 @@ public sealed class SmtpSubmitBackend(
 		// The mail is accepted at this point. The QUIT teardown must NOT be able to fail the
 		// operation: pass CancellationToken.None (a cancelled request must not make an already-sent
 		// message look like a send failure) and swallow any disconnect error — otherwise the client
-		// retries and the recipient gets it twice (D9).
+		// retries and the recipient gets it twice.
 		try
 		{
 			await smtp.DisconnectAsync(true, CancellationToken.None).ConfigureAwait(false);
@@ -117,7 +117,7 @@ public sealed class SmtpSubmitBackend(
 	}
 
 	/// <summary>
-	///   G29: the exact byte count <see cref="MimeMessage.WriteTo(System.IO.Stream, CancellationToken)" />
+	///   The exact byte count <see cref="MimeMessage.WriteTo(System.IO.Stream, CancellationToken)" />
 	///   would produce, without buffering the serialized bytes anywhere — a counting sink is enough
 	///   since only the length is needed.
 	/// </summary>

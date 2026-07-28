@@ -103,7 +103,7 @@ public sealed partial class ImapMailBackend
 	}
 
 	/// <summary>
-	///   G22: the STATUS poll runs on the provider-owned per-user <see cref="ImapStatusPoller" />
+	///   The STATUS poll runs on the provider-owned per-user <see cref="ImapStatusPoller" />
 	///   — its own persistent connection behind its own gate — so a concurrent
 	///   <c>GetItemRevisionsAsync</c> holding the session gate for a whole-mailbox FETCH cannot
 	///   stall push detection for every other device of the same user. The session fallback covers

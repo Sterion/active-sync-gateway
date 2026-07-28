@@ -18,14 +18,14 @@ namespace ActiveSync.Backends.Sieve;
 public sealed class ManageSieveClient : IAsyncDisposable
 {
 	/// <summary>
-	///   Ceiling on a server-advertised literal's byte count (G2). Scripts are the only large
+	///   Ceiling on a server-advertised literal's byte count. Scripts are the only large
 	///   payload the gateway ever reads back — and it only ever WRITES those — so a literal above
 	///   this is a hostile or badly malfunctioning server, not a legitimate response.
 	/// </summary>
 	private const int MaxLiteralLength = 1024 * 1024;
 
 	/// <summary>
-	///   Per-operation I/O bound (G5): no read/write here ever had a timeout, so a half-dead
+	///   Per-operation I/O bound: no read/write here ever had a timeout, so a half-dead
 	///   server hangs the caller's Settings→Oof request indefinitely.
 	/// </summary>
 	private static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(30);
@@ -101,7 +101,7 @@ public sealed class ManageSieveClient : IAsyncDisposable
 			_stream = ssl;
 			BindReader();
 			// The server re-announces its capabilities after the TLS handshake — re-check SASL
-			// there rather than trusting the plaintext greeting (G10): a pre-TLS capability
+			// there rather than trusting the plaintext greeting: a pre-TLS capability
 			// announcement is not authenticated.
 			SieveResponse postTls = await ReadResponseAsync(ct).ConfigureAwait(false);
 			postTls.ThrowUnlessOk("post-TLS capabilities");
@@ -218,7 +218,7 @@ public sealed class ManageSieveClient : IAsyncDisposable
 		{
 			if (_stream is not null)
 			{
-				// Own short standalone bound (G5): unlike a real operation there is no caller
+				// Own short standalone bound: unlike a real operation there is no caller
 				// token to link to, and a best-effort goodbye must never hang the caller's
 				// `await using` forever waiting on a half-dead server.
 				using CancellationTokenSource logoutCts = new(DisposeTimeout);
@@ -239,7 +239,7 @@ public sealed class ManageSieveClient : IAsyncDisposable
 
 	/// <summary>
 	///   RFC 5804 quoted string: backslash-escape backslashes and double quotes. Also strips any
-	///   control character (G17) — RFC 5804's <c>quoted-string</c> forbids them, and a name arriving
+	///   control character — RFC 5804's <c>quoted-string</c> forbids them, and a name arriving
 	///   with a raw CR/LF (e.g. via a literal) would otherwise inject a line break into whatever
 	///   command later re-quotes it (SETACTIVE, DELETESCRIPT).
 	/// </summary>
@@ -291,7 +291,7 @@ public sealed class ManageSieveClient : IAsyncDisposable
 				return new SieveResponse(line, lines);
 
 			// Trailing synchronizing literal: consume its byte count from the reader. The
-			// open >= 0 check runs BEFORE the slice it protects (G24) — with no '{' present the
+			// open >= 0 check runs BEFORE the slice it protects — with no '{' present the
 			// minimum matching line is "}" alone (length 1), so line[(open + 1)..^1] would have
 			// been in range today regardless, but only by accident of that minimum length; guard
 			// first so a future edit to the slice can't turn a hostile line into a crash.

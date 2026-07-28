@@ -31,7 +31,7 @@ public static class ContactConverter
 	///   the store base classes read that as "skip this item", so one corrupt card costs one
 	///   contact instead of the whole Sync response.
 	/// </summary>
-	/// <summary>D34: the wire PHOTO cap, named rather than the undocumented literal it used to be.</summary>
+	/// <summary>The wire PHOTO cap, named rather than the undocumented literal it used to be.</summary>
 	internal const int MaxWirePhotoBytes = 96 * 1024;
 
 	public static List<XElement>? ToApplicationData(string vcf, BodyPreference bodyPreference)
@@ -46,7 +46,7 @@ public static class ContactConverter
 	///   ghosting path — the merge needs the FULL stored note to re-embed in the vCard, never a
 	///   client-budget-truncated one, or an unrelated edit would permanently cut the note down to
 	///   whatever a past sync's TruncationSize allowed. Internal (not private) so tests can drive
-	///   the boundary with a small cap instead of a 96 KB fixture (D34).
+	///   the boundary with a small cap instead of a 96 KB fixture.
 	/// </summary>
 	internal static List<XElement>? ToApplicationData(string vcf, int maxPhotoBytes, long? noteTruncationSize = null)
 	{
@@ -87,7 +87,7 @@ public static class ContactConverter
 			{
 				AddFirst(Contacts + "MobilePhoneNumber", number);
 			}
-			// D9: these two must precede the generic Fax/untyped branches below — the writer
+			// These two must precede the generic Fax/untyped branches below — the writer
 			// emits TEL;TYPE=HOME,FAX for HomeFaxNumber and TEL;TYPE=CAR for CarPhoneNumber, so
 			// the read has to recognise both slots or Ghost() migrates them to the wrong field
 			// (BusinessFaxNumber / HomePhoneNumber) on the next unrelated edit.
@@ -124,7 +124,7 @@ public static class ContactConverter
 			}
 		}
 
-		// D10: MS-ASCNTC's Home*/Business* address fields are single-instance, but there is no
+		// MS-ASCNTC's Home*/Business* address fields are single-instance, but there is no
 		// Home2/Business2 fallback the way phones have — so once a slot is filled, a second
 		// address of the same class must be skipped ENTIRELY (not field-by-field), or its
 		// fields would blend with the first address's into one inconsistent record.
@@ -159,7 +159,7 @@ public static class ContactConverter
 			data.Add(new XElement(Contacts + "Birthday", EasDateTime.ToLong(dto.UtcDateTime)));
 
 		RawData? photo = vcard.Photos?.FirstOrDefault(p => p is not null)?.Value;
-		// D34: "<=" — a photo of EXACTLY the cap size fits the budget precisely and must not be
+		// "<=" — a photo of EXACTLY the cap size fits the budget precisely and must not be
 		// silently dropped by a strict "<".
 		if (photo?.Bytes is { Length: > 0 } bytes && bytes.Length <= maxPhotoBytes)
 			data.Add(new XElement(Contacts + "Picture", Convert.ToBase64String(bytes)));
@@ -293,7 +293,7 @@ public static class ContactConverter
 	};
 
 	/// <summary>
-	///   D3: "surplus" (not one of Email1-3) must be decided the same way Email1-3 itself was
+	///   "Surplus" (not one of Email1-3) must be decided the same way Email1-3 itself was
 	///   picked — <c>vcard.EMails.OrderByPref()</c>, via <see cref="Ghost" />/
 	///   <see cref="ToApplicationData(string,int)" /> — not by raw FILE position, which is not
 	///   guaranteed to match pref order (a PREF param on a later line promotes it to the front).
@@ -306,7 +306,7 @@ public static class ContactConverter
 	private static void AppendPreserved(StringBuilder sb, string existingVcard, bool photoWritten)
 	{
 		HashSet<string> top3 = TopEmailAddresses(existingVcard, 3);
-		// D4: PHOTO is normally "managed" (rewritten from V("Picture") only), but the only value
+		// PHOTO is normally "managed" (rewritten from V("Picture") only), but the only value
 		// ToApplicationData can ever produce for Picture comes from decodable BYTES — a
 		// URI-valued PHOTO (verified against FolkerKinzel.VCards 8.2.0: Value.Bytes is null for
 		// PHOTO;VALUE=URI) never round-trips through Picture at all, so treating it as "managed"
@@ -408,7 +408,7 @@ public static class ContactConverter
 	}
 
 	/// <summary>
-	///   D19: parses the vCard ONCE and produces the GAL entry plus (optionally) its photo, so a
+	///   Parses the vCard ONCE and produces the GAL entry plus (optionally) its photo, so a
 	///   matching contact is not parsed three times (ToGalEntry + AppendGalPicture each used to
 	///   re-parse). Returns null when the card is unparsable or does not match the query.
 	/// </summary>
@@ -510,7 +510,7 @@ public static class ContactConverter
 	///   arbitrary properties into the stored card and, via CardDAV, onto the DAV server.
 	///   Re-encoding makes that structurally impossible. Undecodable input is skipped.
 	/// </summary>
-	/// <summary>Returns true when an actual PHOTO line was written (used by D4's preservation guard).</summary>
+	/// <summary>Returns true when an actual PHOTO line was written (used by the photo preservation guard above).</summary>
 	private static bool AppendPhoto(StringBuilder sb, string? picture)
 	{
 		if (string.IsNullOrWhiteSpace(picture))
@@ -597,7 +597,7 @@ public static class ContactConverter
 		if (value is null)
 			return "";
 
-		// D24: the newline replaces only ever matched "\r\n" and "\n" — a bare "\r" (not part of a
+		// The newline replaces only ever matched "\r\n" and "\n" — a bare "\r" (not part of a
 		// CRLF pair) survived unescaped into the property value, and some parsers treat a lone CR
 		// as a line terminator, truncating the property and turning the remainder into a spurious
 		// continuation line. The trailing "\r" replace closes that; any other remaining control

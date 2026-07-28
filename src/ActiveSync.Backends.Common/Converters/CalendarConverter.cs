@@ -47,7 +47,7 @@ public static class CalendarConverter
 		bool allDay = master.IsAllDay;
 		data.Add(new XElement(Cal + "AllDayEvent", allDay ? "1" : "0"));
 
-		// D5: an all-day DTSTART/DTEND;VALUE=DATE carries no time and no zone — the date IS the
+		// An all-day DTSTART/DTEND;VALUE=DATE carries no time and no zone — the date IS the
 		// whole value. Routing it through AsUtc (correct for every timed value) applies
 		// zone-conversion arithmetic to something zoneless; NominalUtc keeps the emitted date
 		// bytes equal to the wire value instead of depending on a library's internal handling of
@@ -82,7 +82,7 @@ public static class CalendarConverter
 
 		if (master.Organizer is not null)
 		{
-			// D30: a prefix strip, not a substring Replace — the literal text "mailto:" must only
+			// A prefix strip, not a substring Replace — the literal text "mailto:" must only
 			// ever be removed from the FRONT of the value, never wherever it happens to occur.
 			string? email = StripMailto(master.Organizer.Value?.ToString());
 			if (!string.IsNullOrEmpty(email))
@@ -98,7 +98,7 @@ public static class CalendarConverter
 			XElement attendees = new(Cal + "Attendees");
 			foreach (Attendee attendee in master.Attendees)
 			{
-				// D30: same prefix-strip fix as the organizer read above.
+				// Same prefix-strip fix as the organizer read above.
 				string? email = StripMailto(attendee.Value?.ToString());
 				if (string.IsNullOrEmpty(email))
 					continue;
@@ -122,7 +122,7 @@ public static class CalendarConverter
 				data.Add(attendees);
 		}
 
-		// D6: the read must agree with the write on which alarm is EAS-managed. The write
+		// The read must agree with the write on which alarm is EAS-managed. The write
 		// (below, in FromApplicationData) only ever touches DISPLAY alarms, so reading ANY
 		// alarm action here — as this used to — could echo an EMAIL/AUDIO alarm's minutes as
 		// Reminder even though a client's Reminder edit can never reach that alarm.
@@ -145,7 +145,7 @@ public static class CalendarConverter
 		RecurrencePattern? recurrence = master.RecurrenceRules?.FirstOrDefault();
 		if (recurrence is not null)
 		{
-			// D21: the DayOfWeek/DayOfMonth/MonthOfYear fallbacks (when the RRULE carries no
+			// The DayOfWeek/DayOfMonth/MonthOfYear fallbacks (when the RRULE carries no
 			// explicit BYDAY/BYMONTHDAY) must derive from DTSTART's weekday/day/month IN ITS OWN
 			// ZONE (RFC 5545), not from the UTC instant — a wall-clock-local Monday can be a
 			// Sunday in UTC, which shifted the emitted day/month across the boundary.
@@ -206,7 +206,7 @@ public static class CalendarConverter
 	private const string CdoBusyStatusProperty = "X-MICROSOFT-CDO-BUSYSTATUS";
 
 	/// <summary>
-	///   D8: TRANSP alone can only express free (TRANSPARENT) vs busy (OPAQUE), so Tentative (1)
+	///   TRANSP alone can only express free (TRANSPARENT) vs busy (OPAQUE), so Tentative (1)
 	///   and Out-of-Office (3) both collapsed to Busy (2) on read. X-MICROSOFT-CDO-BUSYSTATUS is
 	///   the de-facto property (Outlook and every major CalDAV server round-trip it) that carries
 	///   the extra states; prefer it when present and fall back to the TRANSP mapping for events
@@ -230,7 +230,7 @@ public static class CalendarConverter
 	}
 
 	/// <summary>
-	///   D7: MeetingStatus 1 means "meeting, and the syncing user is the organizer"; 3 means
+	///   MeetingStatus 1 means "meeting, and the syncing user is the organizer"; 3 means
 	///   "meeting, and the syncing user is not". Without a known acting identity (a caller that
 	///   has not threaded one through) this keeps the historical "assume organizer" behavior —
 	///   correct only for the organizer's own copy, but the previous universal default.
@@ -301,20 +301,20 @@ public static class CalendarConverter
 		if (location is not null)
 			evt.Location = location;
 
-		// D5: presence-guarded like every neighbouring field (Sensitivity, BusyStatus,
+		// Presence-guarded like every neighbouring field (Sensitivity, BusyStatus,
 		// Recurrence, Attendees, Reminder) below — an omitted AllDayEvent must keep whatever the
 		// stored event already is, not silently evaluate to false and convert an all-day event to
 		// a timed one on a partial 16.x Change that carries only StartTime/EndTime.
 		bool allDay = V("AllDayEvent") is { } ad ? ad == "1" : evt.Start is { HasTime: false };
 		string? startRaw = V("StartTime");
 		string? endRaw = V("EndTime");
-		// D3: the effective offset (base bias + daylight bias when applicable) is read per
+		// The effective offset (base bias + daylight bias when applicable) is read per
 		// instant, not once — a multi-day all-day event can straddle a DST transition, and
 		// reading only the standard bias rolls the nominal date back a day for roughly half
 		// the year in any zone that observes DST.
 		string? tzBlob = V("TimeZone");
 
-		// D12: capture the stored zone BEFORE overwriting so an update keeps a real (non-UTC)
+		// Capture the stored zone BEFORE overwriting so an update keeps a real (non-UTC)
 		// TZID instead of re-anchoring the event — and its recurrences — to a fixed UTC offset.
 		string? storedStartTz = evt.Start?.TzId;
 		string? storedEndTz = evt.End?.TzId;
@@ -341,7 +341,7 @@ public static class CalendarConverter
 		if (V("BusyStatus") is { } busyStatus)
 		{
 			evt.Transparency = busyStatus == "0" ? "TRANSPARENT" : "OPAQUE";
-			// D8: TRANSP alone cannot distinguish Tentative/OOF from Busy on the way back in —
+			// TRANSP alone cannot distinguish Tentative/OOF from Busy on the way back in —
 			// write the CDO property alongside it so ReadBusyStatus can recover all four states.
 			string cdoStatus = busyStatus switch
 			{
@@ -398,7 +398,7 @@ public static class CalendarConverter
 				if (whenRaw is null || !EasDateTime.TryParse(whenRaw, out DateTime when))
 					continue;
 				if (existing.Add(when))
-					// D18: RFC 5545 §3.8.5.1 requires EXDATE's value type to match DTSTART's — an
+					// RFC 5545 §3.8.5.1 requires EXDATE's value type to match DTSTART's — an
 					// all-day (DATE-valued) DTSTART needs a DATE-valued EXDATE, not a UTC DATE-TIME;
 					// Ical.Net tolerates the mismatch on its own read-back, but another CalDAV
 					// server/client is not required to, and the "deleted" day can reappear there.
@@ -540,8 +540,8 @@ public static class CalendarConverter
 
 	/// <summary>
 	///   Strips a leading "mailto:" scheme — a PREFIX strip, not a substring Replace, so the literal
-	///   text is only ever removed from the front of the value (D30/D26 area — a value legitimately
-	///   containing "mailto:" more than once must keep every occurrence but the leading one).
+	///   text is only ever removed from the front of the value (a value legitimately containing
+	///   "mailto:" more than once must keep every occurrence but the leading one).
 	///   Internal (not private) so <see cref="MailConverter" /> can reuse the same logic for its own
 	///   ORGANIZER read rather than repeating the substring-Replace pattern this fixes.
 	/// </summary>
@@ -666,7 +666,7 @@ public static class CalendarConverter
 				continue;
 
 			string parameters = line[..colon];
-			// D35: find the FBTYPE parameter by NAME (split on ';', match the key before '='),
+			// Find the FBTYPE parameter by NAME (split on ';', match the key before '='),
 			// not by substring-scanning the whole segment — an unrelated parameter (or a TZID)
 			// whose value merely contains "BUSY-TENTATIVE"/etc. anywhere must not be misread as
 			// FBTYPE.
@@ -799,10 +799,10 @@ public static class CalendarConverter
 	public static string? SetPartStat(string ics, int userResponse, string userEmail)
 	{
 		Calendar? calendar = Calendar.Load(ics);
-		// D19: master-first, matching every other entry point in this file (:37, :213, :397-398,
-		// :423-424, :644-645) — an ICS that lists a modified-occurrence override before the
-		// master VEVENT must still update the master's attendee, or the acceptance is lost for
-		// the series the next time anything reads the stored (master) PARTSTAT.
+		// Master-first, matching every other entry point in this file — an ICS that lists a
+		// modified-occurrence override before the master VEVENT must still update the master's
+		// attendee, or the acceptance is lost for the series the next time anything reads the
+		// stored (master) PARTSTAT.
 #pragma warning disable CS0618 // obsolete single-value RecurrenceId (see file header note)
 		CalendarEvent? evt = calendar?.Events.FirstOrDefault(e => e.RecurrenceId is null)
 			?? calendar?.Events.FirstOrDefault();
@@ -868,7 +868,7 @@ public static class CalendarConverter
 	}
 
 	/// <summary>
-	///   D12: renders a UTC instant as wall-clock in the event's stored timezone when that zone
+	///   Renders a UTC instant as wall-clock in the event's stored timezone when that zone
 	///   is a real, resolvable non-UTC zone; otherwise keeps it in UTC. Recovering a zone from
 	///   the bias-only client TimeZone blob is out of scope, so a fresh event (no stored zone)
 	///   or a UTC-stored one stays UTC — the documented limitation.
@@ -888,7 +888,7 @@ public static class CalendarConverter
 	}
 
 	/// <summary>
-	///   D5: the wall-clock value of an all-day (date-only) CalDateTime, marked as UTC only so
+	///   The wall-clock value of an all-day (date-only) CalDateTime, marked as UTC only so
 	///   EasDateTime.ToCompact passes it through unconverted — the all-day counterpart to
 	///   TasksConverter.Nominal(). Never routes a zoneless date through AsUtc's zone-conversion
 	///   arithmetic.

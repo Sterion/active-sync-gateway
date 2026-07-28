@@ -34,7 +34,7 @@ public sealed class LocalContactStore(
 		await using SyncDbContext db = DbFactory.CreateDbContext();
 		List<IReadOnlyList<XElement>> results = new();
 		int photosGranted = 0;
-		// D19: stream the rows (AsAsyncEnumerable) so the maxResults break stops pulling and
+		// Stream the rows (AsAsyncEnumerable) so the maxResults break stops pulling and
 		// decrypting rows once enough matches are found, instead of ToListAsync materializing the
 		// entire collection up front; AsNoTracking because this is a pure read; and parse each card
 		// ONCE via BuildGalEntry rather than three times (ToGalEntry + AppendGalPicture re-parsed).
@@ -48,7 +48,7 @@ public sealed class LocalContactStore(
 			}
 			catch (BackendException ex)
 			{
-				// G18: one row written under a rotated key (or otherwise undecryptable) must not
+				// One row written under a rotated key (or otherwise undecryptable) must not
 				// fail the ENTIRE GAL search — skip it and keep going, the way a malformed vCard
 				// already costs one contact instead of the whole result set.
 				logger.LogWarning(ex, "Skipping an undecryptable contact row during GAL search for user {UserId}", UserId);
@@ -63,9 +63,9 @@ public sealed class LocalContactStore(
 			if (granted)
 				photosGranted++;
 			results.Add(gal);
-			// G26: checked AFTER adding — the await foreach above has already pulled/materialized
+			// Checked AFTER adding — the await foreach above has already pulled/materialized
 			// the CURRENT row by the time the loop body runs, so testing this BEFORE the add (the
-			// original D19 shape) let the enumerator advance one row past what maxResults needs.
+			// original check-before-add shape) let the enumerator advance one row past what maxResults needs.
 			if (results.Count >= maxResults)
 				break;
 		}
@@ -106,7 +106,7 @@ public sealed class LocalCalendarStore(
 	public async Task<string?> RespondToMeetingAsync(
 		string calendarFolderBackendKey, string eventUid, int userResponse, CancellationToken ct)
 	{
-		// G20: bounded retry mirroring LocalStoreBase.UpdateItemAsync — another device may bump
+		// Bounded retry mirroring LocalStoreBase.UpdateItemAsync — another device may bump
 		// the same row between our read and save, so each attempt re-reads the latest content
 		// and re-applies the response instead of losing it to a lost concurrency race.
 		const int maxAttempts = 4;
@@ -161,7 +161,7 @@ public sealed class LocalCalendarStore(
 
 	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
 	{
-		// D7: partStatIdentity is the acting user's mail address, so MeetingStatus can tell
+		// partStatIdentity is the acting user's mail address, so MeetingStatus can tell
 		// "I am the organizer" apart from "I am an invitee".
 		return CalendarConverter.ToApplicationData(content, bodyPreference, partStatIdentity);
 	}
@@ -197,7 +197,7 @@ public sealed class LocalCalendarStore(
 			return null;
 
 		await using SyncDbContext db = DbFactory.CreateDbContext();
-		// D19: AsNoTracking — a pure read; no need to snapshot every event into the change tracker.
+		// AsNoTracking — a pure read; no need to snapshot every event into the change tracker.
 		List<string> contents = await Rows(db).AsNoTracking().Select(i => i.Content).ToListAsync(ct)
 			.ConfigureAwait(false);
 		List<string> plaintext = new(contents.Count);
@@ -208,7 +208,7 @@ public sealed class LocalCalendarStore(
 			}
 			catch (BackendException ex)
 			{
-				// G18 / AGENTS.md: "a free/busy failure must never fail the whole
+				// AGENTS.md: "a free/busy failure must never fail the whole
 				// ResolveRecipients" — one undecryptable event must not sink the whole answer.
 				logger.LogWarning(ex, "Skipping an undecryptable calendar row during free/busy for user {UserId}", UserId);
 			}

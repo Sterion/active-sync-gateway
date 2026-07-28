@@ -29,7 +29,7 @@ public static class BodyText
 		if (Encoding.UTF8.GetByteCount(content) <= maxBytes)
 			return content;
 		byte[] bytes = Encoding.UTF8.GetBytes(content);
-		// D29: maxBytes originates from the client's BodyPreference.TruncationSize (a plain long?);
+		// maxBytes originates from the client's BodyPreference.TruncationSize (a plain long?);
 		// clamp to [0, bytes.Length] so a negative value can never index before the array (it used
 		// to throw IndexOutOfRangeException out of the converter instead of degrading to "").
 		int len = (int)Math.Clamp(maxBytes, 0, bytes.Length);

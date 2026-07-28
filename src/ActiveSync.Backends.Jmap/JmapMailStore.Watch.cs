@@ -4,7 +4,7 @@ namespace ActiveSync.Backends.Jmap;
 
 // The push/watch engine: WaitForChangesAsync races the shared per-user JMAP EventSource push
 // (when available) against polling folder/account state tokens — Mailbox counts plus the
-// account-wide Email state (H19) — to detect backend changes during a Ping/Sync long-poll.
+// account-wide Email state — to detect backend changes during a Ping/Sync long-poll.
 public sealed partial class JmapMailStore
 {
 	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
@@ -59,7 +59,7 @@ public sealed partial class JmapMailStore
 		// Mailbox counts (total:unread) alone miss a flag-only change (e.g. $flagged/$answered/a
 		// category, which move no counter) and an equal add+delete (the counts net out). The
 		// account-level Email state advances on ANY email create/update/destroy, so fold it into
-		// every folder's token to catch those (H19). Both are fetched in one request; Email/get with
+		// every folder's token to catch those. Both are fetched in one request; Email/get with
 		// an empty id list returns just the current state. NOTE: the state is account-wide, so a
 		// change in one folder shifts every watched folder's token - Ping over-notifies rather than
 		// misses, which is the safe direction (the client resyncs and finds nothing new).

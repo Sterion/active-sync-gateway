@@ -40,7 +40,7 @@ public sealed class CardDavStore(
 		int photosGranted = 0;
 		foreach (BackendFolder folder in await ListFoldersAsync(ct).ConfigureAwait(false))
 		{
-			// H14: one addressbook-query REPORT returns the matching vCards INLINE (address-data),
+			// One addressbook-query REPORT returns the matching vCards INLINE (address-data),
 			// instead of listing every href and then a serial GET per contact — the single largest
 			// DAV performance defect. A server that rejects the REPORT (throws) falls back to the
 			// per-contact GET path below; a server that ignores the filter and returns everything is
@@ -110,7 +110,7 @@ public sealed class CardDavStore(
 				cards.Add(data);
 		}
 
-		// H6: a server can accept the REPORT and answer a well-formed 207 whose propstats carry
+		// A server can accept the REPORT and answer a well-formed 207 whose propstats carry
 		// getetag but no address-data at all (unsupported or silently dropped) — that is an
 		// EMPTY-BUT-NON-NULL list, indistinguishable here from "genuinely zero matches". The caller
 		// (SearchGalAsync) treats null as "fall back to per-contact enumeration" and a non-null empty
@@ -134,7 +134,7 @@ public sealed class CardDavStore(
 					text));
 	}
 
-	/// <summary>The pre-H14 fallback: list every href, then a GET per contact.</summary>
+	/// <summary>The fallback when the server has no addressbook-query support: list every href, then a GET per contact.</summary>
 	private async Task<IReadOnlyList<string>> GetCardsByEnumerationAsync(
 		string folderBackendKey, CancellationToken ct)
 	{
@@ -186,7 +186,7 @@ public sealed class CardDavStore(
 
 		List<BackendFolder> folders = new();
 		bool first = true;
-		// H22: multistatus order is server whim, and the first address book below becomes THE
+		// Multistatus order is server whim, and the first address book below becomes THE
 		// default contacts folder — sort by href so the pick is stable across sessions and
 		// servers (CalDavStore already does this for the default calendar).
 		foreach (DavResource resource in resources.OrderBy(r => r.Href, StringComparer.OrdinalIgnoreCase))

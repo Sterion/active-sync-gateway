@@ -26,7 +26,7 @@ public sealed class ImapSession(
 
 	public async ValueTask DisposeAsync()
 	{
-		// D28: idempotent — a second dispose (or one racing a store's own teardown) must not hit the
+		// Idempotent — a second dispose (or one racing a store's own teardown) must not hit the
 		// already-disposed gate with an ObjectDisposedException.
 		if (Interlocked.Exchange(ref _disposed, 1) == 1)
 			return;
@@ -42,7 +42,7 @@ public sealed class ImapSession(
 		{
 			if (acquired)
 				_gate.Release();
-			// G11: never dispose the gate itself. RunAsync's disposed-flag check (top of the
+			// Never dispose the gate itself. RunAsync's disposed-flag check (top of the
 			// method) and its own WaitAsync/Release calls are separate steps from this one, so a
 			// caller that passed the flag check just before it flipped — or one still holding the
 			// gate when our bounded wait above times out — can reach the gate AFTER this method
@@ -67,7 +67,7 @@ public sealed class ImapSession(
 	public async Task<T> RunAsync<T>(
 		Func<ImapClient, Task<T>> action, CancellationToken ct, bool idempotent = true)
 	{
-		// D28: a caller arriving after disposal must fail cleanly, not with an ObjectDisposedException
+		// A caller arriving after disposal must fail cleanly, not with an ObjectDisposedException
 		// from the disposed gate.
 		if (Volatile.Read(ref _disposed) == 1)
 			throw new BackendException("IMAP session has been disposed.");

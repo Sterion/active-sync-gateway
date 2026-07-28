@@ -17,7 +17,7 @@ namespace ActiveSync.Backends.Jmap;
 ///   is resolved lazily from the cached session, so construction stays I/O-free.
 /// </summary>
 /// <remarks>
-///   Split by concern across four partials (S4), mirroring the IMAP precedent
+///   Split by concern across four partials, mirroring the IMAP precedent
 ///   (<c>ImapMailBackend.Watch.cs</c>): this file holds folder/item CRUD + listing; free-text
 ///   search is in <c>JmapMailStore.Search.cs</c>; the Ping/Sync change-wait engine is in
 ///   <c>JmapMailStore.Watch.cs</c>; attachment fetch + the file-reference codec are in
@@ -40,7 +40,7 @@ public sealed partial class JmapMailStore(
 
 	private string? _account;
 
-	// H25: the mailbox role map (id→role and role→id) is stable for a session's lifetime — trash,
+	// The mailbox role map (id→role and role→id) is stable for a session's lifetime — trash,
 	// drafts and sent do not move — so it is resolved once and cached rather than re-listing every
 	// mailbox (Mailbox/get ids:null) on every delete/create/draft-edit. The session is recycled on
 	// a config change, which is when a re-resolve would matter. Guarded by _rolesGate so concurrent
@@ -137,7 +137,7 @@ public sealed partial class JmapMailStore(
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string mailboxId = FromKey(folderBackendKey);
-		// H8: page at min(500, maxObjectsInGet). The Email/get back-references up to a page of
+		// Page at min(500, maxObjectsInGet). The Email/get back-references up to a page of
 		// Email/query ids, so a server advertising a lower maxObjectsInGet would answer
 		// requestTooLarge and fail the whole folder sync if we asked for 500 blindly.
 		int page = PageSize(await client.GetSessionAsync(ct).ConfigureAwait(false));
@@ -145,7 +145,7 @@ public sealed partial class JmapMailStore(
 		int position = 0;
 		int previousPosition = -1;
 		string? queryState = null;
-		// H3: bounded restarts before falling back to whatever the last pass collected, rather than
+		// Bounded restarts before falling back to whatever the last pass collected, rather than
 		// restarting forever against a mailbox that never settles.
 		int restartsRemaining = 3;
 		while (true)
@@ -168,7 +168,7 @@ public sealed partial class JmapMailStore(
 			using JmapResponse response = await client.InvokeAsync(CapMail, [query, get], ct).ConfigureAwait(false);
 			JsonElement queryArgs = response.Arguments("0");
 
-			// H3: `queryState` (RFC 8620 §5.5) changes whenever the result set shifts. A concurrent
+			// `queryState` (RFC 8620 §5.5) changes whenever the result set shifts. A concurrent
 			// insert/remove earlier in the descending-sort order slides every later item's position,
 			// so continuing at our own `position` can skip an item entirely — it lands in the gap
 			// between the page we already read and the page we are about to ask for, and never comes
@@ -192,14 +192,14 @@ public sealed partial class JmapMailStore(
 				map[email.GetProperty("id").GetString()!] = RevisionOf(KeywordsOf(email));
 
 			int returned = queryArgs.GetProperty("ids").GetArrayLength();
-			// H8: a short page does NOT mean "done" — servers may return fewer than requested. Advance
+			// A short page does NOT mean "done" — servers may return fewer than requested. Advance
 			// by the server's own reported position (it may clamp ours) and stop only when a page comes
 			// back empty, or the server's reported total has been reached. Terminating on
 			// `returned < page` truncated the folder, silently dropping the tail.
 			int reported = queryArgs.TryGetProperty("position", out JsonElement pos) && pos.TryGetInt32(out int pv)
 				? pv
 				: position;
-			// H18: `total` is normally absent (calculateTotal is never requested), so the
+			// `total` is normally absent (calculateTotal is never requested), so the
 			// `position >= total` guard below is usually dead — termination rests on the position
 			// actually advancing. A server that ignores our `position` and keeps reporting the same
 			// value must not spin this loop forever.
@@ -226,7 +226,7 @@ public sealed partial class JmapMailStore(
 			return null;
 
 		IReadOnlyList<string> keywords = KeywordsOf(value);
-		// D14: prefer JMAP's own delivery timestamp over the sender-supplied Date: header.
+		// Prefer JMAP's own delivery timestamp over the sender-supplied Date: header.
 		DateTimeOffset? receivedAt = value.TryGetProperty("receivedAt", out JsonElement receivedAtEl) &&
 		                              receivedAtEl.TryGetDateTimeOffset(out DateTimeOffset receivedAtValue)
 			? receivedAtValue
@@ -282,7 +282,7 @@ public sealed partial class JmapMailStore(
 
 			MimeMessage merged = DraftMessageBuilder.Build(applicationData, original, mailAddress);
 			await ImportAsync(account, merged, mailboxId, ct).ConfigureAwait(false);
-			// H10: dispose the response and surface a per-item destroy failure instead of leaking
+			// Dispose the response and surface a per-item destroy failure instead of leaking
 			// the JsonDocument and assuming success — a lingering old draft duplicates the message.
 			using JmapResponse destroyOld = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
 			{
@@ -306,7 +306,7 @@ public sealed partial class JmapMailStore(
 		if (categories is not null)
 		{
 			IReadOnlyList<string> current = await CategoriesOfAsync(account, itemKey, ct).ConfigureAwait(false);
-			// H4: '/' and '~' ARE legal JMAP keyword characters (RFC 8621 §4.1.1) but PatchObject
+			// '/' and '~' ARE legal JMAP keyword characters (RFC 8621 §4.1.1) but PatchObject
 			// keys are JSON Pointers (RFC 8620 §5.3 → RFC 6901), where '/' separates path segments —
 			// a category like "Work/Home" must be pointer-escaped via PointerToken below, not
 			// dropped. A category containing a character the keyword grammar itself forbids IS
@@ -323,7 +323,7 @@ public sealed partial class JmapMailStore(
 
 		if (patch.Count > 0)
 		{
-			// H25: batch the Email/set and the trailing Email/get into ONE request instead of two
+			// Batch the Email/set and the trailing Email/get into ONE request instead of two
 			// sequential round trips. JMAP runs method calls in order, so the get reflects the set;
 			// itemKey is known, so the get uses an explicit id list (no result reference needed).
 			IReadOnlyList<JmapCall> calls =
@@ -357,7 +357,7 @@ public sealed partial class JmapMailStore(
 		string? trashId = permanent ? null : await FindMailboxByRoleAsync(account, "trash", ct).ConfigureAwait(false);
 		if (trashId is null || string.Equals(trashId, FromKey(folderBackendKey), StringComparison.Ordinal))
 		{
-			// H10: dispose the response and check the per-item destroy bucket rather than assuming
+			// Dispose the response and check the per-item destroy bucket rather than assuming
 			// success on a leaked document.
 			using JmapResponse destroyResponse = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
 			{
@@ -368,7 +368,7 @@ public sealed partial class JmapMailStore(
 			return;
 		}
 
-		// H7: patch only the two affected keys (RFC 8620 §5.3 PatchObject) instead of replacing
+		// Patch only the two affected keys (RFC 8620 §5.3 PatchObject) instead of replacing
 		// "mailboxIds" wholesale — a message filed under more than one mailbox (e.g. a label
 		// alongside Inbox) must keep every OTHER membership across a single-folder EAS delete.
 		using JmapResponse response = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
@@ -392,9 +392,9 @@ public sealed partial class JmapMailStore(
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string sourceId = FromKey(sourceFolderBackendKey);
 		string destId = FromKey(destinationFolderBackendKey);
-		// H7: same PatchObject shape as DeleteItemAsync above — drop only the source mailbox
+		// Same PatchObject shape as DeleteItemAsync above — drop only the source mailbox
 		// membership, not every mailbox the message happened to be filed under.
-		// F5: batch the move with a trailing keywords fetch (same H25 shape as UpdateItemAsync) so
+		// Batch the move with a trailing keywords fetch (same shape as UpdateItemAsync) so
 		// the caller gets the item's REAL post-move revision in one round trip instead of storing a
 		// placeholder that can never match the next listing's revision.
 		IReadOnlyList<JmapCall> calls =
@@ -434,9 +434,9 @@ public sealed partial class JmapMailStore(
 		if (sentId is null)
 			return;
 		string blobId = await client.UploadBlobAsync(account, mime, "message/rfc822", ct).ConfigureAwait(false);
-		// H10: dispose the response and surface an import failure — a dropped Save-to-Sent leaves
+		// Dispose the response and surface an import failure — a dropped Save-to-Sent leaves
 		// the user's Sent folder missing the message they just sent.
-		// H8: Email/import is a Mail-capability method (RFC 8621 §4.8) — no Blob capability
+		// Email/import is a Mail-capability method (RFC 8621 §4.8) — no Blob capability
 		// needed. Requiring urn:ietf:params:jmap:blob (RFC 9404) here rejected the WHOLE request on
 		// any server that does not implement that separate extension.
 		using JmapResponse response = await client.CallAsync(CapMail, "Email/import", new Dictionary<string, object?>
@@ -480,7 +480,7 @@ public sealed partial class JmapMailStore(
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string mailboxId = FromKey(folderBackendKey);
-		// H8: cap the destroy batch at maxObjectsInSet (defaulting to 500) — a batch over the
+		// Cap the destroy batch at maxObjectsInSet (defaulting to 500) — a batch over the
 		// server's limit is rejected wholesale. The loop re-queries from the top after each destroy
 		// and stops only when a page comes back empty, never on a short page (which does not mean the
 		// folder is empty and previously left messages behind).
@@ -497,7 +497,7 @@ public sealed partial class JmapMailStore(
 				.Select(e => e.GetString()!).ToArray();
 			if (ids.Length == 0)
 				break;
-			// H10: dispose the response and surface a batch destroy failure rather than looping on
+			// Dispose the response and surface a batch destroy failure rather than looping on
 			// a leaked document — a message the server refused to delete would otherwise reappear
 			// in the very next Email/query page and spin this loop forever.
 			using JmapResponse destroyResponse = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
@@ -525,7 +525,7 @@ public sealed partial class JmapMailStore(
 		if (_account is not null)
 			return _account;
 		JmapSessionResource session = await client.GetSessionAsync(ct).ConfigureAwait(false);
-		// H9: fail fast if the server does not advertise mail, rather than sending a request it
+		// Fail fast if the server does not advertise mail, rather than sending a request it
 		// cannot honour and surfacing the opaque error back.
 		session.RequireCapability(JmapCapabilities.Mail);
 		return _account = session.PrimaryAccount(JmapCapabilities.Mail);
@@ -544,7 +544,7 @@ public sealed partial class JmapMailStore(
 		using MemoryStream stream = new();
 		await message.WriteToAsync(stream, ct).ConfigureAwait(false);
 		string blobId = await client.UploadBlobAsync(account, stream.ToArray(), "message/rfc822", ct).ConfigureAwait(false);
-		// H8: Email/import is a Mail-capability method (RFC 8621 §4.8) — no Blob capability
+		// Email/import is a Mail-capability method (RFC 8621 §4.8) — no Blob capability
 		// needed. Requiring urn:ietf:params:jmap:blob (RFC 9404) here rejected the WHOLE request on
 		// any server that does not implement that separate extension.
 		using JmapResponse response = await client.CallAsync(CapMail, "Email/import", new Dictionary<string, object?>
@@ -599,7 +599,7 @@ public sealed partial class JmapMailStore(
 	}
 
 	/// <summary>
-	///   The cached mailbox-id→role map (H25), resolved once per session with a single
+	///   The cached mailbox-id→role map, resolved once per session with a single
 	///   <c>Mailbox/get ids:null</c>. Also populates the reverse role→id map for
 	///   <see cref="FindMailboxByRoleAsync" />.
 	/// </summary>
@@ -665,14 +665,14 @@ public sealed partial class JmapMailStore(
 	}
 
 	// The desired listing page — never larger than 500, and clamped down to the server's
-	// maxObjectsInGet so the Email/get back-reference (H8) never exceeds what the server accepts.
+	// maxObjectsInGet so the Email/get back-reference never exceeds what the server accepts.
 	private static int PageSize(JmapSessionResource session)
 	{
 		return Math.Max(1, Math.Min(500, session.CoreLimits.MaxObjectsInGet));
 	}
 
 	// The Empty-folder destroy batch — bounded by maxObjectsInSet, since the whole page is destroyed
-	// in one Email/set (H8).
+	// in one Email/set.
 	private static int DestroyBatchSize(JmapSessionResource session)
 	{
 		return Math.Max(1, Math.Min(500, session.CoreLimits.MaxObjectsInSet));
@@ -691,7 +691,7 @@ public sealed partial class JmapMailStore(
 		return new Dictionary<string, object?> { ["resultOf"] = resultOf, ["name"] = name, ["path"] = path };
 	}
 
-	// H4: RFC 6901 pointer-escapes a keyword before it is spliced into a PatchObject path
+	// RFC 6901 pointer-escapes a keyword before it is spliced into a PatchObject path
 	// ("keywords/{token}") — '~' must be escaped FIRST or a keyword already containing a
 	// pointer-escape sequence would be double-escaped.
 	private static string PointerToken(string keyword) => keyword.Replace("~", "~0").Replace("/", "~1");
@@ -757,7 +757,7 @@ public sealed partial class JmapMailStore(
 	}
 
 	/// <summary>
-	///   Maps a JMAP SetError to an exception. H20: a <c>notFound</c> type becomes
+	///   Maps a JMAP SetError to an exception. A <c>notFound</c> type becomes
 	///   <see cref="BackendItemNotFoundException" /> so the host reconciles an item the server no
 	///   longer has (re-add/delete) instead of treating a doomed update/delete as a generic
 	///   transient failure — or, worse, as success.

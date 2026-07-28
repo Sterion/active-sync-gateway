@@ -27,7 +27,7 @@ public sealed class JmapMailSubmit(
 	public async Task SendAsync(byte[] mime, CancellationToken ct)
 	{
 		string accountId = await AccountAsync(ct).ConfigureAwait(false);
-		// H9: fail fast with a named error if the server does not advertise submission, rather
+		// Fail fast with a named error if the server does not advertise submission, rather
 		// than sending a request it cannot honour and surfacing the opaque "400" back.
 		string submissionAccountId = await SubmissionAccountAsync(ct).ConfigureAwait(false);
 		using MemoryStream input = new(mime);
@@ -75,7 +75,7 @@ public sealed class JmapMailSubmit(
 		}, "0");
 		JmapCall submit = new("EmailSubmission/set", new Dictionary<string, object?>
 		{
-			// H9: EmailSubmission is gated on its own primaryAccounts entry (RFC 8621 §7),
+			// EmailSubmission is gated on its own primaryAccounts entry (RFC 8621 §7),
 			// distinct from Mail's — on a server where the two differ, submitting under the mail
 			// account fails with accountNotFound. Email/import above still uses the mail account.
 			["accountId"] = submissionAccountId,
@@ -100,7 +100,7 @@ public sealed class JmapMailSubmit(
 		    notCreated.TryGetProperty("s", out JsonElement error))
 		{
 			string type = error.TryGetProperty("type", out JsonElement t) ? t.GetString() ?? "unknown" : "unknown";
-			// H1: the submission was rejected, so onSuccessDestroyEmail (keyed off the submission's
+			// The submission was rejected, so onSuccessDestroyEmail (keyed off the submission's
 			// success) never fired and the staged copy still sits in Drafts — it would sync to the
 			// device as a phantom draft. Destroy it before throwing. Best-effort: a cleanup failure
 			// must not mask the real submission error.
@@ -144,7 +144,7 @@ public sealed class JmapMailSubmit(
 	}
 
 	/// <summary>
-	///   The submission-capability primary account (H9): EmailSubmission/set requires
+	///   The submission-capability primary account: EmailSubmission/set requires
 	///   <c>urn:ietf:params:jmap:submission</c>, not Mail, and RFC 8621 §7 gives it its own
 	///   <c>primaryAccounts</c> entry. Checking the capability here, before any I/O, means a server
 	///   that doesn't support submission fails with a named error instead of an opaque 400 from

@@ -10,8 +10,8 @@ namespace ActiveSync.Backends.Common;
 ///   strips the Authorization header and downgrades non-GET methods on 301/302 — which turns a
 ///   well-known discovery redirect (e.g. Stalwart's 307 from <c>/.well-known/caldav</c> to the real
 ///   collection) into an unauthenticated request or an HTML login page. This is the shared home for
-///   logic that used to be duplicated near-verbatim in <c>WebDavClient</c> and <c>JmapClient</c>
-///   (S3) — the JMAP copy's own comment used to say "Mirrors WebDavClient". Both callers wrap the
+///   logic that used to be duplicated near-verbatim in <c>WebDavClient</c> and <c>JmapClient</c> —
+///   the JMAP copy's own comment used to say "Mirrors WebDavClient". Both callers wrap the
 ///   returned task in <see cref="TransientRetry.SendHttpAsync" /> themselves; this type owns only
 ///   the redirect walk and the same-origin credential-forwarding guard.
 /// </summary>
@@ -34,7 +34,7 @@ public sealed class RedirectingHttpSender(HttpClient http, Uri baseUri, ILogger?
 			if (redirectTarget is not null)
 				request.RequestUri = redirectTarget;
 			Uri currentUri = request.RequestUri!; // the URI actually requested this hop
-			// H1/D26: every later hop already passed IsSafeRedirect before becoming redirectTarget
+			// Every later hop already passed IsSafeRedirect before becoming redirectTarget
 			// (below), but hop 0 is whatever the caller built — and for WebDavClient that can be an
 			// absolute, server-controlled href (RFC 4918 permits it). The Authorization header lives
 			// on the shared HttpClient and rides whatever URI is requested, so an unchecked hop 0

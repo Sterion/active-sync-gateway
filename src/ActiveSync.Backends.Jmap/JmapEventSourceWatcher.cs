@@ -39,7 +39,7 @@ public sealed class JmapEventSourceWatcher : IAsyncDisposable
 	/// </summary>
 	public Task WaitForChangeAsync(DateTime afterUtc, CancellationToken ct)
 	{
-		// H14: capture the CURRENT signal TCS BEFORE checking the latch (capture-then-check). The
+		// Capture the CURRENT signal TCS BEFORE checking the latch (capture-then-check). The
 		// old check-then-read order read _signal only after the latch check — if Signal() ran in
 		// that gap, it had already installed a FRESH, uncompleted TCS (and completed the old one),
 		// so the waiter subscribed to the new TCS and missed the change until the NEXT push. With
@@ -90,13 +90,13 @@ public sealed class JmapEventSourceWatcher : IAsyncDisposable
 					return; // server advertises no EventSource — nothing to watch
 				backoffSeconds = 1;
 				await using Stream stream = await response.Content.ReadAsStreamAsync(_cts.Token).ConfigureAwait(false);
-				// H12: BackendHttpClientFactory documents this stream (opened with ResponseHeadersRead)
+				// BackendHttpClientFactory documents this stream (opened with ResponseHeadersRead)
 				// as exempt from MaxResponseContentBufferSize — a plain StreamReader.ReadLineAsync here
 				// grows its internal buffer without bound if the server ever emits a line with no '\n'.
 				// CappedLineReader abandons the connection (throws, caught by the reconnect logic below)
 				// once a single record exceeds the cap instead.
 				CappedLineReader reader = new(stream);
-				// H6: dispatch once at the record boundary (a blank line — SSE fields have no fixed
+				// Dispatch once at the record boundary (a blank line — SSE fields have no fixed
 				// order within a record, so a ping's "data:" line can legally arrive before its
 				// "event: ping" line, and signalling as soon as "data:" is seen mis-latches on that).
 				string currentEvent = "";
@@ -152,7 +152,7 @@ public sealed class JmapEventSourceWatcher : IAsyncDisposable
 	}
 
 	/// <summary>
-	///   H12: a forward-only, size-capped line reader over the raw SSE byte stream. Unlike
+	///   A forward-only, size-capped line reader over the raw SSE byte stream. Unlike
 	///   <see cref="StreamReader" />.ReadLineAsync, which grows its internal buffer without bound
 	///   when a line never terminates, this throws once a single unterminated record exceeds
 	///   <see cref="MaxLineBytes" /> — an SSE record here (a tiny StateChange payload or a ping) is
