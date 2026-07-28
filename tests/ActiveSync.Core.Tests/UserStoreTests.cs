@@ -65,7 +65,7 @@ public sealed class UserStoreTests : IDisposable
 			new ActiveSync.Backends.Imap.ImapBackendProvider(
 				TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
 			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
-			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!)
+			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!, NullLoggerFactory.Instance)
 		], NullLogger<BackendProviderRegistry>.Instance);
 		return new UserResolver(TestOptionsMonitor.Of(options), rolesProvider, registry, _store);
 	}
@@ -466,7 +466,7 @@ public sealed class UserStoreTests : IDisposable
 			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
 			// Calendar/Tasks/Contacts auto-fallback to "local" (no explicit assignment below) — must
 			// be registered so their validation doesn't add unrelated noise to `failures`.
-			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!),
+			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!, NullLoggerFactory.Instance),
 			slow,
 		], NullLogger<BackendProviderRegistry>.Instance);
 

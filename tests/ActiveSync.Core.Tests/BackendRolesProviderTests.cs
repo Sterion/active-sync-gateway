@@ -44,7 +44,7 @@ public sealed class BackendRolesProviderTests
 			new SmtpBackendProvider(NullLoggerFactory.Instance),
 			// The content roles fall back to "local", so the rebuild validates it too — like real DI.
 			// Only ValidateConfiguration is exercised, so the null connection deps are never touched.
-			new LocalBackendProvider(null!, null!, null!),
+			new LocalBackendProvider(null!, null!, null!, NullLoggerFactory.Instance),
 		], NullLogger<BackendProviderRegistry>.Instance);
 
 	private static (BackendRolesProvider Provider, DbSettingsConfigurationProvider Db) BuildWithRegistry()

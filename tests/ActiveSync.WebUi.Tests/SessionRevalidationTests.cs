@@ -83,7 +83,7 @@ public sealed class SessionRevalidationTests : IDisposable
 			provider.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>(),
 			new BackendRolesProvider(new ConfigurationBuilder().Build()),
 			new BackendProviderRegistry(
-				[new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!)],
+				[new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!, NullLoggerFactory.Instance)],
 				NullLogger<BackendProviderRegistry>.Instance),
 			provider.GetRequiredService<UserStore>()));
 		builder.Services.AddScoped<SyncDbContext>(_ => factory.CreateDbContext());

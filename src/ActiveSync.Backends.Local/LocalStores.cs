@@ -8,6 +8,7 @@ using ActiveSync.Protocol;
 using Ical.Net;
 using Ical.Net.CalendarComponents;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Backends.Local;
 
@@ -16,7 +17,8 @@ public sealed class LocalContactStore(
 	ISyncDbContextFactory dbFactory,
 	LocalChangeNotifier notifier,
 	int userId,
-	LocalContentProtector protector)
+	LocalContentProtector protector,
+	ILogger logger)
 	: LocalStoreBase(dbFactory, notifier, userId, protector), IContactOperations
 {
 	public const string BackendKey = KeyPrefix + "contacts";
@@ -41,7 +43,20 @@ public sealed class LocalContactStore(
 		{
 			if (results.Count >= maxResults)
 				break;
-			string vcf = Protector.Unprotect(stored, UserId, "contacts");
+			string vcf;
+			try
+			{
+				vcf = Protector.Unprotect(stored, UserId, Collection);
+			}
+			catch (BackendException ex)
+			{
+				// G18: one row written under a rotated key (or otherwise undecryptable) must not
+				// fail the ENTIRE GAL search — skip it and keep going, the way a malformed vCard
+				// already costs one contact instead of the whole result set.
+				logger.LogWarning(ex, "Skipping an undecryptable contact row during GAL search for user {UserId}", UserId);
+				continue;
+			}
+
 			List<XElement>? gal = ContactConverter.BuildGalEntry(
 				vcf, query, photos is not null, photos?.MaxSizeBytes,
 				photosGranted >= (photos?.MaxCount ?? int.MaxValue), out bool granted);
@@ -73,7 +88,8 @@ public sealed class LocalCalendarStore(
 	int userId,
 	LocalContentProtector protector,
 	string gatewayLogin,
-	string partStatIdentity)
+	string partStatIdentity,
+	ILogger logger)
 	: LocalStoreBase(dbFactory, notifier, userId, protector),
 		ICalendarOperations, ICalendarAttachmentSource, IFreeBusySource
 {
@@ -160,9 +176,20 @@ public sealed class LocalCalendarStore(
 		// D19: AsNoTracking — a pure read; no need to snapshot every event into the change tracker.
 		List<string> contents = await Rows(db).AsNoTracking().Select(i => i.Content).ToListAsync(ct)
 			.ConfigureAwait(false);
-		return CalendarConverter.BusyPeriodsFromEvents(
-			contents.Select(c => Protector.Unprotect(c, UserId, "calendar")),
-			startUtc, endUtc);
+		List<string> plaintext = new(contents.Count);
+		foreach (string stored in contents)
+			try
+			{
+				plaintext.Add(Protector.Unprotect(stored, UserId, Collection));
+			}
+			catch (BackendException ex)
+			{
+				// G18 / AGENTS.md: "a free/busy failure must never fail the whole
+				// ResolveRecipients" — one undecryptable event must not sink the whole answer.
+				logger.LogWarning(ex, "Skipping an undecryptable calendar row during free/busy for user {UserId}", UserId);
+			}
+
+		return CalendarConverter.BusyPeriodsFromEvents(plaintext, startUtc, endUtc);
 	}
 
 	protected override DateTime? ExtractItemDate(string content)

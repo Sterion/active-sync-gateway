@@ -63,7 +63,7 @@ public sealed class UserFieldResolutionTests : IDisposable
 			new ActiveSync.Backends.Imap.ImapBackendProvider(
 				TestOptionsMonitor.Of(options), NullLoggerFactory.Instance),
 			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
-			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!)
+			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!, NullLoggerFactory.Instance)
 		], NullLogger<BackendProviderRegistry>.Instance);
 		return new UserResolver(
 			TestOptionsMonitor.Of(options), new BackendRolesProvider(config ?? GlobalConfig()),
@@ -215,7 +215,7 @@ public sealed class UserFieldResolutionTests : IDisposable
 			new ActiveSync.Backends.Imap.ImapBackendProvider(
 				TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
 			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
-			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!),
+			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!, NullLoggerFactory.Instance),
 			new SieveBackendProvider(NullLoggerFactory.Instance),
 		], NullLogger<BackendProviderRegistry>.Instance);
 
@@ -454,7 +454,7 @@ public sealed class UserFieldResolutionTests : IDisposable
 			new ActiveSync.Backends.Imap.ImapBackendProvider(
 				TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
 			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
-			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!),
+			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!, NullLoggerFactory.Instance),
 		], NullLogger<BackendProviderRegistry>.Instance);
 		UserResolver resolver = new(
 			TestOptionsMonitor.Of(Options()), new BackendRolesProvider(GlobalConfig()), registry, store, logger);

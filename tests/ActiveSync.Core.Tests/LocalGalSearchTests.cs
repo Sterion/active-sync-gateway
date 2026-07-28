@@ -6,6 +6,7 @@ using ActiveSync.Core.State;
 using ActiveSync.Protocol.Wbxml;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Core.Tests;
 
@@ -43,7 +44,7 @@ public sealed class LocalGalSearchTests : IDisposable
 		_userId = user.UserId;
 		_store = new LocalContactStore(
 			_factory, new LocalChangeNotifier(), _userId,
-			LocalContentProtector.CreatePlaintext());
+			LocalContentProtector.CreatePlaintext(), NullLogger.Instance);
 	}
 
 	public void Dispose() => _connection.Dispose();

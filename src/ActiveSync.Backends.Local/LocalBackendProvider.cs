@@ -2,6 +2,7 @@ using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
+using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Backends.Local;
 
@@ -13,7 +14,8 @@ namespace ActiveSync.Backends.Local;
 public sealed class LocalBackendProvider(
 	ISyncDbContextFactory dbFactory,
 	LocalChangeNotifier notifier,
-	LocalContentProtector protector) : IBackendProvider
+	LocalContentProtector protector,
+	ILoggerFactory loggerFactory) : IBackendProvider
 {
 	private static readonly IReadOnlySet<BackendRole> Roles = new HashSet<BackendRole>
 	{
@@ -45,9 +47,11 @@ public sealed class LocalBackendProvider(
 			stores.Add(role.Role switch
 			{
 				BackendRole.Calendar => new LocalCalendarStore(
-					dbFactory, notifier, userId, protector, gatewayLogin, partStatIdentity),
+					dbFactory, notifier, userId, protector, gatewayLogin, partStatIdentity,
+					loggerFactory.CreateLogger<LocalCalendarStore>()),
 				BackendRole.Tasks => new LocalTaskStore(dbFactory, notifier, userId, protector),
-				BackendRole.Contacts => new LocalContactStore(dbFactory, notifier, userId, protector),
+				BackendRole.Contacts => new LocalContactStore(
+					dbFactory, notifier, userId, protector, loggerFactory.CreateLogger<LocalContactStore>()),
 				BackendRole.Notes => new LocalNotesStore(dbFactory, notifier, userId, protector),
 				_ => throw new InvalidOperationException($"local cannot serve the {role.Role} role.")
 			});

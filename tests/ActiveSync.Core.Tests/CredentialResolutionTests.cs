@@ -75,7 +75,7 @@ public sealed class CredentialResolutionTests : IDisposable
 			new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
 			new ActiveSync.Backends.Dav.CalDavBackendProvider(
 				TestOptionsMonitor.Of(options), NullLoggerFactory.Instance),
-			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!)
+			new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!, NullLoggerFactory.Instance)
 		], NullLogger<BackendProviderRegistry>.Instance);
 		return new UserResolver(
 			TestOptionsMonitor.Of(options), new BackendRolesProvider(config), registry, _store);

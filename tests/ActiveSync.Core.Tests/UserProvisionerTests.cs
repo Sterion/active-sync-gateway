@@ -39,7 +39,7 @@ public sealed class UserProvisionerTests : IDisposable
 		new ActiveSync.Backends.Imap.ImapBackendProvider(
 			TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
 		new ActiveSync.Backends.Smtp.SmtpBackendProvider(NullLoggerFactory.Instance),
-		new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!)
+		new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!, NullLoggerFactory.Instance)
 	], NullLogger<BackendProviderRegistry>.Instance);
 
 	private (UserProvisioner Provisioner, UserResolver Resolver) Build(ActiveSyncOptions options)

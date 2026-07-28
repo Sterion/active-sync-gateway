@@ -50,7 +50,7 @@ public class UserResolverTests
 			new CardDavBackendProvider(TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLoggerFactory.Instance),
 			new SieveBackendProvider(NullLoggerFactory.Instance),
 			// Only ValidateConfiguration/DescribeRole are exercised here — no connections.
-			new LocalBackendProvider(null!, null!, null!)
+			new LocalBackendProvider(null!, null!, null!, NullLoggerFactory.Instance)
 		], NullLogger<BackendProviderRegistry>.Instance);
 	}
 

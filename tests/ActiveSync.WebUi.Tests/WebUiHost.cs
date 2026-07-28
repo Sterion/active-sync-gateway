@@ -87,7 +87,7 @@ internal sealed class WebUiHost : IAsyncDisposable
 
 		BackendProviderRegistry registry = new(
 			[
-				new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!),
+				new ActiveSync.Backends.Local.LocalBackendProvider(null!, null!, null!, NullLoggerFactory.Instance),
 				new CalDavBackendProvider(new StaticOptionsMonitor(options), NullLoggerFactory.Instance),
 				new CardDavBackendProvider(new StaticOptionsMonitor(options), NullLoggerFactory.Instance)
 			],
