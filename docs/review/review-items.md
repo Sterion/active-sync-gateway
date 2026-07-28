@@ -344,25 +344,29 @@ work. Every finding ID appears in exactly one item.
 > `F13` FolderCreate can report success with no ServerId. `F15` the long poll abandons its losing waits
 > instead of draining them. `F16`/`F17` unmapped backend failures reach the client as HTTP 500.
 
-**24. IMAP correctness** [LIVE] — ~~`G3`~~ ~~`G6`~~ ~~`G7`~~ ~~`G9`~~ ~~`G12`~~ ~~`G13`~~ ~~`G16`~~ `G22`
-> **`G22` was struck and then ROLLED BACK — it is open again and must be redone.** The first fix gave
-> `SnapshotStatusAsync` a brand-new IMAP connection per poll (`ConnectStandaloneAsync` → LOGIN → STATUS →
-> LOGOUT, every 30 s, for the whole heartbeat). `PollForChangesAsync` races IDLE on EVERY long-poll rather
-> than only when IDLE is down (`ImapMailBackend.Watch.cs`, `Task.WhenAny(idleTask, pollTask)`), so that is
-> ~118 logins per device per hour in the NORMAL path — aggravating the very connection-cap pressure `G6`
-> in this same item exists to survive. Reverted in `<this commit>`.
-> **Redo it as the finding actually says — "its own lightweight connection (as `ImapIdleWatcher` already
-> has)", i.e. PERSISTENT.** The defect is sharing the session GATE, not sharing a connection, so the fix
-> needs a second gate, not a new connection: a poll connection owned by `ImapBackendProvider` keyed on the
-> gateway login (one per user, shared by all their devices and folders, like `_watchers`), with its own
-> `SemaphoreSlim`, lazy start, capped-backoff reconnect, and `IPerUserResourceOwner` eviction when the
-> user's last session goes. Steady state is then 3 connections per user (session + IDLE + poll), constant.
-> **The test must pin connection REUSE, not just non-blocking.** The first attempt passed a live suite and
-> a full unit suite while opening a connection every 30 s, because nothing counted connections — that is
-> exactly how the regression shipped. Required: a test that drives several poll iterations and asserts the
-> number of IMAP connections opened stays CONSTANT (one), so a future per-call reconnect fails the build.
-> Keep the non-blocking assertion too — the original defect (queuing behind the whole-mailbox FETCH) still
-> has to be proven fixed, red-first.
+**24. IMAP correctness** [LIVE] — ~~`G3`~~ ~~`G6`~~ ~~`G7`~~ ~~`G9`~~ ~~`G12`~~ ~~`G13`~~ ~~`G16`~~ ~~`G22`~~ **COMPLETE**
+> **`G22` was struck, ROLLED BACK, and then REDONE** — history kept because the rollback is the lesson.
+> The first fix gave `SnapshotStatusAsync` a brand-new IMAP connection per poll
+> (`ConnectStandaloneAsync` → LOGIN → STATUS → LOGOUT, every 30 s, for the whole heartbeat).
+> `PollForChangesAsync` races IDLE on EVERY long-poll rather than only when IDLE is down
+> (`ImapMailBackend.Watch.cs`, `Task.WhenAny(idleTask, pollTask)`), so that was ~118 logins per device per
+> hour in the NORMAL path — aggravating the very connection-cap pressure `G6` in this same item exists to
+> survive. Reverted in `3a269d4`.
+> **The redo does what the finding actually says — "its own lightweight connection (as `ImapIdleWatcher`
+> already has)", i.e. PERSISTENT.** The defect is sharing the session GATE, not sharing a connection, so
+> the fix is a second gate, not a new connection: `ImapStatusPoller`, owned by `ImapBackendProvider` and
+> keyed on the gateway login (one per user, shared by all their devices and folders, like `_watchers`),
+> with its own `SemaphoreSlim`, lazy start, capped-backoff reconnect, and `IPerUserResourceOwner` eviction
+> when the user's last session goes. Steady state is 3 connections per user (session + IDLE + poll),
+> constant.
+> **The test pins connection REUSE, not just non-blocking.** The first attempt passed a live suite and a
+> full unit suite while opening a connection every 30 s, because nothing counted connections — that is
+> exactly how the regression shipped.
+> `WaitForChangesAsync_PollsOverOneOwnConnection_NotTheSessionGate` (Integration.Tests) holds the session
+> gate for 8 s, drives four poll rounds (eight STATUS snapshots) and asserts BOTH that they are not
+> blocked AND that exactly **two** connections were opened in total (the session's + one poll connection),
+> counted through MailKit's per-connection protocol-logger line. Red-first on unmodified code: 11.0 s vs
+> the 6 s bound. A per-call reconnect scores 9 there, so the regression cannot come back silently.
 > `G6` one transient `AuthenticationException` (Dovecot's per-user connection cap, which this design provokes)
 > **permanently** disables IDLE push for that folder. `G7` a per-user backend change leaves a live
 > authenticated IDLE connection against the old server. `G9` a draft rewrite is append-then-delete with no

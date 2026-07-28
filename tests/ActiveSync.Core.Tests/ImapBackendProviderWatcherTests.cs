@@ -13,6 +13,11 @@ namespace ActiveSync.Core.Tests;
 ///   connects lazily once a wait is registered), so this is directly unit-testable: build two
 ///   watchers for the same (user, folder) with the same password but different resolved
 ///   <see cref="ImapOptions" />, and the provider must NOT hand back the same cached instance.
+///   <para>
+///     G22 adds the second per-user resource the provider owns — the shared STATUS-poll
+///     connection (<see cref="ImapStatusPoller" />) — which is cached, rebuilt and evicted by the
+///     same rules, and is likewise constructible without I/O.
+///   </para>
 /// </summary>
 public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 {
@@ -56,5 +61,61 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 		ImapIdleWatcher? second = _provider.GetOrCreateWatcher("bob@example.com", options, credentials, "INBOX");
 
 		Assert.Same(first, second);
+	}
+
+	/// <summary>
+	///   G22 (coverage, not proof — the symptom itself is proven red-first against a real IMAP
+	///   server by <c>WaitForChangesAsync_PollsOverOneOwnConnection_NotTheSessionGate</c>, which
+	///   counts connections; this pins the CACHE half of the same invariant deterministically, in
+	///   the suite that always runs). The STATUS-poll connection is one per gateway user, shared by
+	///   every device and folder — so the provider must hand back the SAME poller, and it must
+	///   survive across sessions rather than being rebuilt per connection.
+	/// </summary>
+	[Fact]
+	public void GetOrCreatePoller_SameEverything_ReturnsTheSamePoller()
+	{
+		BackendCredentials credentials = new("bob@example.com", "same-password");
+		ImapOptions options = new() { Host = "imap.example.com", Port = 143 };
+
+		ImapStatusPoller first = _provider.GetOrCreatePoller("bob@example.com", options, credentials);
+		ImapStatusPoller second = _provider.GetOrCreatePoller("bob@example.com", options, credentials);
+
+		Assert.Same(first, second);
+	}
+
+	/// <summary>
+	///   G22 + G7: the poll connection carries the same rebuild rule as the IDLE watcher — a
+	///   per-user host/port/security edit must not leave an authenticated poll connection open
+	///   against the decommissioned server.
+	/// </summary>
+	[Fact]
+	public void GetOrCreatePoller_SamePasswordDifferentHost_ReturnsADifferentPoller()
+	{
+		BackendCredentials credentials = new("bob@example.com", "same-password");
+		ImapOptions original = new() { Host = "old-imap.example.com", Port = 143 };
+		ImapOptions moved = new() { Host = "new-imap.example.com", Port = 143 };
+
+		ImapStatusPoller first = _provider.GetOrCreatePoller("bob@example.com", original, credentials);
+		ImapStatusPoller second = _provider.GetOrCreatePoller("bob@example.com", moved, credentials);
+
+		Assert.NotSame(first, second);
+	}
+
+	/// <summary>
+	///   G22: the poll connection is a per-user resource with the same lifetime as the watchers —
+	///   the eviction sweep must drop it once the user has no live session, or the gateway holds an
+	///   authenticated IMAP connection per user forever.
+	/// </summary>
+	[Fact]
+	public void TrimUserResources_WithoutTheUser_EvictsThePollConnection()
+	{
+		BackendCredentials credentials = new("bob@example.com", "same-password");
+		ImapOptions options = new() { Host = "imap.example.com", Port = 143 };
+
+		ImapStatusPoller before = _provider.GetOrCreatePoller("bob@example.com", options, credentials);
+		_provider.TrimUserResources(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "alice@example.com" });
+		ImapStatusPoller after = _provider.GetOrCreatePoller("bob@example.com", options, credentials);
+
+		Assert.NotSame(before, after);
 	}
 }

@@ -191,7 +191,7 @@ re-upload); key rotation is not supported yet.
 | `MaxPingFolders` | `200` | Maximum number of folders a single Ping may monitor. A request naming more is refused with Ping Status 6 and this limit; `0` disables the cap. |
 | `DefaultWindowSize` | `100` | Items per Sync response when the client sends no `WindowSize`. |
 | `MaxWindowSize` | `512` | Hard cap on the client-requested window size. |
-| `SessionIdleMinutes` | `15` | Idle backend sessions (and with them the user's shared IDLE watchers) are evicted after this long. |
+| `SessionIdleMinutes` | `15` | Idle backend sessions (and with them the user's shared IDLE watchers and shared IMAP STATUS-poll connection) are evicted after this long. |
 | `FolderRetentionDays` | `30` | Days a folder that vanished from the backend is kept soft-deleted before a background sweep reclaims its row and dependent DAV/collection state. A folder that reappears within the window keeps its ServerId; `0` disables the sweep. |
 | `UseImapIdle` | `true` | Persistent per-(user, folder) IMAP IDLE watcher for the priority pinged folder (sub-second push). Degrades to STATUS polling when disabled or unsupported by the server. |
 | `WatchdogSeconds` | `60` | Interval of the exact pending-change re-check that backstops the IDLE/STATUS watchers during waits. `0` disables the periodic ticks (the check at Ping start always runs); minimum otherwise 15. |

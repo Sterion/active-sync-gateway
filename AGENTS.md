@@ -250,7 +250,10 @@ licence is held.
   `ImapSession.RunAsync`, which serializes with a `SemaphoreSlim` and reconnects dropped
   connections. Never touch a client outside `RunAsync`. Hold the semaphore only around
   each protocol exchange — a Ping poll loop must release it between iterations so a
-  concurrent Sync on the same session can interleave.
+  concurrent Sync on the same session can interleave. The two provider-owned background
+  connections (`ImapIdleWatcher`, `ImapStatusPoller`) are the deliberate exceptions: each
+  owns its own client behind its **own** gate precisely so push detection is not serialized
+  behind a request's long-running FETCH — they are per-user singletons, never per call.
 
 ## Protocol layer invariants (read before touching Protocol/)
 
@@ -690,8 +693,15 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   unavailable (no capability / stale credentials) and the wait degrades to pure STATUS
   polling — keep that fallback intact. The watcher is a latency optimization only: the
   Ping entry check and the watchdog re-check remain the correctness guarantees. Mail
-  folders also STATUS-poll every ~30 s; DAV collections poll ctag/sync-token every
-  `DavPollSeconds`. `Eas.UseImapIdle=false` disables IDLE entirely.
+  folders also STATUS-poll every ~30 s (`ImapStatusPoller` — G22: **one persistent poll
+  connection per gateway user**, shared by every device and folder, provider-owned with the
+  watchers and evicted by the same sweep; it exists so the poll does not queue behind the
+  session gate that `GetItemRevisionsAsync`'s whole-mailbox FETCH holds. It is a second
+  GATE, never a connection per poll — the poll runs on every long-poll, not only as an IDLE
+  fallback, so reconnecting per call would be ~118 logins/device/hour and would provoke the
+  per-user connection caps `ImapIdleWatcher`'s auth-retry budget exists to survive. Steady
+  state is 3 connections per user: session + IDLE + poll); DAV collections poll
+  ctag/sync-token every `DavPollSeconds`. `Eas.UseImapIdle=false` disables IDLE entirely.
 - Attachment `FileReference` format: `UrlEncode("{imapBackendKey}|{uid}|{attachmentIndex}")`
   where index is the position in `MimeMessage.Attachments`. Search `LongId` format:
   `UrlEncode("{folderBackendKey}|{itemKey}")`. Both round-trip through ItemOperations.

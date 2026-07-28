@@ -29,6 +29,14 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 	private readonly ILogger _wireLogger;
 	private readonly ConcurrentDictionary<string, Lazy<ImapIdleWatcher>> _watchers = new();
 
+	/// <summary>
+	///   G22: one persistent STATUS-poll connection per gateway user, shared by every device and
+	///   every folder of that user (the watcher cache's shape, minus the per-folder dimension —
+	///   a STATUS costs one round trip per folder on one connection). Trimmed by the same
+	///   <see cref="TrimUserResources" /> sweep.
+	/// </summary>
+	private readonly ConcurrentDictionary<string, Lazy<ImapStatusPoller>> _pollers = new();
+
 	public ImapBackendProvider(IOptionsMonitor<ActiveSyncOptions> options, ILoggerFactory loggerFactory)
 	{
 		_options = options;
@@ -90,7 +98,14 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 			return GetOrCreateWatcher(gatewayLogin, options, role.Credentials, folderFullName);
 		}
 
-		ImapMailBackend backend = new(session, context.MailAddress, WatcherProvider, _logger);
+		// G22: resolved through a closure (not captured once) so a credential/connection rotation
+		// that rebuilds the poller is picked up by an already-open session's next poll.
+		ImapStatusPoller PollerProvider()
+		{
+			return GetOrCreatePoller(gatewayLogin, options, role.Credentials);
+		}
+
+		ImapMailBackend backend = new(session, context.MailAddress, WatcherProvider, _logger, PollerProvider);
 		return Task.FromResult<IBackendConnection>(new BackendConnection([backend], ownedResources: [session]));
 	}
 
@@ -154,6 +169,15 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 					_ = DisposeWatcherAsync(removed.Value);
 			}
 		}
+
+		// G22: and so does the shared STATUS-poll connection (keyed on the login alone).
+		foreach ((string user, Lazy<ImapStatusPoller> _) in _pollers)
+			if (!activeGatewayLogins.Contains(user) && _pollers.TryRemove(user, out Lazy<ImapStatusPoller>? removed))
+			{
+				_logger.LogDebug("Evicting IMAP status poll connection for {User}", user);
+				if (removed.IsValueCreated)
+					_ = DisposePollerAsync(removed.Value);
+			}
 	}
 
 	public async ValueTask DisposeAsync()
@@ -162,6 +186,11 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 			if (lazy.IsValueCreated)
 				await DisposeWatcherAsync(lazy.Value).ConfigureAwait(false);
 		_watchers.Clear();
+
+		foreach ((string _, Lazy<ImapStatusPoller> lazy) in _pollers)
+			if (lazy.IsValueCreated)
+				await DisposePollerAsync(lazy.Value).ConfigureAwait(false);
+		_pollers.Clear();
 	}
 
 	/// <summary>
@@ -203,6 +232,36 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 	}
 
 	/// <summary>
+	///   G22: one shared STATUS-poll connection per gateway user — all of the user's devices and
+	///   folders poll over it, and it is opened lazily on the first poll (constructing the poller
+	///   does no I/O). Rebuilt on the same credential-OR-connection-change rule as the IDLE
+	///   watcher, so a per-user host/port/security edit cannot leave an authenticated connection
+	///   against the decommissioned server.
+	/// </summary>
+	internal ImapStatusPoller GetOrCreatePoller(
+		string gatewayLogin, ImapOptions options, BackendCredentials credentials)
+	{
+		Lazy<ImapStatusPoller> NewPollerLazy(string _) =>
+			new(() => new ImapStatusPoller(options, credentials, _logger, _wireLogger));
+
+		Lazy<ImapStatusPoller> current = _pollers.GetOrAdd(gatewayLogin, NewPollerLazy);
+		if (current.Value.Credentials == credentials && ConnectionMatches(current.Value.Options, options))
+			return current.Value;
+
+		// Same atomic compare-and-set as GetOrCreateWatcher: only the thread that wins the swap
+		// disposes the stale poller, and a loser never materializes an orphan outside the map.
+		Lazy<ImapStatusPoller> replacement = NewPollerLazy(gatewayLogin);
+		if (_pollers.TryUpdate(gatewayLogin, replacement, current))
+		{
+			if (current.IsValueCreated)
+				_ = DisposePollerAsync(current.Value);
+			return replacement.Value;
+		}
+
+		return _pollers.GetOrAdd(gatewayLogin, NewPollerLazy).Value;
+	}
+
+	/// <summary>
 	///   G7: the connection-affecting subset of <see cref="ImapOptions" /> — everything a
 	///   per-user backend edit could change that would leave a cached watcher pointed at the
 	///   wrong server or with the wrong transport/certificate policy.
@@ -228,6 +287,18 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		catch (Exception ex)
 		{
 			_logger.LogDebug(ex, "Error disposing IMAP IDLE watcher");
+		}
+	}
+
+	private async Task DisposePollerAsync(ImapStatusPoller poller)
+	{
+		try
+		{
+			await poller.DisposeAsync().ConfigureAwait(false);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogDebug(ex, "Error disposing IMAP status poll connection");
 		}
 	}
 }

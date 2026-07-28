@@ -7,6 +7,7 @@ using ActiveSync.Protocol.Wbxml;
 using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Security;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using MimeKit;
 
@@ -289,6 +290,107 @@ public class ImapMailBackendCorrectnessTests
 		finally
 		{
 			await session.DisposeAsync();
+		}
+	}
+
+	// G22 ----------------------------------------------------------------------------------
+
+	/// <summary>
+	///   G22 (REDO — the first fix was rolled back for opening a connection per poll).
+	///   <c>SnapshotStatusAsync</c>, the STATUS poll that backs every Ping/Sync long-poll, ran
+	///   through the SAME per-session gate as <c>GetItemRevisionsAsync</c>'s whole-mailbox FETCH,
+	///   so one device's Sync round stalled every other device's push detection behind it.
+	///   The remedy is a PERSISTENT provider-owned poll connection per user (as
+	///   <see cref="ImapIdleWatcher" /> already has), not a fresh connection per poll — so this
+	///   test pins BOTH halves at once:
+	///   <list type="bullet">
+	///     <item>hold the session gate for the whole run and assert the polls are not blocked</item>
+	///     <item>count the IMAP connections actually opened and assert it stays at exactly two —
+	///     the session's own plus ONE poll connection, reused across every snapshot</item>
+	///   </list>
+	///   Connections are counted through MailKit's protocol logger ("Connected to …", emitted once
+	///   per connect by <c>MailKitWireLogger.LogConnect</c>), which needs no test seam in
+	///   production code and counts the session and the poller alike.
+	/// </summary>
+	[BackendFact]
+	public async Task WaitForChangesAsync_PollsOverOneOwnConnection_NotTheSessionGate()
+	{
+		string user = TestBackend.User1;
+		CancellationToken ct = CancellationToken.None;
+		ConnectionCountingLogger wire = new();
+		BackendCredentials credentials = new(user, TestBackend.Password);
+		ImapSession session = new(Options, credentials, NullLogger.Instance, wire);
+		ImapStatusPoller poller = new(Options, credentials, NullLogger.Instance, wire);
+		ImapMailBackend backend = new(session, user, _ => null, NullLogger.Instance, () => poller);
+		try
+		{
+			string folderKey = ImapSession.ToBackendKey("INBOX");
+
+			// Stands in for GetItemRevisionsAsync's long-held whole-mailbox FETCH: any operation
+			// that occupies the session's gate for a while. The TCS fires from INSIDE the gate, so
+			// the polls below are guaranteed to arrive while it is held.
+			TaskCompletionSource gateHeld = new(TaskCreationOptions.RunContinuationsAsynchronously);
+			Task slowHold = session.RunAsync(async _ =>
+			{
+				gateHeld.SetResult();
+				await Task.Delay(TimeSpan.FromSeconds(8), CancellationToken.None);
+				return true;
+			}, ct);
+			await gateHeld.Task;
+			Assert.Equal(1, wire.Connections); // just the session's own
+
+			System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+			for (int i = 0; i < 4; i++)
+				await backend.WaitForChangesAsync([folderKey], TimeSpan.FromMilliseconds(300), ct);
+			stopwatch.Stop();
+
+			await slowHold;
+
+			// Push detection for one device must not queue behind another device's long-running
+			// backend call on the same session gate.
+			Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(6),
+				$"Four poll rounds took {stopwatch.Elapsed} while an 8s operation held the session gate " +
+				"-- they should run on their own connection, not queue behind it.");
+
+			// ...and that own connection must be PERSISTENT. Four WaitForChangesAsync rounds issue
+			// eight STATUS snapshots; a poll that reconnects per call would count nine here, which
+			// is exactly the regression that got the first G22 fix rolled back.
+			Assert.Equal(2, wire.Connections);
+		}
+		finally
+		{
+			await poller.DisposeAsync();
+			await session.DisposeAsync();
+		}
+	}
+
+	/// <summary>
+	///   Counts IMAP connections by watching for MailKit's per-connection
+	///   <c>IProtocolLogger.LogConnect</c> line. Trace must be enabled or
+	///   <c>ImapConnectionFactory</c> does not attach the wire logger at all.
+	/// </summary>
+	private sealed class ConnectionCountingLogger : ILogger
+	{
+		private int _connections;
+
+		public int Connections => Volatile.Read(ref _connections);
+
+		public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+		{
+			return null;
+		}
+
+		public bool IsEnabled(LogLevel logLevel)
+		{
+			return true;
+		}
+
+		public void Log<TState>(
+			LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+			Func<TState, Exception?, string> formatter)
+		{
+			if (formatter(state, exception).Contains("Connected to", StringComparison.Ordinal))
+				Interlocked.Increment(ref _connections);
 		}
 	}
 }

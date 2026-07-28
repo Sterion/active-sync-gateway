@@ -1,4 +1,3 @@
-using MailKit;
 using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Backends.Imap;
@@ -103,30 +102,19 @@ public sealed partial class ImapMailBackend
 		return [];
 	}
 
+	/// <summary>
+	///   G22: the STATUS poll runs on the provider-owned per-user <see cref="ImapStatusPoller" />
+	///   — its own persistent connection behind its own gate — so a concurrent
+	///   <c>GetItemRevisionsAsync</c> holding the session gate for a whole-mailbox FETCH cannot
+	///   stall push detection for every other device of the same user. The session fallback covers
+	///   a backend built without a poller (direct construction in tests); production always has one.
+	/// </summary>
 	private Task<Dictionary<string, string>> SnapshotStatusAsync(
 		IReadOnlyList<string> folderBackendKeys, CancellationToken ct)
 	{
-		return session.RunAsync(async client =>
-		{
-			Dictionary<string, string> map = new(StringComparer.Ordinal);
-			foreach (string key in folderBackendKeys)
-				try
-				{
-					IMailFolder folder = await client.GetFolderAsync(ImapSession.FromBackendKey(key), ct).ConfigureAwait(false);
-					// UIDVALIDITY leads the fingerprint so a reset (mailbox recreated, restored,
-					// migrated) always reads as a change even when count/uidnext/unread happen to
-					// land identically — that is the moment every stored item key goes stale.
-					await folder.StatusAsync(
-						StatusItems.Count | StatusItems.UidNext | StatusItems.Unread | StatusItems.UidValidity, ct)
-						.ConfigureAwait(false);
-					map[key] = $"{folder.UidValidity}:{folder.Count}:{folder.UidNext}:{folder.Unread}";
-				}
-				catch (Exception ex) when (ex is FolderNotFoundException)
-				{
-					map[key] = "gone";
-				}
-
-			return map;
-		}, ct);
+		ImapStatusPoller? poller = statusPollerProvider?.Invoke();
+		return poller is not null
+			? poller.StatusAsync(folderBackendKeys, ct)
+			: session.RunAsync(client => ImapStatusPoller.ReadStatusAsync(client, folderBackendKeys, ct), ct);
 	}
 }
