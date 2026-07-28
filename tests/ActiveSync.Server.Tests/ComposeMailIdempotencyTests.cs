@@ -99,6 +99,35 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 		Assert.True(_harness.Session.Mail.SaveToSentAttempted);
 	}
 
+	// F29 (round 3) — SendMailHandler.MarkSourceAsync bypasses the source-resolution cache
+	// ResolveSourceAsync introduced (F4, an earlier round) and its own base class documents: it
+	// calls Folders.ResolveCollectionAsync/ResolveItemKeyAsync directly instead of ResolveSourceAsync,
+	// a second DB round trip per send for no reason — the sibling handlers (below) do not do this.
+	[Fact]
+	public async Task SendMail_ResolvesSourceExactlyOnce()
+	{
+		UserFolder drafts = await DraftsAsync();
+		_harness.Session.Mail.RawMessage = Encoding.UTF8.GetBytes(
+			"From: u@example.test\r\nTo: dest@example.com\r\nSubject: draft\r\n\r\ndraft body\r\n");
+
+		XDocument request = new(new XElement(CM + "SendMail",
+			new XElement(CM + "Source",
+				new XElement(CM + "FolderId", drafts.ServerId),
+				new XElement(CM + "ItemId", $"{drafts.ServerId}:99"))));
+
+		SendMailHandler handler = new(
+			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
+			NullLogger<SendMailHandler>.Instance);
+
+		int before = _harness.FolderResolutionQueries;
+		await _harness.RunAsync(handler, "SendMail", request);
+
+		// BuildOutgoingAsync resolves the source to fetch the stored draft; MarkSourceAsync then
+		// consumes (deletes) that same item — that must reuse the SAME resolution, not look it up
+		// again.
+		Assert.Equal(1, _harness.FolderResolutionQueries - before);
+	}
+
 	// F4 — BuildOutgoingAsync resolves the source item (to quote/attach it); MarkSourceAsync then
 	// flags that same item (answered/forwarded). It must reuse the first resolution rather than
 	// resolving the ServerId a second time.

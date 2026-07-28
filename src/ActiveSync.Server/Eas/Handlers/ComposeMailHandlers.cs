@@ -282,11 +282,14 @@ public abstract class ComposeMailHandlerBase(
 	// MarkSourceAsync resolves the SAME source again to flag it (answered/forwarded) — a second
 	// DB round trip (and, for a DAV store, a second backend lookup) per send for no reason: the
 	// source never changes within one HandleAsync call. Cache the outcome (including a "not
-	// found" miss) so the second call is free.
+	// found" miss) so the second call is free. The cached shape carries the resolved UserFolder +
+	// IContentStore (not just the backend-key string) because SendMailHandler.MarkSourceAsync (F29)
+	// needs the folder's Type (Drafts check) and the store itself (DeleteItemAsync) — a plain
+	// (string, string) tuple could not serve that caller too.
 	private bool _sourceResolveAttempted;
-	private (string FolderBackendKey, string ItemKey)? _resolvedSource;
+	private (UserFolder Folder, IContentStore Store, string ItemKey)? _resolvedSource;
 
-	protected async Task<(string FolderBackendKey, string ItemKey)?> ResolveSourceAsync(
+	protected async Task<(UserFolder Folder, IContentStore Store, string ItemKey)?> ResolveSourceAsync(
 		EasContext context, ComposeRequest request, CancellationToken ct)
 	{
 		if (_sourceResolveAttempted)
@@ -301,7 +304,7 @@ public abstract class ComposeMailHandlerBase(
 			return _resolvedSource = null;
 		string? itemKey = await Folders.ResolveItemKeyAsync(
 			resolved.Value.Folder, resolved.Value.Store, request.SourceItemId, ct);
-		return _resolvedSource = itemKey is null ? null : (resolved.Value.Folder.BackendKey, itemKey);
+		return _resolvedSource = itemKey is null ? null : (resolved.Value.Folder, resolved.Value.Store, itemKey);
 	}
 
 	protected sealed record ComposeRequest(
@@ -344,11 +347,12 @@ public sealed class SendMailHandler(
 		// 16.x: SendMail without MIME submits a stored draft (Source > FolderId/ItemId). An
 		// unresolvable draft yields empty bytes → Status 107 (F19; already a clean failure, never a
 		// degraded send), so this path does not need the source-not-found sentinel.
-		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
+		(UserFolder Folder, IContentStore Store, string ItemKey)? source =
+			await ResolveSourceAsync(context, request, ct);
 		if (source is null)
 			return [];
 		return await context.Session.MailStore.GetRawMessageAsync(
-			source.Value.FolderBackendKey, source.Value.ItemKey, ct) ?? [];
+			source.Value.Folder.BackendKey, source.Value.ItemKey, ct) ?? [];
 	}
 
 	protected override async Task MarkSourceAsync(EasContext context, ComposeRequest request, CancellationToken ct)
@@ -356,9 +360,11 @@ public sealed class SendMailHandler(
 		// A draft that was submitted by reference is consumed by the send.
 		if (request.Mime.Length > 0 || request.SourceFolderId is null || request.SourceItemId is null)
 			return;
-		(UserFolder Folder, IContentStore Store)? resolved = await Folders.ResolveCollectionAsync(
-			context.Session, context.UserId, request.SourceFolderId, ct);
-		if (resolved is null)
+		// F29: reuse BuildOutgoingAsync's resolution (which already ran for this same request when
+		// Mime is empty, the only way this method is reached) instead of resolving the source again.
+		(UserFolder Folder, IContentStore Store, string ItemKey)? source =
+			await ResolveSourceAsync(context, request, ct);
+		if (source is null)
 			return;
 		// F12: nothing else enforces the 16.x "submit a stored draft" flow's assumption that Source
 		// names a draft — a client (or a bug) pointing SendMail at an ordinary message would
@@ -366,13 +372,10 @@ public sealed class SendMailHandler(
 		// genuine Drafts item may be consumed by the send; anything else is left untouched. Also
 		// honour the per-folder write grant the same way every other mutating handler does — the
 		// global ReadOnly check above the send only covers the SEND, not this post-send delete.
-		if (resolved.Value.Folder.Type != EasFolderType.Drafts ||
-		    WritePermission.IsBlocked(context, Options.Value, resolved.Value.Folder))
+		if (source.Value.Folder.Type != EasFolderType.Drafts ||
+		    WritePermission.IsBlocked(context, Options.Value, source.Value.Folder))
 			return;
-		string? itemKey = await Folders.ResolveItemKeyAsync(
-			resolved.Value.Folder, resolved.Value.Store, request.SourceItemId, ct);
-		if (itemKey is not null)
-			await resolved.Value.Store.DeleteItemAsync(resolved.Value.Folder.BackendKey, itemKey, true, ct);
+		await source.Value.Store.DeleteItemAsync(source.Value.Folder.BackendKey, source.Value.ItemKey, true, ct);
 	}
 }
 
@@ -394,10 +397,11 @@ public sealed class SmartReplyHandler(
 			return request.Mime;
 		// A source WAS referenced but could not be resolved / fetched — fail rather than send a
 		// reply with the quoted original silently missing (F29).
-		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
+		(UserFolder Folder, IContentStore Store, string ItemKey)? source =
+			await ResolveSourceAsync(context, request, ct);
 		if (source is null)
 			return null;
-		byte[]? original = await context.Session.MailStore.GetRawMessageAsync(source.Value.FolderBackendKey,
+		byte[]? original = await context.Session.MailStore.GetRawMessageAsync(source.Value.Folder.BackendKey,
 			source.Value.ItemKey, ct);
 		if (original is null)
 			return null;
@@ -447,13 +451,14 @@ public sealed class SmartReplyHandler(
 
 	protected override async Task MarkSourceAsync(EasContext context, ComposeRequest request, CancellationToken ct)
 	{
-		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
+		(UserFolder Folder, IContentStore Store, string ItemKey)? source =
+			await ResolveSourceAsync(context, request, ct);
 		// F25: the global ReadOnly check above only covers the SEND — this post-send write into the
 		// source folder must honour a per-folder read-only/share grant too, the same way
 		// SendMailHandler's post-send delete already does.
-		if (source is not null && !WritePermission.IsBlocked(context, Options.Value, source.Value.FolderBackendKey))
+		if (source is not null && !WritePermission.IsBlocked(context, Options.Value, source.Value.Folder.BackendKey))
 			await context.Session.MailStore.SetAnsweredAsync(
-				source.Value.FolderBackendKey, source.Value.ItemKey, forwarded: false, ct);
+				source.Value.Folder.BackendKey, source.Value.ItemKey, forwarded: false, ct);
 	}
 }
 
@@ -475,11 +480,12 @@ public sealed class SmartForwardHandler(
 			return request.Mime;
 		// A source WAS referenced but could not be resolved / fetched — fail rather than forward a
 		// message with the forwarded content silently missing (F29).
-		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
+		(UserFolder Folder, IContentStore Store, string ItemKey)? source =
+			await ResolveSourceAsync(context, request, ct);
 		if (source is null)
 			return null;
 		byte[]? original = await context.Session.MailStore.GetRawMessageAsync(
-			source.Value.FolderBackendKey, source.Value.ItemKey, ct);
+			source.Value.Folder.BackendKey, source.Value.ItemKey, ct);
 		if (original is null)
 			return null;
 
@@ -544,11 +550,12 @@ public sealed class SmartForwardHandler(
 
 	protected override async Task MarkSourceAsync(EasContext context, ComposeRequest request, CancellationToken ct)
 	{
-		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
+		(UserFolder Folder, IContentStore Store, string ItemKey)? source =
+			await ResolveSourceAsync(context, request, ct);
 		// F25: see SmartReplyHandler.MarkSourceAsync — the same per-folder grant must gate this
 		// post-send write, not just the global ReadOnly flag the send itself already checked.
-		if (source is not null && !WritePermission.IsBlocked(context, Options.Value, source.Value.FolderBackendKey))
+		if (source is not null && !WritePermission.IsBlocked(context, Options.Value, source.Value.Folder.BackendKey))
 			await context.Session.MailStore.SetAnsweredAsync(
-				source.Value.FolderBackendKey, source.Value.ItemKey, forwarded: true, ct);
+				source.Value.Folder.BackendKey, source.Value.ItemKey, forwarded: true, ct);
 	}
 }
