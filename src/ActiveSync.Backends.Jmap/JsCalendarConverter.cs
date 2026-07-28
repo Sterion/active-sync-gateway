@@ -45,10 +45,14 @@ public static class JsCalendarConverter
 	];
 
 	// Server-managed / read-only members: never echoed back in an update (invalidProperties).
+	// H11: "utcStart"/"utcEnd" (server-computed) and "baseEventId" (server-set) per
+	// draft-ietf-jmap-calendars — omitting them from this denylist meant a server that returns
+	// them got them echoed straight back in the update patch, failing EVERY event edit against
+	// that server with invalidProperties.
 	private static readonly string[] ReadOnly =
 	[
 		"id", "calendarIds", "isDraft", "isOrigin", "created", "updated", "sequence",
-		"method", "prodId", "blobId"
+		"method", "prodId", "blobId", "utcStart", "utcEnd", "baseEventId"
 	];
 
 	public static string ToICalendar(JsonElement jsEvent)

@@ -267,4 +267,33 @@ public class JsCalendarConverterTests
 		Assert.False(update.ContainsKey("isOrigin"));
 		Assert.False(update.ContainsKey("id"));
 	}
+
+	// H11: the preserve-unknowns loop copied every member of the stored event into the update
+	// patch, minus a fixed ten-name denylist. draft-ietf-jmap-calendars defines "utcStart",
+	// "utcEnd" (server-computed) and "baseEventId" (server-set) on CalendarEvent, and none of the
+	// three was in that denylist — a server that returns them gets them echoed straight back in
+	// the CalendarEvent/set update and answers invalidProperties, so NO event edit works at all
+	// on that server.
+	[Theory]
+	[InlineData("utcStart")]
+	[InlineData("utcEnd")]
+	[InlineData("baseEventId")]
+	public void FromICalendar_DoesNotEchoBackServerComputedTimeOrBaseEventMembers(string member)
+	{
+		string eventJson = $$"""
+		{
+		  "@type": "Event", "uid": "test-uid-1", "title": "Team Sync", "description": "Weekly",
+		  "start": "2026-07-20T10:00:00", "timeZone": "UTC", "duration": "PT1H",
+		  "status": "confirmed", "id": "b", "{{member}}": "some-server-value"
+		}
+		""";
+		JsonElement eventWithServerComputedMember = JsonDocument.Parse(eventJson).RootElement;
+
+		string ics = JsCalendarConverter.ToICalendar(eventWithServerComputedMember);
+		Dictionary<string, object?> update =
+			JsCalendarConverter.FromICalendar(ics, eventWithServerComputedMember);
+
+		Assert.False(update.ContainsKey(member),
+			$"'{member}' is server-computed/server-set and must never be echoed back in an update patch");
+	}
 }
