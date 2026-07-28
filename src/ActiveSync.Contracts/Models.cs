@@ -6,6 +6,9 @@ using ActiveSync.Protocol;
 
 namespace ActiveSync.Contracts;
 
+/// <summary>A username/password pair as presented to (or resolved for) a backend connection.</summary>
+/// <param name="UserName">The backend-facing username. Never assumed to be an identity — a per-backend user name can be renamed freely.</param>
+/// <param name="Password">The backend-facing password, in plaintext. Masked as "***" in the record's generated <c>ToString()</c> — never logged in the clear.</param>
 public sealed record BackendCredentials(string UserName, string Password)
 {
 	// The compiler-synthesized record ToString() would print Password in plaintext — and this
@@ -42,14 +45,19 @@ public sealed record BackendFolder(
 /// </summary>
 public sealed record BodyPreference(int Type, long? TruncationSize, bool AllOrNone, bool Eas16 = false)
 {
+	/// <summary>Convenience default: plain text (Type 1), truncated at 32 KB, AllOrNone false, pre-16.x shapes.</summary>
 	public static readonly BodyPreference PlainText = new(1, 32 * 1024, false);
 }
 
 /// <summary>Server-side filter for a collection (from AirSync FilterType).</summary>
 public sealed record ContentFilter(DateTime? SinceUtc)
 {
+	/// <summary>No date filtering — every item matches. Used for classes that are never date-filtered (contacts, tasks, notes) and as the fallback for an unrecognized FilterType.</summary>
 	public static readonly ContentFilter All = new((DateTime?)null);
 
+	/// <summary>Maps an AirSync FilterType value for the Email class to a date window (1 = 1 day back … 7 = 6 months back); any other value returns <see cref="All" />.</summary>
+	/// <param name="filterType">The client-supplied AirSync FilterType.</param>
+	/// <returns>A filter matching items no older than the mapped window, or <see cref="All" /> for an unrecognized value.</returns>
 	public static ContentFilter FromMailFilterType(int filterType)
 	{
 		return filterType switch
@@ -65,6 +73,9 @@ public sealed record ContentFilter(DateTime? SinceUtc)
 		};
 	}
 
+	/// <summary>Maps an AirSync FilterType value for the Calendar class to a date window (4 = 2 weeks back … 7 = 6 months back); any other value (including the mail-only 1-3) returns <see cref="All" />.</summary>
+	/// <param name="filterType">The client-supplied AirSync FilterType.</param>
+	/// <returns>A filter matching items no older than the mapped window, or <see cref="All" /> for an unrecognized value.</returns>
 	public static ContentFilter FromCalendarFilterType(int filterType)
 	{
 		return filterType switch
@@ -99,14 +110,22 @@ public sealed record BackendItem(IReadOnlyList<XElement> ApplicationData);
 /// <summary>An attachment payload fetched from a backend.</summary>
 public sealed record BackendAttachment(string ContentType, byte[] Content);
 
-// NOT sealed — a plugin backend must be able to introduce its own typed error that the
-// host's `catch (BackendException)` idiom still funnels.
+/// <summary>
+///   Thrown by a backend store or operation for any failure the host should treat as a backend
+///   error (as opposed to a bug). NOT sealed — a plugin backend must be able to introduce its own
+///   typed subclass that the host's codebase-wide <c>catch (BackendException)</c> idiom still funnels.
+/// </summary>
 public class BackendException : Exception
 {
+	/// <summary>Creates the exception with a message only.</summary>
+	/// <param name="message">Human-readable description of the failure.</param>
 	public BackendException(string message) : base(message)
 	{
 	}
 
+	/// <summary>Creates the exception wrapping an inner cause.</summary>
+	/// <param name="message">Human-readable description of the failure.</param>
+	/// <param name="inner">The underlying exception that caused this failure.</param>
 	public BackendException(string message, Exception inner) : base(message, inner)
 	{
 	}

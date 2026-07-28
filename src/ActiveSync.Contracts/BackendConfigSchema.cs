@@ -9,9 +9,16 @@ namespace ActiveSync.Contracts;
 /// </summary>
 public enum BackendFieldType
 {
+	/// <summary>Free-text value, rendered as a plain text input.</summary>
 	String,
+
+	/// <summary>Whole-number value; <see cref="BackendConfigField.Min" />/<see cref="BackendConfigField.Max" /> bound it when set.</summary>
 	Int,
+
+	/// <summary>Boolean flag, rendered as a checkbox/toggle.</summary>
 	Bool,
+
+	/// <summary>A closed set of choices; <see cref="BackendConfigField.EnumValues" /> lists the allowed values.</summary>
 	Enum,
 
 	/// <summary>
@@ -24,6 +31,8 @@ public enum BackendFieldType
 	///   (<c>SecretValue</c>) alongside Contracts — see docs/plugins.md.
 	/// </summary>
 	Secret,
+
+	/// <summary>An absolute URL string, rendered as a text input (no scheme/host validation implied).</summary>
 	Url,
 
 	/// <summary>Repeated element; the field Name is the list ROOT ("X" for the keys "X:0", "X:1").</summary>
@@ -38,6 +47,23 @@ public enum BackendFieldType
 ///   <see cref="Default" /> is the string form of the options-class default and MUST match it
 ///   (BackendSchemaDefaultsTests binds an empty section and compares).
 /// </summary>
+/// <param name="Name">
+///   The config key relative to the role section (e.g. "Host"), or the list ROOT for
+///   <see cref="BackendFieldType.StringList" /> (e.g. "SharedCollections" for keys
+///   "SharedCollections:0", "SharedCollections:1", …).
+/// </param>
+/// <param name="Label">Short human-readable label for the rendering surface.</param>
+/// <param name="Type">The field's shape — governs how it is entered, validated and rendered.</param>
+/// <param name="Required">Whether a value must be supplied; unset otherwise falls back to <paramref name="Default" />.</param>
+/// <param name="Default">
+///   The string form of the options-class property's own default value. MUST match it exactly —
+///   <c>BackendSchemaDefaultsTests</c> binds an empty section and compares, so a drift here renders
+///   a wrong "(default: X)" hint to the operator.
+/// </param>
+/// <param name="EnumValues">The allowed values when <paramref name="Type" /> is <see cref="BackendFieldType.Enum" />; otherwise unused.</param>
+/// <param name="Help">Longer help text shown alongside the field in the rendering surface.</param>
+/// <param name="Min">Inclusive lower bound for <see cref="BackendFieldType.Int" /> fields; otherwise unused.</param>
+/// <param name="Max">Inclusive upper bound for <see cref="BackendFieldType.Int" /> fields; otherwise unused.</param>
 /// <param name="SelfServiceEditable">
 ///   Whether a NON-ADMIN account holder may set this field for their own account from the user
 ///   portal. Defaults to <c>false</c>, so a field — and a whole plugin provider — is

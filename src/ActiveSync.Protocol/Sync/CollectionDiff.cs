@@ -5,6 +5,9 @@ using System.Globalization;
 
 namespace ActiveSync.Protocol.Sync;
 
+/// <summary>One item's identity and revision stamp within a <see cref="CollectionDiff.Compute" /> result.</summary>
+/// <param name="ServerId">The item's id within the collection (backend-defined; always compared with <see cref="StringComparer.Ordinal" />).</param>
+/// <param name="Revision">An opaque backend revision/ETag token; a value that differs from the snapshotted one means the item changed.</param>
 public sealed record ItemChange(string ServerId, string Revision);
 
 /// <summary>
@@ -41,6 +44,11 @@ public static class CollectionDiff
 	///   rely on any other comparer's semantics (e.g. case-insensitivity) being honored.
 	/// </param>
 	/// <param name="current">The backend's current id → revision map. Same comparer note as <paramref name="snapshot" />.</param>
+	/// <param name="windowSize">
+	///   The combined budget for deletes+changes+adds sent this round (see the class summary for
+	///   the charge order). Clamped to at least 1, so a non-positive value still makes progress
+	///   instead of producing an empty round forever.
+	/// </param>
 	public static CollectionChanges Compute(
 		IReadOnlyDictionary<string, string> snapshot,
 		IReadOnlyDictionary<string, string> current,

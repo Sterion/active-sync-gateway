@@ -12,6 +12,11 @@ namespace ActiveSync.Protocol.Wbxml;
 /// </summary>
 public static class WbxmlCodePages
 {
+	/// <summary>
+	///   All WBXML code pages, indexed by WBXML page number (a page with no tokens, e.g. the
+	///   obsolete AirNotify page 3, still occupies its index so <see cref="ForIndex" /> stays
+	///   aligned with the wire's page numbers).
+	/// </summary>
 	// IReadOnlyList/IReadOnlyDictionary are the interface types, but that alone is
 	// documentation, not protection — Build() itself returns a List<CodePage> and T(...) a
 	// Dictionary<byte, string>, so a cast back to the concrete mutable type used to succeed. This
@@ -26,11 +31,13 @@ public static class WbxmlCodePages
 	private static readonly Dictionary<XNamespace, CodePage> ByNamespace =
 		Pages.Where(p => p.Tokens.Count > 0).ToDictionary(p => p.Namespace, p => p);
 
+	/// <summary>Looks up the code page whose namespace is <paramref name="ns" />, or null if no page (with any tokens) defines it.</summary>
 	public static CodePage? ForNamespace(XNamespace ns)
 	{
 		return ByNamespace.GetValueOrDefault(ns);
 	}
 
+	/// <summary>Looks up a code page by its WBXML page index (the byte written after the WBXML SWITCH_PAGE opcode), or null if out of range.</summary>
 	public static CodePage? ForIndex(int page)
 	{
 		return page >= 0 && page < Pages.Count ? Pages[page] : null;
@@ -350,10 +357,15 @@ public static class WbxmlCodePages
 		];
 	}
 
+	/// <summary>One WBXML code page: the token/tag-name mapping for the elements of one EAS XML namespace.</summary>
+	/// <param name="Index">The WBXML page index (the byte switched to via the SWITCH_PAGE opcode) — matches this page's position in <see cref="Pages" />.</param>
+	/// <param name="Namespace">The EAS XML namespace whose elements this page's tokens encode/decode.</param>
+	/// <param name="Tokens">The decode direction: WBXML token byte → tag name.</param>
 	public sealed record CodePage(int Index, XNamespace Namespace, IReadOnlyDictionary<byte, string> Tokens)
 	{
 		// Same hardening as Tokens above — a cast back to Dictionary<string, byte> must not
 		// let a plugin silently repoint the encoder's half of the token table.
+		/// <summary>The encode direction: tag name → WBXML token byte, built once from <see cref="Tokens" /> at construction time.</summary>
 		public IReadOnlyDictionary<string, byte> Reverse { get; } =
 			Tokens.ToFrozenDictionary(kv => kv.Value, kv => kv.Key, StringComparer.Ordinal);
 	}

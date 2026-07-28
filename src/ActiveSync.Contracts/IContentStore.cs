@@ -22,6 +22,9 @@ public interface IContentStore
 	/// </summary>
 	bool OwnsBackendKey(string backendKey);
 
+	/// <summary>Lists every folder this store currently exposes for its <see cref="EasClass" />.</summary>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
+	/// <returns>The store's current folders (empty when it has none).</returns>
 	Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct);
 
 	/// <summary>
@@ -132,7 +135,15 @@ public interface IFolderOperations
 	/// <summary>Creates a folder. Returns the new folder's backend key.</summary>
 	Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct);
 
+	/// <summary>Renames a folder in place (its backend key is stable across the rename).</summary>
+	/// <param name="backendKey">The folder's backend key.</param>
+	/// <param name="newDisplayName">The new display name.</param>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
 	Task RenameFolderAsync(string backendKey, string newDisplayName, CancellationToken ct);
+
+	/// <summary>Deletes a folder and its contents.</summary>
+	/// <param name="backendKey">The folder's backend key.</param>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
 	Task DeleteFolderAsync(string backendKey, CancellationToken ct);
 }
 
@@ -142,6 +153,16 @@ public interface IFolderOperations
 /// </summary>
 public interface ICalendarAttachmentSource
 {
+	/// <summary>
+	///   Resolves one inline attachment of an event by its position, as encoded in a
+	///   "calatt::&lt;serverId&gt;::&lt;index&gt;" FileReference (the converter emits the index,
+	///   SyncHandler stamps the ServerId).
+	/// </summary>
+	/// <param name="folderBackendKey">The calendar folder's backend key.</param>
+	/// <param name="itemKey">The event's item key.</param>
+	/// <param name="index">The attachment's position within the event's attachment list.</param>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
+	/// <returns>The attachment bytes and content type, or <c>null</c> when the event or attachment no longer exists.</returns>
 	Task<BackendAttachment?> GetEventAttachmentAsync(
 		string folderBackendKey, string itemKey, int index, CancellationToken ct);
 }
@@ -156,6 +177,17 @@ public sealed record BusyPeriod(DateTime StartUtc, DateTime EndUtc, char Kind);
 /// </summary>
 public interface IFreeBusySource
 {
+	/// <summary>
+	///   Fetches the busy periods for one recipient over a time range. <c>null</c> means no data
+	///   is obtainable for that target (per-recipient Availability status 163) — this is distinct
+	///   from an EMPTY list, which means the target is completely free. A failure resolving one
+	///   target must never fail the whole ResolveRecipients response.
+	/// </summary>
+	/// <param name="targetAddress">The recipient's address to query.</param>
+	/// <param name="startUtc">Start of the queried range, in UTC.</param>
+	/// <param name="endUtc">End of the queried range, in UTC.</param>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
+	/// <returns>The recipient's busy periods, an empty list if free, or <c>null</c> if no data is available.</returns>
 	Task<IReadOnlyList<BusyPeriod>?> GetBusyPeriodsAsync(
 		string targetAddress, DateTime startUtc, DateTime endUtc, CancellationToken ct);
 }

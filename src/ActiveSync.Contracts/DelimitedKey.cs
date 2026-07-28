@@ -12,6 +12,9 @@ namespace ActiveSync.Contracts;
 /// </summary>
 public static class DelimitedKey
 {
+	/// <summary>Percent-escapes each part and joins them with '|', so a literal '|' inside a part can never be mistaken for the delimiter.</summary>
+	/// <param name="parts">The components to encode, in order.</param>
+	/// <returns>The pipe-joined, percent-escaped composite key.</returns>
 	public static string Encode(params string[] parts)
 	{
 		return string.Join('|', parts.Select(Uri.EscapeDataString));

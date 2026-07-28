@@ -27,6 +27,14 @@
 
 	<PropertyGroup>
 		<IsPackable>true</IsPackable>
+		<!-- Ship the XML docs: this is the one assembly an out-of-repo plugin references, so the
+		     doc file IS the plugin author's reference material and their IntelliSense. It must be
+		     set HERE rather than with the other package-scoped properties in
+		     Directory.Build.targets — that file is imported after the SDK has already computed
+		     DocumentationFile, so setting it there yields no .xml and no CS1591 at all.
+		     Consequence: CS1591/CS1573 are live in this project against a 0-warning baseline, so
+		     a new undocumented public member FAILS the build. Document it; never suppress it. -->
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<PackageId>ActiveSync.Contracts</PackageId>
 		<Description>ActiveSync Gateway — the backend plugin contract (IBackendProvider, IContentStore, IGatewayPlugin, roles, provider settings and config schema). The one package to reference when writing a gateway backend plugin.</Description>
 	</PropertyGroup>

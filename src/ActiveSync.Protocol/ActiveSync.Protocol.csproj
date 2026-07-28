@@ -15,6 +15,11 @@
 
 	<PropertyGroup>
 		<IsPackable>true</IsPackable>
+		<!-- Ship the XML docs — see the matching comment in ActiveSync.Contracts.csproj for why
+		     this cannot live with the other package-scoped properties in Directory.Build.targets.
+		     CS1591/CS1573 are live here against a 0-warning baseline: a new undocumented public
+		     member FAILS the build. Document it; never suppress it. -->
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<PackageId>ActiveSync.Protocol</PackageId>
 		<Description>ActiveSync Gateway — EAS/WBXML protocol primitives (code pages, constants, query parser). Reference this to build a gateway backend plugin.</Description>
 	</PropertyGroup>

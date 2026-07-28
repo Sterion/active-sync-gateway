@@ -65,18 +65,50 @@ public sealed record EasRequestParameters
 	/// </summary>
 	private static readonly byte[] ProtocolVersionBytes = [25, 120, 121, 140, 141, 160, 161];
 
+	/// <summary>The EAS command this request invokes (e.g. "Sync", "SendMail", "Ping") — always one of <c>CommandCodes</c>.</summary>
 	public required string Command { get; init; }
+
+	/// <summary>The MS-ASProtocolVersion this request was parsed under, as "major.minor" (e.g. "14.1").</summary>
 	public string ProtocolVersion { get; init; } = "14.1";
+
+	/// <summary>The client-supplied device identifier (MS-ASHTTP DeviceId), used to key the persisted Device row.</summary>
 	public string DeviceId { get; init; } = "";
+
+	/// <summary>The client-supplied device type token (e.g. "iPhone", "WindowsOutlook15"), used for client-quirk detection.</summary>
 	public string DeviceType { get; init; } = "";
+
+	/// <summary>The user/mailbox identifier, when the client includes it in the query rather than relying solely on the HTTP auth header.</summary>
 	public string? User { get; init; }
+
+	/// <summary>
+	///   The MS-ASPROV policy key the device is presenting. Compared against the persisted
+	///   Device.PolicyKey (and the current policy document hash) to gate non-Provision commands
+	///   with HTTP 449 when they disagree; zero when the device has not yet provisioned.
+	/// </summary>
 	public uint PolicyKey { get; init; }
+
+	/// <summary>The FileReference for a legacy (pre-ItemOperations) GetAttachment request.</summary>
 	public string? AttachmentName { get; init; }
+
+	/// <summary>The target folder/collection id for commands that operate on a specific collection (Sync, ItemOperations, MoveItems, etc.).</summary>
 	public string? CollectionId { get; init; }
+
+	/// <summary>The target item id within <see cref="CollectionId" />, for commands that operate on a single item.</summary>
 	public string? ItemId { get; init; }
+
+	/// <summary>
+	///   An opaque backend item reference ("{folderBackendKey}|{itemKey}"), as produced by Search
+	///   results and resolved back by ItemOperations Fetch.
+	/// </summary>
 	public string? LongId { get; init; }
+
+	/// <summary>The recurrence instance identifier, for commands that target a single occurrence of a recurring calendar item (e.g. MeetingResponse).</summary>
 	public string? Occurrence { get; init; }
+
+	/// <summary>Whether SendMail/SmartForward/SmartReply should save a copy of the outgoing message in Sent Items.</summary>
 	public bool SaveInSent { get; init; }
+
+	/// <summary>Whether the client accepts a multipart MIME response (as opposed to a single WBXML body) for commands like ItemOperations/GetAttachment.</summary>
 	public bool AcceptMultiPart { get; init; }
 
 	/// <summary>Parses the plain-text query string form.</summary>

@@ -25,6 +25,15 @@ public static class WbxmlEncoder
 	// document decoded from the wire is already capped at this depth.
 	private const int MaxDepth = 256;
 
+	/// <summary>
+	///   Encodes <paramref name="document" /> to a WBXML byte array. Prefer
+	///   <see cref="EncodeAsync" /> for writing straight to a response stream — this overload
+	///   allocates a full extra copy of the buffer via <see cref="MemoryStream.ToArray" />.
+	/// </summary>
+	/// <exception cref="WbxmlException">
+	///   The document is empty, or contains a tag/namespace not defined in <see cref="WbxmlCodePages" />,
+	///   or nests deeper than the decoder's ceiling, or an opaque element's text is not valid base64.
+	/// </exception>
 	public static byte[] Encode(XDocument document)
 	{
 		using MemoryStream output = BuildStream(document);

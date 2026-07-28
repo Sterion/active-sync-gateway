@@ -16,5 +16,13 @@ namespace ActiveSync.Contracts;
 /// </summary>
 public interface IGatewayPlugin
 {
+	/// <summary>
+	///   Registers this plugin's backend providers (and anything they depend on) into the host's
+	///   service collection — typically one or more
+	///   <c>services.AddSingleton&lt;IBackendProvider, MyProvider&gt;()</c> calls. Called once
+	///   during host service registration, before the service provider is built.
+	/// </summary>
+	/// <param name="services">The host's service collection to register into.</param>
+	/// <param name="configuration">The host's root configuration, for reading plugin-specific settings if needed.</param>
 	void Register(IServiceCollection services, IConfiguration configuration);
 }

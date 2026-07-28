@@ -12,12 +12,25 @@ namespace ActiveSync.Contracts;
 /// </summary>
 public enum BackendRole
 {
+	/// <summary>Mail retrieval/storage (IMAP-shaped: folders, messages, flags). Mandatory — every account needs one.</summary>
 	MailStore,
+
+	/// <summary>Outbound mail submission (SMTP-shaped send). Mandatory — every account needs one.</summary>
 	MailSubmit,
+
+	/// <summary>Calendar events. Falls back to the local store when unconfigured.</summary>
 	Calendar,
+
+	/// <summary>Tasks. Falls back to the local store when unconfigured.</summary>
 	Tasks,
+
+	/// <summary>Contacts. Falls back to the local store when unconfigured.</summary>
 	Contacts,
+
+	/// <summary>Notes. Always served by the local store — no in-repo backend implements it.</summary>
 	Notes,
+
+	/// <summary>Out-of-office (vacation) responder. No configured provider = accept-and-ignore stub.</summary>
 	Oof
 }
 
@@ -36,6 +49,7 @@ public sealed class ProviderSettings(IConfigurationSection section)
 	/// <summary>Settings with no keys at all (the "local" provider, absent sections).</summary>
 	public static ProviderSettings Empty { get; } = new(EmptySection);
 
+	/// <summary>The raw configuration section this instance wraps. Never contains credentials.</summary>
 	public IConfigurationSection Section => section;
 
 	/// <summary>Binds the section onto a fresh instance of the provider's options type.</summary>
@@ -121,10 +135,19 @@ public sealed class BackendConnection(
 {
 	private int _disposed;
 
+	/// <inheritdoc />
 	public IReadOnlyList<IContentStore> Stores => stores;
+
+	/// <inheritdoc />
 	public IMailSubmitOperations? MailSubmit => mailSubmit;
+
+	/// <inheritdoc />
 	public IOofBackend? Oof => oof;
 
+	/// <summary>
+	///   Disposes every owned resource and disposable store exactly once. See the type-level
+	///   remarks for ordering, idempotence and failure-aggregation guarantees.
+	/// </summary>
 	public async ValueTask DisposeAsync()
 	{
 		// Interlocked.Exchange makes the check-and-set a single atomic operation — only the
@@ -186,6 +209,12 @@ public interface IBackendProvider
 	/// <summary>Unique name config refers to; compared case-insensitively.</summary>
 	string Name { get; }
 
+	/// <summary>
+	///   Roles this provider is capable of serving. Config may assign any subset of these to it —
+	///   a provider serves every role assigned to it over the ONE connection
+	///   <see cref="CreateConnectionAsync" /> returns (the JMAP shape: one provider can fill
+	///   MailStore + MailSubmit + Calendar + Contacts + Oof over a single session).
+	/// </summary>
 	IReadOnlySet<BackendRole> SupportedRoles { get; }
 
 	/// <summary>
@@ -223,6 +252,15 @@ public interface IBackendProvider
 /// </summary>
 public interface ICredentialVerifier
 {
+	/// <summary>
+	///   Verifies the credentials carried by <paramref name="role" /> against the live backend
+	///   (a login probe — e.g. an IMAP LOGIN). Returns <c>false</c> for a rejected credential;
+	///   throws <see cref="BackendException" /> when the backend itself could not be reached
+	///   (a distinction the caller relies on to tell "wrong password" from "backend is down").
+	/// </summary>
+	/// <param name="role">The resolved role (provider, settings and credentials) to probe.</param>
+	/// <param name="ct">Cancellation token for the probe's I/O.</param>
+	/// <returns><c>true</c> if the credentials are accepted by the backend; otherwise <c>false</c>.</returns>
 	Task<bool> VerifyCredentialsAsync(ResolvedRole role, CancellationToken ct);
 }
 
@@ -250,6 +288,11 @@ public sealed record WatcherInfo(string User, string Resource);
 /// </summary>
 public interface IWatcherDiagnostics
 {
+	/// <summary>
+	///   Point-in-time snapshot of this provider's live push watchers, for the admin dashboard.
+	///   Must not mutate provider state; called synchronously and frequently, so it should be cheap.
+	/// </summary>
+	/// <returns>The currently live watchers, empty when none are active.</returns>
 	IReadOnlyList<WatcherInfo> SnapshotWatchers();
 }
 
@@ -260,5 +303,12 @@ public interface IWatcherDiagnostics
 /// </summary>
 public interface IReadinessSource
 {
+	/// <summary>
+	///   Cheap reachability probe of the globally configured endpoint (no credentials — connectivity
+	///   only, e.g. a TCP connect or an HTTP OPTIONS) for the <c>/readyz</c> report.
+	/// </summary>
+	/// <param name="settings">The role's globally configured settings (never per-user overrides).</param>
+	/// <param name="ct">Cancellation token for the probe's I/O.</param>
+	/// <returns><c>true</c> when the endpoint answered; <c>false</c> otherwise. Must not throw.</returns>
 	Task<bool> ProbeReadinessAsync(ProviderSettings settings, CancellationToken ct);
 }

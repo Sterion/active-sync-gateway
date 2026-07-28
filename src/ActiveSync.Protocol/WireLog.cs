@@ -24,6 +24,12 @@ public static class WireLog
 	// it is still fixed for the process lifetime — only readable live rather than baked in.
 	private const int DefaultMaxChars = 16 * 1024;
 
+	/// <summary>
+	///   The default character cap <see cref="Truncate" /> and <see cref="Payload" /> apply to a
+	///   dumped payload. A <c>static readonly</c> field, not a <c>const</c>, so a plugin built
+	///   against an older version of this package reads the host's current value at run time
+	///   rather than baking in the value from its own build.
+	/// </summary>
 	public static readonly int MaxChars = DefaultMaxChars;
 
 	/// <summary>Truncates a dump to <see cref="MaxChars" /> with an explicit marker.</summary>
