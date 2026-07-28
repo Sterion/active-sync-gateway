@@ -656,3 +656,32 @@ recorded here so it is not lost. FIX: reword the "Database-declared accounts" pa
 `User`/`UserStore`/`UserResolver` and the per-field declaration shape (mirroring what item 32's `B9`/
 `B10` fixes did for `UserOptions`/`ResolvedUser`), and reword "mirroring the accounts store" to name
 `UserStore` (or drop the comparison).
+
+`N9` **Low** `WbxmlCodePages`'s Search code page (15) carries two tokens — `Schema` (0x1C) and
+`Supported` (0x1D) — that do not exist in the published `[MS-ASWBXML]` specification (verified
+against revision 24.0, 2025-05-20): the real table goes straight from `GreaterThan` (0x1B) to
+`UserName` (0x1E), with 0x1C/0x1D genuinely unassigned, exactly like the gap at 0x06 on the same
+page that `W8` (item 37) documents. Discovered incidentally while spec-verifying `W7`/`W8`: `Schema`
+0x10 and `Supported` 0x20 ARE real tokens, but on ItemOperations (page 20) and AirSync (page 0)
+respectively — this page 15 pair looks like a copy-paste/cross-page transcription slip. No handler
+in the codebase ever builds or looks up `EasNamespaces.Search + "Schema"` or `+ "Supported"`
+(confirmed by grep), so this is unreachable dead-table entries rather than a live bug: no real
+client sends 0x1C/0x1D under the Search page (they are unassigned in the actual protocol), so the
+decoder never takes the wrong branch in practice. Left unfixed because it is not one of item 37's
+assigned findings (`W7`–`W21`) and touches the same page the item's `W8` comment already annotates —
+fixing it inline would have been scope creep on a finding not yet raised. FIX: remove the two
+entries from the Search page's token table (`src/ActiveSync.Protocol/Wbxml/WbxmlCodePages.cs`,
+Page 15: Search); add a round-trip test asserting `Search/Schema` and `Search/Supported` are not
+encodable (mirroring how other unknown-tag tests work) so the mistake cannot silently return.
+
+`N10` **Nit** `LogTextTests.BidiOverrideCharacters_AreNeutralized`
+(`tests/ActiveSync.Server.Tests/LogTextTests.cs`) embeds the same raw, unterminated bidi-override
+characters (U+202E, U+2069, U+202A, U+2066) as string-literal test data that `W9` (item 37) fixed in
+`WireLog.cs` and `WireLogTests.cs` — the identical Trojan Source hazard (CVE-2021-42574): an
+unterminated LRE/RLO sitting in this source file reorders how the remainder of the line renders in
+a bidi-aware viewer (GitHub, most editors, a modern terminal's `git diff`). Not fixed under `W9`
+because that finding's own text names only `WireLog.cs`'s classifier and `WireLogTests.cs`'s
+matching assertions; this is a different file with the same defect, noticed while writing W9's
+fix but out of that finding's stated scope. FIX: replace the four raw literals in
+`LogTextTests.cs` with `\uXXXX` escapes, the same way `W9`'s fix did for `WireLog.cs`/
+`WireLogTests.cs`.
