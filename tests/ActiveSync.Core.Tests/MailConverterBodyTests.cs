@@ -51,6 +51,44 @@ public class MailConverterBodyTests
 		Assert.Equal("0", truncatedFlag); // never truncated for type 4
 		Assert.True(Encoding.UTF8.GetByteCount(data) >= fullSize - 16); // full MIME survives (± CRLF normalization)
 		Assert.Contains("Subject: full mime body", data);
-		Assert.Contains(longText, data); // the full body text is present, not cut mid-content
+		// D15: BuildBody now calls Prepare(SevenBit) before writing, so a 2000-char run with no
+		// whitespace is quoted-printable soft-wrapped ("=\r\n" every ~76 octets) rather than
+		// streamed as one unbroken line -- unfold before checking the text survived intact.
+		Assert.Contains(longText, data.Replace("=\r\n", ""));
+	}
+
+	[Fact]
+	public void Type4Body_PreservesBinaryContent_IncludingNulBytes()
+	{
+		// D15 — the serialized RFC 822 stream was decoded as UTF-8 and then had every NUL byte
+		// stripped unconditionally. That is correct for the type 1/2 text branches but a byte
+		// stream is not UTF-8 text: a part declared Content-Transfer-Encoding: binary carries its
+		// bytes raw, and stripping NULs from the resulting string corrupts it byte-for-byte.
+		byte[] binaryContent = [0x41, 0x00, 0x42, 0x00, 0x43]; // "A\0B\0C" -- deliberately has NULs
+		MimePart part = new("application", "octet-stream")
+		{
+			Content = new MimeContent(new MemoryStream(binaryContent)),
+			ContentTransferEncoding = ContentEncoding.Binary,
+			ContentDisposition = new ContentDisposition(ContentDisposition.Attachment) { FileName = "raw.bin" }
+		};
+
+		MimeMessage message = new();
+		message.From.Add(MailboxAddress.Parse("sender@example.com"));
+		message.To.Add(MailboxAddress.Parse("recipient@example.com"));
+		message.Subject = "binary body";
+		message.Date = DateTimeOffset.UtcNow;
+		message.Body = part;
+
+		BodyPreference preference = new(4, null, false);
+		XElement body = MailConverter.BuildBody(message, preference, out _);
+		string data = body.Element(AirSyncBase + "Data")!.Value;
+
+		// Round-trip the returned text back through a MIME parser and compare the attachment's
+		// decoded bytes to the original -- proves nothing was lost or mangled in transit.
+		MimeMessage roundTripped = MimeMessage.Load(new MemoryStream(Encoding.UTF8.GetBytes(data)));
+		MimePart roundTrippedPart = Assert.IsType<MimePart>(roundTripped.Body);
+		using MemoryStream decoded = new();
+		roundTrippedPart.Content!.DecodeTo(decoded);
+		Assert.Equal(binaryContent, decoded.ToArray());
 	}
 }

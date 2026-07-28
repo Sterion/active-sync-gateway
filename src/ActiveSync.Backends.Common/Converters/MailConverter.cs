@@ -135,6 +135,15 @@ public static class MailConverter
 			case 4: // full MIME
 				using (MemoryStream ms = new())
 				{
+					// D15: a serialized RFC 822 stream is a byte stream, not UTF-8 text --
+					// stringifying it via Encoding.UTF8.GetString mangles any 8-bit/non-UTF-8
+					// part (invalid sequences become U+FFFD) and the NUL-strip below then
+					// corrupts any part carrying raw bytes (Content-Transfer-Encoding: binary).
+					// Prepare(SevenBit) constrains every part's transfer encoding to something
+					// ASCII-safe (quoted-printable/base64) BEFORE writing, so the serialized
+					// bytes are valid ASCII by construction and neither transformation can lose
+					// or corrupt anything.
+					message.Prepare(EncodingConstraint.SevenBit, FormatOptions.Default.MaxLineLength);
 					message.WriteTo(ms);
 					content = Encoding.UTF8.GetString(ms.ToArray());
 				}
@@ -151,7 +160,11 @@ public static class MailConverter
 				break;
 		}
 
-		content = content.Replace("\0", "");
+		// D15: only the plain-text/HTML branches can carry a stray NUL from HTML-to-text
+		// conversion or a permissive backend; type 4 is now ASCII-safe by construction (Prepare
+		// above) and stripping NULs from it would corrupt a legitimately NUL-bearing binary part.
+		if (type != 4)
+			content = content.Replace("\0", "");
 		long estimated = Encoding.UTF8.GetByteCount(content);
 		bool truncated = false;
 		// D4: type 4 is the serialized message/rfc822 stream — cutting it at an arbitrary byte
