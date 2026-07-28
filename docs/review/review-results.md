@@ -1415,3 +1415,52 @@ the tests name**: it keeps the tree compiling and isolates one behaviour. Third 
   design constraint and the connection-count requirement were written into `review-items.md` before
   spawning, so they could not be lost to a paraphrase or a scope judgment. The stronger model helped; the
   written constraint is what made it reproducible.
+
+## Item 25 — Local stores
+**Findings:** `G18` `G19` `G20` `G21` `G26` `G30`
+**Commits:** `7f726b6` (G18) · `38f0cec` (G19) · `d3ba23e` (G20) · `e7c6573` (G21) · `4648406` (G26) ·
+`b27e42e` (G30)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 26 ✓ · one commit per finding, strike shipped with every one ✓ · build 0 warnings ✓ ·
+unit **1435 passed, 0 failed** (Cli 16 · Protocol 99 · Core 867 · WebUi 120 · Server 333) ✓ ·
+live **150 passed, 0 skipped** ✓
+
+**Red-first re-proved independently for all four that claimed it**, in two passes — bulk reversal was
+unusable (G18 changes a constructor and G21 a method signature that the tests now use, and G18/G20 have
+overlapping hunks in `LocalStores.cs`):
+- **Reversal of the four signature-neutral commits** → exactly 2 failures,
+  `UpdateItemAsync_ExhaustingRetries_ThrowsBackendException_NotTheRawEfType` (G19) and
+  `RespondToMeetingAsync_RetriesOnceOnAConcurrentWrite_LikeEverySiblingWrite` (G20).
+- **Targeted mutation for G18 and G21** (rethrow instead of skip; disable the latch check) → 3 failures,
+  `SearchGalAsync_SkipsAnUndecryptableRow_...`, `GetBusyPeriodsAsync_SkipsAnUndecryptableRow_...` (G18)
+  and `NotifyChanged_BeforeWaitRegisters_MustNotBeLost` (G21).
+- **`G26`/`G30` stayed green under reversal**, which is exactly what their "coverage, not proof" labels
+  predict — the worker labelled them honestly and the labels hold up.
+
+**The live suite was run although the worker skipped it**, and its stated reason ("only
+`Backends.Local` internals, no HTTP endpoint") is defensible but incomplete: the local stores back Sync
+for contacts/calendar/tasks and always for notes, so they ARE reachable over HTTP. 150 passed, 0 skipped —
+the skip was safe, but that is now verified rather than assumed.
+
+**Notes:**
+- **`G21` narrows the race, it does not close it.** `watchStartUtc` is captured inside
+  `LocalStoreBase.WaitForChangesAsync`, so a write landing between the Ping handler's own entry check and
+  that call still latches BEFORE the reference time and is not returned early. The residual window is the
+  handler-to-store call path rather than the old check-to-registration window, so this is a real
+  improvement — and closing it fully would need the entry-check timestamp threaded through
+  `IContentStore.WaitForChangesAsync`, i.e. a contract change. `ImapMailBackend` has the same shape but
+  masks it with a baseline STATUS snapshot the local path has no equivalent of. AGENTS.md's stated
+  correctness guarantee (the watchdog re-check) is unaffected.
+- **`G21` changed a public signature and the test was rewritten mid-proof.** `LocalChangeNotifier.WaitAsync`
+  gained `sinceUtc`, so the red run used the old signature and the test was then updated to the new one.
+  The worker disclosed this in the commit message. I re-proved it by mutation instead (disabling the latch
+  check on the shipped signature), which does not depend on that rewrite.
+- **`G18` is source-breaking inside the repo:** `LocalBackendProvider` now requires `ILoggerFactory`, and
+  `LocalContactStore`/`LocalCalendarStore` an `ILogger`. Nine test files were updated mechanically. Not a
+  contract concern — these types are outside `Contracts`/`Protocol`.
+- **`G19`/`G20` change failure behaviour:** exhausted retries now surface `BackendException` rather than a
+  raw `DbUpdateConcurrencyException` (G19), and a meeting response no longer loses a concurrent write
+  silently (G20).
+- **The seam-vs-reversal problem is now the norm, not the exception** — four items running
+  (F17, G7, G22, and here G18/G21). Reversal only works for commits that add no test-visible surface;
+  everything else needs targeted mutation. Worth doing mutation-first from here.
