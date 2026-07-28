@@ -29,7 +29,12 @@ public static class BodyText
 		if (Encoding.UTF8.GetByteCount(content) <= maxBytes)
 			return content;
 		byte[] bytes = Encoding.UTF8.GetBytes(content);
-		int len = (int)Math.Min(maxBytes, bytes.Length); // < bytes.Length after the guard above
+		// D29: maxBytes originates from the client's BodyPreference.TruncationSize (a plain long?);
+		// clamp to [0, bytes.Length] so a negative value can never index before the array (it used
+		// to throw IndexOutOfRangeException out of the converter instead of degrading to "").
+		int len = (int)Math.Clamp(maxBytes, 0, bytes.Length);
+		if (len == 0)
+			return "";
 		// Only back off when the cut lands INSIDE a code point — i.e. the first byte being
 		// removed is a continuation byte. A cut exactly on a boundary keeps the whole prefix
 		// (backing off unconditionally would drop a fully valid trailing character).

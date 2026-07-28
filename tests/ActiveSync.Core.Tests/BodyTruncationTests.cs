@@ -69,6 +69,26 @@ public class BodyTruncationTests
 		Assert.Equal("AB", data);
 	}
 
+	/// <summary>
+	///   D29 — maxBytes originates from the client's BodyPreference.TruncationSize (a plain
+	///   long?); a negative value made `len` negative and `bytes[len]` throw
+	///   IndexOutOfRangeException out of the converter instead of degrading gracefully.
+	/// </summary>
+	[Fact]
+	public void NegativeLimit_DoesNotThrow_ReturnsEmpty()
+	{
+		string result = BodyText.TruncateUtf8("hello world", -5);
+		Assert.Equal("", result);
+	}
+
+	/// <summary>Coverage, not red-first proof — 0 already returned "" without throwing before the fix.</summary>
+	[Fact]
+	public void ZeroLimit_DoesNotThrow_ReturnsEmpty()
+	{
+		string result = BodyText.TruncateUtf8("hello world", 0);
+		Assert.Equal("", result);
+	}
+
 	[Fact]
 	public void NoLimit_Unchanged()
 	{
