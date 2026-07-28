@@ -122,6 +122,32 @@ public class ContactConverterTests
 		Assert.Contains("ORG:Contoso;Research", updated);
 	}
 
+	/// <summary>
+	///   D24 — Escape only replaced "\r\n" and "\n"; a bare "\r" (not part of a CRLF pair) survived
+	///   into the stored property value unescaped. Some vCard parsers treat a lone CR as a line
+	///   terminator, so this could truncate the NOTE property and turn the remainder into a
+	///   spurious continuation line.
+	/// </summary>
+	[Fact]
+	public void Escape_ConvertsABareCarriageReturn_NoRawCrSurvives()
+	{
+		string created = ContactConverter.FromApplicationData(AppData(
+			new XElement(Contacts + "FirstName", "Fresh"),
+			new XElement(AirSyncBase + "Body",
+				new XElement(AirSyncBase + "Data", "line one\rline two"))), "c-3", null);
+
+		Assert.False(HasBareCarriageReturn(created), $"raw CR survived into the vCard: {created}");
+	}
+
+	/// <summary>A CR not immediately followed by LF — the exact shape Escape's own replaces miss.</summary>
+	private static bool HasBareCarriageReturn(string value)
+	{
+		for (int i = 0; i < value.Length; i++)
+			if (value[i] == '\r' && (i + 1 >= value.Length || value[i + 1] != '\n'))
+				return true;
+		return false;
+	}
+
 	[Fact]
 	public void Create_WithoutExistingCard_HasNoPreservedLines()
 	{

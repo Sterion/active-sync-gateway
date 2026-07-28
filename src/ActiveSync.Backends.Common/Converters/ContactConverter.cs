@@ -588,9 +588,19 @@ public static class ContactConverter
 
 	private static string Escape(string? value)
 	{
-		return value is null
-			? ""
-			: value.Replace("\\", "\\\\").Replace(";", "\\;").Replace(",", "\\,")
-				.Replace("\r\n", "\\n").Replace("\n", "\\n");
+		if (value is null)
+			return "";
+
+		// D24: the newline replaces only ever matched "\r\n" and "\n" — a bare "\r" (not part of a
+		// CRLF pair) survived unescaped into the property value, and some parsers treat a lone CR
+		// as a line terminator, truncating the property and turning the remainder into a spurious
+		// continuation line. The trailing "\r" replace closes that; any other remaining control
+		// character is stripped using the codebase's one control-character classifier
+		// (WireLog.IsUnsafe) so nothing else can smuggle a structural break into the card.
+		string escaped = value.Replace("\\", "\\\\").Replace(";", "\\;").Replace(",", "\\,")
+			.Replace("\r\n", "\\n").Replace("\n", "\\n").Replace("\r", "\\n");
+		return escaped.Any(c => WireLog.IsUnsafe(c, allowLineStructure: false))
+			? string.Concat(escaped.Where(c => !WireLog.IsUnsafe(c, allowLineStructure: false)))
+			: escaped;
 	}
 }
