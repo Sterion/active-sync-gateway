@@ -698,3 +698,19 @@ worker was concurrently editing `src/ActiveSync.Core/`. FIX: point the `cref` at
 `ActiveSync.Core.State.DataChange` (or name the `"settings"` change-stamp row in prose), and
 consider whether enabling XML doc generation — or at least `CS1574` as a warning — is worth it so
 the next dangling `cref` fails the build instead of rotting silently.
+
+`N12` **Low** Fourteen dangling `<see cref="..."/>` references survive repo-wide, and nothing can catch
+the next one. `GenerateDocumentationFile` is off (`Directory.Build.props:7`), so `CS1574`
+("XML comment has cref attribute that could not be resolved") never fires — a `cref` pointing at a
+deleted or renamed type rots silently, which is exactly how `N11`'s pointer at the removed
+`SettingsStamp` survived the db-restructure. Measured on the unmodified tree by a scratch build with
+`-p:GenerateDocumentationFile=true`: **14 remaining `CS1574`** (in `SecretValue.cs`,
+`ContactConverter.cs`, `UserResolver.cs`, `LogQueryService.cs`, `ActiveSyncOptionsValidator.cs` ×2,
+`LocalCliEndpoint.cs` and several test files) after `N11` fixed the fifteenth. **Do NOT simply enable
+doc generation**: the same build produced **2650 warnings** in total, overwhelmingly `CS1591`
+missing-comment noise (2601), which is unusable against this repo's 0-warning baseline. FIX: fix the 14
+dangling crefs, then enable `GenerateDocumentationFile=true` with the noise codes suppressed
+(`NoWarn=1591;1573;1570;1734;0419`) so `CS1574` alone stays live and the next dangling reference fails
+the build instead of rotting. Sized and recommended by the worker that fixed `N11`, deliberately not
+enabled unilaterally because flipping the flag touches ~8 files outside that finding's scope and is a
+build-policy decision.
