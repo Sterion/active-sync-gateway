@@ -67,7 +67,12 @@ public sealed class SmtpSubmitBackend(
 		// distinct, non-retryable BackendException carrying the size hint; at the EAS layer this maps
 		// to ComposeMail Status 120 (permanent), which is correct — a too-big message never succeeds
 		// on retry, and the DATA transfer is spared.
-		EnsureWithinMaxSize(mime.LongLength, smtp.Capabilities, smtp.MaxSize);
+		// G29: measure what will ACTUALLY be transmitted, not the caller-supplied `mime` bytes —
+		// smtp.SendAsync below re-serializes `message`, which differs from the input whenever
+		// ForceFrom rewrote the headers (above) or MimeKit re-encoded a part. A stale length can
+		// wrongly pass a message the server will reject, or wrongly fail one that would have fit.
+		long transmittedLength = await SerializedLengthAsync(message, ct).ConfigureAwait(false);
+		EnsureWithinMaxSize(transmittedLength, smtp.Capabilities, smtp.MaxSize);
 
 		// G4: once the DATA phase starts, the exchange must not observe the caller's own request
 		// abort — if the phone drops the connection between the server durably accepting the final
@@ -106,6 +111,41 @@ public sealed class SmtpSubmitBackend(
 		if ((capabilities & SmtpCapabilities.Size) != 0 && maxSize > 0 && mimeLength > maxSize)
 			throw new BackendException(
 				$"Message size {mimeLength} bytes exceeds the SMTP server's maximum of {maxSize} bytes (RFC 1870 SIZE).");
+	}
+
+	/// <summary>
+	///   G29: the exact byte count <see cref="MimeMessage.WriteTo(System.IO.Stream, CancellationToken)" />
+	///   would produce, without buffering the serialized bytes anywhere — a counting sink is enough
+	///   since only the length is needed.
+	/// </summary>
+	private static async Task<long> SerializedLengthAsync(MimeMessage message, CancellationToken ct)
+	{
+		CountingStream counter = new();
+		await message.WriteToAsync(counter, ct).ConfigureAwait(false);
+		return counter.Length;
+	}
+
+	/// <summary>A write-only <see cref="Stream" /> that discards every byte and only counts them.</summary>
+	private sealed class CountingStream : Stream
+	{
+		private long _length;
+
+		public override bool CanRead => false;
+		public override bool CanSeek => false;
+		public override bool CanWrite => true;
+		public override long Length => _length;
+
+		public override long Position
+		{
+			get => _length;
+			set => throw new NotSupportedException();
+		}
+
+		public override void Write(byte[] buffer, int offset, int count) => _length += count;
+		public override void Flush() { }
+		public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
 	}
 
 	private static bool IsTransientSmtp(Exception ex, CancellationToken ct)
