@@ -113,9 +113,17 @@ public sealed class EasHandlerHarness : IDisposable
 		};
 	}
 
-	/// <summary>Runs one command and returns the decoded response document (null for an empty body).</summary>
+	/// <summary>
+	///   Runs one command and returns the decoded response document (null for an empty body).
+	///   <paramref name="credentialsUserName" /> overrides the "user" identity carried on
+	///   <see cref="EasContext.Credentials" /> — purely a logging/metrics label (state resolution
+	///   is keyed on <see cref="UserId" />, not this string) — so a test that needs to pick its own
+	///   emissions out of the process-global <c>GatewayMetrics</c> meter apart from whatever else
+	///   is running concurrently can tag them distinctly. Defaults to the shared <see cref="UserName" />.
+	/// </summary>
 	public async Task<XDocument?> RunAsync(
-		IEasCommandHandler handler, string command, XDocument request, string protocolVersion = "14.1")
+		IEasCommandHandler handler, string command, XDocument request, string protocolVersion = "14.1",
+		string? credentialsUserName = null)
 	{
 		// Encode is pure CPU/in-memory work (no I/O) — EncodeAsync just calls it internally
 		// before writing to a Stream, and the request body here is a byte[] MemoryStream.
@@ -136,7 +144,7 @@ public sealed class EasHandlerHarness : IDisposable
 			{
 				Command = command, DeviceId = device.DeviceId, ProtocolVersion = protocolVersion
 			},
-			Credentials = new BackendCredentials(UserName, "pw"),
+			Credentials = new BackendCredentials(credentialsUserName ?? UserName, "pw"),
 			Session = Session,
 			Device = device,
 			State = State,

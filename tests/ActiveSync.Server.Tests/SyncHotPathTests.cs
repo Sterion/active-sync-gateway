@@ -98,6 +98,16 @@ public sealed class SyncHotPathTests : IDisposable
 		_harness.Session.Store.Revisions["11"] = "b";
 		_harness.Session.Store.VanishedKeys.Add("10");
 
+		// GatewayMetrics is one process-global static Meter (by design — see its doc comment),
+		// and xUnit runs test classes in this assembly in parallel, so any OTHER concurrently
+		// running test that drives a Sync also emits server_to_client/add measurements onto the
+		// same instrument. A plain MeterListener would sum those in too. The "user" tag is the
+		// only per-emission label available (RecordSyncItems doesn't carry a request/collection
+		// correlation id), so give this call its own unique credentials identity — purely a
+		// logging/metrics label, state resolution stays keyed on the harness's UserId — and
+		// filter measurements down to that identity. That isolates this test's own activity
+		// without serializing the class (which would just hide the interference, not fix it).
+		string metricsUser = $"{EasHandlerHarness.UserName}+F14-{Guid.NewGuid():N}";
 		int addsRecorded = 0;
 		using MeterListener listener = new();
 		listener.InstrumentPublished = (instrument, l) =>
@@ -108,19 +118,21 @@ public sealed class SyncHotPathTests : IDisposable
 		};
 		listener.SetMeasurementEventCallback<long>((_, measurement, tags, _) =>
 		{
-			string? direction = null, operation = null;
+			string? direction = null, operation = null, user = null;
 			foreach (KeyValuePair<string, object?> tag in tags)
 			{
 				if (tag.Key == "direction") direction = tag.Value?.ToString();
 				if (tag.Key == "operation") operation = tag.Value?.ToString();
+				if (tag.Key == "user") user = tag.Value?.ToString();
 			}
 
-			if (direction == "server_to_client" && operation == "add")
+			if (direction == "server_to_client" && operation == "add" && user == metricsUser)
 				addsRecorded += (int)measurement;
 		});
 		listener.Start();
 
-		XDocument? response = await _harness.RunAsync(handler, "Sync", SyncRequest(inbox.ServerId, "1"));
+		XDocument? response = await _harness.RunAsync(
+			handler, "Sync", SyncRequest(inbox.ServerId, "1"), credentialsUserName: metricsUser);
 		listener.Dispose();
 
 		XElement collection = response!.Root!.Element(AS + "Collections")!.Element(AS + "Collection")!;
