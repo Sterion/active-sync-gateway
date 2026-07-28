@@ -1596,3 +1596,45 @@ correctly absent.
   match.
 - **`H19` emits the "no photo" status (173) without delivering photos**, which is correct: `H25` (doc-only)
   corrects the class summary that claimed photo coverage JMAP does not actually have.
+
+## Item 29 — DAV polling & folder shape [LIVE]
+**Findings:** `H5` `H6` `H15` `H16` `H17` `H22` `H23`
+**Commits:** `b275efe` (H5) · `ab2d01d` (H6) · `2033206` (H15) · `c4d4e00` (H16) · `39c957f` (H17) ·
+`f3d1a3e` (H22) · `d01c290` (H23)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 30 ✓ · strike shipped with every commit ✓ · build 0 warnings ✓ ·
+unit **1482 passed, 0 failed** (Cli 16 · Protocol 99 · Core 914 · WebUi 120 · Server 333) ✓ ·
+live **150 passed, 0 skipped** ✓
+
+**Red-first re-proved independently for all seven** — six by reversal
+(`PollCtags_MultipleFoldersUnderOneHomeSet_UsesOnePropfindPerHomeSet` H5,
+`SearchGal_ReportOmitsAddressData_FallsBackToEnumeration` H6,
+`ListFolders_DefaultTasks_IsChosenDeterministically` H15, `TransportFailure_SurfacesAsBackendException`
+H16, `GetBusyPeriods_Self_ExcludesSharedCalendars` H22,
+`ListFolders_AllHomeSetCalendarsAreShared_StillProducesADefaultCalendar` H23) and `H17` by mutation
+(zeroing the character cap and restoring the 128 MiB byte ceiling → both its assertions fail).
+
+**Notes:**
+- **`H23` deliberately breaks an AGENTS.md absolute, the finding sanctions it, and the document was not
+  updated — filed as `N7`.** AGENTS.md says a share-granted collection "NEVER claims the default slot";
+  `H23` promotes one precisely when every home-set calendar is granted, because "no default at all" is
+  worse for iOS. The finding calls the rule "correct and deliberate" and asks for a floor beneath it, so
+  the code is right and the doc is now wrong — the same failure mode `S1` already documents. A contributor
+  reading "NEVER" would treat the fallback as a bug.
+- **`H17` lowers the DAV response ceiling from 128 MiB to 32 MiB** and decouples it from the JMAP blob
+  ceiling, plus adds a character cap on parsed XML. A legitimately huge multistatus (>32 MiB) is now
+  refused where it previously was not. JMAP's own ceiling is untouched.
+- **`H17`'s red-first used the "inert seam first" two-step** (add the unwired knob, prove the assertion
+  fails, then wire it), citing the round-1 `H24` precedent. That is a defensible way to red-prove a limit
+  that cannot exist before the fix, and I did not have to take it on trust: mutating the shipped constants
+  makes both assertions fail, so the guard discriminates the fix either way.
+- **`H16` took the finding's "or" branch** — wrapping once at `WebDavClient.SendAsync` rather than widening
+  four individual catch clauses. Lower-risk and covers future call sites, but it changes the exception type
+  DAV transport failures surface as (raw `HttpRequestException`/`IOException` → `BackendException`); no
+  in-repo caller catches the raw types.
+- **`H5`'s grouping key is the structural parent of each folder's href**, not a re-discovered home set —
+  which matches the finding's own description and keeps shares outside the home set on the fallback path.
+- **Live coverage limit worth stating:** `H5` is described in the queue as **Axigen** behaviour, and the
+  live run is Stalwart. The mechanism (one PROPFIND per home set instead of per folder) is proven by the
+  unit test and the suite is green, but the Axigen async-indexing interaction `H5` names is NOT exercised
+  here. `scripts/test-fast` covers Axigen if someone wants that confirmation.

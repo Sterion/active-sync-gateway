@@ -620,3 +620,16 @@ non-UTC zone mis-reports its recurrence day the same way. Noticed by the item 26
 and correctly left unfixed under "stay inside the item", but not filed — recorded here by the orchestrator
 so it is not lost. FIX: anchor the `RecurrenceMapper.Build` call on the task's local wall-clock start,
 mirroring `D21`.
+
+`N7` **Low** `AGENTS.md` now states an absolute that `H23` (item 29) deliberately made false — `AGENTS.md`
+§ *Sync model*, "Default-calendar pick is deterministic": "a collection matching a share grant **NEVER**
+claims the default slot (it's a share, not the user's primary calendar)". `H23`'s fix
+(`CalDavStore.ListFoldersAsync`, commit `d01c290`) adds exactly the exception the finding asked for: when
+every home-set calendar matches a share grant, one is promoted to `EasFolderType.Calendar` rather than
+emitting no default at all, because iOS expects a default Calendar folder to exist. The finding
+acknowledged the rule as "correct and deliberate" and prescribed a floor beneath it, so the CODE is right
+and the DOCUMENT is now wrong. This is the same failure mode as `S1`: AGENTS.md is designated the authority
+on these invariants, so a contributor reading "NEVER" would treat the new fallback as a bug and "fix" it.
+The item 29 commit did not touch AGENTS.md. FIX: reword the sentence to "a collection matching a share
+grant never claims the default slot **unless every calendar in the home set is granted, in which case one
+is promoted so a default always exists (H23)**".
