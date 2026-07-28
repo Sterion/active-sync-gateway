@@ -645,8 +645,10 @@ protocol, throttle rejections globally.
 `/readyz` is a real readiness probe: cached (~10 s) checks of the state database plus each
 configured backend role whose provider can probe itself — `mailstore` (TCP, no
 credentials) and `calendar`/`contacts` (any HTTP answer counts, including 401). Component
-names in the JSON are the role names; the probe returns 503 with per-component detail when
-something is down. `/healthz` stays a trivial liveness 200 on purpose: a dead mail server
+names in the JSON are the role names; the probe returns 503 with per-component detail —
+but only to a loopback caller or one arriving from a configured `Auth:TrustedProxies` hop
+(e.g. the k8s node/CNI address a kubelet node probe dials from); every other caller gets
+the bare status. `/healthz` stays a trivial liveness 200 on purpose: a dead mail server
 should drain traffic, not restart gateway pods.
 
 A gateway that has no mail backend yet reports `"configured": false` but stays **ready** — it

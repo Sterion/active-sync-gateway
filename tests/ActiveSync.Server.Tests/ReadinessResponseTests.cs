@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using ActiveSync.Core.Options;
 using ActiveSync.Server.Setup;
 using Microsoft.AspNetCore.Http;
 
@@ -23,6 +24,9 @@ public sealed class ReadinessResponseTests
 	// Guards the process-wide env var so this test can't race a parallel test in the same run.
 	private static readonly object EnvLock = new();
 
+	/// <summary>No trusted proxies configured — the default, and irrelevant to the tests below it.</summary>
+	private static readonly AuthOptions NoTrustedProxies = new();
+
 	[Fact]
 	public void IsLocal_NullPeer_IsNotLocal_OutsideTheTestHostSeam()
 	{
@@ -35,7 +39,7 @@ public sealed class ReadinessResponseTests
 				DefaultHttpContext http = new();
 				Assert.Null(http.Connection.RemoteIpAddress);
 
-				Assert.False(ReadinessResponse.IsLocal(http));
+				Assert.False(ReadinessResponse.IsLocal(http, NoTrustedProxies));
 			}
 			finally
 			{
@@ -59,7 +63,7 @@ public sealed class ReadinessResponseTests
 				Environment.SetEnvironmentVariable("AS_TEST_FORCE_SERVE", "1");
 				DefaultHttpContext http = new();
 
-				Assert.True(ReadinessResponse.IsLocal(http));
+				Assert.True(ReadinessResponse.IsLocal(http, NoTrustedProxies));
 			}
 			finally
 			{
@@ -74,7 +78,7 @@ public sealed class ReadinessResponseTests
 		DefaultHttpContext http = new();
 		http.Connection.RemoteIpAddress = IPAddress.Loopback;
 
-		Assert.True(ReadinessResponse.IsLocal(http));
+		Assert.True(ReadinessResponse.IsLocal(http, NoTrustedProxies));
 	}
 
 	[Fact]
@@ -83,7 +87,34 @@ public sealed class ReadinessResponseTests
 		DefaultHttpContext http = new();
 		http.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.9");
 
-		Assert.False(ReadinessResponse.IsLocal(http));
+		Assert.False(ReadinessResponse.IsLocal(http, NoTrustedProxies));
+	}
+
+	/// <summary>
+	///   E9: a kubelet's httpGet probe dials the pod from the node/CNI address, never 127.0.0.1, so
+	///   the loopback-only rule left the documented k8s deployment never seeing the component detail
+	///   at all. Listing the node/CIDR in <see cref="AuthOptions.TrustedProxies" /> must restore it —
+	///   the same peer-trust primitive <c>EndpointAuth.IsFromTrustedProxy</c> already applies to
+	///   <c>X-Forwarded-Proto</c> (E1/E16).
+	/// </summary>
+	[Fact]
+	public void IsLocal_NonLoopbackPeer_FromATrustedProxy_IsLocal()
+	{
+		DefaultHttpContext http = new();
+		http.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.9");
+		AuthOptions auth = new() { TrustedProxies = ["203.0.113.9"] };
+
+		Assert.True(ReadinessResponse.IsLocal(http, auth));
+	}
+
+	[Fact]
+	public void IsLocal_NonLoopbackPeer_NotAConfiguredTrustedProxy_IsNotLocal()
+	{
+		DefaultHttpContext http = new();
+		http.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.9");
+		AuthOptions auth = new() { TrustedProxies = ["10.0.0.1"] };
+
+		Assert.False(ReadinessResponse.IsLocal(http, auth));
 	}
 
 	private static readonly Dictionary<string, bool> Components = new()

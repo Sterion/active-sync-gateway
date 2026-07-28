@@ -79,6 +79,8 @@ public partial class Program
 		// IOptionsMonitor snapshot on every metric emission rather than a value captured once
 		// (the previous "assign GatewayMetrics.PerUserLabels once at startup" never picked up a
 		// later `eas config set`/admin Settings change despite both claiming it applies live).
+		// Reused below (E9) for /readyz's trusted-proxy check — Auth:TrustedProxies is live-settable
+		// too, so it must be read the same way rather than off the startup-only `options` snapshot.
 		IOptionsMonitor<ActiveSyncOptions> metricsOptionsMonitor =
 			app.Services.GetRequiredService<IOptionsMonitor<ActiveSyncOptions>>();
 		ActiveSync.Core.Observability.GatewayMetrics.SetPerUserLabelsProvider(
@@ -126,10 +128,12 @@ public partial class Program
 		app.MapGet("/readyz", async (HttpContext http, ReadinessProbe probe, CancellationToken ct) =>
 		{
 			(bool ready, Dictionary<string, bool> components) = await probe.CheckAsync(ct);
-			// E16: withhold the component topology from anonymous, non-local callers — the HTTP
-			// status is the readiness verdict; only a local caller (k8s node probe, operator) sees
+			// E16/E9: withhold the component topology from anonymous, non-local callers — the HTTP
+			// status is the readiness verdict; only a loopback caller (an operator on the box) or one
+			// arriving from a configured Auth:TrustedProxies hop (a k8s node probe, live-settable) sees
 			// which backend roles are configured.
-			object body = ReadinessResponse.Body(ready, components, ReadinessResponse.IsLocal(http));
+			bool isLocal = ReadinessResponse.IsLocal(http, metricsOptionsMonitor.CurrentValue.Auth);
+			object body = ReadinessResponse.Body(ready, components, isLocal);
 			return ready ? Results.Ok(body) : Results.Json(body, statusCode: 503);
 		});
 		if (options.Metrics.Enabled)
