@@ -53,17 +53,29 @@ public class EasDateTimeTests
 		Assert.Throws<WbxmlException>(() => EasDateTime.Parse("3/4/2026"));
 	}
 
-	// W16 coverage: the exact MS-ASDTYPE forms, including the no-Z basic form.
+	// W16 coverage: the exact MS-ASDTYPE forms (all Z-terminated, per spec).
 	[Theory]
 	[InlineData("2026-06-01T09:00:00.000Z")]
 	[InlineData("2026-06-01T09:00:00Z")]
 	[InlineData("20260601T090000Z")]
-	[InlineData("20260601T090000")] // basic form without the trailing Z
 	public void TryParse_ExactForms_Accepted(string value)
 	{
 		Assert.True(EasDateTime.TryParse(value, out DateTime result));
 		Assert.Equal(new DateTime(2026, 6, 1, 9, 0, 0, DateTimeKind.Utc), result);
 		Assert.Equal(DateTimeKind.Utc, result.Kind);
+	}
+
+	// W18: the tolerant no-Z basic form is not an MS-ASDTYPE format at all -- it exists only so a
+	// non-conforming client is not rejected -- but combined with AssumeUniversal it does not merely
+	// accept the value, it ASSERTS UTC for the one string that, by omitting the 'Z', is the one
+	// case where the client did NOT say UTC. A client in UTC+10 sending "20260713T120000" for a
+	// calendar StartTime would book the event ten hours off, silently. MS-ASDTYPE defines only the
+	// Z-terminated forms, so the no-Z basic form must be rejected like any other non-conforming
+	// input, not silently reinterpreted.
+	[Fact]
+	public void TryParse_BasicFormWithoutTrailingZ_Rejected()
+	{
+		Assert.False(EasDateTime.TryParse("20260601T090000", out _));
 	}
 
 	[Fact]

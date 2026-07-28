@@ -40,19 +40,29 @@ public static class EasDateTime
 		};
 	}
 
+	// W18: a sixth entry here used to accept "yyyyMMdd'T'HHmmss" (no trailing 'Z') as a "tolerant"
+	// form for non-conforming clients. MS-ASDTYPE defines only Z-terminated forms, and combined
+	// with DateTimeStyles.AssumeUniversal below that row did not merely tolerate the input, it
+	// ASSERTED UTC for the one string that -- by omitting the 'Z' -- is the one case where the
+	// client did NOT say UTC: a client in UTC+10 sending "20260713T120000" for a calendar
+	// StartTime would book the event ten hours off, silently. Removed rather than kept as an
+	// opt-in lenient parse: no in-repo caller needs it (every TryParse call site parses genuine
+	// client-supplied date/time text, where a wrong-but-accepted value is worse than a rejected
+	// one), and this list should hold only the formats the doc-comment below claims it does.
 	private static readonly string[] Formats =
 	[
 		"yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
 		"yyyy-MM-dd'T'HH:mm:ss'Z'",
 		"yyyyMMdd'T'HHmmss'Z'",
-		"yyyyMMdd'T'HHmmssfff'Z'",
-		"yyyyMMdd'T'HHmmss" // basic form without the trailing Z (MS-ASDTYPE tolerant)
+		"yyyyMMdd'T'HHmmssfff'Z'"
 	];
 
 	/// <summary>
 	///   Parses an MS-ASDTYPE date/time using only the exact spec formats — no loose
 	///   <see cref="DateTime.Parse(string)" /> fallback (which accepted culture-dependent forms
-	///   like "3/4/2026" and made failure locale-dependent). Returns UTC.
+	///   like "3/4/2026" and made failure locale-dependent), and no non-conforming form that
+	///   omits the 'Z' designator (W18 — such a value does not say whether it is UTC, and treating
+	///   it as UTC anyway silently misinterprets a local time). Returns UTC.
 	/// </summary>
 	public static bool TryParse(string? value, out DateTime result)
 	{
