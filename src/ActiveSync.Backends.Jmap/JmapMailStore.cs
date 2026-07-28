@@ -221,11 +221,16 @@ public sealed partial class JmapMailStore(
 		string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		JsonElement? email = await GetEmailAsync(account, itemKey, ["id", "blobId", "keywords"], ct).ConfigureAwait(false);
+		JsonElement? email = await GetEmailAsync(account, itemKey, ["id", "blobId", "keywords", "receivedAt"], ct).ConfigureAwait(false);
 		if (email is not { } value || !value.TryGetProperty("blobId", out JsonElement blob) || blob.GetString() is not { } blobId)
 			return null;
 
 		IReadOnlyList<string> keywords = KeywordsOf(value);
+		// D14: prefer JMAP's own delivery timestamp over the sender-supplied Date: header.
+		DateTimeOffset? receivedAt = value.TryGetProperty("receivedAt", out JsonElement receivedAtEl) &&
+		                              receivedAtEl.TryGetDateTimeOffset(out DateTimeOffset receivedAtValue)
+			? receivedAtValue
+			: null;
 		byte[] raw = await client.DownloadBlobAsync(account, blobId, ct).ConfigureAwait(false);
 		using MemoryStream stream = new(raw);
 		MimeMessage message = await MimeMessage.LoadAsync(stream, ct).ConfigureAwait(false);
@@ -236,7 +241,7 @@ public sealed partial class JmapMailStore(
 			keywords.Contains("$forwarded"),
 			keywords.Where(k => !k.StartsWith('$')).ToList());
 		List<XElement> data = MailConverter.ToApplicationData(
-			message, flags, bodyPreference, idx => MakeFileReference(folderBackendKey, itemKey, idx));
+			message, flags, bodyPreference, idx => MakeFileReference(folderBackendKey, itemKey, idx), receivedAt);
 		return new BackendItem(data);
 	}
 

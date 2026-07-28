@@ -18,18 +18,27 @@ public static class MailConverter
 	private static readonly XNamespace Email2 = EasNamespaces.Email2;
 	private static readonly XNamespace AirSyncBase = EasNamespaces.AirSyncBase;
 
+	/// <param name="receivedUtc">
+	///   The backend's own delivery timestamp — IMAP INTERNALDATE or JMAP receivedAt — preferred
+	///   over the sender-supplied Date: header for MS-ASEMAIL DateReceived (D14). Null when the
+	///   caller has none; falls back to <paramref name="message" />'s Date header, and only to that
+	///   when it is itself non-default (a parsed message with no Date: header reports
+	///   <c>default(DateTimeOffset)</c>, i.e. year 0001 — never emitted verbatim).
+	/// </param>
 	public static List<XElement> ToApplicationData(
 		MimeMessage message,
 		MessageFlags flags,
 		BodyPreference bodyPreference,
-		Func<int, string> fileReferenceForAttachment)
+		Func<int, string> fileReferenceForAttachment,
+		DateTimeOffset? receivedUtc = null)
 	{
+		DateTimeOffset received = receivedUtc ?? (message.Date != default ? message.Date : DateTimeOffset.UtcNow);
 		List<XElement> data = new()
 		{
 			new XElement(Email + "To", Limit(message.To.ToString(), 32 * 1024)),
 			new XElement(Email + "From", Limit(message.From.ToString(), 32 * 1024)),
 			new XElement(Email + "Subject", message.Subject ?? ""),
-			new XElement(Email + "DateReceived", EasDateTime.ToLong(message.Date.UtcDateTime)),
+			new XElement(Email + "DateReceived", EasDateTime.ToLong(received.UtcDateTime)),
 			new XElement(Email + "DisplayTo", string.Join("; ",
 				message.To.Mailboxes.Select(m => string.IsNullOrEmpty(m.Name) ? m.Address : m.Name))),
 			new XElement(Email + "ThreadTopic", NormalizeTopic(message.Subject)),

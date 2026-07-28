@@ -139,7 +139,7 @@ public sealed partial class ImapMailBackend(
 				.ConfigureAwait(false);
 			UniqueId uid = ParseUid(folder, itemKey);
 			IList<IMessageSummary> summaries = await folder
-				.FetchAsync([uid], MessageSummaryItems.UniqueId | MessageSummaryItems.Flags, ct)
+				.FetchAsync([uid], MessageSummaryItems.UniqueId | MessageSummaryItems.Flags | MessageSummaryItems.InternalDate, ct)
 				.ConfigureAwait(false);
 			if (summaries.Count == 0)
 				return null;
@@ -162,7 +162,7 @@ public sealed partial class ImapMailBackend(
 				summaries[0].Keywords);
 			List<XElement> data = MailConverter.ToApplicationData(
 				message, converterFlags, bodyPreference,
-				idx => MakeFileReference(folderBackendKey, itemKey, idx));
+				idx => MakeFileReference(folderBackendKey, itemKey, idx), summaries[0].InternalDate);
 			return new BackendItem(data);
 		}, ct);
 	}
