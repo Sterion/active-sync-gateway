@@ -5,7 +5,8 @@ using Microsoft.Extensions.Options;
 namespace ActiveSync.Core.Settings;
 
 /// <summary>
-///   Polls the <see cref="ActiveSync.Core.State.SettingsStamp" /> and, when it moves, reloads the
+///   Polls the <c>"settings"</c> row of <see cref="ActiveSync.Core.State.DataChange" />
+///   (<see cref="ActiveSync.Core.State.DataChangeAreas.Settings" />) and, when it moves, reloads the
 ///   global settings into the <see cref="DbSettingsConfigurationProvider" /> — which fires the
 ///   configuration reload token so <c>IOptionsMonitor</c> recomputes. Mirrors
 ///   <see cref="ActiveSync.Core.Accounts.UserResolver" />'s change-stamp poll: at most one

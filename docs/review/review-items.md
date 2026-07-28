@@ -686,7 +686,7 @@ fix but out of that finding's stated scope. FIX: replace the four raw literals i
 `LogTextTests.cs` with `\uXXXX` escapes, the same way `W9`'s fix did for `WireLog.cs`/
 `WireLogTests.cs`.
 
-`N11` **Nit** `SettingsRefresher`'s doc comment points at a type that no longer exists —
+~~`N11`~~ **Nit** `SettingsRefresher`'s doc comment points at a type that no longer exists —
 `src/ActiveSync.Core/Settings/SettingsRefresher.cs:8`: `Polls the <see
 cref="ActiveSync.Core.State.SettingsStamp" />`. `SettingsStamp` was folded into the single
 `DataChange` table during the db-restructure (the same drift `A11`/`A13` corrected elsewhere and `N8`
