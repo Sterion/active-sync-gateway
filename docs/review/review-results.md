@@ -2036,3 +2036,57 @@ snapshot gained a `1.3` line with `1.0`/`1.1`/`1.2` untouched (checked for `^-1\
 - **New findings filed by the worker:** `N9` (Search code page 15 carries two extraneous spec-incorrect
   tokens — dead and unreachable, not a live bug) and `N10` (`LogTextTests.cs` has the same raw-bidi-literal
   hazard `W9` fixed, in a different file).
+
+## Run summary — items 23–37 (Phase 3 + Phase 4), plus items 21–22 earlier in the same session
+**Swept:** `git log 59bc96c..HEAD` — **157 commits**. Every finding claimed by this run reconciled
+**mechanically, not by eye**: each is struck exactly once in the queue and appears in a commit subject.
+The apparent mismatches all resolved: four tight clusters (`(D4, D9, D10)`,
+`(D6, D7, D8, D18, D19, D21)`, `(H25, H26)`, `(B16, B18)`), `K16` whose subject spells the ID without
+parentheses, and `G22` which legitimately has two commits — the rolled-back attempt and the redo.
+**No un-struck finding remains in the queue and no item lacks COMPLETE.**
+
+**At HEAD:** integrity **items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0** ✓ ·
+build **0 warnings** ✓ · unit **1571 passed, 0 failed** (Cli 18 · Protocol 121 · Core 952 · WebUi 123 ·
+Server 357) ✓ · live **152 passed, 0 skipped** on a clean-volume Stalwart ✓
+Baseline for comparison was 1270 unit / 8 live-skipped at `406b83f`.
+
+**Scope:** everything landed inside `src/`, `tests/` and `docs/`, plus exactly three files outside them,
+each justified — `AGENTS.md` (`S1`/`A11` doc corrections and the `G22` redo's convention note),
+`Directory.Build.props` (the two contract bumps), and `README.md` (`E9` changed `/readyz`'s disclosure and
+the README documented the old behaviour).
+
+**All 37 items in the round-3 queue are now complete.**
+
+### Carried forward — what the next person actually needs
+1. **`W7` is the one strike resting on an AI reading a spec the queue reserved for a human.** Detail in
+   item 37's entry. Mitigating: the code-page table was NOT changed — the commit is a comment plus a test
+   pinning existing bytes — so a misreading costs a misleading comment, not a new defect. Still worth ten
+   minutes with MS-ASWBXML §2.1.2.1.26 in front of you.
+2. **Two contract bumps landed: `ContractVersion` is now 1.3** (1.1 → 1.2 for `K9`'s `DelaysMs` retype,
+   1.2 → 1.3 for `W21`'s `const` → `static readonly`). **Major is still 1.** Any plugin built against 1.1
+   or 1.2 will be refused by the loader — that is the intended semantics, but it is a real consequence of
+   this run.
+3. **`K12` is a silent ABI-behaviour change**: `TransientRetry`'s `idempotent` now defaults to **false**.
+   Parameter defaults are not rendered in the surface snapshot, so nothing mechanical guards it.
+4. **Findings filed but not fixed:** `N6` (TasksConverter has `D21`'s UTC-anchor bug), `N7` (AGENTS.md
+   still states the "share never claims the default slot" absolute that `H23` made false), `N8` (AGENTS.md
+   names pre-restructure types that no longer exist), `N9` (Search page 15's two extraneous tokens),
+   `N10` (`LogTextTests.cs` carries the raw-bidi hazard `W9` fixed elsewhere). `N7` and `N8` are the same
+   document and should be swept together. `N1`–`N5` predate this run; `N3` is now fixed.
+5. **Three flaky tests were fixed during the run** and one was deleted outright
+   (`UnfixedPattern_...CorruptsUnderConcurrentWrites`, which asserted that a data race *manifests* — a
+   property of the scheduler, not this repo, and it failed CI). The standing lesson recorded there: **a
+   test that does not execute production code is documentation, and must never be able to fail
+   nondeterministically.**
+6. **Reversal is no longer a reliable re-proof technique** — it failed on eight items because the fix
+   introduced a member the tests name, and `--no-build` then silently runs stale binaries and reports a
+   **false green**. Targeted mutation of the shipped code is the better tool and was used throughout the
+   second half of this run.
+7. **`G22` shipped broken once and was rolled back.** Read its two entries together: the failure was not
+   the worker's model but the orchestrator striking a finding whose disclosed cost landed on the same axis
+   as another finding in the same item. When two fixes in one item touch the same resource,
+   "individually correct" is not the bar.
+8. **An orchestrator incident is recorded in item 35's entry** — I destroyed a live agent's working tree
+   after trusting `TaskList` over the human's screen, and briefly ran two workers on one item. The
+   reliable liveness signal is the **completion notification**; `TaskList` and output-file mtime are both
+   unreliable for background agents.
