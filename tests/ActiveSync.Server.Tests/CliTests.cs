@@ -58,6 +58,21 @@ public class CliTests
 		Assert.Contains("hash-password", result.Output);
 	}
 
+	// E12: the `block` help text used to say "Refuse logins (403) for a user, or for one of their
+	// devices" — but BlockCommand refuses a bare user outright (BlockOutcome.DeviceRequired, "A
+	// device id is required: blocks are per-device"), matching docs/cli.md ("to refuse a user
+	// everywhere, use 'eas user disable'") rather than the help text an operator actually sees.
+	[Fact]
+	public void Help_Block_DescribesItAsPerDevice_NotPerUser()
+	{
+		CommandAppTester tester = CreateTester();
+		CommandAppResult result = tester.Run("block", "--help");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("ONE DEVICE", result.Output);
+		Assert.Contains("user disable", result.Output);
+	}
+
 	[Fact]
 	public void HashPassword_HashesStdin()
 	{

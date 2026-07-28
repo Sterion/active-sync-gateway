@@ -48,7 +48,10 @@ internal static class CliApp
 		config.AddCommand<TlsCommand>("tls")
 			.WithDescription("Show the active HTTPS certificate (mode, subject, SANs, validity, fingerprint).");
 		config.AddCommand<BlockCommand>("block")
-			.WithDescription("Refuse logins (403) for a user, or for one of their devices.");
+			// E12: BlockCommand actually refuses a bare user outright (DeviceRequired — "blocks are
+			// per-device"), matching docs/cli.md; the old text ("...for a user, or for one of their
+			// devices") led an operator to try `eas block alice` expecting it to work.
+			.WithDescription("Refuse logins (403) for ONE DEVICE of a user ('eas user disable' turns off a whole user).");
 		config.AddCommand<UnblockCommand>("unblock")
 			.WithDescription("Remove a login block set with 'block'.");
 		config.AddBranch("user", user =>
