@@ -175,6 +175,48 @@ public sealed class JmapMailStoreTests
 		Assert.True(patch.GetProperty("mailboxIds/ARCHIVEID").GetBoolean());
 	}
 
+	// H4: category keywords were spliced into the JMAP PatchObject path without RFC 6901 escaping,
+	// so a category containing '/' (legal EAS free text and a legal JMAP keyword) produced a path
+	// the server reads as a NESTED pointer ("keywords/Work/Home") and rejects with invalidPatch,
+	// failing the whole Sync Change. '/' must become "~1" per RFC 6901.
+	[Fact]
+	public async Task UpdateItem_CategoryWithSlash_IsEscapedAsAJsonPointerToken()
+	{
+		PatchCapturingStub stub = new();
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		XElement change = new("ApplicationData",
+			new XElement(XName.Get("Categories", "Email"),
+				new XElement(XName.Get("Category", "Email"), "Work/Home")));
+
+		await store.UpdateItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", change, CancellationToken.None);
+
+		Assert.NotNull(stub.CapturedUpdate);
+		JsonElement patch = stub.CapturedUpdate!.Value.GetProperty("E1");
+		Assert.True(patch.TryGetProperty("keywords/Work~1Home", out JsonElement v) && v.GetBoolean());
+		Assert.False(patch.TryGetProperty("keywords/Work/Home", out _));
+	}
+
+	// H4: a category containing a character the JMAP keyword grammar forbids (RFC 8621 §4.1.1 —
+	// '(' ')' '{' ']' '%' '*' '"' '\' and non-ASCII) must be dropped, mirroring
+	// ImapMailBackend.SanitizeKeyword's drop-don't-mangle rule, rather than sent verbatim.
+	[Fact]
+	public async Task UpdateItem_CategoryWithForbiddenCharacter_IsDropped()
+	{
+		PatchCapturingStub stub = new();
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		XElement change = new("ApplicationData",
+			new XElement(XName.Get("Categories", "Email"),
+				new XElement(XName.Get("Category", "Email"), "Bad(Cat)")));
+
+		await store.UpdateItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", change, CancellationToken.None);
+
+		// No patch entry at all for the forbidden-character category — no keywords/* key present.
+		Assert.True(stub.CapturedUpdate is null ||
+		            !stub.CapturedUpdate!.Value.GetProperty("E1").EnumerateObject().Any());
+	}
+
 	// H3: position-based paging over a descending sort is not stable under a concurrent mailbox
 	// change. Server-side timeline: [A,B,C,D,E] (positions 0-4). Page 1 (position 0, limit 2)
 	// returns [A,B] under queryState "s1". Before page 2 is issued, B is deleted, so the live

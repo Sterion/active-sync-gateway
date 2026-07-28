@@ -306,14 +306,19 @@ public sealed partial class JmapMailStore(
 		if (categories is not null)
 		{
 			IReadOnlyList<string> current = await CategoriesOfAsync(account, itemKey, ct).ConfigureAwait(false);
+			// H4: '/' and '~' ARE legal JMAP keyword characters (RFC 8621 §4.1.1) but PatchObject
+			// keys are JSON Pointers (RFC 8620 §5.3 → RFC 6901), where '/' separates path segments —
+			// a category like "Work/Home" must be pointer-escaped via PointerToken below, not
+			// dropped. A category containing a character the keyword grammar itself forbids IS
+			// dropped, mirroring ImapMailBackend.SanitizeKeyword's drop-don't-mangle rule.
 			HashSet<string> wanted = categories.Elements(Email + "Category")
 				.Select(c => c.Value)
-				.Where(v => v.Length > 0 && !v.StartsWith('$'))
+				.Where(v => v.Length > 0 && !v.StartsWith('$') && IsValidJmapKeyword(v))
 				.ToHashSet(StringComparer.OrdinalIgnoreCase);
 			foreach (string add in wanted.Where(w => !current.Contains(w, StringComparer.OrdinalIgnoreCase)))
-				patch[$"keywords/{add}"] = true;
+				patch[$"keywords/{PointerToken(add)}"] = true;
 			foreach (string remove in current.Where(c => !wanted.Contains(c)))
-				patch[$"keywords/{remove}"] = null;
+				patch[$"keywords/{PointerToken(remove)}"] = null;
 		}
 
 		if (patch.Count > 0)
@@ -684,6 +689,22 @@ public sealed partial class JmapMailStore(
 	private static Dictionary<string, object?> ResultRef(string resultOf, string name, string path)
 	{
 		return new Dictionary<string, object?> { ["resultOf"] = resultOf, ["name"] = name, ["path"] = path };
+	}
+
+	// H4: RFC 6901 pointer-escapes a keyword before it is spliced into a PatchObject path
+	// ("keywords/{token}") — '~' must be escaped FIRST or a keyword already containing a
+	// pointer-escape sequence would be double-escaped.
+	private static string PointerToken(string keyword) => keyword.Replace("~", "~0").Replace("/", "~1");
+
+	// RFC 8621 §4.1.1: a JMAP keyword MUST NOT contain '(' ')' '{' ']' '%' '*' '"' '\' or any
+	// non-ASCII character. '/' and '~' are legal (they only need PointerToken's escaping above).
+	private static bool IsValidJmapKeyword(string keyword)
+	{
+		foreach (char c in keyword)
+			if (c <= ' ' || c >= (char)127 || "(){]%*\"\\".Contains(c))
+				return false;
+
+		return true;
 	}
 
 	private static int RoleToEasType(string? role)
