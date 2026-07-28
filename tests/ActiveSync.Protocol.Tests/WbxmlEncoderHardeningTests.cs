@@ -136,4 +136,64 @@ public class WbxmlEncoderHardeningTests
 		XDocument decoded = WbxmlDecoder.Decode(bytes);
 		Assert.NotNull(decoded.Root);
 	}
+
+	[Fact]
+	public async Task EncodeAsync_LargePayload_RoundTrips()
+	{
+		// Guards EncodeAsync specifically (not just Encode, which OpaqueElementWithLargePayload_
+		// RoundTrips above already covers) now that it builds and writes its own MemoryStream
+		// rather than delegating to Encode() (W14) — a sizing bug in that path would still show up
+		// as a broken round trip even though the allocation improvement itself is not observable
+		// from outside the type.
+		byte[] payload = new byte[200_000];
+		Random.Shared.NextBytes(payload);
+		XElement mime = new(EasNamespaces.ComposeMail + "Mime", Convert.ToBase64String(payload));
+		mime.SetAttributeValue(EasNamespaces.OpaqueAttribute, "1");
+		XDocument doc = new(new XElement(EasNamespaces.ComposeMail + "SendMail", mime));
+
+		using MemoryStream destination = new();
+		await WbxmlEncoder.EncodeAsync(doc, destination, CancellationToken.None);
+
+		XDocument result = WbxmlDecoder.Decode(destination.ToArray());
+		Assert.Equal(payload, Convert.FromBase64String(
+			result.Root!.Element(EasNamespaces.ComposeMail + "Mime")!.Value));
+	}
+
+	// W14: EncodeAsync used to call the synchronous Encode() (which finishes with output.ToArray(),
+	// a full extra copy of an already-doubled MemoryStream buffer) and then write that array to the
+	// destination — a large ItemOperations attachment response paid roughly an extra payload-sized
+	// allocation for a copy the stream write never needed. The fix is a structural one (which method
+	// EncodeAsync's body calls), not something that changes EncodeAsync_LargePayload_RoundTrips'
+	// observable output — a benchmark-style allocation comparison between the two shapes was tried
+	// first and discarded: on an 8 MB payload the "removed" copy (one payload's worth) was smaller
+	// than the run-to-run GC/allocator noise between two successive large encodes, so it could not
+	// tell red from green reliably. Reading the source directly is the same technique
+	// DependencyRuleTests already uses for "the compiled behavior is identical either way" checks
+	// (e.g. JmapMailStore_IsSplitIntoPartialFilesByConcern, Cs0618Suppressions_AreScopedNarrowly).
+	[Fact]
+	public void EncodeAsync_DoesNotDelegateToEncode_AndWritesFromTheStreamBufferDirectly()
+	{
+		string source = File.ReadAllText(
+			Path.Combine(FindRepoRoot(), "src", "ActiveSync.Protocol", "Wbxml", "WbxmlEncoder.cs"));
+
+		int encodeAsyncStart = source.IndexOf("public static async Task EncodeAsync(", StringComparison.Ordinal);
+		Assert.True(encodeAsyncStart >= 0, "Could not locate the EncodeAsync method body.");
+		// WriteElement is the next member in the file on both sides of the W14 fix, so it is a
+		// stable end-of-body marker regardless of whether BuildStream exists yet.
+		int bodyEnd = source.IndexOf("private static void WriteElement", encodeAsyncStart, StringComparison.Ordinal);
+		Assert.True(bodyEnd > encodeAsyncStart, "Could not locate the end of the EncodeAsync method body.");
+		string body = source[encodeAsyncStart..bodyEnd];
+
+		Assert.DoesNotContain("Encode(document)", body, StringComparison.Ordinal);
+		Assert.Contains("GetBuffer()", body, StringComparison.Ordinal);
+	}
+
+	private static string FindRepoRoot()
+	{
+		DirectoryInfo? dir = new(AppContext.BaseDirectory);
+		while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "ActiveSync.slnx")))
+			dir = dir.Parent;
+		return dir?.FullName
+			?? throw new InvalidOperationException("Could not locate repo root (ActiveSync.slnx) above the test binary.");
+	}
 }

@@ -27,6 +27,28 @@ public static class WbxmlEncoder
 
 	public static byte[] Encode(XDocument document)
 	{
+		using MemoryStream output = BuildStream(document);
+		return output.ToArray();
+	}
+
+	/// <summary>
+	///   W14: writes straight out of the encoding <see cref="MemoryStream" />'s own backing array
+	///   instead of going through <see cref="Encode" />'s <c>ToArray()</c> — that call is a full
+	///   extra copy of an already-doubled buffer, so a large ItemOperations attachment response paid
+	///   roughly a payload-sized allocation for a copy the stream write never needed:
+	///   <see cref="MemoryStream.GetBuffer" /> exposes the same bytes <c>ToArray()</c> would have
+	///   copied, and <see cref="Stream.WriteAsync(ReadOnlyMemory{byte},CancellationToken)" /> reads
+	///   them directly.
+	/// </summary>
+	public static async Task EncodeAsync(XDocument document, Stream destination, CancellationToken ct)
+	{
+		using MemoryStream output = BuildStream(document);
+		await destination.WriteAsync(output.GetBuffer().AsMemory(0, (int)output.Length), ct)
+			.ConfigureAwait(false);
+	}
+
+	private static MemoryStream BuildStream(XDocument document)
+	{
 		if (document.Root is null)
 			throw new WbxmlException("Cannot encode an empty document.");
 
@@ -38,13 +60,7 @@ public static class WbxmlEncoder
 
 		int currentPage = 0;
 		WriteElement(output, document.Root, ref currentPage, 1);
-		return output.ToArray();
-	}
-
-	public static async Task EncodeAsync(XDocument document, Stream destination, CancellationToken ct)
-	{
-		byte[] bytes = Encode(document);
-		await destination.WriteAsync(bytes, ct).ConfigureAwait(false);
+		return output;
 	}
 
 	private static void WriteElement(MemoryStream output, XElement element, ref int currentPage, int depth)
