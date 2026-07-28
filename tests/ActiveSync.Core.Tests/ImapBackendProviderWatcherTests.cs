@@ -156,6 +156,30 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	///   directly into the private watcher dictionary via reflection, since no public path can build
 	///   one today.
 	/// </summary>
+	/// <summary>
+	///   The admin dashboard's watcher list (and the matching gauge) only ever enumerated the IDLE
+	///   watcher cache — the provider now also holds one persistent STATUS-poll connection per
+	///   gateway user (<see cref="ImapStatusPoller" />), and an operator diagnosing a server-side
+	///   per-user connection cap needs to see all of it, not just the IDLE half. A poller is
+	///   "started" once it has actually been asked to poll (mirroring the IDLE watcher's own
+	///   started-vs-merely-constructed distinction) — driven here with an already-cancelled token so
+	///   the call returns immediately without needing a real server, the same way the disposed-gate
+	///   tests elsewhere in this suite avoid real I/O.
+	/// </summary>
+	[Fact]
+	public async Task SnapshotWatchers_IncludesAStartedPollConnection()
+	{
+		BackendCredentials credentials = new("bob@example.com", "pw");
+		ImapOptions options = new() { Host = "imap.example.com", Port = 143 };
+		ImapStatusPoller poller = _provider.GetOrCreatePoller("bob@example.com", options, credentials);
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(
+			() => poller.StatusAsync([], new CancellationToken(canceled: true)));
+
+		Assert.Contains(_provider.SnapshotWatchers(),
+			w => w.User == "bob@example.com" && w.Resource == "(status poll)");
+	}
+
 	[Fact]
 	public void TrimUserResources_KeyWithoutASeparator_DoesNotThrow()
 	{

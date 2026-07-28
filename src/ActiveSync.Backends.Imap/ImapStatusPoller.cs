@@ -37,10 +37,21 @@ public sealed class ImapStatusPoller(
 	private TimeSpan _backoff = InitialBackoff;
 	private ImapClient? _client;
 	private int _disposed;
+	private int _started;
 	private DateTime _retryNotBeforeUtc = DateTime.MinValue;
 
 	/// <summary>The credentials this poll connection authenticates with (rotation rebuilds it).</summary>
 	public BackendCredentials Credentials { get; } = credentials;
+
+	/// <summary>
+	///   Whether this poller has actually been asked to poll at least once — as opposed to merely
+	///   constructed. <see cref="ImapBackendProvider.GetOrCreatePoller" /> materializes the cached
+	///   <c>Lazy&lt;ImapStatusPoller&gt;</c> on every call just to compare credentials/options (the
+	///   poller itself does no I/O until the first <see cref="StatusAsync" />), so the object always
+	///   exists well before any connection is attempted — mirrors
+	///   <see cref="ImapIdleWatcher.IsStarted" /> for the same reason.
+	/// </summary>
+	internal bool IsStarted => Volatile.Read(ref _started) != 0;
 
 	/// <summary>
 	///   The resolved connection options this poller was built with — compared alongside
@@ -79,6 +90,7 @@ public sealed class ImapStatusPoller(
 	{
 		if (Volatile.Read(ref _disposed) == 1)
 			throw new BackendException("IMAP status poller has been disposed.");
+		Volatile.Write(ref _started, 1);
 
 		bool IsTransient(Exception ex)
 		{

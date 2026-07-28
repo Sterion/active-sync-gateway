@@ -63,6 +63,7 @@ public static class GatewayMetrics
 	// counts in; test hosts overwrite each other harmlessly.
 	private static volatile Func<IEnumerable<Measurement<long>>>? _sessionsObserver;
 	private static volatile Func<IEnumerable<Measurement<long>>>? _idleWatchersObserver;
+	private static volatile Func<IEnumerable<Measurement<long>>>? _statusPollConnectionsObserver;
 	private static volatile Func<DateTimeOffset?>? _certificateExpiryObserver;
 
 	static GatewayMetrics()
@@ -71,6 +72,9 @@ public static class GatewayMetrics
 			() => _sessionsObserver?.Invoke() ?? [], null, "Live backend sessions by user.");
 		Meter.CreateObservableGauge(Prefix + "imap_idle_watchers_active",
 			() => _idleWatchersObserver?.Invoke() ?? [], null, "Live IMAP IDLE watchers by user.");
+		Meter.CreateObservableGauge(Prefix + "imap_status_poll_connections_active",
+			() => _statusPollConnectionsObserver?.Invoke() ?? [], null,
+			"Live IMAP STATUS-poll connections by user (the second per-user connection alongside IDLE).");
 		Meter.CreateObservableGauge(Prefix + "eas_longpolls_active",
 			() => ActiveLongPolls
 				.Where(pair => pair.Value > 0)
@@ -252,6 +256,12 @@ public static class GatewayMetrics
 	public static void SetIdleWatchersObserver(Func<IEnumerable<Measurement<long>>> observe)
 	{
 		_idleWatchersObserver = observe;
+	}
+
+	/// <summary>The sibling gauge for the per-user IMAP STATUS-poll connection (see the IDLE gauge above).</summary>
+	public static void SetStatusPollConnectionsObserver(Func<IEnumerable<Measurement<long>>> observe)
+	{
+		_statusPollConnectionsObserver = observe;
 	}
 
 	/// <summary>Publishes the serving TLS certificate's expiry for the expiry gauge.</summary>

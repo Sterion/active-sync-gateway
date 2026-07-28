@@ -606,7 +606,7 @@ boot. FIX: have `ValidateRemovalImpact`'s before/after diff also run `UserResolv
 over the candidate `BackendRolesConfig` (mirroring what B5 added to the write path), the same way it
 already runs `BackendSectionFailures`.
 
-`N5` **Nit** The IMAP live-connection observability surface still knows only about IDLE watchers, so
+~~`N5`~~ **Nit — FIXED** The IMAP live-connection observability surface still knows only about IDLE watchers, so
 G22's new per-user `ImapStatusPoller` is invisible. `ImapBackendProvider`'s
 `GatewayMetrics.SetIdleWatchersObserver` gauge (`activesync_idle_watchers`) and `SnapshotWatchers()`
 — which feeds the admin dashboard's watcher list — both enumerate `_watchers` only, while the

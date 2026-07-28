@@ -52,6 +52,12 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 			.GroupBy(pair => pair.Key.Split('\n')[0], StringComparer.OrdinalIgnoreCase)
 			.Select(g => new Measurement<long>(g.Count(),
 				new KeyValuePair<string, object?>("user", GatewayMetrics.PerUserLabels ? g.Key : "-"))));
+		// The sibling STATUS-poll connection gauge — same started-only filter, one per user (the
+		// poller cache is keyed on the gateway login directly, with no folder dimension to group by).
+		GatewayMetrics.SetStatusPollConnectionsObserver(() => _pollers
+			.Where(pair => pair.Value.IsValueCreated && pair.Value.Value.IsStarted)
+			.Select(pair => new Measurement<long>(1,
+				new KeyValuePair<string, object?>("user", GatewayMetrics.PerUserLabels ? pair.Key : "-"))));
 	}
 
 	public string Name => "imap";
@@ -136,7 +142,12 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		return true;
 	}
 
-	/// <summary>Live (started, not just materialized) IDLE watchers for the admin dashboard.</summary>
+	/// <summary>
+	///   Live (started, not just materialized) IDLE watchers AND STATUS-poll connections for the
+	///   admin dashboard — the two other live connections a gateway user can hold alongside their
+	///   session, so an operator diagnosing a server-side per-user connection cap sees the true
+	///   count rather than only the IDLE half of it.
+	/// </summary>
 	public IReadOnlyList<WatcherInfo> SnapshotWatchers()
 	{
 		List<WatcherInfo> watchers = new();
@@ -149,6 +160,10 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 				separator < 0 ? key : key[..separator],
 				separator < 0 ? "" : key[(separator + 1)..]));
 		}
+
+		foreach ((string user, Lazy<ImapStatusPoller> lazy) in _pollers)
+			if (lazy.IsValueCreated && lazy.Value.IsStarted)
+				watchers.Add(new WatcherInfo(user, "(status poll)"));
 
 		return watchers;
 	}
