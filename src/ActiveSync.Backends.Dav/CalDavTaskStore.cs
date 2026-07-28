@@ -79,7 +79,10 @@ public sealed class CalDavTaskStore(
 		List<DavResource> resources = await Dav.PropfindAsync(home, 1, body, ct).ConfigureAwait(false);
 
 		List<BackendFolder> folders = new();
-		foreach (DavResource resource in resources)
+		// H15: multistatus order is server whim (CalDavStore/CardDavStore already sort their home-set
+		// listing for exactly this reason) — when two VTODO collections both match TaskFolder, which
+		// one becomes EAS folder type 7 (the default) must not depend on raw listing order.
+		foreach (DavResource resource in resources.OrderBy(r => r.Href, StringComparer.OrdinalIgnoreCase))
 		{
 			XElement? type = resource.Propstat.Descendants(DavNs.D + "resourcetype").FirstOrDefault();
 			if (type?.Element(DavNs.CalDav + "calendar") is null)
