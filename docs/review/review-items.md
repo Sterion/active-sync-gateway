@@ -420,7 +420,7 @@ work. Every finding ID appears in exactly one item.
 ## Phase 4 — Structure, docs and cleanup
 *By area. Safe to reorder or skip; nothing else depends on these.*
 
-**32. Structural & schema documentation** — ~~`S1`~~ ~~`S2`~~ `A11` `A12` `A13` `B9` `B10` `B19`
+**32. Structural & schema documentation** — ~~`S1`~~ ~~`S2`~~ ~~`A11`~~ `A12` `A13` `B9` `B10` `B19`
 > `S1` AGENTS.md's dependency table says `Backends.Common` depends on Core; it does not, and an enforced test
 > asserts the opposite — a contributor following the document gets a red build. `A11` the per-user-scoping
 > entity list contradicts the schema it documents (names `LoginBlock`, omits `UserBackendRole`, still cites
@@ -633,3 +633,18 @@ on these invariants, so a contributor reading "NEVER" would treat the new fallba
 The item 29 commit did not touch AGENTS.md. FIX: reword the sentence to "a collection matching a share
 grant never claims the default slot **unless every calendar in the home set is granted, in which case one
 is promoted so a default always exists (H23)**".
+
+`N8` **Low** `AGENTS.md`'s "Database-declared accounts" paragraph (§ *State store*, right after the
+`eas`/`/cli` forwarding notes) describes a class of types that no longer exist — `AccountEntry` rows
+(serialized `AccountOptions` JSON), `AccountStore`, and `AccountResolver`. The db-restructure renamed
+these to `User` (per-field columns, not a JSON blob), `UserStore`, and `UserResolver` — `grep`
+confirms no `AccountStore`/`AccountResolver`/`AccountEntry` type exists anywhere under `src/`. The
+same drift reaches one line further down, in the unrelated "DB-backed global settings" paragraph:
+"the state DB (`GlobalSetting` rows + a single-row `SettingsStamp`, mirroring the accounts store)" —
+`SettingsStamp` was folded into `DataChange` (same mechanism `A11`/`A13` correct elsewhere), and "the
+accounts store" is the same stale name. Noticed while fixing `A11` (item 32) and correctly left
+unfixed as outside that finding's cited paragraph (the State store entity-list paragraph), but
+recorded here so it is not lost. FIX: reword the "Database-declared accounts" paragraph to name
+`User`/`UserStore`/`UserResolver` and the per-field declaration shape (mirroring what item 32's `B9`/
+`B10` fixes did for `UserOptions`/`ResolvedUser`), and reword "mirroring the accounts store" to name
+`UserStore` (or drop the comparison).

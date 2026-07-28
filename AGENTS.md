@@ -412,18 +412,21 @@ entity, add a migration for **both** contexts (see README) — never hand-edit t
 snapshot. **All 18 entities** (one `DbSet` each — `SyncDbContext.cs:14-31` is the definitive list),
 by purpose: **sync state** — `Device`, `UserFolder`, `DeviceFolder`, `CollectionState`,
 `SentCommandToken`, `DavItem`; **local user data** — `LocalItem` (contacts/calendar/tasks/notes);
-**users & access** — `User` + `AccountsStamp`, `LoginBlock`, `SharedCalendarGrant`, `OofSetting`,
-`WebSessionRevocation`; **settings & ops** — `GlobalSetting` + `SettingsStamp`, `LogEntry`,
+**users & access** — `User`, `UserBackendRole`, `LoginBlock`, `SharedCalendarGrant`, `OofSetting`,
+`WebSessionRevocation`; **settings & ops** — `GlobalSetting`, `DataChange`, `LogEntry`,
 `ServerCertificate`, `DataProtectionKeyEntry`.
 **Per-user scoping is split two ways, and it matters when touching identity:** seven entities carry
 a real **`UserId` FK to `User` with cascade delete** — `Device`, `UserFolder`, `LocalItem`,
-`LoginBlock`, `WebSessionRevocation`, `SharedCalendarGrant`, `OofSetting` — while
-`DeviceFolder`/`CollectionState`/`SentCommandToken` scope transitively via `DeviceKey` and `DavItem`
-via `UserFolderKey`. The remaining six are global (not per-user). **Never add a `UserId` to a table
-that already reaches a user through a FK** — the two paths could disagree and no constraint would
-catch it. `User.Login` is the mutable, unique, case-folded login attribute; `User.Json` is the
-optional serialized `UserOptions` declaration (null = an identity-only row: the user exists, but the
-database declares nothing and configuration keeps supplying the values).
+`UserBackendRole`, `WebSessionRevocation`, `SharedCalendarGrant`, `OofSetting` — while
+`DeviceFolder`/`CollectionState`/`SentCommandToken`/`LoginBlock` scope transitively via `DeviceKey`
+(`LoginBlock` carries no `UserId` of its own — a device already reaches its user through its own FK)
+and `DavItem` via `UserFolderKey`. `User` itself and the settings/ops entities above are global (not
+per-user). **Never add a `UserId` to a table that already reaches a user through a FK** — the two
+paths could disagree and no constraint would catch it. `User.Login` is the mutable, unique,
+case-folded login attribute; `User.Declared` marks a row as a database DECLARATION, whose per-field
+columns (`Password`, `DefaultBackendLogin`, `DefaultBackendPassword`, `MailAddress`, `Admin`,
+`Enabled`, …) carry the deviations directly — `Declared = false` is an identity-only row: the user
+exists, but the database declares nothing and configuration keeps supplying the values.
 `LocalItem.Content` is **AES-256-GCM ciphertext at rest** (`"v1:" + base64`, sealed by
 `LocalContentProtector` with a versioned length-prefixed AAD binding the immutable **`UserId`** and
 the collection — `"v2" ‖ LE64(userId) ‖ LE32(len) ‖ collection`, injective by construction) — never
