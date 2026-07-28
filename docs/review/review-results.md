@@ -1727,3 +1727,50 @@ change on the hot request path, not an isolated support type.
 - **`W17` is a no-op on every current call path** and is defence for future ones: it normalizes to an
   ordinal-keyed dictionary when the caller's is not already `StringComparer.Ordinal`. The worker verified
   `SnapshotCodec` and `DavItemMap` both already construct with ordinal keys.
+
+## Item 32 — Structural & schema documentation
+**Findings:** `S1` `S2` `A11` `A12` `A13` `B9` `B10` `B19`
+**Commits:** `6c79b93` (S1) · `523a6c5` (S2) · `fda4ae9` (A11) · `11400a5` (A12) · `585f665` (A13) ·
+`4f223ef` (B9) · `ea93e0a` (B10) · `50f5e51` (B19)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 33 ✓ · strike shipped with every commit ✓ · build 0 warnings ✓ ·
+unit **1504 passed, 0 failed** (Cli 16 · Protocol 108 · Core 927 · WebUi 120 · Server 333) ✓ ·
+live **150 passed, 0 skipped** ✓
+
+**Six of eight are documentation-only, so "red-first" is N/A by design** — and for those the meaningful
+check is not a test but whether the new text is TRUE. I verified the two load-bearing ones against the
+code rather than reading them:
+- **`S1`**: `ActiveSync.Backends.Common.csproj` really has exactly one `ProjectReference`, to
+  `ActiveSync.Contracts`, and AGENTS.md now reads "Depends on Contracts ONLY". The document no longer
+  contradicts `DependencyRuleTests.BackendsCommon_DoesNotReferenceCore()`.
+- **`A11`**: `LoginBlock` (Entities.cs:259) carries `DeviceKey`, not `UserId`, so moving it out of the
+  UserId-FK group is correct; `UserBackendRole` exists and is now listed; the deleted `AccountsStamp`/
+  `SettingsStamp` are replaced by `DataChange`; and `User.Json` → `User.Declared` matches the field
+  `UserStore.LoadAllAsync` actually filters on.
+
+**Red-first re-proved for both behavioural findings** — `S2` by reversal
+(`Cs0618Suppressions_AreScopedNarrowly_NotFileWide` fails for both `CalendarConverter.cs` and
+`TasksConverter.cs`); `B19`'s reversal is compile-blocked because the parameter drop updated eleven call
+sites, and its test is a reflection assertion that the parameter is absent — trivially red while the
+parameter exists.
+
+**The live suite was run despite the item being documentation-heavy**, because `B19` changed call sites in
+`PortalEndpoints` and `UsersEndpoints`, which are HTTP-reachable. 150 passed, 0 skipped.
+
+**Notes:**
+- **`S2` went further than the minimum and that is the right call.** The finding's complaint was scope, not
+  rationale; the worker scoped each suppression to its actual obsolete-API call site (9 pairs in
+  `CalendarConverter.cs`, 2 in `TasksConverter.cs`) rather than wrapping whole methods. Repo-wide CS0618
+  disables and restores are now balanced 13/13, where the finding recorded the 2-pair imbalance.
+- **`B19` took the full-drop option** over the finding's "or keep the signature and note why", updating
+  `PortalEndpoints` ×2, `UsersEndpoints`, `UserCommands` ×6 and two tests. Mechanical, and each caller's
+  `options` local is still used for `ValidateEntry`/`FindConfigUser`, so nothing was left dangling.
+- **`N8` filed by the worker** (properly, in "Found while working the queue"): AGENTS.md's
+  "Database-declared accounts" paragraph and one line of "DB-backed global settings" still name
+  pre-restructure types — `AccountEntry`, `AccountStore`, `AccountResolver`, `SettingsStamp` — that no
+  longer exist in `src/`. Correctly left unfixed as outside `A11`'s cited paragraph. **Note this is the
+  same class of defect as `S1` and `A11`, in the same document, found immediately after "fixing" it** —
+  AGENTS.md has more post-restructure drift than this item's findings captured.
+- **`N7` (mine, from item 29) is still open and also lives in AGENTS.md** — the "a share grant NEVER claims
+  the default slot" absolute that `H23` deliberately made false. Whoever sweeps `N8` should take `N7` in
+  the same pass.
