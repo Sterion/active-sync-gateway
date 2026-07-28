@@ -40,12 +40,19 @@ public abstract class ComposeMailHandlerBase(
 			return;
 		}
 
-		// 16.x requests may legitimately carry no MIME: SmartForward with Forwardees, or
-		// SendMail sourcing a stored draft — BuildOutgoingAsync produces the bytes then.
-		if (request is null ||
-		    (request.Mime.Length == 0 && request.Forwardees.Count == 0 && request.SourceItemId is null))
+		if (request is null)
 		{
-			await WriteErrorAsync(context, "103"); // invalid MIME
+			await WriteErrorAsync(context, "103"); // invalid XML: the request itself did not parse
+			return;
+		}
+
+		// 16.x requests may legitimately carry no MIME: SmartForward with Forwardees, or
+		// SendMail sourcing a stored draft — BuildOutgoingAsync produces the bytes then. A request
+		// that decoded fine but carries none of the three is not an XML problem — it is an
+		// empty/invalid MIME submission (F19: MS-ASCMD common status 107, not 103).
+		if (request.Mime.Length == 0 && request.Forwardees.Count == 0 && request.SourceItemId is null)
+		{
+			await WriteErrorAsync(context, "107"); // invalid MIME
 			return;
 		}
 
@@ -80,7 +87,7 @@ public abstract class ComposeMailHandlerBase(
 
 		if (outgoing.Length == 0)
 		{
-			await WriteErrorAsync(context, "103");
+			await WriteErrorAsync(context, "107"); // F19: empty MIME, not an XML problem
 			return;
 		}
 
@@ -313,7 +320,7 @@ public sealed class SendMailHandler(
 			return request.Mime;
 
 		// 16.x: SendMail without MIME submits a stored draft (Source > FolderId/ItemId). An
-		// unresolvable draft yields empty bytes → Status 103 (already a clean failure, never a
+		// unresolvable draft yields empty bytes → Status 107 (F19; already a clean failure, never a
 		// degraded send), so this path does not need the source-not-found sentinel.
 		(string FolderBackendKey, string ItemKey)? source = await ResolveSourceAsync(context, request, ct);
 		if (source is null)
