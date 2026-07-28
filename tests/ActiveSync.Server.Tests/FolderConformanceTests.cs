@@ -3,7 +3,9 @@ using ActiveSync.Contracts;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Server.Eas;
 using ActiveSync.Server.Eas.Handlers;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Server.Tests;
@@ -39,7 +41,7 @@ public sealed class FolderConformanceTests : IDisposable
 	[Fact]
 	public async Task FolderSync_ReplaysPreviousGeneration_InsteadOfForcingFullResync()
 	{
-		FolderSyncHandler handler = new(_harness.Folders);
+		FolderSyncHandler handler = new(_harness.Folders, NullLogger<FolderSyncHandler>.Instance);
 
 		// Generation 1: initial sync (key 0 → key 1) acknowledges the starting hierarchy.
 		await _harness.RegisterFoldersAsync(
@@ -64,6 +66,36 @@ public sealed class FolderConformanceTests : IDisposable
 		Assert.Equal("1", replay?.Root?.Element(FH + "Status")?.Value);
 		Assert.Equal("2", replay?.Root?.Element(FH + "SyncKey")?.Value);
 		Assert.Equal(3, replay?.Root?.Element(FH + "Changes")?.Elements(FH + "Add").Count());
+	}
+
+	// ---- item 23 F17 -------------------------------------------------------------------------
+
+	// F17: unlike its three sibling folder handlers (FolderModifyHandlerBase's ExecuteAsync/
+	// refresh/commit path), FolderSync had no backend-failure mapping — the handler that runs on
+	// every device on every reconnect. A transport failure reaching the hierarchy refresh/commit
+	// must surface as EAS Status 6, not escape raw and become an HTTP 500 the client cannot
+	// interpret.
+	[Fact]
+	public async Task FolderSync_BackendTransportFailure_YieldsStatus6_NotAnUncaughtError()
+	{
+		await _harness.RegisterFoldersAsync(
+			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+
+		FolderSyncHandler handler = new(_harness.Folders, NullLogger<FolderSyncHandler>.Instance);
+
+		// Build the context the normal way (the device row is resolved while the DB is healthy).
+		EasContext context = await _harness.NewContextAsync("FolderSync");
+
+		// Break the connection the request's own DB operations rely on — a genuine backend/
+		// transport failure, not the FolderSyncKey race BackendException the handler already
+		// handles via its own try/catch around CommitFolderHierarchyAsync.
+		await _harness.Db.Database.GetDbConnection().CloseAsync();
+
+		await handler.HandleAsync(context, CancellationToken.None);
+
+		byte[] responseBytes = ((MemoryStream)context.Http.Response.Body).ToArray();
+		XDocument? response = responseBytes.Length == 0 ? null : WbxmlDecoder.Decode(responseBytes);
+		Assert.Equal("6", response?.Root?.Element(FH + "Status")?.Value);
 	}
 
 	// ---- F26 -------------------------------------------------------------------------------

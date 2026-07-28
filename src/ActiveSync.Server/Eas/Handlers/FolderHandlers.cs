@@ -10,12 +10,33 @@ using Microsoft.Extensions.Options;
 namespace ActiveSync.Server.Eas.Handlers;
 
 /// <summary>FolderSync (MS-ASCMD 2.2.1.5): folder hierarchy synchronization.</summary>
-public sealed class FolderSyncHandler(FolderService folders) : IEasCommandHandler
+public sealed class FolderSyncHandler(FolderService folders, ILogger<FolderSyncHandler> logger) : IEasCommandHandler
 {
 	private static readonly XNamespace FH = EasNamespaces.FolderHierarchy;
 	public string Command => "FolderSync";
 
 	public async Task HandleAsync(EasContext context, CancellationToken ct)
+	{
+		try
+		{
+			await HandleCoreAsync(context, ct);
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			// F17: FolderSync runs on every device on every reconnect, yet unlike its three sibling
+			// folder handlers (FolderModifyHandlerBase's ExecuteAsync/refresh/commit path) it had no
+			// backend-failure mapping — a transport failure (e.g. IMAP down) during the hierarchy
+			// refresh or commit escaped raw to the endpoint's generic catch (HTTP 500), which the
+			// client cannot interpret. Status 6 mirrors FolderModifyHandlerBase's own mapping for the
+			// same class of failure.
+			logger.LogError(ex, "FolderSync failed for {User}", context.UserName);
+			await context.WriteResponseAsync(new XDocument(
+				new XElement(FH + "FolderSync",
+					new XElement(FH + "Status", "6"))));
+		}
+	}
+
+	private async Task HandleCoreAsync(EasContext context, CancellationToken ct)
 	{
 		XDocument? request = await context.ReadRequestAsync();
 		string clientKey = request?.Root?.Element(FH + "SyncKey")?.Value ?? "0";
