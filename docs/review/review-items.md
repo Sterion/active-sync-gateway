@@ -373,7 +373,7 @@ work. Every finding ID appears in exactly one item.
 > claim → duplicates on retry. `G3`/`G12`/`G13`/`G16`/`G22` UIDVALIDITY, special-folder classification,
 > search floor, silently-discarded edits, gate contention.
 
-**25. Local stores** — ~~`G18`~~ ~~`G19`~~ ~~`G20`~~ ~~`G21`~~ `G26` `G30`
+**25. Local stores** — ~~`G18`~~ ~~`G19`~~ ~~`G20`~~ ~~`G21`~~ ~~`G26`~~ `G30`
 > `G18` one undecryptable row fails the **entire** GAL search and free/busy lookup, contradicting "a free/busy
 > failure must never fail the whole ResolveRecipients". `G21` the local change notifier has no latch, so a
 > write landing between a Ping's check and its wait is invisible for a full watchdog interval. `G20` the

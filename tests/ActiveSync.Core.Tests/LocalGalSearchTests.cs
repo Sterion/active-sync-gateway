@@ -65,6 +65,30 @@ public sealed class LocalGalSearchTests : IDisposable
 		Assert.Equal(["Alice Example", "Alice Smith"], names);
 	}
 
+	/// <summary>
+	///   G26: <c>SearchGalAsync</c>'s <c>maxResults</c> break was checked BEFORE adding the current
+	///   match, one row later than the D19 comment's stated intent ("stops pulling and decrypting
+	///   rows once enough matches are found") — the enumerator had already pulled/materialized one
+	///   extra row by the time the old check ran. The fix moves the check to after the add. COVERAGE,
+	///   not red-first proof: the actual waste is one extra streamed-row fetch from the open SQLite
+	///   reader, which isn't observable through this store's public surface (both the old and the new
+	///   code decrypt/return exactly <c>maxResults</c> matches — Unprotect is never called on the
+	///   extra row either way) without instrumenting EF's DbDataReader, so this pins the
+	///   still-correct limiting behaviour rather than reproducing the fetch itself.
+	/// </summary>
+	[Fact]
+	public async Task SearchGal_StopsAtMaxResults_WhenMoreRowsMatch()
+	{
+		Seed("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:1\r\nFN:Alice One\r\nEMAIL:one@example.com\r\nEND:VCARD\r\n");
+		Seed("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:2\r\nFN:Alice Two\r\nEMAIL:two@example.com\r\nEND:VCARD\r\n");
+		Seed("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:3\r\nFN:Alice Three\r\nEMAIL:three@example.com\r\nEND:VCARD\r\n");
+
+		IReadOnlyList<IReadOnlyList<XElement>> results =
+			await _store.SearchGalAsync("Alice", 2, null, CancellationToken.None);
+
+		Assert.Equal(2, results.Count);
+	}
+
 	[Fact]
 	public async Task SearchGal_WithPhotoRequest_ReturnsTheDecodedPhoto()
 	{

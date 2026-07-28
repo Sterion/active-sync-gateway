@@ -41,8 +41,6 @@ public sealed class LocalContactStore(
 		await foreach (string stored in Rows(db).AsNoTracking().Select(i => i.Content)
 			               .AsAsyncEnumerable().WithCancellation(ct).ConfigureAwait(false))
 		{
-			if (results.Count >= maxResults)
-				break;
 			string vcf;
 			try
 			{
@@ -65,6 +63,11 @@ public sealed class LocalContactStore(
 			if (granted)
 				photosGranted++;
 			results.Add(gal);
+			// G26: checked AFTER adding — the await foreach above has already pulled/materialized
+			// the CURRENT row by the time the loop body runs, so testing this BEFORE the add (the
+			// original D19 shape) let the enumerator advance one row past what maxResults needs.
+			if (results.Count >= maxResults)
+				break;
 		}
 
 		return results;
