@@ -67,12 +67,26 @@ public sealed class MailKitWireLogger(ILogger logger) : IProtocolLogger
 	}
 
 	// MailKit hands arbitrary chunks; accumulate per direction and emit whole lines.
+	// D28: scan the StringBuilder's own indexer for '\n' instead of calling pending.ToString()
+	// (twice) per line found -- the old code re-stringified the WHOLE remaining buffer on every
+	// iteration, so a chunk of N lines allocated on the order of N copies of the (shrinking)
+	// buffer, i.e. roughly O(N^2) bytes total rather than O(N). A large FETCH response delivered
+	// across many chunks, each with several lines, amplified allocation by the lines-per-chunk
+	// factor -- exactly when Trace logging is already enabled to debug a slow mailbox.
 	private void Append(StringBuilder pending, string direction, string text)
 	{
 		pending.Append(text);
 		while (true)
 		{
-			int newline = pending.ToString().IndexOf('\n');
+			int newline = -1;
+			for (int i = 0; i < pending.Length; i++)
+			{
+				if (pending[i] != '\n')
+					continue;
+				newline = i;
+				break;
+			}
+
 			if (newline < 0)
 				return;
 			string line = pending.ToString(0, newline).TrimEnd('\r');
