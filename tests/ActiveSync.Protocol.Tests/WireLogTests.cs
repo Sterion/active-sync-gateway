@@ -18,6 +18,33 @@ public sealed class WireLogTests
 		Assert.EndsWith("[truncated, 100 chars total]", result);
 	}
 
+	// W11: a negative max falls through to `text[..max]`, which throws — but as an accident of
+	// Range/Substring internals rather than an explicit parameter check, so the caller (a logging
+	// helper, itself called from inside a LogTrace site) sees ParamName "length", not "max": the
+	// parameter Truncate was actually called with.
+	[Fact]
+	public void Truncate_NegativeMax_ThrowsNamingItsOwnParameter()
+	{
+		ArgumentOutOfRangeException ex = Assert.Throws<ArgumentOutOfRangeException>(
+			() => WireLog.Truncate("hello", -1));
+		Assert.Equal("max", ex.ParamName);
+	}
+
+	// W11: when the cap lands between a surrogate pair's high and low half (any emoji or other
+	// non-BMP character in a MIME dump sitting exactly at the MaxChars boundary), the retained
+	// window must not end with a lone high surrogate — a downstream console/JSON sink would render
+	// it as U+FFFD mojibake instead of the truncation marker reading cleanly.
+	[Fact]
+	public void Truncate_CapLandsMidSurrogatePair_DoesNotEndWithALoneHighSurrogate()
+	{
+		string text = "abc\U0001F600def"; // U+1F600 is a surrogate pair at index 3-4
+		string result = WireLog.Truncate(text, 4); // 4 lands right after the high surrogate alone
+
+		string retained = result[..result.IndexOf('…', StringComparison.Ordinal)];
+		Assert.False(char.IsHighSurrogate(retained[^1]),
+			$"Truncated window ends with a lone high surrogate: {retained}");
+	}
+
 	[Fact]
 	public void Payload_KeepsLineStructure_NeutralizesEscapes()
 	{

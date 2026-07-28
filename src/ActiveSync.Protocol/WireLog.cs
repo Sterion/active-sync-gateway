@@ -17,9 +17,22 @@ public static class WireLog
 	/// <summary>Truncates a dump to <see cref="MaxChars" /> with an explicit marker.</summary>
 	public static string Truncate(string text, int max = MaxChars)
 	{
-		return text.Length <= max
-			? text
-			: $"{text[..max]}… [truncated, {text.Length} chars total]";
+		// W11: without this, a negative max still throws — but as an accident of Range/Substring
+		// internals, naming ITS OWN "length" parameter rather than the "max" the caller actually
+		// passed. An explicit check up front gives the caller (this is a logging helper, called
+		// from inside LogTrace sites that do not expect an exception at all) a message that names
+		// the parameter it recognizes.
+		ArgumentOutOfRangeException.ThrowIfNegative(max);
+		if (text.Length <= max)
+			return text;
+
+		// W11: max may land between a surrogate pair's high and low half (any emoji or other
+		// non-BMP character sitting exactly at the boundary) — back the cut off by one so the
+		// retained window never ends with a lone high surrogate, which a downstream console/JSON
+		// sink would otherwise render as U+FFFD mojibake instead of the truncation marker reading
+		// cleanly.
+		int cut = max > 0 && char.IsHighSurrogate(text[max - 1]) ? max - 1 : max;
+		return $"{text[..cut]}… [truncated, {text.Length} chars total]";
 	}
 
 	/// <summary>
