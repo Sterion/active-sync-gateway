@@ -382,6 +382,36 @@ public sealed class SyncStateServiceTests : IDisposable
 	}
 
 	[Fact]
+	public async Task CommitFolderHierarchy_ConcurrencyConflict_DoesNotPoisonLaterSaveOnSameContext()
+	{
+		// A5: after CommitFolderHierarchyAsync loses a concurrency race, the incremented
+		// FolderSyncKey and stale ConcurrencyToken must not stay tracked Modified on the shared
+		// request-scoped context — otherwise a later, completely unrelated SaveChangesAsync on the
+		// SAME request (e.g. persisting an idempotent last-seen stamp) retries the doomed UPDATE and
+		// throws a second, unrelated DbUpdateConcurrencyException. Mirrors
+		// CollectionStateStore.CommitCollectionStateAsync's reload-before-rethrow (A18).
+		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a5"), "DEV1", "Phone", CancellationToken.None);
+		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a5"),
+			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email")], CancellationToken.None);
+
+		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
+		SyncStateService service2 = new(db2);
+		Device device2 = await db2.Devices.FirstAsync(d => d.DeviceId == "DEV1" && d.User.Login == "u@a5");
+		List<UserFolder> registry2 = await service2.GetFoldersAsync(await UserAsync("u@a5"), CancellationToken.None);
+
+		// The first writer commits and bumps Device's ConcurrencyToken.
+		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
+
+		// The second (stale) writer loses the race.
+		await Assert.ThrowsAsync<BackendException>(() =>
+			service2.CommitFolderHierarchyAsync(device2, registry2, CancellationToken.None));
+
+		// An unrelated later save on the SAME request-scoped context must not retry the doomed
+		// UPDATE it just lost.
+		await service2.PersistAsync(CancellationToken.None);
+	}
+
+	[Fact]
 	public async Task FolderDiff_DoesNotTrackTheDeviceFoldersItOnlyCompares()
 	{
 		// ComputeFolderDiffAsync loads every DeviceFolder purely to compare against the registry;

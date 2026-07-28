@@ -210,6 +210,14 @@ internal sealed class FolderRegistry(SyncDbContext db)
 			// generation. This commit diffed against a now-stale hierarchy, so it must not
 			// overwrite the winner — surface it so the handler answers FolderSync Status 9 and
 			// the client restarts the hierarchy from key 0 (A6).
+			// Reload the device first and detach the staged DeviceFolder mutations: left Modified
+			// with their failed values (device.FolderSyncKey++ and its stale ConcurrencyToken, plus
+			// any staged DeviceFolder insert/removal), a later unrelated SaveChangesAsync on this
+			// same request-scoped context would retry the doomed UPDATE (A5) — mirrors
+			// CollectionStateStore.CommitCollectionStateAsync (A18).
+			await db.Entry(device).ReloadAsync(ct).ConfigureAwait(false);
+			foreach (EntityEntry<DeviceFolder> entry in db.ChangeTracker.Entries<DeviceFolder>().ToList())
+				entry.State = EntityState.Detached;
 			throw new BackendException("Concurrent folder-hierarchy update — please retry.", ex);
 		}
 
