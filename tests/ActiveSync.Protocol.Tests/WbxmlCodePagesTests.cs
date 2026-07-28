@@ -35,13 +35,13 @@ public class WbxmlCodePagesTests
 	}
 
 	/// <summary>
-	///   W7: Find (page 25) assigns MaxPictures/MaxSize/Picture in the reverse order of every
-	///   sibling page (Search page 15, ResolveRecipients page 10 both put Picture first) — a
-	///   shape internal consistency alone flagged as needing a human with the actual MS-ASWBXML
-	///   text rather than a guess. Verified against the published spec, revision 24.0
+	///   Find (page 25) assigns MaxPictures/MaxSize/Picture in the reverse order of every sibling
+	///   page (Search page 15 and ResolveRecipients page 10 both put Picture first) — a shape that
+	///   looks exactly like a transposed transcription, so it was checked against the actual
+	///   MS-ASWBXML text rather than trusted. Verified against the published spec, revision 24.0
 	///   (2025-05-20), section 2.1.2.1.26 "Code Page 25: Find": the byte assignment below is
-	///   exactly what the spec lists. This is coverage that pins the answer, not a red-first
-	///   proof of a bug — the table was already correct; only the uncertainty was the defect.
+	///   exactly what the spec lists. This pins the answer; it is not a regression proof — the
+	///   table was already correct, only the uncertainty was the defect.
 	///   <para>
 	///     Corroborated by an INDEPENDENT implementation: Z-Push's <c>wbxmldefs.php</c> carries
 	///     byte-identical tokens for pages 10, 15 and 25 (consulted for semantics per AGENTS.md;

@@ -453,6 +453,30 @@ done and which are untouched. Do not start a finding you cannot finish and verif
 **8. Stay inside the item.** Anything you notice outside it goes at the bottom of the findings list as
 a new finding, not fixed inline.
 
+**8a. NEVER put a finding ID in source, tests or shipped docs — the ID is scaffolding, the explanation is
+the deliverable.** `// F13: a backend created the folder but its listing does not reflect it yet` must be
+written as `// A backend can create the folder while its own listing does not yet reflect it`. The same
+goes for test names (`F14_VanishedItem_IsNotCountedAsSent` → `VanishedItem_IsNotCountedAsSent`), commit
+*bodies*, and any doc outside the review folder.
+
+Three reasons, and the first two bite even before the queue is finished:
+
+- **The IDs are per-round and they collide.** Round 2's `F13` and round 3's `F13` are different findings.
+  A reader who greps `F13` gets two answers and no way to tell which. This is not hypothetical — it is
+  already true in this repository.
+- **A bare marker carries no information at all.** `(A18)` next to a line of code tells a future reader
+  nothing except that a document they may not have once said something.
+- **The review folder is temporary.** It gets deleted when the round is finished, taking every referent
+  with it and leaving dangling IDs behind in permanent code.
+
+**The commit SUBJECT is the one exception** — `fix(imap): scope EXPUNGE to the deleted UID (D1)` is
+correct and required by step 2, because the subject is how the orchestrator reconciles findings to commits
+and git history is not deleted with the folder. Keep the ID out of the body prose.
+
+Test this on yourself before writing the comment: **delete the review folder in your head, then re-read
+the line.** If it stops making sense, the comment was leaning on the ID and needs the explanation written
+into it instead.
+
 **9. When a test fails, establish whose failure it is** before fixing anything:
 
 ```sh

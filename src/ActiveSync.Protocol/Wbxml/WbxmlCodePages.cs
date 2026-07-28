@@ -309,10 +309,10 @@ public static class WbxmlCodePages
 
 			// Page 25: Find (16.1). Token gaps at 0x0F/0x10 and 0x1A-0x1F are per MS-ASWBXML.
 			//
-			// ┌─ SETTLED — DO NOT RE-LITIGATE (W7, round 3). ────────────────────────────────────┐
+			// ┌─ SETTLED: the reversed Picture triplet here is CORRECT. Do not "fix" it. ────────┐
 			// The MaxPictures(0x20)/MaxSize(0x21)/Picture(0x22) order below is the REVERSE of every
-			// sibling page, which looks like a transcription error and has now been questioned once.
-			// It is CORRECT. Find is the outlier in MS-ASWBXML itself. The four picture-bearing
+			// sibling page, which looks like a transcription error and has been questioned once.
+			// It is correct — Find is the outlier in MS-ASWBXML itself. The four picture-bearing
 			// pages, as verified:
 			//
 			//     Page 10 ResolveRecipients : 0x1A Picture · 0x1B MaxSize · 0x1C Data · 0x1D MaxPictures
