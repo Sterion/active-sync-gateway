@@ -82,7 +82,9 @@ public static class CalendarConverter
 
 		if (master.Organizer is not null)
 		{
-			string? email = master.Organizer.Value?.ToString().Replace("mailto:", "", StringComparison.OrdinalIgnoreCase);
+			// D30: a prefix strip, not a substring Replace — the literal text "mailto:" must only
+			// ever be removed from the FRONT of the value, never wherever it happens to occur.
+			string? email = StripMailto(master.Organizer.Value?.ToString());
 			if (!string.IsNullOrEmpty(email))
 			{
 				data.Add(new XElement(Cal + "OrganizerEmail", email));
@@ -96,7 +98,8 @@ public static class CalendarConverter
 			XElement attendees = new(Cal + "Attendees");
 			foreach (Attendee attendee in master.Attendees)
 			{
-				string? email = attendee.Value?.ToString().Replace("mailto:", "", StringComparison.OrdinalIgnoreCase);
+				// D30: same prefix-strip fix as the organizer read above.
+				string? email = StripMailto(attendee.Value?.ToString());
 				if (string.IsNullOrEmpty(email))
 					continue;
 				attendees.Add(new XElement(Cal + "Attendee",
@@ -535,7 +538,14 @@ public static class CalendarConverter
 		return !SchedulingFingerprint(newEvent).Equals(SchedulingFingerprint(oldEvent), StringComparison.Ordinal);
 	}
 
-	private static string? StripMailto(string? value)
+	/// <summary>
+	///   Strips a leading "mailto:" scheme — a PREFIX strip, not a substring Replace, so the literal
+	///   text is only ever removed from the front of the value (D30/D26 area — a value legitimately
+	///   containing "mailto:" more than once must keep every occurrence but the leading one).
+	///   Internal (not private) so <see cref="MailConverter" /> can reuse the same logic for its own
+	///   ORGANIZER read rather than repeating the substring-Replace pattern this fixes.
+	/// </summary>
+	internal static string? StripMailto(string? value)
 	{
 		if (value is null)
 			return null;

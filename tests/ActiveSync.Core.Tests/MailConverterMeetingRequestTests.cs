@@ -88,6 +88,27 @@ public class MailConverterMeetingRequestTests
 		Assert.Equal("2025-06-01T09:00:00.000Z", mr.Element(Email + "StartTime")!.Value);
 	}
 
+	// D30 — coverage, not red-first proof: MailConverter's ORGANIZER read repeated the same
+	// substring-Replace("mailto:", "") pattern as CalendarConverter's organizer/attendee reads
+	// (CalendarConverterTests.ToApplicationData_OrganizerEmail_OnlyStripsTheLeadingMailtoPrefix is
+	// the red-first proof for the shared defect/fix — CalendarConverter.StripMailto). Both call
+	// sites were fixed in the same change (route through the same prefix-strip helper), so there
+	// is no way to observe THIS site fail independently without reverting the already-landed fix,
+	// which the protocol forbids. This pins that the third call site got the same treatment.
+	[Fact]
+	public void MeetingRequest_OrganizerEmail_OnlyStripsTheLeadingMailtoPrefix()
+	{
+		string ics =
+			"BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:abc\r\n" +
+			"DTSTART:20250601T090000Z\r\n" +
+			"ORGANIZER:mailto:mailto:boss@example.com\r\n" +
+			"SUMMARY:Sync\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+		XElement mr = Convert(MeetingMessage(ics));
+
+		Assert.Equal("mailto:boss@example.com", mr.Element(Email + "Organizer")!.Value);
+	}
+
 	// D1 — Outlook/Google/Exchange all emit BEGIN:VTIMEZONE before BEGIN:VEVENT, and its
 	// STANDARD/DAYLIGHT subcomponents each carry a bare (no-Z, no-TZID) DTSTART for the 1970
 	// DST transition. Prop() scanned the whole ICS from the top and returned that line instead

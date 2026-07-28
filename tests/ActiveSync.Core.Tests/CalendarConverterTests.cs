@@ -303,6 +303,39 @@ public class CalendarConverterTests
 		Assert.Equal("3", data!.FirstOrDefault(e => e.Name == Cal + "MeetingStatus")?.Value);
 	}
 
+	/// <summary>
+	///   D30 — the organizer/attendee email read used a substring Replace("mailto:", "") rather
+	///   than a prefix strip, so the literal text "mailto:" anywhere in the value is removed, not
+	///   just the leading URI scheme. A value that legitimately carries the substring more than
+	///   once (a malformed upstream re-write, or a resource address embedding it) is mangled: only
+	///   the LEADING occurrence should ever be stripped.
+	/// </summary>
+	[Fact]
+	public void ToApplicationData_OrganizerEmail_OnlyStripsTheLeadingMailtoPrefix()
+	{
+		const string ics = """
+		                    BEGIN:VCALENDAR
+		                    VERSION:2.0
+		                    BEGIN:VEVENT
+		                    UID:meet-organizer-3
+		                    DTSTART:20260801T090000Z
+		                    DTEND:20260801T100000Z
+		                    SUMMARY:Planning
+		                    ORGANIZER:mailto:mailto:boss@example.com
+		                    ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:mailto:invitee@example.com
+		                    END:VEVENT
+		                    END:VCALENDAR
+		                    """;
+
+		List<XElement>? data = CalendarConverter.ToApplicationData(ics, BodyPreference.PlainText);
+
+		Assert.NotNull(data);
+		Assert.Equal("mailto:boss@example.com", data!.Single(e => e.Name == Cal + "OrganizerEmail").Value);
+		XElement attendees = data.Single(e => e.Name == Cal + "Attendees");
+		Assert.Equal("mailto:invitee@example.com",
+			attendees.Elements(Cal + "Attendee").Single().Element(Cal + "Email")!.Value);
+	}
+
 	[Fact]
 	public void ToApplicationData_MeetingStatus_IsOrganizer_WhenActingUserIsTheOrganizer()
 	{

@@ -271,7 +271,9 @@ public static class MailConverter
 		DateTime? dtStart = ParseIcsDate(startProp);
 		DateTime? dtEnd = ParseIcsDate(endProp);
 		string location = Prop("LOCATION")?.Value ?? "";
-		string organizer = Prop("ORGANIZER")?.Value.Replace("mailto:", "", StringComparison.OrdinalIgnoreCase) ?? "";
+		// D30: a prefix strip (CalendarConverter.StripMailto), not a substring Replace — the literal
+		// text "mailto:" must only ever be removed from the front of the value.
+		string organizer = CalendarConverter.StripMailto(Prop("ORGANIZER")?.Value) ?? "";
 		bool allDay = startProp is { } sp &&
 		              (sp.Parameters.Contains("VALUE=DATE", StringComparison.OrdinalIgnoreCase) ||
 		               (sp.Value.Length == 8 && !sp.Value.Contains('T')));
