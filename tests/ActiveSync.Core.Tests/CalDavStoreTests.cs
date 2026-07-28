@@ -80,6 +80,38 @@ public sealed class CalDavStoreTests
 		Assert.Contains("/dav/cal/own/", reportPaths);
 	}
 
+	[Fact]
+	public async Task ListFolders_AllHomeSetCalendarsAreShared_StillProducesADefaultCalendar()
+	{
+		// The home set contains exactly one calendar, and it is a share grant — "a share never
+		// claims the default slot" (deliberate, per AGENTS.md) must not leave NO default at all.
+		string homeSet =
+			"""
+			<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+			  <D:response>
+			    <D:href>/dav/cal/team/</D:href>
+			    <D:propstat><D:status>HTTP/1.1 200 OK</D:status>
+			      <D:prop>
+			        <D:resourcetype><D:collection/><C:calendar/></D:resourcetype>
+			        <D:displayname>Team</D:displayname>
+			        <C:supported-calendar-component-set><C:comp name="VEVENT"/></C:supported-calendar-component-set>
+			      </D:prop>
+			    </D:propstat>
+			  </D:response>
+			</D:multistatus>
+			""";
+		StubHandler stub = new(_ => Xml(homeSet));
+		using WebDavClient dav = new(Base, new HttpClient(stub));
+		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/cal/" };
+		SharedCollection[] shared = [new SharedCollection("/dav/cal/team/", ReadOnly: true)];
+		CalDavStore store = new(dav, options, new BackendCredentials("user", "pass"), "user@example.com",
+			NullLogger.Instance, pollSeconds: 60, shared);
+
+		IReadOnlyList<BackendFolder> folders = await store.ListFoldersAsync(CancellationToken.None);
+
+		Assert.Contains(folders, f => f.EasType == EasFolderType.Calendar);
+	}
+
 	private static HttpResponseMessage Xml(string body)
 	{
 		return new HttpResponseMessage((HttpStatusCode)207)

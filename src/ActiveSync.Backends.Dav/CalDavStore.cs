@@ -281,6 +281,20 @@ public sealed class CalDavStore(
 				first = false;
 		}
 
+		// H23: "a share never claims the default slot" is deliberate (AGENTS.md), but it has no
+		// floor — a delegate account whose home set contains only granted collections would
+		// otherwise get ZERO folders of type 8 (Calendar), and iOS in particular expects a default
+		// calendar folder to exist. If nothing was promoted above, promote the first (already
+		// href-sorted) calendar folder, preferring one that is not itself a share.
+		if (folders.Count > 0 && folders.TrueForAll(f => f.EasType != EasFolderType.Calendar))
+		{
+			int promoteIndex = folders.FindIndex(f =>
+				!_sharedCollections.Any(s => SharedHrefEquals(s.Href, FromBackendKey(f.BackendKey))));
+			if (promoteIndex < 0)
+				promoteIndex = 0; // every home-set calendar is a share — fall back to the first anyway
+			folders[promoteIndex] = folders[promoteIndex] with { EasType = EasFolderType.Calendar };
+		}
+
 		// Shared collections (config + `eas share` grants): each is probed individually and
 		// SKIPPED on any failure — an unreachable/revoked share must never break folder sync.
 		foreach (SharedCollection shared in _sharedCollections)
