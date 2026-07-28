@@ -463,9 +463,17 @@ public static class MailConverter
 		return WebUtility.HtmlDecode(text);
 	}
 
+	/// <summary>
+	///   D25 — a naive `value[..max]` can cut a UTF-16 surrogate pair in half, producing a lone
+	///   surrogate that <see cref="System.Xml.XmlWriter" /> rejects when the response is encoded
+	///   -- sinking the whole Sync response over one oversized header rather than one message.
+	///   Route through the byte-budgeted, code-point-aligned truncation the body text already
+	///   uses; <paramref name="max" /> is treated as a byte, not a character, budget (the two
+	///   coincide for the ASCII-heavy header text this is used on).
+	/// </summary>
 	private static string Limit(string value, int max)
 	{
-		return value.Length <= max ? value : value[..max];
+		return BodyText.TruncateUtf8(value, max);
 	}
 
 	private static XElement Opaque(XName name, byte[] data)
