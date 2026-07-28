@@ -218,10 +218,22 @@ public sealed partial class ImapMailBackend(
 					// merge-from-nothing is fine — the payload becomes the whole draft
 				}
 
+				// G9: build the merged content in memory FIRST (the GetMessageAsync fetch above is
+				// non-mutating, so it is always safe to run before touching the old message), then
+				// delete the OLD uid before appending the new one — the reverse of the historical
+				// append-then-delete order. A fault after the fetch/build has no I/O to undo; a
+				// fault after the delete but before the append LOSES the edit (the old message is
+				// simply gone) instead of DUPLICATING it. The old order left a mid-fault mailbox
+				// with BOTH the original (still addressable by the client's stale item key) and
+				// the freshly-appended copy, so a client retry re-executed the whole rewrite and
+				// appended a SECOND stray on every subsequent retry — unbounded duplication. With
+				// delete-first, a retry against an already-deleted uid gets MessageNotFoundException
+				// (caught below, merge-from-nothing), so it converges to exactly one final copy no
+				// matter how many times the delete-but-not-append window is hit.
 				MimeMessage merged = DraftMessageBuilder.Build(applicationData, original, mailAddress);
-				await folder.AppendAsync(merged, MessageFlags.Draft, ct).ConfigureAwait(false);
 				await folder.AddFlagsAsync(uid, MessageFlags.Deleted, true, ct).ConfigureAwait(false);
 				await ExpungeUidAsync(folder, uid, ct).ConfigureAwait(false);
+				await folder.AppendAsync(merged, MessageFlags.Draft, ct).ConfigureAwait(false);
 				return RevisionOf(MessageFlags.None);
 			}
 
