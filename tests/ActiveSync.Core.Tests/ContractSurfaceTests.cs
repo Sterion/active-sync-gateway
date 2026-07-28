@@ -42,7 +42,9 @@ public sealed class ContractSurfaceTests
 	[Fact]
 	public void ContractVersion_IsTheExpectedSurfaceVersion()
 	{
-		Assert.Equal(new Version(1, 1), ContractVersion.Current);
+		// K9 (item 36): TransientRetry.DelaysMs retyped from int[] to ImmutableArray<int> so the
+		// shared retry backoff can no longer be rewritten process-wide by any caller/plugin.
+		Assert.Equal(new Version(1, 2), ContractVersion.Current);
 	}
 
 	// K67: BackendItemNotFoundException derived straight from Exception, so the codebase-wide

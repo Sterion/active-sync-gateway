@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using ActiveSync.Contracts;
 
 namespace ActiveSync.Core.Tests;
@@ -10,6 +11,45 @@ namespace ActiveSync.Core.Tests;
 /// </summary>
 public class TransientRetryTests
 {
+	// K9: DelaysMs used to be a public static readonly int[] — a mutable reference any plugin (or
+	// any host code) could rewrite process-wide, retuning or disabling every backend's backoff.
+	// Reflection avoids a compile-time dependency on the exposed shape (int[] pre-fix,
+	// ImmutableArray<int> post-fix) so this ONE test source compiles — and proves the property —
+	// both before and after the fix.
+	[Fact]
+	public void DelaysMs_CannotBeMutatedByACaller()
+	{
+		FieldInfo? field = typeof(TransientRetry).GetField(nameof(TransientRetry.DelaysMs));
+		PropertyInfo? property = typeof(TransientRetry).GetProperty(nameof(TransientRetry.DelaysMs));
+		object Current() => field is not null ? field.GetValue(null)! : property!.GetValue(null)!;
+
+		object value = Current();
+		try
+		{
+			// A tiny bump (not a huge one) so a pre-fix red run does not stall every OTHER test in
+			// this process that shares the same static array — but any change at all is proof enough.
+			if (value is int[] mutableArray)
+				mutableArray[0] = 151;
+
+			object after = Current();
+			int firstDelay = after switch
+			{
+				int[] arr => arr[0],
+				System.Collections.Generic.IReadOnlyList<int> list => list[0], // ImmutableArray<int> post-fix
+				_ => throw new InvalidOperationException($"Unexpected DelaysMs shape: {after.GetType()}"),
+			};
+
+			Assert.Equal(150, firstDelay);
+		}
+		finally
+		{
+			// Restore, so a pre-fix (red) run of this test does not poison every other test in the
+			// process that shares this static array.
+			if (value is int[] mutableArray)
+				mutableArray[0] = 150;
+		}
+	}
+
 	[Fact]
 	public async Task RunAsync_SuccessOnFirstTry_RunsOnce()
 	{

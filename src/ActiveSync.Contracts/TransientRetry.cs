@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Ruben Andersen
 // SPDX-License-Identifier: MIT
 
+using System.Collections.Immutable;
 using System.Net;
 
 namespace ActiveSync.Contracts;
@@ -14,8 +15,14 @@ namespace ActiveSync.Contracts;
 /// </summary>
 public static class TransientRetry
 {
-	/// <summary>Backoff before each retry; its length is the retry budget (so 3 attempts total).</summary>
-	public static readonly int[] DelaysMs = [150, 400];
+	/// <summary>
+	///   Backoff before each retry; its length is the retry budget (so 3 attempts total).
+	///   K9: this used to be a public mutable <c>int[]</c> in the published MIT contract — any
+	///   loaded plugin (or any host code) could rewrite the shared backing array process-wide,
+	///   stalling or removing every backend's retry backoff. <see cref="ImmutableArray{T}" /> keeps
+	///   the same read shape (<c>Length</c>, indexer) with no settable member.
+	/// </summary>
+	public static readonly ImmutableArray<int> DelaysMs = [150, 400];
 
 	/// <summary>
 	///   Runs <paramref name="action" />, replaying it on a transient failure up to the
