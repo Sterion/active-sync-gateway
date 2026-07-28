@@ -670,20 +670,35 @@ public sealed partial class ImapMailBackend(
 	/// </summary>
 	private static UniqueId ParseUid(IMailFolder folder, string itemKey)
 	{
-		string uidPart = itemKey;
-		int separator = itemKey.IndexOf(':');
-		if (separator >= 0)
-		{
-			if (!uint.TryParse(itemKey[..separator], out uint validity) || validity != folder.UidValidity)
-				throw new BackendItemNotFoundException(
-					$"Mail item key '{itemKey}' belongs to an earlier UIDVALIDITY generation of \"{folder.FullName}\".");
-			uidPart = itemKey[(separator + 1)..];
-		}
+		return ParseUid(folder.UidValidity, folder.FullName, itemKey);
+	}
 
-		// Keys stored before UIDVALIDITY was carried have no generation prefix. They are honoured
-		// for the single sync it takes the diff to reissue them in the qualified form.
+	/// <summary>
+	///   G3: the qualified "&lt;uidvalidity&gt;:&lt;uid&gt;" form is REQUIRED — an unqualified key
+	///   (no ':') used to have the folder's CURRENT UidValidity stamped onto it unconditionally,
+	///   which is exactly the hazard <see cref="ToItemKey" /> exists to close: RFC 3501 lets a
+	///   server reset UIDVALIDITY (mailbox recreated, restored, migrated, index rebuilt), after
+	///   which the same UID number names a different message, so a stale "delete 4711" would
+	///   mutate whatever now holds UID 4711 with no error. `GetItemRevisionsAsync` only ever emits
+	///   the qualified form, and the pre-upgrade legacy-row path this fallback was written for is
+	///   gone (the schema was reinitialized — see AGENTS.md), so the only sources of an unqualified
+	///   key left are a stale pre-upgrade device `ServerId` or a buggy/hostile client. Refusing it
+	///   turns a stale key into a clean Delete+Add re-sync instead of a silent cross-item mutation.
+	/// </summary>
+	internal static UniqueId ParseUid(uint currentUidValidity, string folderFullName, string itemKey)
+	{
+		int separator = itemKey.IndexOf(':');
+		if (separator < 0)
+			throw new BackendItemNotFoundException(
+				$"Mail item key '{itemKey}' has no UIDVALIDITY prefix; it cannot be resolved in \"{folderFullName}\".");
+
+		if (!uint.TryParse(itemKey[..separator], out uint validity) || validity != currentUidValidity)
+			throw new BackendItemNotFoundException(
+				$"Mail item key '{itemKey}' belongs to an earlier UIDVALIDITY generation of \"{folderFullName}\".");
+
+		string uidPart = itemKey[(separator + 1)..];
 		return uint.TryParse(uidPart, out uint value) && value > 0
-			? new UniqueId(folder.UidValidity, value)
+			? new UniqueId(currentUidValidity, value)
 			: throw new BackendItemNotFoundException($"'{itemKey}' is not a valid mail item key.");
 	}
 
