@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Reflection;
 using ActiveSync.Backends.Imap;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Options;
@@ -142,5 +144,31 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 		Assert.NotNull(watcher);
 
 		Assert.Empty(_provider.SnapshotWatchers());
+	}
+
+	/// <summary>
+	///   G28: <c>TrimUserResources</c>'s <c>key[..key.IndexOf('\n')]</c> has no guard against a
+	///   missing separator, unlike the defensive form <see cref="ImapBackendProvider.SnapshotWatchers" />
+	///   already uses. Unreachable via <c>GetOrCreateWatcher</c> today (every key it builds is
+	///   "user\nfolder"), but the eviction sweep runs on a background timer thread whose escaping
+	///   exceptions <c>BackendSessionFactory.EvictIdleSessions</c> explicitly guards against ("an
+	///   escaping exception terminates the process") — reproduced by injecting a malformed key
+	///   directly into the private watcher dictionary via reflection, since no public path can build
+	///   one today.
+	/// </summary>
+	[Fact]
+	public void TrimUserResources_KeyWithoutASeparator_DoesNotThrow()
+	{
+		ConcurrentDictionary<string, Lazy<ImapIdleWatcher>> watchers =
+			(ConcurrentDictionary<string, Lazy<ImapIdleWatcher>>)typeof(ImapBackendProvider)
+				.GetField("_watchers", BindingFlags.NonPublic | BindingFlags.Instance)!
+				.GetValue(_provider)!;
+		watchers["no-separator-key"] = new Lazy<ImapIdleWatcher>(() =>
+			new ImapIdleWatcher(new ImapOptions(), new BackendCredentials("x", "y"), "INBOX", NullLogger.Instance));
+
+		Exception? ex = Record.Exception(() =>
+			_provider.TrimUserResources(new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
+
+		Assert.Null(ex);
 	}
 }

@@ -158,7 +158,12 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		// A user's shared IDLE watchers live exactly as long as any of their sessions.
 		foreach ((string key, Lazy<ImapIdleWatcher> lazy) in _watchers)
 		{
-			string user = key[..key.IndexOf('\n')];
+			// G28: defensive against a missing separator, matching SnapshotWatchers below — this
+			// runs on the eviction sweep's background timer thread, whose escaping exceptions
+			// BackendSessionFactory.EvictIdleSessions explicitly guards against (an escaping
+			// exception there terminates the process).
+			int separator = key.IndexOf('\n');
+			string user = separator < 0 ? key : key[..separator];
 			if (!activeGatewayLogins.Contains(user) && _watchers.TryRemove(key, out Lazy<ImapIdleWatcher>? removed))
 			{
 				_logger.LogDebug("Evicting IMAP IDLE watcher {Key}", key.Replace('\n', '/'));
