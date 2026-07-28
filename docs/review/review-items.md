@@ -444,7 +444,7 @@ work. Every finding ID appears in exactly one item.
 > the standard mail ports is opportunistic STARTTLS, which downgrades silently. `D24` a bare CR survives
 > vCard escaping. Plus `ConversationIndex`, surrogate cuts, `var` usage, allocation.
 
-**35. Hosting, CLI & backend nits** — ~~`E9`~~ ~~`E12`~~ ~~`E13`~~ ~~`E15`~~ ~~`E16`~~ `E21` `E22` ~~`E23`~~ `G8` ~~`G11`~~ `G14` `G15` `G25` `G27` `G28` `G29`
+**35. Hosting, CLI & backend nits** — ~~`E9`~~ ~~`E12`~~ ~~`E13`~~ ~~`E15`~~ ~~`E16`~~ ~~`E21`~~ `E22` ~~`E23`~~ `G8` ~~`G11`~~ `G14` `G15` `G25` `G27` `G28` `G29`
 > `E9` `/readyz` component detail is gated on a loopback peer, so the k8s node probe the code names never sees
 > it. `E16` `X-Forwarded-Proto` is taken leftmost with no chain walk. `G8` `PathSeparator` is a documented,
 > schema-exposed IMAP option nothing reads. `G14` folder listing is one LIST per folder, unbounded depth,

@@ -142,8 +142,12 @@ public static class WebApplicationExtensions
 	///   <para>
 	///     It is deliberately not an <c>UseExceptionHandler</c> re-execute: there is no error
 	///     page to re-execute into, and the clients here are phones speaking WBXML, for which
-	///     any HTML body would be noise. Serilog's request logging sits outside this and still
-	///     records the failure at Error, so nothing is lost by swallowing.
+	///     any HTML body would be noise. E21: Serilog's request-logging middleware
+	///     (<see cref="UseEasRequestLogging" />) is registered AFTER this shield, so it sits
+	///     NESTED INSIDE it, not outside — it still records the failure at Error via its own
+	///     exception filter and rethrows, so nothing is lost by swallowing here, but the
+	///     consequence is that an escaped exception logs at Error TWICE: once as Serilog's
+	///     "responded 500" request-completion line, once as this handler's own line below.
 	///   </para>
 	/// </summary>
 	public static IApplicationBuilder UseUnhandledExceptionShield(this IApplicationBuilder app)
