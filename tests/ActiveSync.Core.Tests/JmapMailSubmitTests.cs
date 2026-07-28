@@ -155,7 +155,10 @@ public sealed class JmapMailSubmitTests
 	// The account id for EmailSubmission/set was taken from primaryAccounts["...:mail"], but
 	// RFC 8621 §7 gives submission its own primaryAccounts entry — on a server where the two
 	// differ, submitting under the mail account fails with accountNotFound. The Email/import call
-	// (a Mail-capability method) must still use the mail account.
+	// (a Mail-capability method) must still use the mail account. RFC 8621 §7.1 puts Identity
+	// under the SAME submission capability as EmailSubmission, so Identity/get must resolve
+	// under the submission account too — only Mailbox/get (a Mail-capability method) belongs
+	// under the mail account.
 	[Fact]
 	public async Task Send_AccountsDiffer_UsesSubmissionAccountForEmailSubmissionSet()
 	{
@@ -197,6 +200,8 @@ public sealed class JmapMailSubmitTests
 
 		Assert.Equal("subAcct", accountIdByMethod["EmailSubmission/set"]);
 		Assert.Equal("mailAcct", accountIdByMethod["Email/import"]);
+		Assert.Equal("subAcct", accountIdByMethod["Identity/get"]);
+		Assert.Equal("mailAcct", accountIdByMethod["Mailbox/get"]);
 	}
 
 	private static HttpResponseMessage Json(string body)

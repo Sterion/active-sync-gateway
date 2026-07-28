@@ -52,7 +52,7 @@ public sealed class JmapMailSubmit(
 			.ConfigureAwait(false);
 
 		(string identityId, string draftsMailboxId) =
-			await ResolvePrerequisitesAsync(accountId, from, ct).ConfigureAwait(false);
+			await ResolvePrerequisitesAsync(accountId, submissionAccountId, from, ct).ConfigureAwait(false);
 
 		Dictionary<string, object?> envelope = new()
 		{
@@ -159,13 +159,18 @@ public sealed class JmapMailSubmit(
 		return _submissionAccount = session.PrimaryAccount(JmapCapabilities.Submission);
 	}
 
-	/// <summary>Fetches the sending identity (matching the From address if possible) and the Drafts mailbox.</summary>
+	/// <summary>
+	///   Fetches the sending identity (matching the From address if possible) and the Drafts mailbox.
+	///   Identity/get rides the SUBMISSION account — RFC 8621 §7.1 defines Identity under
+	///   <c>urn:ietf:params:jmap:submission</c>, the same capability as EmailSubmission/set, not
+	///   Mail — while Mailbox/get is a Mail-capability method and stays on the mail account.
+	/// </summary>
 	private async Task<(string IdentityId, string DraftsMailboxId)> ResolvePrerequisitesAsync(
-		string accountId, string from, CancellationToken ct)
+		string accountId, string submissionAccountId, string from, CancellationToken ct)
 	{
 		JmapCall identities = new("Identity/get", new Dictionary<string, object?>
 		{
-			["accountId"] = accountId,
+			["accountId"] = submissionAccountId,
 			["ids"] = null
 		}, "0");
 		JmapCall mailboxes = new("Mailbox/get", new Dictionary<string, object?>

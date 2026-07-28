@@ -552,7 +552,7 @@ ever responded to, not just per retry. FIX: either give `SendDedupStore` a age-b
 completed claims older than N days, independent of a collection commit) or a small periodic purge command
 analogous to `FolderRetentionService`/`LogRetentionService`.
 
-`N2` **Low** `JmapMailSubmit.ResolvePrerequisitesAsync` (`src/ActiveSync.Backends.Jmap/JmapMailSubmit.cs`)
+~~`N2`~~ **Low — FIXED** `JmapMailSubmit.ResolvePrerequisitesAsync` (`src/ActiveSync.Backends.Jmap/JmapMailSubmit.cs`)
 issues `Identity/get` under the MAIL primary account, not the submission one, even after H9 gave
 `EmailSubmission/set` its own submission-capability account. RFC 8621 §7.1 defines `Identity` under
 `urn:ietf:params:jmap:submission`, same as `EmailSubmission`, so on a server where the mail and submission
