@@ -48,24 +48,18 @@ public sealed partial class ImapMailBackend(
 		return session.RunAsync<IReadOnlyList<BackendFolder>>(async client =>
 		{
 			List<BackendFolder> result = new();
-			IMailFolder? personal = client.PersonalNamespaces.Count > 0
-				? client.GetFolder(client.PersonalNamespaces[0])
-				: null;
-			IList<IMailFolder> folders = personal is not null
-				? await personal.GetSubfoldersAsync(false, ct).ConfigureAwait(false)
+
+			// G14: fetch the WHOLE tree in one LIST ("" "namespace/*") instead of walking one level
+			// at a time (one GetSubfoldersAsync round trip per folder, recursively) — a mailbox with
+			// N folders used to cost N round trips per FolderSync, all held under the per-user
+			// session gate, blocking every other device's Sync and the Ping STATUS poll for the
+			// duration. MailKit reconstructs ParentFolder/hierarchy from the returned names the same
+			// way regardless of how a folder was discovered.
+			List<IMailFolder> all = client.PersonalNamespaces.Count > 0
+				? (await client.GetFoldersAsync(client.PersonalNamespaces[0], StatusItems.None, false, ct)
+					.ConfigureAwait(false)).ToList()
 				: [];
 
-			List<IMailFolder> all = new();
-
-			async Task Walk(IMailFolder folder)
-			{
-				all.Add(folder);
-				foreach (IMailFolder child in await folder.GetSubfoldersAsync(false, ct).ConfigureAwait(false))
-					await Walk(child).ConfigureAwait(false);
-			}
-
-			foreach (IMailFolder f in folders)
-				await Walk(f).ConfigureAwait(false);
 			if (!all.Any(f => f.FullName.Equals("INBOX", StringComparison.OrdinalIgnoreCase)))
 				all.Insert(0, client.Inbox);
 
