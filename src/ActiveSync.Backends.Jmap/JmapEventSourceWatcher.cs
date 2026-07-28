@@ -1,3 +1,4 @@
+using System.Text;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using Microsoft.Extensions.Logging;
@@ -79,7 +80,12 @@ public sealed class JmapEventSourceWatcher : IAsyncDisposable
 					return; // server advertises no EventSource — nothing to watch
 				backoffSeconds = 1;
 				await using Stream stream = await response.Content.ReadAsStreamAsync(_cts.Token).ConfigureAwait(false);
-				using StreamReader reader = new(stream);
+				// H12: BackendHttpClientFactory documents this stream (opened with ResponseHeadersRead)
+				// as exempt from MaxResponseContentBufferSize — a plain StreamReader.ReadLineAsync here
+				// grows its internal buffer without bound if the server ever emits a line with no '\n'.
+				// CappedLineReader abandons the connection (throws, caught by the reconnect logic below)
+				// once a single record exceeds the cap instead.
+				CappedLineReader reader = new(stream);
 				// H6: dispatch once at the record boundary (a blank line — SSE fields have no fixed
 				// order within a record, so a ping's "data:" line can legally arrive before its
 				// "event: ping" line, and signalling as soon as "data:" is seen mis-latches on that).
@@ -133,5 +139,55 @@ public sealed class JmapEventSourceWatcher : IAsyncDisposable
 		TaskCompletionSource previous = Interlocked.Exchange(
 			ref _signal, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
 		previous.TrySetResult();
+	}
+
+	/// <summary>
+	///   H12: a forward-only, size-capped line reader over the raw SSE byte stream. Unlike
+	///   <see cref="StreamReader" />.ReadLineAsync, which grows its internal buffer without bound
+	///   when a line never terminates, this throws once a single unterminated record exceeds
+	///   <see cref="MaxLineBytes" /> — an SSE record here (a tiny StateChange payload or a ping) is
+	///   always a few hundred bytes, so the cap is generous while still being finite. The thrown
+	///   <see cref="BackendException" /> is caught by <see cref="RunAsync" />'s existing reconnect
+	///   logic, same as any other dropped connection.
+	/// </summary>
+	private sealed class CappedLineReader(Stream inner)
+	{
+		private const int MaxLineBytes = 64 * 1024;
+
+		private readonly byte[] _buffer = new byte[4096];
+		private int _position;
+		private int _length;
+
+		public async Task<string?> ReadLineAsync(CancellationToken ct)
+		{
+			using MemoryStream line = new();
+			while (true)
+			{
+				if (_position >= _length)
+				{
+					_length = await inner.ReadAsync(_buffer, ct).ConfigureAwait(false);
+					_position = 0;
+					if (_length == 0)
+						return line.Length > 0 ? Decode(line) : null; // EOF — reconnect
+				}
+
+				byte b = _buffer[_position++];
+				if (b == (byte)'\n')
+					return Decode(line);
+				line.WriteByte(b);
+				if (line.Length > MaxLineBytes)
+					throw new BackendException(
+						$"JMAP EventSource record exceeded the {MaxLineBytes}-byte line cap.");
+			}
+		}
+
+		private static string Decode(MemoryStream line)
+		{
+			byte[] bytes = line.ToArray();
+			int length = bytes.Length;
+			if (length > 0 && bytes[length - 1] == (byte)'\r') // StreamReader.ReadLine parity: trim a lone CR before LF
+				length--;
+			return Encoding.UTF8.GetString(bytes, 0, length);
+		}
 	}
 }

@@ -75,6 +75,78 @@ public sealed class JmapEventSourceWatcherTests
 		Assert.Same(wait, winner); // the state-change record must have signalled
 	}
 
+	// H12: the SSE stream read through a plain StreamReader.ReadLineAsync with no size cap, on a
+	// path BackendHttpClientFactory documents as exempt from the response ceiling (it opens the
+	// stream with ResponseHeadersRead, so MaxResponseContentBufferSize never applies). A server
+	// that emits an endless line with no '\n' grows the reader's internal buffer without bound.
+	// Proven deterministically (not timing-dependent): an in-memory stream that never returns 0
+	// bytes and never emits a newline is read for a fixed, short wall-clock window; unmodified
+	// code has no reason to ever stop reading within that window, so it consumes many times the
+	// intended cap. The fix must abandon the connection once a single record exceeds the cap, so
+	// total bytes read stays close to it.
+	[Fact]
+	public async Task UnboundedSseLine_DoesNotGrowTheReadBufferWithoutLimit()
+	{
+		InfiniteNoNewlineStream garbage = new();
+		StubHandler stub = new(request => request.RequestUri!.AbsolutePath.StartsWith("/jmap/eventsource")
+			? new HttpResponseMessage(HttpStatusCode.OK)
+			{
+				Content = new StreamContent(garbage) { Headers = { ContentType = new("text/event-stream") } }
+			}
+			: Json(SessionJson));
+
+		await using JmapEventSourceWatcher watcher = new(
+			new JmapClient(Base, new HttpClient(stub)), new BackendCredentials("u", "p"), NullLogger.Instance);
+
+		// Give the background loop a generous window to read as much as it will. Real network I/O
+		// would throttle this; here the stream is fully in-memory, so the only thing that can bound
+		// the byte count is the watcher itself abandoning the connection.
+		await Task.Delay(TimeSpan.FromMilliseconds(500));
+
+		Assert.True(garbage.TotalRead < 2_000_000,
+			$"the SSE line reader must cap a single unterminated record instead of growing without " +
+			$"bound; read {garbage.TotalRead} bytes with no line terminator in 500ms");
+	}
+
+	/// <summary>An endless byte stream (no EOF, no '\n') that counts everything read from it.</summary>
+	private sealed class InfiniteNoNewlineStream : Stream
+	{
+		public long TotalRead;
+
+		public override bool CanRead => true;
+		public override bool CanSeek => false;
+		public override bool CanWrite => false;
+		public override long Length => throw new NotSupportedException();
+		public override long Position { get => TotalRead; set => throw new NotSupportedException(); }
+
+		public override int Read(byte[] buffer, int offset, int count)
+		{
+			// Never called by the watcher (it reads asynchronously) — this test double only needs
+			// to satisfy the abstract Stream surface without itself sync-over-async'ing.
+			throw new NotSupportedException();
+		}
+
+		public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) =>
+			ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+
+		public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+		{
+			// Honor cancellation so the watcher's dispose (which cancels and awaits the background
+			// loop) can actually terminate — an infinite stream that ignored ct would hang the test
+			// itself rather than exercise the size cap under test.
+			ct.ThrowIfCancellationRequested();
+			int n = Math.Min(buffer.Length, 4096);
+			buffer.Span[..n].Fill((byte)'a'); // never '\n' or '\r' — one endless "line"
+			TotalRead += n;
+			return ValueTask.FromResult(n);
+		}
+
+		public override void Flush() { }
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+	}
+
 	private static HttpResponseMessage Sse(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)
