@@ -10,8 +10,8 @@ using Ical.Net.Serialization;
 
 // EAS 14.1 expresses at most one recurrence rule per event and identifies exceptions by their
 // original start time, so the obsolete single-value RecurrenceId/RecurrenceRules surface of
-// Ical.Net matches what the protocol can carry.
-#pragma warning disable CS0618
+// Ical.Net matches what the protocol can carry (scoped CS0618 suppressions below, one per call
+// site, rather than a file-wide one).
 
 namespace ActiveSync.Backends.Common.Converters;
 
@@ -35,7 +35,9 @@ public static class CalendarConverter
 		if (events is null || events.Count == 0)
 			return null;
 
+#pragma warning disable CS0618 // obsolete single-value RecurrenceId (see file header note)
 		CalendarEvent master = events.FirstOrDefault(e => e.RecurrenceId is null) ?? events.First();
+#pragma warning restore CS0618
 		List<XElement> data = new();
 
 		TimeZoneInfo? tz = ResolveTimeZone(master.Start?.TzId);
@@ -136,6 +138,7 @@ public static class CalendarConverter
 				data.Add(new XElement(Cal + "Reminder", ((int)minutesBefore).ToString()));
 		}
 
+#pragma warning disable CS0618 // obsolete single-value RecurrenceRules/RecurrenceId (see file header note)
 		RecurrencePattern? recurrence = master.RecurrenceRules?.FirstOrDefault();
 		if (recurrence is not null)
 		{
@@ -182,6 +185,7 @@ public static class CalendarConverter
 			if (exceptions.HasElements)
 				data.Add(exceptions);
 		}
+#pragma warning restore CS0618
 
 		string? description = master.Description;
 		if (!string.IsNullOrEmpty(description))
@@ -269,8 +273,10 @@ public static class CalendarConverter
 		if (existingIcs is not null)
 		{
 			calendar = IcalHelpers.Load(existingIcs);
+#pragma warning disable CS0618 // obsolete single-value RecurrenceId (see file header note)
 			evt = calendar.Events.FirstOrDefault(e => e.RecurrenceId is null) ?? calendar.Events.FirstOrDefault()
 				?? AddNewEvent(calendar);
+#pragma warning restore CS0618
 		}
 		else
 		{
@@ -355,12 +361,17 @@ public static class CalendarConverter
 		XElement? recurrenceElement = applicationData.Element(Cal + "Recurrence");
 		if (recurrenceElement is not null)
 		{
+			// Obsolete single-value RecurrenceRules surface (see file header note).
+#pragma warning disable CS0618
 			evt.RecurrenceRules?.Clear();
+#pragma warning restore CS0618
 			RecurrencePattern? rule = RecurrenceMapper.Parse(Cal, recurrenceElement);
 			if (rule is not null)
 			{
+#pragma warning disable CS0618
 				evt.RecurrenceRules ??= [];
 				evt.RecurrenceRules.Add(rule);
+#pragma warning restore CS0618
 			}
 		}
 
@@ -463,7 +474,9 @@ public static class CalendarConverter
 	/// </summary>
 	private static string SchedulingFingerprint(CalendarEvent evt)
 	{
+#pragma warning disable CS0618 // obsolete single-value RecurrenceRules (see file header note)
 		string rrule = evt.RecurrenceRules?.FirstOrDefault()?.ToString() ?? "";
+#pragma warning restore CS0618
 		return $"{ToUtc(evt.Start as CalDateTime):O}|{ToUtc(evt.End as CalDateTime):O}|{rrule}|" +
 		       $"{evt.Location}|{evt.Summary}";
 	}
@@ -479,8 +492,10 @@ public static class CalendarConverter
 	public static SchedulingInfo? ReadSchedulingInfo(string ics)
 	{
 		Calendar? calendar = Calendar.Load(ics);
+#pragma warning disable CS0618 // obsolete single-value RecurrenceId (see file header note)
 		CalendarEvent? evt = calendar?.Events.FirstOrDefault(e => e.RecurrenceId is null)
 		                     ?? calendar?.Events.FirstOrDefault();
+#pragma warning restore CS0618
 		if (evt is null)
 			return null;
 		List<(string Email, string? Name)> attendees = new();
@@ -505,8 +520,10 @@ public static class CalendarConverter
 		CalendarEvent? Load(string? ics)
 		{
 			Calendar? calendar = ics is null ? null : Calendar.Load(ics);
+#pragma warning disable CS0618 // obsolete single-value RecurrenceId (see file header note)
 			return calendar?.Events.FirstOrDefault(e => e.RecurrenceId is null)
 			       ?? calendar?.Events.FirstOrDefault();
+#pragma warning restore CS0618
 		}
 
 		CalendarEvent? oldEvent = Load(oldIcs);
@@ -726,8 +743,10 @@ public static class CalendarConverter
 	public static BackendAttachment? ExtractAttachment(string ics, int index)
 	{
 		Calendar? calendar = Calendar.Load(ics);
+#pragma warning disable CS0618 // obsolete single-value RecurrenceId (see file header note)
 		CalendarEvent? master = calendar?.Events.FirstOrDefault(e => e.RecurrenceId is null)
 		                        ?? calendar?.Events.FirstOrDefault();
+#pragma warning restore CS0618
 		List<Attachment> binaries = master?.Attachments?
 			.Where(a => a?.Data is { Length: > 0 }).ToList() ?? [];
 		if (index < 0 || index >= binaries.Count)
@@ -759,8 +778,10 @@ public static class CalendarConverter
 		// :423-424, :644-645) — an ICS that lists a modified-occurrence override before the
 		// master VEVENT must still update the master's attendee, or the acceptance is lost for
 		// the series the next time anything reads the stored (master) PARTSTAT.
+#pragma warning disable CS0618 // obsolete single-value RecurrenceId (see file header note)
 		CalendarEvent? evt = calendar?.Events.FirstOrDefault(e => e.RecurrenceId is null)
 			?? calendar?.Events.FirstOrDefault();
+#pragma warning restore CS0618
 		if (calendar is null || evt is null)
 			return null;
 

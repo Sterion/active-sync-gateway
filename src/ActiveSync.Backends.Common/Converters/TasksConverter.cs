@@ -6,11 +6,6 @@ using Ical.Net;
 using Ical.Net.CalendarComponents;
 using Ical.Net.DataTypes;
 
-// EAS expresses at most one recurrence rule per task, so the obsolete single-value
-// RecurrenceRules surface of Ical.Net matches what the protocol can carry (same rationale
-// as CalendarConverter).
-#pragma warning disable CS0618
-
 namespace ActiveSync.Backends.Common.Converters;
 
 /// <summary>
@@ -94,7 +89,12 @@ public static class TasksConverter
 			data.Add(new XElement(Tasks + "Categories",
 				categories.Select(c => new XElement(Tasks + "Category", c))));
 
+		// EAS expresses at most one recurrence rule per task, so the obsolete single-value
+		// RecurrenceRules surface of Ical.Net matches what the protocol can carry (same rationale
+		// as CalendarConverter).
+#pragma warning disable CS0618
 		if (todo.RecurrenceRules?.FirstOrDefault() is { } rule)
+#pragma warning restore CS0618
 		{
 			CalDateTime? anchor = todo.DtStart ?? todo.Due;
 			DateTime anchorUtc = anchor?.AsUtc ?? DateTime.UtcNow.Date;
@@ -203,9 +203,12 @@ public static class TasksConverter
 			RecurrencePattern? rule = regenerate ? null : RecurrenceMapper.Parse(Tasks, recurrenceElement);
 			if (rule is not null)
 			{
+				// Same obsolete single-value RecurrenceRules surface as the read side above.
+#pragma warning disable CS0618
 				todo.RecurrenceRules?.Clear();
 				todo.RecurrenceRules ??= [];
 				todo.RecurrenceRules.Add(rule);
+#pragma warning restore CS0618
 				// An RRULE needs an anchor: derive DTSTART from Recurrence/Start when the
 				// task has no dates at all (date-only, like the nominal handling above).
 				if (todo.DtStart is null && todo.Due is null &&

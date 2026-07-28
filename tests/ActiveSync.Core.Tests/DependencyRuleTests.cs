@@ -182,6 +182,35 @@ public sealed class DependencyRuleTests
 			"Expected JmapMailStore.Attachments.cs (attachment fetch + file-reference codec) to exist as its own partial.");
 	}
 
+	// S2: CalendarConverter.cs and TasksConverter.cs each carried a file-wide
+	// `#pragma warning disable CS0618` (above the `namespace` declaration, no matching `restore`) that
+	// suppressed obsolete-API warnings for the ENTIRE file rather than the handful of Ical.Net
+	// single-value-recurrence call sites they were written for. This pins the suppression as narrowly
+	// scoped: every `disable` in the file has a matching `restore` in the same file, and none of them
+	// sit ahead of the `namespace` declaration (which is what a file-wide suppression looks like).
+	[Theory]
+	[InlineData("CalendarConverter.cs")]
+	[InlineData("TasksConverter.cs")]
+	public void Cs0618Suppressions_AreScopedNarrowly_NotFileWide(string fileName)
+	{
+		string file = Path.Combine(
+			FindRepoRoot(), "src", "ActiveSync.Backends.Common", "Converters", fileName);
+		string[] lines = File.ReadAllLines(file);
+		int namespaceLine = Array.FindIndex(
+			lines, static l => l.TrimStart().StartsWith("namespace ", StringComparison.Ordinal));
+		Assert.True(namespaceLine >= 0, $"{file}: expected a namespace declaration.");
+
+		int disables = lines.Count(l => l.Contains("#pragma warning disable CS0618", StringComparison.Ordinal));
+		int restores = lines.Count(l => l.Contains("#pragma warning restore CS0618", StringComparison.Ordinal));
+		Assert.True(disables > 0,
+			$"{file}: expected at least one CS0618 disable (the obsolete Ical.Net recurrence surface is still used).");
+		Assert.Equal(disables, restores);
+
+		bool anyBeforeNamespace = lines.Take(namespaceLine)
+			.Any(l => l.Contains("#pragma warning disable CS0618", StringComparison.Ordinal));
+		Assert.False(anyBeforeNamespace, $"{file}: CS0618 is disabled ahead of the namespace declaration (file-wide).");
+	}
+
 	private static string FindRepoRoot()
 	{
 		DirectoryInfo? dir = new(AppContext.BaseDirectory);
