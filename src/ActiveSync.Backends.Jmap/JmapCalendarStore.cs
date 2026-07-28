@@ -28,6 +28,14 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 
 	private string? _account;
 
+	// H7: the full account listing (state + events) cached on the store instance. GetItemRevisionsAsync
+	// is invoked once PER CALENDAR within one Sync round, and RespondToMeetingAsync adds another
+	// caller — without this, M calendars cost M full downloads of the same N events. A cheap
+	// state-only check (StateAsync) decides whether the cached list is still current before paying
+	// for a real download.
+	private List<JsonElement>? _cachedEvents;
+	private string? _cachedEventsState;
+
 	public string EasClass => Protocol.EasClass.Calendar;
 
 	public bool OwnsBackendKey(string backendKey) => backendKey.StartsWith(KeyPrefix, StringComparison.Ordinal);
@@ -69,7 +77,7 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string calId = FromKey(folderBackendKey);
-		List<JsonElement> events = await GetAllEventsAsync(account, ct).ConfigureAwait(false);
+		List<JsonElement> events = await AllEventsAsync(account, ct).ConfigureAwait(false);
 		// H29: honor the client's calendar FilterType window instead of ignoring it (CalDavStore
 		// applies a time-range; the JMAP store enumerates all events, so it filters in memory).
 		return events.Where(e => InCalendar(e, calId))
@@ -213,7 +221,7 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		string calendarFolderBackendKey, string eventUid, int userResponse, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		List<JsonElement> events = await GetAllEventsAsync(account, ct).ConfigureAwait(false);
+		List<JsonElement> events = await AllEventsAsync(account, ct).ConfigureAwait(false);
 		JsonElement match = events.FirstOrDefault(e =>
 			e.TryGetProperty("uid", out JsonElement u) && u.GetString() == eventUid);
 		if (match.ValueKind != JsonValueKind.Object)
@@ -271,7 +279,76 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		return list.GetArrayLength() == 0 ? null : list[0].Clone();
 	}
 
-	private async Task<List<JsonElement>> GetAllEventsAsync(string account, CancellationToken ct)
+	private async Task<Dictionary<string, string>> TokensAsync(
+		string account, IReadOnlyList<string> folderBackendKeys, CancellationToken ct)
+	{
+		// H15: the wait token is the account-level CalendarEvent state instead of a SHA-256 over the
+		// full JSCalendar body of every event, which used to be re-downloaded on every poll tick for
+		// the whole heartbeat. The state is account-wide, so a change in one calendar shifts every
+		// watched calendar's token — the wait over-notifies rather than misses (the safe direction;
+		// the client resyncs and finds nothing new). Mirrors the mail store's H19 token.
+		string state = await StateAsync(account, ct).ConfigureAwait(false);
+		Dictionary<string, string> tokens = new(StringComparer.Ordinal);
+		foreach (string folderKey in folderBackendKeys)
+			tokens[folderKey] = state;
+		return tokens;
+	}
+
+	// H7: CalendarEvent/get with an empty id list returns just the current account-level state —
+	// no event bodies — so this is cheap enough to call before every full download to decide
+	// whether the cache is still current.
+	private async Task<string> StateAsync(string account, CancellationToken ct)
+	{
+		using JmapResponse response = await client.CallAsync(Cap, "CalendarEvent/get", new Dictionary<string, object?>
+		{
+			["accountId"] = account,
+			["ids"] = Array.Empty<string>()
+		}, ct).ConfigureAwait(false);
+		JsonElement args = response.Arguments("0");
+		return args.TryGetProperty("state", out JsonElement s) ? s.GetString() ?? "" : "";
+	}
+
+	// H7: caches the full account listing on the store instance, keyed by the CalendarEvent state,
+	// so a Sync round with M calendars (GetItemRevisionsAsync is invoked once per calendar, and
+	// RespondToMeetingAsync adds another caller) costs at most one real download, not M.
+	private async Task<List<JsonElement>> AllEventsAsync(string account, CancellationToken ct)
+	{
+		string state = await StateAsync(account, ct).ConfigureAwait(false);
+		if (_cachedEvents is not null && string.Equals(_cachedEventsState, state, StringComparison.Ordinal))
+			return _cachedEvents;
+
+		List<JsonElement> events = await FetchAllEventsAsync(account, ct).ConfigureAwait(false);
+		_cachedEvents = events;
+		_cachedEventsState = state;
+		return events;
+	}
+
+	private async Task<List<JsonElement>> FetchAllEventsAsync(string account, CancellationToken ct)
+	{
+		JmapSessionResource session = await client.GetSessionAsync(ct).ConfigureAwait(false);
+		if (session.CoreLimits.MaxObjectsInGet == int.MaxValue)
+			return await FetchAllEventsUnboundedAsync(account, ct).ConfigureAwait(false);
+
+		try
+		{
+			// H7: a server that declares a finite maxObjectsInGet answers requestTooLarge to a
+			// blind "ids:null" over a large calendar — page the ids through CalendarEvent/query
+			// (position-based, restarting on a queryState shift, same H3 protection the mail
+			// store's Email/query paging uses) and fetch each page's bodies in maxObjectsInGet
+			// batches.
+			return await FetchAllEventsPagedAsync(account, session, ct).ConfigureAwait(false);
+		}
+		catch (BackendException)
+		{
+			// CalendarEvent/query is FTS-backed and eventually-consistent on some servers (the
+			// contact store's ContactCard/query is documented as answering serverUnavailable right
+			// after a write) — fall back to the simple, always-consistent ids:null get rather than
+			// failing the whole calendar sync over the paging optimization.
+			return await FetchAllEventsUnboundedAsync(account, ct).ConfigureAwait(false);
+		}
+	}
+
+	private async Task<List<JsonElement>> FetchAllEventsUnboundedAsync(string account, CancellationToken ct)
 	{
 		using JmapResponse response = await client.CallAsync(Cap, "CalendarEvent/get", new Dictionary<string, object?>
 		{
@@ -281,27 +358,74 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		return response.Arguments("0").GetProperty("list").EnumerateArray().Select(e => e.Clone()).ToList();
 	}
 
-	private async Task<Dictionary<string, string>> TokensAsync(
-		string account, IReadOnlyList<string> folderBackendKeys, CancellationToken ct)
+	private async Task<List<JsonElement>> FetchAllEventsPagedAsync(
+		string account, JmapSessionResource session, CancellationToken ct)
 	{
-		// H15: the wait token is the account-level CalendarEvent state instead of a SHA-256 over the
-		// full JSCalendar body of every event, which used to be re-downloaded on every poll tick for
-		// the whole heartbeat. CalendarEvent/get with an empty id list returns just the current state;
-		// it advances on ANY event create/update/destroy. The state is account-wide, so a change in
-		// one calendar shifts every watched calendar's token — the wait over-notifies rather than
-		// misses (the safe direction; the client resyncs and finds nothing new). Mirrors the mail
-		// store's H19 token.
-		using JmapResponse response = await client.CallAsync(Cap, "CalendarEvent/get", new Dictionary<string, object?>
+		int page = Math.Max(1, Math.Min(500, session.CoreLimits.MaxObjectsInGet));
+		List<JsonElement> events = new();
+		int position = 0;
+		int previousPosition = -1;
+		string? queryState = null;
+		int restartsRemaining = 3;
+		while (true)
 		{
-			["accountId"] = account,
-			["ids"] = Array.Empty<string>()
-		}, ct).ConfigureAwait(false);
-		JsonElement args = response.Arguments("0");
-		string state = args.TryGetProperty("state", out JsonElement s) ? s.GetString() ?? "" : "";
-		Dictionary<string, string> tokens = new(StringComparer.Ordinal);
-		foreach (string folderKey in folderBackendKeys)
-			tokens[folderKey] = state;
-		return tokens;
+			JmapCall query = new("CalendarEvent/query", new Dictionary<string, object?>
+			{
+				["accountId"] = account,
+				["position"] = position,
+				["limit"] = page
+			}, "0");
+			JmapCall get = new("CalendarEvent/get", new Dictionary<string, object?>
+			{
+				["accountId"] = account,
+				["#ids"] = ResultRef("0", "CalendarEvent/query", "/ids")
+			}, "1");
+
+			using JmapResponse response = await client.InvokeAsync(Cap, [query, get], ct).ConfigureAwait(false);
+			JsonElement queryArgs = response.Arguments("0");
+
+			// Same defence as the mail store's H3 fix: a concurrent write can shift the (unsorted,
+			// server-defined) result order between pages, so a queryState change restarts the whole
+			// enumeration from position 0 instead of risking a dropped or duplicated event.
+			string? currentState =
+				queryArgs.TryGetProperty("queryState", out JsonElement qsEl) ? qsEl.GetString() : null;
+			if (queryState is not null &&
+			    !string.Equals(queryState, currentState, StringComparison.Ordinal) &&
+			    restartsRemaining > 0)
+			{
+				restartsRemaining--;
+				events.Clear();
+				position = 0;
+				previousPosition = -1;
+				queryState = null;
+				continue;
+			}
+
+			queryState = currentState;
+			foreach (JsonElement jsEvent in response.Arguments("1").GetProperty("list").EnumerateArray())
+				events.Add(jsEvent.Clone());
+
+			int returned = queryArgs.GetProperty("ids").GetArrayLength();
+			int reported = queryArgs.TryGetProperty("position", out JsonElement pos) && pos.TryGetInt32(out int pv)
+				? pv
+				: position;
+			if (reported <= previousPosition)
+				break; // a server that never advances position must not spin this loop forever
+			previousPosition = reported;
+			position = reported + returned;
+			if (returned == 0)
+				break;
+			if (queryArgs.TryGetProperty("total", out JsonElement tot) && tot.TryGetInt64(out long total) &&
+			    position >= total)
+				break;
+		}
+
+		return events;
+	}
+
+	private static Dictionary<string, object?> ResultRef(string resultOf, string name, string path)
+	{
+		return new Dictionary<string, object?> { ["resultOf"] = resultOf, ["name"] = name, ["path"] = path };
 	}
 
 	private static string? FindParticipantId(JsonElement jsEvent, string email)

@@ -104,6 +104,105 @@ public sealed class JmapContactStoreTests
 		Assert.Equal("173", picture!.Elements().FirstOrDefault(e => e.Name.LocalName == "Status")?.Value);
 	}
 
+	// H7: GetItemRevisionsAsync is invoked once PER address book within one Sync round; it used to
+	// re-download the FULL account's cards every time (ContactCard/get ids:null), so M address
+	// books cost M full downloads of the same N cards. The full body download must happen at most
+	// once per account-level state, regardless of how many folders are listed.
+	[Fact]
+	public async Task GetItemRevisions_AcrossMultipleAddressBooks_DownloadsCardBodiesOnce()
+	{
+		int fullDownloads = 0;
+		StubHandler stub = new(request =>
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			string body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+			using JsonDocument doc = JsonDocument.Parse(body);
+			JsonElement call = doc.RootElement.GetProperty("methodCalls")[0];
+			bool idsNull = call[1].TryGetProperty("ids", out JsonElement ids) && ids.ValueKind == JsonValueKind.Null;
+			if (idsNull)
+				fullDownloads++;
+			string list = idsNull
+				? "{\"id\":\"K1\",\"addressBookIds\":{\"B1\":true,\"B2\":true}}"
+				: "";
+			return Json(
+				$"{{\"methodResponses\":[[\"ContactCard/get\",{{\"accountId\":\"c\",\"state\":\"s1\",\"list\":[{list}]}},\"0\"]],\"sessionState\":\"x\"}}");
+		});
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapContactStore store = new(client, pollSeconds: 1);
+
+		await store.GetItemRevisionsAsync("jmap-contact:B1", ContentFilter.All, CancellationToken.None);
+		await store.GetItemRevisionsAsync("jmap-contact:B2", ContentFilter.All, CancellationToken.None);
+
+		Assert.Equal(1, fullDownloads);
+	}
+
+	// H7: a server that declares a finite maxObjectsInGet answers requestTooLarge to a blind
+	// "ids:null" over a large address book. When one is declared, listing must page the ids
+	// through ContactCard/query + ContactCard/get instead of a single unbounded get.
+	[Fact]
+	public async Task GetItemRevisions_ServerDeclaresFiniteMaxObjectsInGet_PagesTheListing()
+	{
+		const string sessionWithLimit = """
+		{
+		  "capabilities": {
+		    "urn:ietf:params:jmap:core": { "maxObjectsInGet": 2, "maxObjectsInSet": 2,
+		      "maxCallsInRequest": 16, "maxSizeUpload": 1000000, "maxConcurrentRequests": 4 },
+		    "urn:ietf:params:jmap:contacts": {}
+		  },
+		  "primaryAccounts": { "urn:ietf:params:jmap:core": "c", "urn:ietf:params:jmap:contacts": "c" },
+		  "apiUrl": "http://localhost:5232/jmap/",
+		  "downloadUrl": "http://localhost:5232/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
+		  "uploadUrl": "http://localhost:5232/jmap/upload/{accountId}/",
+		  "state": "abc"
+		}
+		""";
+		bool sawUnboundedGet = false;
+		int queryCalls = 0;
+		StubHandler stub = new(request =>
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(sessionWithLimit);
+			string body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+			using JsonDocument doc = JsonDocument.Parse(body);
+			JsonElement calls = doc.RootElement.GetProperty("methodCalls");
+			JsonElement first = calls[0];
+			string firstName = first[0].GetString()!;
+			if (firstName == "ContactCard/get")
+			{
+				bool idsNull = first[1].TryGetProperty("ids", out JsonElement ids) && ids.ValueKind == JsonValueKind.Null;
+				if (idsNull)
+					sawUnboundedGet = true;
+				// The account-level state check (ids:[]).
+				string getId = first[2].GetString()!;
+				return Json(
+					$"{{\"methodResponses\":[[\"ContactCard/get\",{{\"accountId\":\"c\",\"state\":\"s1\",\"list\":[]}},\"{getId}\"]],\"sessionState\":\"x\"}}");
+			}
+
+			// A batched [ContactCard/query, ContactCard/get] pair.
+			queryCalls++;
+			int position = first[1].GetProperty("position").GetInt32();
+			string queryId = first[2].GetString()!;
+			string getPairId = calls[1][2].GetString()!;
+			string[] pageIds = position == 0 ? ["K1", "K2"] : [];
+			string idsJson = string.Join(",", pageIds.Select(i => $"\"{i}\""));
+			string listJson = string.Join(",", pageIds.Select(i => $"{{\"id\":\"{i}\",\"addressBookIds\":{{\"B1\":true}}}}"));
+			string queryResponse =
+				$"[\"ContactCard/query\",{{\"accountId\":\"c\",\"queryState\":\"qs1\",\"position\":{position},\"ids\":[{idsJson}]}},\"{queryId}\"]";
+			string getResponse = $"[\"ContactCard/get\",{{\"accountId\":\"c\",\"list\":[{listJson}]}},\"{getPairId}\"]";
+			return Json($"{{\"methodResponses\":[{queryResponse},{getResponse}],\"sessionState\":\"x\"}}");
+		});
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapContactStore store = new(client, pollSeconds: 1);
+
+		IReadOnlyDictionary<string, string> revs = await store.GetItemRevisionsAsync(
+			"jmap-contact:B1", ContentFilter.All, CancellationToken.None);
+
+		Assert.True(queryCalls > 0, "a server that declares a finite maxObjectsInGet must be paged via ContactCard/query");
+		Assert.False(sawUnboundedGet, "must not send a blind ids:null get once a finite maxObjectsInGet is declared");
+		Assert.Equal(2, revs.Count);
+	}
+
 	private static async Task<string> RevisionOfSingleCard(string cardJson)
 	{
 		StubHandler stub = new(request =>

@@ -392,7 +392,7 @@ work. Every finding ID appears in exactly one item.
 > `D14` `DateReceived` comes from the sender-supplied header and defaults to year 0001. `D16` every
 > attachment is fully decoded per sync round just to report its size.
 
-**28. JMAP mapping & watcher** [LIVE] — ~~`H4`~~ `H7` ~~`H11`~~ ~~`H12`~~ ~~`H14`~~ ~~`H19`~~ ~~`H21`~~ ~~`H25`~~ ~~`H26`~~
+**28. JMAP mapping & watcher** [LIVE] — ~~`H4`~~ ~~`H7`~~ ~~`H11`~~ ~~`H12`~~ ~~`H14`~~ ~~`H19`~~ ~~`H21`~~ ~~`H25`~~ ~~`H26`~~ **COMPLETE**
 > `H4` a category containing `/` corrupts the JSON-Pointer patch and fails the whole Sync Change. `H11` the
 > update denylist is hard-coded, so a server returning `utcStart`/`utcEnd` makes **every** event edit fail.
 > `H7` contacts/calendar re-download the entire account per folder per round. `H12` the SSE stream has no

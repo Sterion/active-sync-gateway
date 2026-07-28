@@ -67,6 +67,104 @@ public sealed class JmapCalendarStoreUnitTests
 		Assert.Contains("REC", revs.Keys);          // recurring — never dropped on a date filter
 	}
 
+	// H7: GetItemRevisionsAsync is invoked once PER CALENDAR within one Sync round; it used to
+	// re-download the FULL account's events every time (CalendarEvent/get ids:null), so M calendars
+	// cost M full downloads of the same N events. The full body download must happen at most once
+	// per account-level state, regardless of how many calendars are listed.
+	[Fact]
+	public async Task GetItemRevisions_AcrossMultipleCalendars_DownloadsEventBodiesOnce()
+	{
+		int fullDownloads = 0;
+		StateHandler stub = new(request =>
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			string body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+			using JsonDocument doc = JsonDocument.Parse(body);
+			JsonElement call = doc.RootElement.GetProperty("methodCalls")[0];
+			bool idsNull = call[1].TryGetProperty("ids", out JsonElement ids) && ids.ValueKind == JsonValueKind.Null;
+			if (idsNull)
+				fullDownloads++;
+			string list = idsNull
+				? "{\"id\":\"E1\",\"calendarIds\":{\"C1\":true,\"C2\":true},\"start\":\"2024-01-01T09:00:00\"}"
+				: "";
+			return Json(
+				$"{{\"methodResponses\":[[\"CalendarEvent/get\",{{\"accountId\":\"c\",\"state\":\"s1\",\"list\":[{list}]}},\"0\"]],\"sessionState\":\"x\"}}");
+		});
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapCalendarStore store = new(client, "u@example.test", pollSeconds: 1);
+
+		await store.GetItemRevisionsAsync("jmap-cal:C1", ContentFilter.All, CancellationToken.None);
+		await store.GetItemRevisionsAsync("jmap-cal:C2", ContentFilter.All, CancellationToken.None);
+
+		Assert.Equal(1, fullDownloads);
+	}
+
+	// H7: a server that declares a finite maxObjectsInGet answers requestTooLarge to a blind
+	// "ids:null" over a large calendar. When one is declared, listing must page the ids through
+	// CalendarEvent/query + CalendarEvent/get instead of a single unbounded get.
+	[Fact]
+	public async Task GetItemRevisions_ServerDeclaresFiniteMaxObjectsInGet_PagesTheListing()
+	{
+		const string sessionWithLimit = """
+		{
+		  "capabilities": {
+		    "urn:ietf:params:jmap:core": { "maxObjectsInGet": 2, "maxObjectsInSet": 2,
+		      "maxCallsInRequest": 16, "maxSizeUpload": 1000000, "maxConcurrentRequests": 4 },
+		    "urn:ietf:params:jmap:calendars": {}
+		  },
+		  "primaryAccounts": { "urn:ietf:params:jmap:core": "c", "urn:ietf:params:jmap:calendars": "c" },
+		  "apiUrl": "http://localhost:5232/jmap/",
+		  "downloadUrl": "http://localhost:5232/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
+		  "uploadUrl": "http://localhost:5232/jmap/upload/{accountId}/",
+		  "state": "abc"
+		}
+		""";
+		bool sawUnboundedGet = false;
+		int queryCalls = 0;
+		StateHandler stub = new(request =>
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(sessionWithLimit);
+			string body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+			using JsonDocument doc = JsonDocument.Parse(body);
+			JsonElement calls = doc.RootElement.GetProperty("methodCalls");
+			JsonElement first = calls[0];
+			string firstName = first[0].GetString()!;
+			if (firstName == "CalendarEvent/get")
+			{
+				bool idsNull = first[1].TryGetProperty("ids", out JsonElement ids) && ids.ValueKind == JsonValueKind.Null;
+				if (idsNull)
+					sawUnboundedGet = true;
+				string getId = first[2].GetString()!;
+				return Json(
+					$"{{\"methodResponses\":[[\"CalendarEvent/get\",{{\"accountId\":\"c\",\"state\":\"s1\",\"list\":[]}},\"{getId}\"]],\"sessionState\":\"x\"}}");
+			}
+
+			queryCalls++;
+			int position = first[1].GetProperty("position").GetInt32();
+			string queryId = first[2].GetString()!;
+			string getPairId = calls[1][2].GetString()!;
+			string[] pageIds = position == 0 ? ["E1", "E2"] : [];
+			string idsJson = string.Join(",", pageIds.Select(i => $"\"{i}\""));
+			string listJson = string.Join(",",
+				pageIds.Select(i => $"{{\"id\":\"{i}\",\"calendarIds\":{{\"C1\":true}},\"start\":\"2024-01-01T09:00:00\"}}"));
+			string queryResponse =
+				$"[\"CalendarEvent/query\",{{\"accountId\":\"c\",\"queryState\":\"qs1\",\"position\":{position},\"ids\":[{idsJson}]}},\"{queryId}\"]";
+			string getResponse = $"[\"CalendarEvent/get\",{{\"accountId\":\"c\",\"list\":[{listJson}]}},\"{getPairId}\"]";
+			return Json($"{{\"methodResponses\":[{queryResponse},{getResponse}],\"sessionState\":\"x\"}}");
+		});
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapCalendarStore store = new(client, "u@example.test", pollSeconds: 1);
+
+		IReadOnlyDictionary<string, string> revs = await store.GetItemRevisionsAsync(
+			"jmap-cal:C1", ContentFilter.All, CancellationToken.None);
+
+		Assert.True(queryCalls > 0, "a server that declares a finite maxObjectsInGet must be paged via CalendarEvent/query");
+		Assert.False(sawUnboundedGet, "must not send a blind ids:null get once a finite maxObjectsInGet is declared");
+		Assert.Equal(2, revs.Count);
+	}
+
 	// H15: the Ping/Sync wait token re-downloaded the FULL JSCalendar body of every event on every
 	// poll tick (CalendarEvent/get ids:null) and SHA-256'd it. The token must instead be the
 	// account-level CalendarEvent state (a tiny CalendarEvent/get ids:[] call), so a change is
