@@ -38,7 +38,7 @@ public static class ContractVersion
 		ResolveAssemblyVersion(typeof(ContractVersion).Assembly.GetName().Version);
 
 	/// <summary>
-	///   K19: this used to default to <c>new Version(1, 0)</c> when the assembly version was
+	///   This used to default to <c>new Version(1, 0)</c> when the assembly version was
 	///   unreadable — but 1.0 is not a placeholder, it is a version that once shipped with a
 	///   genuinely different surface (see <c>ContractSurface.approved.txt</c>), so defaulting to
 	///   it would make the loader's gate silently ADMIT a stale plugin instead of refusing it. A

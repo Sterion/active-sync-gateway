@@ -8,7 +8,7 @@ namespace ActiveSync.Contracts;
 
 public sealed record BackendCredentials(string UserName, string Password)
 {
-	// K56: the compiler-synthesized record ToString() would print Password in plaintext — and this
+	// The compiler-synthesized record ToString() would print Password in plaintext — and this
 	// type is published plugin contract that lands in logs, exception messages and debugger views,
 	// both directly and nested inside ResolvedRole / BackendConnectionContext (whose own ToString()
 	// calls this one). Mask the secret by overriding PrintMembers so the record shape is preserved
@@ -99,7 +99,7 @@ public sealed record BackendItem(IReadOnlyList<XElement> ApplicationData);
 /// <summary>An attachment payload fetched from a backend.</summary>
 public sealed record BackendAttachment(string ContentType, byte[] Content);
 
-// K67: NOT sealed — a plugin backend must be able to introduce its own typed error that the
+// NOT sealed — a plugin backend must be able to introduce its own typed error that the
 // host's `catch (BackendException)` idiom still funnels.
 public class BackendException : Exception
 {
@@ -114,7 +114,7 @@ public class BackendException : Exception
 
 /// <summary>
 ///   Thrown when the referenced backend object no longer exists.
-///   K67: derives from <see cref="BackendException" /> so the codebase-wide
+///   Derives from <see cref="BackendException" /> so the codebase-wide
 ///   `catch (BackendException)` idiom catches it — before, it derived straight from
 ///   <see cref="Exception" /> and item-gone errors slipped past every backend-error handler.
 /// </summary>

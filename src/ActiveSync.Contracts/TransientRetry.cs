@@ -17,7 +17,7 @@ public static class TransientRetry
 {
 	/// <summary>
 	///   Backoff before each retry; its length is the retry budget (so 3 attempts total).
-	///   K9: this used to be a public mutable <c>int[]</c> in the published MIT contract — any
+	///   This used to be a public mutable <c>int[]</c> in the published MIT contract — any
 	///   loaded plugin (or any host code) could rewrite the shared backing array process-wide,
 	///   stalling or removing every backend's retry backoff. <see cref="ImmutableArray{T}" /> keeps
 	///   the same read shape (<c>Length</c>, indexer) with no settable member.
@@ -26,7 +26,7 @@ public static class TransientRetry
 
 	/// <summary>
 	///   Runs <paramref name="action" />, replaying it on a transient failure up to the
-	///   <see cref="DelaysMs" /> budget. K12: <paramref name="idempotent" /> defaults to false — a
+	///   <see cref="DelaysMs" /> budget. <paramref name="idempotent" /> defaults to false — a
 	///   caller who omits it gets the SAFE behavior (the action runs exactly once, the predicate
 	///   never consulted); replay must be opted into explicitly by whoever has judged the action
 	///   safe to run twice. <paramref name="onRetry" /> is invoked with the failing exception and
@@ -53,7 +53,7 @@ public static class TransientRetry
 		}
 	}
 
-	/// <summary>Void-returning overload for actions with no result. K12: idempotent defaults to false.</summary>
+	/// <summary>Void-returning overload for actions with no result. Idempotent defaults to false.</summary>
 	public static Task RunAsync(
 		Func<Task> action,
 		Func<Exception, bool> isTransient,
@@ -70,7 +70,7 @@ public static class TransientRetry
 
 	/// <summary>
 	///   HTTP specialisation shared by the DAV and JMAP clients: retries on a transient transport
-	///   failure OR a replayable 5xx, disposing each discarded response first. K12: idempotent
+	///   failure OR a replayable 5xx, disposing each discarded response first. Idempotent
 	///   defaults to false, same reasoning as <see cref="RunAsync{T}" />. <paramref name="send" />
 	///   is the underlying (redirect-following) send; <paramref name="onRetry" /> gets a short reason
 	///   token (exception type name or status code) and the 1-based retry number.

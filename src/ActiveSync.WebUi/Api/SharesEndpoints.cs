@@ -24,7 +24,7 @@ internal static class SharesEndpoints
 		api.MapGet("shares", async (
 			string? user, int? limit, int? offset, ShareAdminService shares, CancellationToken ct) =>
 		{
-			// Bounded like /logs and /devices — see C10.
+			// Bounded like /logs and /devices: limit clamped between 1 and 500.
 			ShareAdminService.SharePage page = await shares.ListAsync(
 				user, Math.Max(offset ?? 0, 0), Math.Clamp(limit ?? 200, 1, 500), ct);
 			return Results.Ok(new
@@ -60,7 +60,7 @@ internal static class SharesEndpoints
 		api.MapDelete("shares", async (
 			string user, string collectionHref, ShareAdminService shares, CancellationToken ct) =>
 		{
-			// C15: the create verb (above) validates the login's shape and trims both identifiers;
+			// The create verb (above) validates the login's shape and trims both identifiers;
 			// this verb validated neither, which is what let a grant written for a malformed or
 			// whitespace-padded login become unremovable by its well-formed form.
 			if (AdminIdentifiers.LoginProblem(user) is { } loginError)

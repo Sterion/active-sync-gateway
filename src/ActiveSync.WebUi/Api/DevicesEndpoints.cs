@@ -35,7 +35,7 @@ internal static class DevicesEndpoints
 		{
 			await resolver.EnsureFreshAsync(false, ct);
 			// Bounded like /logs — the table is unbounded and an admin refresh must not
-			// materialize all of it (C10).
+			// materialize all of it.
 			DeviceAdminService.DevicePage page = await devices.ListAsync(
 				user, Math.Max(offset ?? 0, 0), Math.Clamp(limit ?? 200, 1, 500), ct);
 
@@ -48,8 +48,10 @@ internal static class DevicesEndpoints
 					listing.Device.LastProtocolVersion, listing.Device.PendingAccountWipe,
 					listing.Blocked,
 					// Two distinct states, reported distinctly: this DEVICE is blocked, or the USER
-					// is disabled (which covers every device and the web). The old "user-level
-					// block" third state is gone — see db-restructure decision 19.
+					// is disabled (which covers every device and the web). There is no third,
+					// user-level block state: `LoginBlock` FKs to a single device only (no `UserId`),
+					// so blocking every device for a user is expressed as `Users.Enabled = false`
+					// instead.
 					listing.UserDisabled || resolver.IsLoginDisabled(listing.Login))).ToList()
 			});
 		});

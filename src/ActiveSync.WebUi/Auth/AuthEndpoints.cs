@@ -153,7 +153,7 @@ internal static class AuthEndpoints
 		if (admin && !isAdmin)
 			return Results.StatusCode(StatusCodes.Status403Forbidden);
 
-		// Clear only this account's counter — never the shared per-address ceiling (K7): a valid
+		// Clear only this account's counter — never the shared per-address ceiling: a valid
 		// login for one account must not reset it, or an attacker holding any one valid credential
 		// could rotate usernames indefinitely from this address. isAddressKey: true makes this
 		// call an explicit, guarded no-op rather than silently wrong.

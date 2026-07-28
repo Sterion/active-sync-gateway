@@ -34,7 +34,7 @@ public readonly record struct EasVersion(int Major, int Minor) : IComparable<Eas
 		if (value is null)
 			return V141;
 		int dot = value.IndexOf('.');
-		// W19: NumberStyles.None + InvariantCulture (rather than the default
+		// NumberStyles.None + InvariantCulture (rather than the default
 		// NumberStyles.Integer + CurrentCulture) so whitespace- or sign-padded text ("
 		// 16.1", "+16.+1") does not parse -- the Known allowlist below is meant to gate the
 		// literal wire text, not a culture-tolerant reading of it.

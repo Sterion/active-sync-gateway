@@ -24,7 +24,7 @@ async function load(host) {
 	const [summary, state, devices, logs, ready] = await Promise.all([
 		api('/admin/api/summary'),
 		api('/admin/api/state'),
-		// Paged (C10): the "active now" card only annotates users that already have a live
+		// Paged: the "active now" card only annotates users that already have a live
 		// session, so a page of device metadata is all it can use.
 		api('/admin/api/devices').then(page => page.entries),
 		api('/admin/api/logs?sinceMinutes=1440&limit=20'),

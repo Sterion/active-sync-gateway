@@ -12,7 +12,7 @@ namespace ActiveSync.Protocol.Wbxml;
 /// </summary>
 public static class WbxmlCodePages
 {
-	// W16: IReadOnlyList/IReadOnlyDictionary are the interface types, but that alone is
+	// IReadOnlyList/IReadOnlyDictionary are the interface types, but that alone is
 	// documentation, not protection — Build() itself returns a List<CodePage> and T(...) a
 	// Dictionary<byte, string>, so a cast back to the concrete mutable type used to succeed. This
 	// assembly is a published MIT package shared with every out-of-repo plugin's
@@ -140,7 +140,7 @@ public static class WbxmlCodePages
 				(0x0E, "InstanceId"),
 				(0x10, "ProposedStartTime"), (0x11, "ProposedEndTime"), (0x12, "SendResponse"))), // 16.x
 
-			// Page 9: Tasks. W8: 0x05-0x07 are real MS-ASWBXML tokens retired from this page —
+			// Page 9: Tasks. 0x05-0x07 are real MS-ASWBXML tokens retired from this page —
 			// Body/BodySize/BodyTruncated, WBXML 2.5 only; the AirSyncBase Body (page 17) is used
 			// instead from 12.0 on (spec note, section 2.1.2.1.10) — deliberately omitted, not a
 			// transcription gap. 0x21 has no entry at all in the published spec (verified against
@@ -182,7 +182,7 @@ public static class WbxmlCodePages
 				(0x05, "Ping"), (0x06, "AutdState"), (0x07, "Status"), (0x08, "HeartbeatInterval"),
 				(0x09, "Folders"), (0x0A, "Folder"), (0x0B, "Id"), (0x0C, "Class"), (0x0D, "MaxFolders"))),
 
-			// Page 14: Provision. W8: 0x12 has no entry in the published spec (verified against
+			// Page 14: Provision. 0x12 has no entry in the published spec (verified against
 			// revision 24.0, 2025-05-20) — genuinely unassigned between PasswordRecoveryEnabled
 			// and AttachmentsEnabled, not a transcription gap or a retired token with a lost name.
 			new(14, EasNamespaces.Provision, T(
@@ -210,7 +210,7 @@ public static class WbxmlCodePages
 				(0x39, "ApprovedApplicationList"), (0x3A, "Hash"),
 				(0x3B, "AccountOnlyRemoteWipe"))), // 16.1
 
-			// Page 15: Search. W8: 0x06 has no entry in the published spec (verified against
+			// Page 15: Search. 0x06 has no entry in the published spec (verified against
 			// revision 24.0, 2025-05-20) — genuinely unassigned between Search and Store, not a
 			// transcription gap or a retired token with a lost name.
 			new(15, EasNamespaces.Search, T(
@@ -350,7 +350,7 @@ public static class WbxmlCodePages
 
 	public sealed record CodePage(int Index, XNamespace Namespace, IReadOnlyDictionary<byte, string> Tokens)
 	{
-		// W16: same hardening as Tokens above — a cast back to Dictionary<string, byte> must not
+		// Same hardening as Tokens above — a cast back to Dictionary<string, byte> must not
 		// let a plugin silently repoint the encoder's half of the token table.
 		public IReadOnlyDictionary<string, byte> Reverse { get; } =
 			Tokens.ToFrozenDictionary(kv => kv.Value, kv => kv.Key, StringComparer.Ordinal);

@@ -105,7 +105,7 @@ async function wipe(d, container, cancel) {
 }
 
 /**
- * Destructive confirm: the user must type the expected value back. Exported (C10) so the Users
+ * Destructive confirm: the user must type the expected value back. Exported so the Users
  * page can reuse it for the "Delete user" flow instead of a bespoke dialog.
  */
 export function confirmTyped(message, expected, onConfirmed) {

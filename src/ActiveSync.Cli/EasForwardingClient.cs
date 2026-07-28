@@ -10,14 +10,14 @@ namespace ActiveSync.Cli;
 /// <summary>
 ///   The testable core of the slim <c>eas</c> forwarding client — see Program.cs's header comment for
 ///   the full behavioral rationale (sealed-envelope auth, the loopback-only target, the local fallback).
-///   This type exists so that rationale has a seam to test against (S8): Program.cs stays a thin
+///   This type exists so that rationale has a seam to test against: Program.cs stays a thin
 ///   top-level entry point that reads real console/environment state once and calls <see cref="RunAsync" />.
 /// </summary>
 internal static class EasForwardingClient
 {
 	/// <summary>
 	///   <c>serve</c>/<c>protect</c> are the full app's pre-parse specials and always run locally. A
-	///   BARE invocation (no arguments) also always runs locally (E6): it prints the banner for "the
+	///   BARE invocation (no arguments) also always runs locally: it prints the banner for "the
 	///   configuration the gateway WOULD start with", which is only meaningful against a process
 	///   that is not already serving — forwarded to a running gateway, the same command ran inside
 	///   the live process and then told the operator "The gateway is NOT running".
@@ -61,7 +61,7 @@ internal static class EasForwardingClient
 			?? "http://127.0.0.1:5080";
 		return url.Replace("0.0.0.0", "127.0.0.1").Replace("[::]", "127.0.0.1")
 			.Replace("://localhost", "://127.0.0.1")
-			// E23: ASPNETCORE_URLS=http://+:5080 and http://*:5080 are idiomatic Kestrel wildcard
+			// ASPNETCORE_URLS=http://+:5080 and http://*:5080 are idiomatic Kestrel wildcard
 			// hosts too — left unhandled, the client tries to resolve a host literally named "+"/"*",
 			// fails DNS, and silently falls back to a full cold start for every command.
 			.Replace("://+:", "://127.0.0.1:").Replace("://*:", "://127.0.0.1:").TrimEnd('/');
@@ -255,10 +255,10 @@ internal static class EasForwardingClient
 			}
 
 			// ONLY 404 proves the request never reached the CLI pipeline (endpoint disabled, non-loopback,
-			// a rejected envelope, or — K7 — a credential-bearing verb refused because there is no master
+			// a rejected envelope, or a credential-bearing verb refused because there is no master
 			// key to seal its response with) — nothing ran, so local execution is safe. Any other status (a
 			// 5xx especially) means the command may have started server-side and even completed its DB
-			// writes; re-running it here would risk a live double-execution (L36).
+			// writes; re-running it here would risk a live double-execution.
 			if (response.StatusCode == HttpStatusCode.NotFound)
 				return RunLocal(arguments, stdin, appDirectory);
 
@@ -276,7 +276,7 @@ internal static class EasForwardingClient
 		catch (TaskCanceledException)
 		{
 			// The 5-minute client timeout fired: the command is very likely still running server-side, so
-			// re-running it locally would double-execute it. Report and fail instead (L36).
+			// re-running it locally would double-execute it. Report and fail instead.
 			await Console.Error.WriteLineAsync(
 				"eas: the gateway did not respond within the timeout; the command may still be running " +
 				"server-side, so it is not being retried locally.");

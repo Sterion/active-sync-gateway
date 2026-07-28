@@ -12,7 +12,7 @@ public sealed record ItemChange(string ServerId, string Revision);
 ///   not <see cref="IReadOnlyList{T}" /> like its siblings — callers (e.g. the sync handler's echo
 ///   suppression) patch it in place before persisting. It is always keyed with
 ///   <see cref="StringComparer.Ordinal" />, regardless of what comparer either input to
-///   <see cref="CollectionDiff.Compute" /> used (W17) — do not rely on any other comparer surviving
+///   <see cref="CollectionDiff.Compute" /> used — do not rely on any other comparer surviving
 ///   into it.
 /// </summary>
 public sealed record CollectionChanges(
@@ -37,7 +37,7 @@ public static class CollectionDiff
 	///   happens to use — a non-ordinal comparer here would make id lookups agree with
 	///   <paramref name="current" /> but disagree with the persisted <see cref="CollectionChanges.NewSnapshot" />
 	///   (itself always ordinal), which forks one logical item into two permanent entries across
-	///   rounds (W17). Normalized internally; callers do not need to pre-normalize, but should not
+	///   rounds. Normalized internally; callers do not need to pre-normalize, but should not
 	///   rely on any other comparer's semantics (e.g. case-insensitivity) being honored.
 	/// </param>
 	/// <param name="current">The backend's current id → revision map. Same comparer note as <paramref name="snapshot" />.</param>
@@ -120,7 +120,7 @@ public static class CollectionDiff
 	private static int CompareIds(string a, string b)
 	{
 		// Numeric ids (IMAP UIDs, DAV short ids) compare numerically so windows fill in
-		// ascending id order; fall back to ordinal for anything else. W3: comparing "na vs nb
+		// ascending id order; fall back to ordinal for anything else. Comparing "na vs nb
 		// when both parse, else ordinal(a, b)" is NOT a total order -- "9" < "10" (numeric),
 		// "10" < "1a" (ordinal), but "9" > "1a" (ordinal) is a genuine cycle, which makes
 		// List.Sort's result depend on the ids' original order rather than their values. Make
@@ -142,7 +142,7 @@ public static class CollectionDiff
 	/// <summary>
 	///   Normalizes to an ordinal-keyed dictionary so every lookup in <see cref="Compute" /> and
 	///   the persisted <see cref="CollectionChanges.NewSnapshot" /> agree on comparer, regardless
-	///   of what the caller happened to pass (W17). A dictionary already keyed on
+	///   of what the caller happened to pass. A dictionary already keyed on
 	///   <see cref="StringComparer.Ordinal" /> is returned as-is to avoid the copy.
 	/// </summary>
 	private static IReadOnlyDictionary<string, string> AsOrdinal(IReadOnlyDictionary<string, string> source)

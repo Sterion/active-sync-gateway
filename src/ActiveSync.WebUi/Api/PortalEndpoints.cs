@@ -52,7 +52,7 @@ internal static class PortalEndpoints
 					{
 						enabled = b.Value.Enabled,
 						provider = b.Value.Provider,
-						// C5, re-evaluated (item 12 follow-up): the withholding this used to do here
+						// Re-evaluated: the withholding this used to do here
 						// gated `userName` on the SETTINGS self-service surface (SelfServiceEditable on
 						// the provider's connection-settings schema) — but per this file's own header
 						// comment and docs/webui.md, backend CREDENTIALS (userName/password) are a
@@ -83,7 +83,7 @@ internal static class PortalEndpoints
 			if (login is null)
 				return Results.Unauthorized();
 
-			// C13: this used to read `resolver.MergedUsers` straight off whatever snapshot happened
+			// This used to read `resolver.MergedUsers` straight off whatever snapshot happened
 			// to be resident — every OTHER endpoint here that touches `MergedUsers` (`me`, `users`,
 			// `devices`, `shares`, login, `SessionValidation`) refreshes first. The window is normally
 			// closed by the cookie-auth pipeline's own periodic refresh, but that one runs at most
@@ -164,7 +164,7 @@ internal static class PortalEndpoints
 			throttle.RecordSuccess(throttleKey);
 			ActiveSyncOptions current = options.CurrentValue;
 			UserOptions entry = await UserEditing.LoadStartingEntryAsync(store, login, ct);
-			// C6: go through the ONE shared gateway-password policy (strength floor, empty/sealed
+			// Go through the ONE shared gateway-password policy (strength floor, empty/sealed
 			// rejection) instead of hashing directly, so the portal cannot set a weaker password
 			// than the CLI or admin API would accept. Stored as a pbkdf2$ hash, decoupling the
 			// phone/web password from the mail backend exactly like `eas user password`.
@@ -212,7 +212,7 @@ internal static class PortalEndpoints
 			// presents there. Only fields the provider marks SelfServiceEditable are writable;
 			// everything else keeps whatever an administrator put on the account.
 			//
-			// C4: resolved from the MERGED (config over database) view — exactly what `GET
+			// Resolved from the MERGED (config over database) view — exactly what `GET
 			// backends/meta` used to render the form — rather than `@override.Provider` (the
 			// database row alone, via LoadStartingEntryAsync). A provider set only in the user's
 			// own CONFIGURATION override never reaches the database row, so resolving from the row
@@ -238,16 +238,17 @@ internal static class PortalEndpoints
 					refused.Select(key => new BackendsEndpoints.FailureDto(
 						key, "This setting can only be changed by an administrator.")));
 
-			// C12: the portal form is pre-filled from the MERGED (config over database) view — `GET
+			// The portal form is pre-filled from the MERGED (config over database) view — `GET
 			// /user/api/me` and `backends/meta` both report it — so a save the holder never touched
 			// resubmits a config-supplied value verbatim. Storing it here would freeze it into a
-			// permanent database override, the same trap C2 closes on the admin side. Elide it back
-			// to null when it matches what configuration alone already supplies for this role.
+			// permanent database override, the same trap the admin Users PUT avoids by eliding
+			// fields that already match configuration. Elide it back to null when it matches what
+			// configuration alone already supplies for this role.
 			UserOptions? configUser = UserEditing.FindConfigUser(current, login);
 			BackendRoleOverride? configRole = UserEditing.FindRole(configUser, role.ToString());
 
 			// Deliberately untouched: Enabled and Provider (admin-only surface).
-			// C14: UserName had no keep-sentinel — Password just below treats null = keep / "" =
+			// UserName had no keep-sentinel — Password just below treats null = keep / "" =
 			// clear, and Settings preserves administered keys, but UserName mapped ANY omitted
 			// value straight to null, silently clearing a stored backend user name on any caller
 			// that does not resend it (the shipped account.js always does, which is why this went
@@ -274,7 +275,7 @@ internal static class PortalEndpoints
 
 			// Keep every stored key the caller may not touch, replace the editable ones wholesale
 			// (an omitted editable key still means "cleared", as it always did). A re-posted mask
-			// sentinel resolves back to the stored secret so masking on read (C5) can't clobber it —
+			// sentinel resolves back to the stored secret so masking on read can't clobber it —
 			// unmasking reads through the MERGED role (needed to reveal what the mask stands for when
 			// the secret is config-supplied); the elision that follows then still keeps a submitted
 			// value equal to configuration from being written back, without touching any key the
@@ -311,7 +312,7 @@ internal static class PortalEndpoints
 	}
 
 	/// <summary>
-	///   C4: the single place that decides who serves a role for a user — the user's own provider
+	///   The single place that decides who serves a role for a user — the user's own provider
 	///   override wins, exactly as <see cref="UserResolver" /> resolves it, else the global role
 	///   assignment. Shared by <c>GET backends/meta</c> (what the form renders) and
 	///   <c>PUT backends/{roleName}</c> (what the save allows), so the two can never disagree about

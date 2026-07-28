@@ -39,12 +39,12 @@ public interface IContentStore
 	///   Fetches several items of one folder in a single round. The Sync engine calls this once
 	///   per windowed batch instead of <see cref="GetItemAsync" /> per item, so a store can amortize
 	///   the per-fetch overhead — for IMAP, one session lease + one folder open + one FETCH set
-	///   rather than N of each (F13). The returned map is keyed by item key; a key mapped to
+	///   rather than N of each. The returned map is keyed by item key; a key mapped to
 	///   <c>null</c> (or absent) vanished or could not be fetched and is skipped, exactly as a
 	///   <c>null</c> from <see cref="GetItemAsync" /> is. <c>null</c> means "not fetched" — the
 	///   caller MUST NOT advance the persisted snapshot for that item (neither recording it as a
 	///   delivered Add nor recording a Change's new revision), so it is retried on the next Sync
-	///   round instead of being silently and permanently dropped (F3/K2). The DEFAULT implementation
+	///   round instead of being silently and permanently dropped. The DEFAULT implementation
 	///   loops <see cref="GetItemAsync" /> — a per-item failure becomes a <c>null</c> entry so one bad
 	///   item never fails the batch — so existing stores keep working unchanged; a store overrides
 	///   it to batch at the protocol level.
@@ -82,12 +82,12 @@ public interface IContentStore
 	///   Deletes an item. When <paramref name="permanent" /> is true the client asked for a
 	///   hard delete (Sync DeletesAsMoves=0); otherwise a store may move it to Trash. Only mail
 	///   distinguishes the two — DAV and local stores always delete outright.
-	///   K59: the token comes last (convention) and <paramref name="permanent" /> is required —
+	///   The token comes last (convention) and <paramref name="permanent" /> is required —
 	///   an interface method must not carry a caller-invisible default.
 	/// </summary>
 	Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct);
 
-	// K58: item move and folder mutation are OPTIONAL CAPABILITIES (IItemMoveOperations /
+	// Item move and folder mutation are OPTIONAL CAPABILITIES (IItemMoveOperations /
 	// IFolderOperations below), not mandatory members — a third of the in-repo stores threw
 	// "not supported" for them (local, DAV, and JMAP calendar/contact folders). A store implements
 	// only the capabilities it truly has; the host checks for the interface and answers the EAS
@@ -113,7 +113,7 @@ public interface IItemMoveOperations
 	/// <summary>
 	///   Moves an item to another folder of the same class; returns the new item key AND the
 	///   item's revision at the destination (the same token <see cref="IContentStore.GetItemRevisionsAsync" />
-	///   would report for it there). F5: the caller persists this into the destination collection's
+	///   would report for it there). The caller persists this into the destination collection's
 	///   snapshot so the next diff does not see a manufactured value that can never match the
 	///   backend's real revision and re-send the item as a spurious Change.
 	/// </summary>

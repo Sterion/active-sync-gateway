@@ -101,14 +101,14 @@ public interface IBackendConnection : IAsyncDisposable
 
 /// <summary>Ready-made <see cref="IBackendConnection" /> that disposes its owned resources.</summary>
 /// <remarks>
-///   K60: disposal is idempotent (a second call is a no-op), keeps going when one resource throws
+///   Disposal is idempotent (a second call is a no-op), keeps going when one resource throws
 ///   (surfacing the failures as an <see cref="AggregateException" /> so no later resource leaks a
 ///   live socket), and also disposes any content store that is itself disposable — stores routinely
 ///   hold connections, and the provider is no longer required to remember to list them in
 ///   <paramref name="ownedResources" />. The parameter stays <c>object</c>-typed because the owned
 ///   resources are a mix of <see cref="IAsyncDisposable" /> (ImapSession) and <see cref="IDisposable" />
 ///   (WebDavClient, JmapClient), which no single disposable interface covers.
-///   K20: the idempotence guard is an <c>int</c> flipped with <see cref="Interlocked.Exchange(ref int, int)" />,
+///   The idempotence guard is an <c>int</c> flipped with <see cref="Interlocked.Exchange(ref int, int)" />,
 ///   not a plain <c>bool</c> read-then-write — two callers racing DisposeAsync (a session-eviction
 ///   sweep vs. a request completing, both plausible in <c>BackendSessionFactory</c>) could otherwise
 ///   both observe "not yet disposed" and both dispose the same owned resource.
@@ -127,14 +127,14 @@ public sealed class BackendConnection(
 
 	public async ValueTask DisposeAsync()
 	{
-		// K20: Interlocked.Exchange makes the check-and-set a single atomic operation — only the
+		// Interlocked.Exchange makes the check-and-set a single atomic operation — only the
 		// caller that flips 0 -> 1 proceeds, however many race in concurrently.
 		if (Interlocked.Exchange(ref _disposed, 1) != 0)
 			return;
 
 		List<Exception>? failures = null;
 
-		// K20: build the owned-resource identity set ONCE (reference equality) instead of an
+		// Build the owned-resource identity set ONCE (reference equality) instead of an
 		// O(stores × ownedResources) Any(ReferenceEquals) scan inside the store loop below.
 		HashSet<object> owned = ownedResources is { Count: > 0 }
 			? new HashSet<object>(ownedResources, ReferenceEqualityComparer.Instance)
@@ -190,7 +190,7 @@ public interface IBackendProvider
 
 	/// <summary>
 	///   One connection serving ALL roles assigned to this provider for one account.
-	///   K61: async — a provider opens its transport here (a TCP/TLS connect, an auth round-trip),
+	///   Async — a provider opens its transport here (a TCP/TLS connect, an auth round-trip),
 	///   and the rest of the contract is async end-to-end. Landed as the async shape while the
 	///   plugin ecosystem was still empty, so no out-of-repo provider had to be rewritten later.
 	/// </summary>
@@ -237,7 +237,7 @@ public interface IPerUserResourceOwner
 	void TrimUserResources(IReadOnlySet<string> activeGatewayLogins);
 }
 
-// K57: BackendSessionInfo (a projection of the HOST's session cache for the admin dashboard) moved
+// BackendSessionInfo (a projection of the HOST's session cache for the admin dashboard) moved
 // to ActiveSync.Core.Backend with IBackendSessionFactory that produces it. WatcherInfo stays: it is
 // the return type of IWatcherDiagnostics, an OPTIONAL PROVIDER capability a plugin may implement.
 

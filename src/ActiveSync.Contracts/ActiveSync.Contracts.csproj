@@ -35,7 +35,7 @@
 		<ProjectReference Include="..\ActiveSync.Protocol\ActiveSync.Protocol.csproj" />
 	</ItemGroup>
 
-	<!-- K19: lets ContractVersionTests exercise the internal ResolveAssemblyVersion fallback
+	<!-- Lets ContractVersionTests exercise the internal ResolveAssemblyVersion fallback
 	     directly (with a null input) — the real assembly always has a version in a normal build,
 	     so there is no other way to observe that fallback deterministically. -->
 	<ItemGroup>

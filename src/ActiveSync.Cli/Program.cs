@@ -12,7 +12,7 @@ using ActiveSync.Cli;
 // key is configured (AllowPlaintext dev/test), where the server also relies on loopback alone. The
 // RESPONSE is sealed the same way whenever a key exists — command output carries secrets too.
 //
-// (S8: the forwarding logic itself lives in EasForwardingClient, under the ActiveSync.Cli namespace,
+// (The forwarding logic itself lives in EasForwardingClient, under the ActiveSync.Cli namespace,
 // so it has a seam ActiveSync.Cli.Tests can construct and drive directly. This file stays the thin
 // top-level entry point.)
 

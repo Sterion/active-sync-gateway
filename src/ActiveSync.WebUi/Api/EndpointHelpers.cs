@@ -48,7 +48,7 @@ internal static class EndpointHelpers
 
 	/// <summary>
 	///   Copies a per-account role's free-form settings for return to a client, masking any
-	///   secret-named value the same way the global backends editor does (C5) — so an ApiKey/
+	///   secret-named value the same way the global backends editor does — so an ApiKey/
 	///   Token/ClientSecret on a role override never leaves the server in the clear. Returns null
 	///   for an empty/absent map so the DTO shape is unchanged.
 	/// </summary>
@@ -66,7 +66,7 @@ internal static class EndpointHelpers
 	///   Resolves the mask sentinel a save receives back against the stored settings: an incoming
 	///   value equal to <see cref="SecretRedaction.Mask" /> means "unchanged", so it is replaced by
 	///   the value already stored (and dropped when there is nothing behind the mask). Without this,
-	///   masking on read (C5) would let a client that re-posts the form clobber a real secret with
+	///   masking on read would let a client that re-posts the form clobber a real secret with
 	///   "***" — the same sentinel contract the global backends editor uses.
 	/// </summary>
 	internal static Dictionary<string, string?>? UnmaskSecretSettings(

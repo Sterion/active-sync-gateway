@@ -4,7 +4,7 @@ import { api } from '/shared/api.js';
 import { h, render as renderInto, table, toast, confirmDialog } from '/shared/ui.js';
 
 export async function render(container) {
-	// Paged like /devices — see C10; the endpoint caps a page at 500 rows.
+	// Paged like /devices; the endpoint caps a page at 500 rows.
 	const page = await api('/admin/api/shares');
 	const shares = page.entries;
 

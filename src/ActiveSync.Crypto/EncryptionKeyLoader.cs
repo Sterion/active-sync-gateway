@@ -9,7 +9,7 @@ namespace ActiveSync.Crypto;
 ///   high-entropy path: 'openssl rand -base64 32'); anything else is treated as a passphrase
 ///   and stretched to 32 bytes with PBKDF2-SHA256 over the PER-DEPLOYMENT salt from
 ///   <see cref="EncryptionOptions.KeyDerivationSalt" />. The passphrase path is REFUSED when
-///   that salt is unset (K1): a single global application salt would let one precomputed
+///   that salt is unset: a single global application salt would let one precomputed
 ///   rainbow table recover the master key of every default deployment, so the default is
 ///   fail-closed rather than silently sharing a salt. Derivation stays deterministic from
 ///   configuration alone (nothing is stored), so the gateway and the slim CLI derive the same
@@ -22,7 +22,7 @@ public static class EncryptionKeyLoader
 	public const int ShortPassphraseLength = 12;
 
 	/// <summary>
-	///   Hard minimum passphrase length (K46): a shorter passphrase is refused, not merely warned
+	///   Hard minimum passphrase length: a shorter passphrase is refused, not merely warned
 	///   about. The raw base64-32-byte key path is exempt (it is not a passphrase).
 	/// </summary>
 	public const int MinPassphraseLength = 8;
@@ -44,7 +44,7 @@ public static class EncryptionKeyLoader
 			return null;
 		bool isPassphrase = TryDecodeRawKey(material) is null;
 
-		// K46: a passphrase (anything that is not a raw base64 32-byte key) must clear a hard length
+		// A passphrase (anything that is not a raw base64 32-byte key) must clear a hard length
 		// floor, not merely earn a warning. A too-short passphrase is a refusal.
 		if (isPassphrase && material.Length < MinPassphraseLength)
 		{
@@ -53,7 +53,7 @@ public static class EncryptionKeyLoader
 			return null;
 		}
 
-		// K1: a passphrase must be stretched against a PER-DEPLOYMENT salt. Without one, PBKDF2 would
+		// A passphrase must be stretched against a PER-DEPLOYMENT salt. Without one, PBKDF2 would
 		// fall back to a single global salt shared by every deployment, so one precomputed rainbow
 		// table recovers every default gateway's master key. Refuse rather than silently derive
 		// against a fixed salt — the default is fail-closed. A raw base64 32-byte key skips PBKDF2 and
@@ -125,13 +125,13 @@ public static class EncryptionKeyLoader
 	private static byte[] DeriveKey(string material, EncryptionOptions options)
 	{
 		// A CANONICAL base64 value decoding to exactly 32 bytes is the raw key (the documented
-		// high-entropy path); everything else — including a non-canonical base64-shaped passphrase
-		// (K14) — is stretched with PBKDF2.
+		// high-entropy path); everything else — including a non-canonical base64-shaped passphrase —
+		// is stretched with PBKDF2.
 		byte[]? raw = TryDecodeRawKey(material);
 		if (raw is not null)
 			return raw;
 
-		// K47: feed the passphrase to PBKDF2 as a byte buffer we can zero afterwards, rather than
+		// Feed the passphrase to PBKDF2 as a byte buffer we can zero afterwards, rather than
 		// the string overload — the derived key is already carefully wiped by callers, so the
 		// passphrase copy should be too. UTF-8 bytes match the string overload's own encoding, so
 		// the derived key is unchanged. (The origin string — config-bound Key or key-file text —
@@ -152,7 +152,7 @@ public static class EncryptionKeyLoader
 	///   The PBKDF2 salt for passphrase stretching, derived from the operator's per-deployment
 	///   <see cref="EncryptionOptions.KeyDerivationSalt" /> (bound under a fixed context so even a
 	///   short operator value yields a full-width salt), so one precomputed table does not cover
-	///   every deployment. K1: there is deliberately NO fixed application-salt fallback — a passphrase
+	///   every deployment. There is deliberately NO fixed application-salt fallback — a passphrase
 	///   without a salt is refused upstream in <see cref="TryLoadKey" />, so this is only reached with
 	///   a non-empty salt. Deterministic — nothing is stored.
 	/// </summary>
@@ -170,7 +170,7 @@ public static class EncryptionKeyLoader
 			byte[] decoded = Convert.FromBase64String(material);
 			if (decoded.Length != KeySize)
 				return null;
-			// K14: take the raw-key interpretation only for CANONICAL base64 — a value that re-encodes
+			// Take the raw-key interpretation only for CANONICAL base64 — a value that re-encodes
 			// to exactly the same string. Convert.FromBase64String is lenient (it ignores embedded
 			// whitespace and accepts non-zero unused padding bits), so a human passphrase that merely
 			// happens to be base64-decodable to 32 bytes would otherwise be used verbatim as the AES

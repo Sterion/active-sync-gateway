@@ -111,7 +111,7 @@ public interface ICalendarOperations
 	Task<bool> ShouldSendInvitationsAsync(CancellationToken ct);
 }
 
-// K57: IBackendSession / IBackendSessionFactory are the HOST's composite-session aggregation and
+// IBackendSession / IBackendSessionFactory are the HOST's composite-session aggregation and
 // its cache — nothing a plugin implements or receives (a plugin implements IBackendConnection and
 // the store/side-op interfaces above). They moved to ActiveSync.Core.Backend so the published
 // plugin surface carries only what a plugin actually builds against.

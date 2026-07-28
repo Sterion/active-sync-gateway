@@ -74,7 +74,7 @@ internal static class OidcLogin
 				subjectBound = false;
 			}
 
-			// C9: a config-declared account can never TOFU-bind (it is never written to), so it
+			// A config-declared account can never TOFU-bind (it is never written to), so it
 			// stays keyed on the mutable login claim forever unless an operator sets OidcSubject
 			// explicitly. A bare login match used to still sign such an account in (withholding
 			// only its Admin flag, below) — but the login claim is user-editable at common IdPs,

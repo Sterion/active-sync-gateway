@@ -42,7 +42,7 @@ function settingRow(setting) {
 			if (value === '' || value === null) {
 				const result = await api(`/admin/api/settings/${setting.key}`, { method: 'DELETE' });
 				toast(`${shortKey} reset to default (${result.tier}).`, 'ok');
-				// C18: badge from the source the DELETE response recomputed — the config file may
+				// Badge from the source the DELETE response recomputed — the config file may
 				// still supply a value for this key, in which case the effective source is "config",
 				// not "default". Assuming "default" lied until the next page reload.
 				status.replaceChildren(sourceBadge(result.source ?? 'default'));

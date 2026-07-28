@@ -44,7 +44,7 @@ internal sealed class DbXmlRepository(
 					string? error = null;
 					if (key is null || !SecretValue.TryUnseal(xml, key, out string? plain, out error))
 					{
-						// C11: the fallback is right, but skipping silently means a wrong/rotated
+						// The fallback is right, but skipping silently means a wrong/rotated
 						// master key (or a tampered row) invalidates every web session on each restart
 						// with the only symptom being repeated logouts. Say which row and why.
 						skipped++;

@@ -50,7 +50,7 @@ internal static class SessionValidation
 	///   revocation (<c>RevokeSessionsBeforeAsync</c> stores its cut-off at full precision) can
 	///   never read as older than that cut-off — flooring, as this used to, could put both instants
 	///   in the same integer second while the cut-off's fractional remainder still made the
-	///   floored stamp compare as "before" it (C1).
+	///   floored stamp compare as "before" it.
 	/// </summary>
 	internal static Claim SessionStart(DateTimeOffset now)
 	{

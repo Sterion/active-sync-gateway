@@ -153,7 +153,7 @@ public sealed record EasRequestParameters
 			: 0;
 
 		// DeviceType is an ASCII token like "iPhone"/"WindowsOutlook15" -- the same shape as
-		// DeviceId, so it goes through the same sanitizing boundary (W13) rather than a bare
+		// DeviceId, so it goes through the same sanitizing boundary rather than a bare
 		// Encoding.ASCII.GetString, which would pass C0 control characters (\r, \n, ESC) straight
 		// through into a value persisted on the Device row and rendered in the admin UI/banner.
 		byte deviceTypeLength = Next();
@@ -280,13 +280,13 @@ public sealed record EasRequestParameters
 
 	/// <summary>
 	///   MS-ASHTTP 2.2.1.1.1.1 length-prefixed fields use a single length byte, so a value longer
-	///   than this is unrepresentable -- it must be rejected, not silently wrapped/truncated (W6).
+	///   than this is unrepresentable -- it must be rejected, not silently wrapped/truncated.
 	/// </summary>
 	private const int MaxFieldBytes = 255;
 
 	/// <summary>
 	///   Encodes "major.minor" into the packed version byte, validated against the same
-	///   <see cref="ProtocolVersionBytes" /> allowlist <see cref="FromBase64" /> reads with (W12):
+	///   <see cref="ProtocolVersionBytes" /> allowlist <see cref="FromBase64" /> reads with:
 	///   an out-of-allowlist version (e.g. "15.0" -&gt; 150) is rejected here instead of emitting a
 	///   byte FromBase64 refuses to read back, and the allowlist check runs on the pre-cast int
 	///   value so an overflowing version (e.g. "28.1" -&gt; 281) cannot wrap into an allowed byte
@@ -317,7 +317,7 @@ public sealed record EasRequestParameters
 	///   Encodes <paramref name="value" /> for the fixed-position ASCII fields (DeviceId,
 	///   DeviceType), rejecting both a non-ASCII character (the default <see cref="Encoding.ASCII" />
 	///   silently maps anything outside the ASCII range to '?', which would round-trip to a
-	///   DIFFERENT value with no error) and a value over the 255-byte length-prefix limit (W6).
+	///   DIFFERENT value with no error) and a value over the 255-byte length-prefix limit.
 	/// </summary>
 	private static byte[] EncodeAsciiField(string fieldName, string value)
 	{
@@ -360,7 +360,7 @@ public sealed record EasRequestParameters
 	///   Decodes one of the UTF-8 tag-value fields (AttachmentName, CollectionId, ItemId, LongId,
 	///   Occurrence, User), rejecting any decoded character <see cref="WireLog.IsUnsafe" /> flags
 	///   (control characters, bidi-override/isolate format characters) rather than handing it
-	///   straight to callers unfiltered (W13) -- these values flow into wire logs, the admin UI
+	///   straight to callers unfiltered -- these values flow into wire logs, the admin UI
 	///   and, for CollectionId/ItemId, backend keys.
 	/// </summary>
 	private static string DecodeUtf8Field(string fieldName, ReadOnlySpan<byte> bytes)

@@ -40,7 +40,7 @@ public static class EasDateTime
 		};
 	}
 
-	// W18: a sixth entry here used to accept "yyyyMMdd'T'HHmmss" (no trailing 'Z') as a "tolerant"
+	// A sixth entry here used to accept "yyyyMMdd'T'HHmmss" (no trailing 'Z') as a "tolerant"
 	// form for non-conforming clients. MS-ASDTYPE defines only Z-terminated forms, and combined
 	// with DateTimeStyles.AssumeUniversal below that row did not merely tolerate the input, it
 	// ASSERTED UTC for the one string that -- by omitting the 'Z' -- is the one case where the
@@ -61,7 +61,7 @@ public static class EasDateTime
 	///   Parses an MS-ASDTYPE date/time using only the exact spec formats — no loose
 	///   <see cref="DateTime.Parse(string)" /> fallback (which accepted culture-dependent forms
 	///   like "3/4/2026" and made failure locale-dependent), and no non-conforming form that
-	///   omits the 'Z' designator (W18 — such a value does not say whether it is UTC, and treating
+	///   omits the 'Z' designator (such a value does not say whether it is UTC, and treating
 	///   it as UTC anyway silently misinterprets a local time). Returns UTC.
 	/// </summary>
 	public static bool TryParse(string? value, out DateTime result)

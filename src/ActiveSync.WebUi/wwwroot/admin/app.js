@@ -68,7 +68,7 @@ async function boot() {
 		document.getElementById('login-sso')?.addEventListener('click', () => {
 			location.href = '/admin/oidc/login';
 		});
-		// C23: the portal link must not be offered when the user portal is disabled — it 404s.
+		// The portal link must not be offered when the user portal is disabled — it 404s.
 		document.getElementById('nav-portal').classList.toggle('hidden', !mode.userPortalEnabled);
 	} catch { /* mode probe failing is not fatal */ }
 

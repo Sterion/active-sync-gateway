@@ -36,7 +36,7 @@ public static class WbxmlDecoder
 	private const int MaxDepth = 256;
 	private const int MaxElements = 200_000;
 
-	// W1: the element/depth caps above bound the number and nesting of TAGS, but a well-formed
+	// The element/depth caps above bound the number and nesting of TAGS, but a well-formed
 	// body of repeated STR_I/OPAQUE/ENTITY runs never trips either — one element, depth 1 — and
 	// still allocates one XText per run with no ceiling on run count or accumulated length. At
 	// MaxDocumentBytes (64 MB) that is ~33.5M XText nodes (~1.3 GB) from the 2-byte STR_I-empty
@@ -44,7 +44,7 @@ public static class WbxmlDecoder
 	private const int MaxTextRuns = 200_000;
 	private const int MaxTextChars = 8 * 1024 * 1024;
 
-	// W21: the DEFAULT value on DecodeAsync's `maxBytes` parameter must itself be a compile-time
+	// The DEFAULT value on DecodeAsync's `maxBytes` parameter must itself be a compile-time
 	// constant (a C# language rule), so this private const carries the literal; the PUBLIC field
 	// below is a genuine `static readonly` built from it, not the const directly, so an external
 	// reader of MaxDocumentBytes (a plugin computing its own buffer sizing, say) resolves the
@@ -53,7 +53,7 @@ public static class WbxmlDecoder
 	private const int DefaultMaxDocumentBytes = 64 * 1024 * 1024;
 
 	/// <summary>Default ceiling for <see cref="DecodeAsync" />; matches Kestrel's request body limit.</summary>
-	// W21: this is a policy knob, not a frozen protocol constant (unlike EasFolderType/EasClass),
+	// This is a policy knob, not a frozen protocol constant (unlike EasFolderType/EasClass),
 	// so it is `static readonly` rather than `const` — a `const` is inlined into the consumer's IL
 	// at compile time, so a plugin built against contract 1.x would keep passing the OLD ceiling
 	// after the host raised it, appearing to report the host's current value while actually
@@ -90,7 +90,7 @@ public static class WbxmlDecoder
 		}
 		finally
 		{
-			// W15: this buffer just held one user's raw request bytes — including any plaintext
+			// This buffer just held one user's raw request bytes — including any plaintext
 			// SyncKey/ClientId/etc it carries — and ArrayPool<byte>.Shared is process-global, so
 			// the next renter of the same size class (potentially a different user's request on
 			// the same worker) would otherwise read the tail of it.
@@ -102,7 +102,7 @@ public static class WbxmlDecoder
 	}
 
 	/// <summary>
-	///   Decodes a WBXML document. An unrecognized tag token (W5) decodes as a placeholder
+	///   Decodes a WBXML document. An unrecognized tag token decodes as a placeholder
 	///   element — namespace <see cref="EasNamespaces.WbxmlInternal" />, local name
 	///   <c>"unknown-{page}-{token}"</c> — instead of aborting the whole document; a caller
 	///   that wants to log the degradation can look for that namespace in the result.
@@ -168,7 +168,7 @@ public static class WbxmlDecoder
 					// (→ uncontrolled 500) for out-of-range or surrogate code points — AND
 					// reject any valid-Unicode-but-illegal-XML-1.0 code point (e.g. U+000B):
 					// ConvertFromUtf32 accepts it, but XNode.ToString() (wire-trace logging)
-					// throws when it later hits an XmlWriter with CheckCharacters (W2).
+					// throws when it later hits an XmlWriter with CheckCharacters.
 					if (code > 0x10FFFF || !IsValidXmlChar((int)code))
 						throw new WbxmlException($"Invalid or illegal-XML ENTITY code point U+{code:X}.");
 					AppendText(current, char.ConvertFromUtf32((int)code), ref textRuns, ref textChars);
@@ -210,7 +210,7 @@ public static class WbxmlDecoder
 					XNamespace elementNamespace = page.Namespace;
 					if (!knownTag)
 					{
-						// W5: the content bit is known even when the name is not, so an unknown
+						// The content bit is known even when the name is not, so an unknown
 						// tag CAN be parsed structurally — bound into a placeholder element in a
 						// private namespace and kept in the tree — without desynchronizing the
 						// stream. One missing or newly-specified token therefore degrades to one
@@ -279,7 +279,7 @@ public static class WbxmlDecoder
 			current.Add(new XText(text));
 	}
 
-	// W2: STR_I/ENTITY admit any valid Unicode scalar value, but LINQ-to-XML validates
+	// STR_I/ENTITY admit any valid Unicode scalar value, but LINQ-to-XML validates
 	// characters only on WRITE (via XmlWriter's CheckCharacters), not on XText construction —
 	// so a control character other than TAB/LF/CR (or U+FFFE/U+FFFF) survives decode and then
 	// throws ArgumentException the first time the document is serialized (wire-trace logging,

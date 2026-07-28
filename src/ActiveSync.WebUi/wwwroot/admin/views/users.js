@@ -92,9 +92,10 @@ export async function render(container) {
 		});
 		let clearPassword = false;
 
-		// C8: per-field provenance — which level (config file / database) supplied the value
+		// Per-field provenance — which level (config file / database) supplied the value
 		// currently shown — so an admin can tell a config-supplied value from a real database
-		// override before saving (C2's freeze is invisible without this).
+		// override before saving (a resubmitted config value would otherwise silently freeze into
+		// an invisible database override, with no visual cue to warn against it).
 		const sources = user?.sources ?? {};
 		const fieldBadge = path => sources[path] ? sourceBadge(sources[path]) : null;
 
@@ -109,7 +110,7 @@ export async function render(container) {
 				: null,
 			h('label', {}, 'Login'),
 			h('div', { style: 'display:flex; gap:8px' }, login,
-				// C10: renaming is possible at all only because identity is a surrogate key — but a
+				// Renaming is possible at all only because identity is a surrogate key — but a
 				// config-declared login is immutable (the CLI refuses it too), so the control is
 				// simply not offered rather than round-tripping to a 400.
 				!isNew && user?.origin !== 'config'
@@ -137,7 +138,7 @@ export async function render(container) {
 				user?.origin?.startsWith('db')
 					? h('button', { class: 'danger', onclick: remove }, 'Delete database entry')
 					: null,
-				// C10: distinct from "Delete database entry" above (which only drops the DECLARATION
+				// Distinct from "Delete database entry" above (which only drops the DECLARATION
 				// and falls back to config) — this cascade-deletes the identity itself, exactly like
 				// `eas user delete`. No SPA path existed for it at all.
 				!isNew ? h('button', { class: 'danger', onclick: deleteUser }, 'Delete user') : null,
@@ -187,7 +188,7 @@ export async function render(container) {
 			}
 		}
 
-		// C10: confirm-and-cascade, mirroring `eas user delete` — GET the impact first so the typed
+		// Confirm-and-cascade, mirroring `eas user delete` — GET the impact first so the typed
 		// dialog can name exactly what is at stake (content-owning users get the counts), then POST
 		// the login back as the confirmation echo.
 		async function deleteUser() {
@@ -229,7 +230,7 @@ export async function render(container) {
 function roleEditor(role, current, providers, globalRole, sources = {}) {
 	const candidates = providers.filter(p => p.roles.includes(role));
 	const inheritedProvider = globalRole?.provider ?? null;
-	// C8: per-field provenance for this role — the same flat map the top-level fields read,
+	// Per-field provenance for this role — the same flat map the top-level fields read,
 	// scoped to this role's paths.
 	const roleBadge = suffix => sources[`Backends:${role}:${suffix}`]
 		? sourceBadge(sources[`Backends:${role}:${suffix}`]) : null;
@@ -369,7 +370,7 @@ function refresh(container) {
 }
 
 /**
- * C10: the login is a mutable attribute (identity is the surrogate UserId) — renaming is a
+ * The login is a mutable attribute (identity is the surrogate UserId) — renaming is a
  * single-row update that leaves sync state and locally-stored items untouched. No SPA path
  * existed for `POST users/{login}/rename` at all.
  */

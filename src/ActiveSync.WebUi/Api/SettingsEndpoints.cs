@@ -54,12 +54,13 @@ internal static class SettingsEndpoints
 			{
 				if (IsBackendKey(key))
 					continue;
-				// C7: `SettingKeys.Find` can never return non-null here — `extra` already excludes
+				// `SettingKeys.Find` can never return non-null here — `extra` already excludes
 				// every catalogue key, and its only other non-null shape (a backend leaf) is excluded
 				// above — so this used to be dead code: a row for a key the catalogue no longer
-				// recognizes (e.g. `ActiveSync:RequireDeclaredUsers`, dropped by the db-restructure)
-				// was invisible in the UI and clearable only by guessing the DELETE URL. Surface it as
-				// a synthetic, read-only-but-deletable entry instead.
+				// recognizes (e.g. `ActiveSync:RequireDeclaredUsers`, removed when `AutoProvisionUsers`
+				// took over meaning "refuse undeclared logins") was invisible in the UI and clearable
+				// only by guessing the DELETE URL. Surface it as a synthetic, read-only-but-deletable
+				// entry instead.
 				entries.Add(SettingKeys.Find(key) is { } definition
 					? Describe(definition, db, config)
 					: new SettingDto(
@@ -84,7 +85,7 @@ internal static class SettingsEndpoints
 				return EndpointHelpers.BadRequest($"'{key}' is not a recognized setting");
 			// Backend leafs are strings to the catalogue; their provider knows their real shape.
 			// The configuration here already carries the database layer, so it IS the effective value.
-			// Catalogue keys also run the startup validator (B1) so a delayed-brick value — one the
+			// Catalogue keys also run the startup validator so a delayed-brick value — one the
 			// catalogue accepts but ActiveSyncOptionsValidator would reject at boot — is refused now.
 			if ((SettingKeys.Validate(definition, request.Value) ??
 			     BackendKeyValidator.Validate(registry, config, key, request.Value) ??
@@ -97,7 +98,7 @@ internal static class SettingsEndpoints
 			// Catalogue-level secrets (the OIDC client secret, the TLS certificate password) are
 			// sealed at rest when the master key exists; open-ended backend keys stay raw (their
 			// providers read them verbatim — the synthetic Secret flag only masks display). Shared
-			// with `eas config set` via UserSecretPolicy so both surfaces seal identically (B5).
+			// with `eas config set` via UserSecretPolicy so both surfaces seal identically.
 			string value = request.Value;
 			if (definition.Secret && SettingKeys.IsCatalogueKey(definition.Key))
 			{
@@ -122,7 +123,7 @@ internal static class SettingsEndpoints
 			if (stored is null)
 				return Results.Ok(new { key, tier = SettingKeys.Find(key)?.Tier ?? "live", removed = false });
 
-			// B4: a removal is validated exactly like a write (B1) — `DELETE` must not persist a
+			// A removal is validated exactly like a write — `DELETE` must not persist a
 			// configuration the next start refuses to boot on. `config` already carries the database
 			// layer (it IS the effective value everywhere else in this file), so the layer BENEATH it
 			// — what a real removal would fall back to — is whatever remains once the database
@@ -138,7 +139,7 @@ internal static class SettingsEndpoints
 				return EndpointHelpers.BadRequest(error);
 
 			await store.DeleteAsync(stored, ct);
-			// C18: report the source the NEXT read would show rather than assuming "default" —
+			// Report the source the NEXT read would show rather than assuming "default" —
 			// `fileConfig` already excludes the database provider, so it IS what remains once this
 			// row is gone. Without this the UI badge lied whenever the config file still supplied a
 			// value for the same key (it showed "default" until the page was reloaded).

@@ -19,7 +19,7 @@ public enum SealedBlobError
 
 /// <summary>
 ///   The AES-256-GCM "&lt;prefix&gt;" + base64(12-byte nonce ‖ ciphertext ‖ 16-byte tag) framing
-///   shared by every sealed-value format in this codebase (S2 / K11). Extracted so a framing fix
+///   shared by every sealed-value format in this codebase. Extracted so a framing fix
 ///   — constant-time handling, a v2 layout, a nonce-reuse audit — lands once instead of drifting
 ///   between independent copies. Callers own their own prefix and AAD, so ciphertexts sealed by
 ///   different callers still can't be interchanged — only the byte layout and the AES-GCM calls
@@ -52,7 +52,7 @@ public static class SealedBlob
 		}
 		finally
 		{
-			// K14: everything sealed through here is sensitive (backend passwords, the escrowed
+			// Everything sealed through here is sensitive (backend passwords, the escrowed
 			// device recovery password, /cli envelopes, the TLS certificate password, the
 			// gateway's own PKCS#12 blob) — wipe the plaintext copy rather than leaving it for the
 			// GC to collect whenever it gets around to it.
@@ -101,7 +101,7 @@ public static class SealedBlob
 		ReadOnlySpan<byte> tag = payload.AsSpan(payload.Length - TagSize, TagSize);
 		byte[] plaintextBytes = new byte[ciphertext.Length];
 
-		// K14: plaintextBytes is wiped on every exit — success, auth failure, or otherwise —
+		// plaintextBytes is wiped on every exit — success, auth failure, or otherwise —
 		// rather than left for the GC to collect whenever it gets around to it.
 		try
 		{

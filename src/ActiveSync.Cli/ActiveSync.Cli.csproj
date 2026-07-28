@@ -23,7 +23,7 @@
 		<ProjectReference Include="..\ActiveSync.Crypto\ActiveSync.Crypto.csproj" />
 	</ItemGroup>
 
-	<!-- S8: EasForwardingClient/CliRequest/CliResponse stay internal (no public API grows out of this
+	<!-- EasForwardingClient/CliRequest/CliResponse stay internal (no public API grows out of this
 	     exe) but need to be visible to the test project that exercises them. -->
 	<ItemGroup>
 		<InternalsVisibleTo Include="ActiveSync.Cli.Tests" />

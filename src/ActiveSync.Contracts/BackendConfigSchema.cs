@@ -16,7 +16,7 @@ public enum BackendFieldType
 
 	/// <summary>
 	///   A masked field: the rendering surface hides it, never echoes it back in an API response,
-	///   and it is redacted from logs and the startup banner. K71: this governs RENDERING and
+	///   and it is redacted from logs and the startup banner. This governs RENDERING and
 	///   REDACTION, not at-rest sealing — Contracts carries no crypto. The one secret the gateway
 	///   seals in its state DB is the role's own credential (the Password), which the HOST seals and
 	///   unseals and hands the provider in plaintext via <c>ResolvedRole.Credentials</c>. A provider

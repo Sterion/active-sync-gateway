@@ -155,7 +155,7 @@ internal static class BackendsEndpoints
 				return roleError!;
 
 			Dictionary<string, string?> db = new(await store.LoadAllAsync(ct), StringComparer.OrdinalIgnoreCase);
-			// C2: probe only the role's currently-STORED settings (config file + DB overrides).
+			// Probe only the role's currently-STORED settings (config file + DB overrides).
 			// A request-body Settings override is never fed to the probe — otherwise the boolean
 			// `reachable` answer is an SSRF-style oracle: any admin caller could aim it at an
 			// arbitrary internal Host:Port and learn open-vs-closed for a target the role was
@@ -283,7 +283,7 @@ internal static class BackendsEndpoints
 		IConfiguration config, GlobalSettingStore store, IBackendProvider? provider,
 		CancellationToken ct)
 	{
-		// C5: a provider SWITCH must not let the new provider silently adopt the old one's stored
+		// A provider SWITCH must not let the new provider silently adopt the old one's stored
 		// leaves — the SPA starts the new provider's form from its own defaults (drawBody's `keep`
 		// flag), but until now the server only ever touched the leaves the request actually
 		// mentioned. Any leaf name the two providers happen to share (e.g. both `caldav` and
@@ -374,7 +374,7 @@ internal static class BackendsEndpoints
 				RestoreCanonicalCasing(leafs, field.Name);
 			}
 
-		// B7 normalizes GlobalSetting.Key to lowercase on write (sargable PK lookups), so a leaf
+		// GlobalSetting.Key is normalized to lowercase on write (sargable PK lookups), so a leaf
 		// whose ONLY source is the database now surfaces under the row's stored lowercase case —
 		// e.g. "password" instead of "Password" — rather than the case it was saved under, which
 		// the UI and this API's own callers key on case-sensitively. The provider schema fields are

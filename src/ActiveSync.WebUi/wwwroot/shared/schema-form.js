@@ -112,7 +112,7 @@ function scalarControl(field, values, inherited) {
 		});
 	}
 
-	// C6: a masked secret otherwise has no way to reach "unset" — leaving it empty means "keep",
+	// A masked secret otherwise has no way to reach "unset" — leaving it empty means "keep",
 	// and the only other escape is discarding the WHOLE role via "Reset to config". Give it the
 	// same explicit Clear affordance the admin user editor and the portal already have for their
 	// host-reserved password fields, so collect() can emit null (PersistAsync already treats null

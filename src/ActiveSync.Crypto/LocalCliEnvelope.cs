@@ -19,7 +19,7 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 {
 	private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-	/// <summary>K8: this type's own AAD — never shared with a config secret or a <see cref="LocalCliResult" />.</summary>
+	/// <summary>This type's own AAD — never shared with a config secret or a <see cref="LocalCliResult" />.</summary>
 	private static readonly byte[] RequestAad = Encoding.UTF8.GetBytes("activesync:cli:req:v1");
 
 	/// <summary>
@@ -52,7 +52,7 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 	///     top of one.
 	///   </para>
 	///   <para>
-	///     K17: this used to take an optional <c>ISet&lt;string&gt; seenNonces</c> to make one call
+	///     This used to take an optional <c>ISet&lt;string&gt; seenNonces</c> to make one call
 	///     self-enforcing. It was dead code — the only production caller
 	///     (<c>LocalCliEndpoint.TryAuthorize</c>) always used <c>ReplayCache</c> instead — and unsafe
 	///     if it had ever been wired up: a plain <c>ISet&lt;string&gt;</c> is not thread-safe under
@@ -79,7 +79,7 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 			return false;
 		}
 
-		// E19: Args is declared `string[]` (non-nullable elements), but that is a compile-time promise
+		// Args is declared `string[]` (non-nullable elements), but that is a compile-time promise
 		// only — JSON deserializes `{"args":["x",null]}` into exactly that array shape at runtime, so
 		// checking the ARRAY reference alone (`decoded.Args is null`) lets a null element through to
 		// every downstream consumer that trusts the non-nullable contract.
@@ -127,7 +127,7 @@ public sealed record LocalCliResult(
 {
 	private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-	/// <summary>K8: this type's own AAD — never shared with a config secret or a <see cref="LocalCliEnvelope" />.</summary>
+	/// <summary>This type's own AAD — never shared with a config secret or a <see cref="LocalCliEnvelope" />.</summary>
 	private static readonly byte[] ResponseAad = Encoding.UTF8.GetBytes("activesync:cli:res:v1");
 
 	/// <summary>AES-256-GCM seals the result with the master key (reuses the <c>enc:v1:</c> format).</summary>

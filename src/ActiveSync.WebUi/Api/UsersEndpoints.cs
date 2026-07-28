@@ -78,7 +78,7 @@ internal static class UsersEndpoints
 			// (breaking every backend for that user), the OIDC subject binding that stops the login
 			// being claimed by someone else, or the auto-provisioned provenance marker.
 			UserOptions? storedRow = await store.GetAsync(login, ct);
-			// Reveals what a re-posted "***" settings mask (C5) stands for: the GET that produced it
+			// Reveals what a re-posted "***" settings mask stands for: the GET that produced it
 			// masked the MERGED (config over database) value, so unmasking must resolve against the
 			// same merge — resolving against the database row alone would treat a config-only secret
 			// as if nothing were behind the mask and silently drop it. This is ONLY for reading
@@ -87,13 +87,14 @@ internal static class UsersEndpoints
 			UserOptions merged = UserMerge.Merge(configUser, storedRow).Options;
 			UserOptions entry = new()
 			{
-				// C2: the form is populated from the MERGED (config over database) view the GET
+				// The form is populated from the MERGED (config over database) view the GET
 				// returned, so an admin who touches nothing resubmits the config value verbatim.
-				// Storing it here would freeze it as a permanent database override — precisely the
-				// trap docs/design/db-restructure.md deviation 2 says was designed out — so a
-				// submitted value equal to what configuration alone already supplies is elided back
-				// to null: the field keeps resolving through configuration exactly as an unset row
-				// already does. A value that genuinely differs still lands as a real deviation.
+				// Storing it here would freeze it as a permanent database override — precisely what
+				// per-field resolution is meant to avoid, since loading a starting entry used to
+				// clone config into the row and that froze later config changes out — so a submitted
+				// value equal to what configuration alone already supplies is elided back to null:
+				// the field keeps resolving through configuration exactly as an unset row already
+				// does. A value that genuinely differs still lands as a real deviation.
 				MailAddress = UserEditing.ElideIfMatchesConfig(
 					string.IsNullOrWhiteSpace(request.MailAddress) ? null : request.MailAddress.Trim(),
 					configUser?.MailAddress),
@@ -111,7 +112,8 @@ internal static class UsersEndpoints
 			// the merged view: an unset row already falls back to configuration on its own, so
 			// resolving "keep" against the row is enough to preserve the effective password.
 			// Resolving it against the merge (the previous behaviour) copied a config-supplied
-			// password into the row on every untouched save — the same freeze as C2, one field over.
+			// password into the row on every untouched save — the same config-value freeze the
+			// fields above are elided to avoid, one field over.
 			string? gatewayPassword = MergeSecret(request.Password, storedRow?.Password,
 				raw => UserSecretPolicy.PrepareGatewayPassword(raw), out string? passwordError);
 			if (passwordError is not null)
@@ -411,9 +413,10 @@ internal static class UsersEndpoints
 	}
 
 	/// <summary>
-	///   C8: per-field provenance — which level (`config`/`db`) supplied each value — so the admin
+	///   Per-field provenance — which level (`config`/`db`) supplied each value — so the admin
 	///   editor can show an operator which of the values in front of them came from the config file
-	///   (a value C2's freeze would otherwise turn into a silent, invisible database override).
+	///   (a value would otherwise silently turn into an invisible database override once resubmitted
+	///   unchanged).
 	///   Keyed by the same field paths <see cref="UserMerge" /> already computes them under
 	///   ("MailAddress", "Backends:MailStore:UserName", …).
 	/// </summary>

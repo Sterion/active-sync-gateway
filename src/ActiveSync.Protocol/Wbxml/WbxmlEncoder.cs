@@ -32,7 +32,7 @@ public static class WbxmlEncoder
 	}
 
 	/// <summary>
-	///   W14: writes straight out of the encoding <see cref="MemoryStream" />'s own backing array
+	///   Writes straight out of the encoding <see cref="MemoryStream" />'s own backing array
 	///   instead of going through <see cref="Encode" />'s <c>ToArray()</c> — that call is a full
 	///   extra copy of an already-doubled buffer, so a large ItemOperations attachment response paid
 	///   roughly a payload-sized allocation for a copy the stream write never needed:
@@ -159,7 +159,7 @@ public static class WbxmlEncoder
 		try
 		{
 			// Malformed base64 has to surface as WbxmlException, not as a raw FormatException —
-			// W20: the fix is right, but the reason used to be stated wrong here. Encode() writes
+			// The fix is right, but the reason used to be stated wrong here. Encode() writes
 			// into a private MemoryStream and only EncodeAsync touches the destination, after
 			// Encode() has already returned successfully, so nothing is ever half-written to a
 			// response; the actual problem is narrower — a codec is expected to map every input
@@ -174,7 +174,7 @@ public static class WbxmlEncoder
 		}
 		finally
 		{
-			// W15: this buffer just held one user's decoded MIME/attachment plaintext, and
+			// This buffer just held one user's decoded MIME/attachment plaintext, and
 			// ArrayPool<byte>.Shared is process-global — the next renter of the same size class
 			// (potentially a different user's request) would otherwise read the tail of it.
 			ArrayPool<byte>.Shared.Return(scratch, clearArray: true);
