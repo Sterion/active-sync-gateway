@@ -334,6 +334,33 @@ public sealed class WebDavClientTests
 			client.PropfindAsync("/dav/cal/", 1, new XElement(XName.Get("propfind", "DAV:")), CancellationToken.None));
 	}
 
+	// H16: TransientRetry.SendHttpAsync rethrows the ORIGINAL transport exception once its retry
+	// budget is spent (see TransientRetry.IsTransientHttpException). Every DAV call site funnels
+	// through WebDavClient.SendAsync and only ever catches BackendException — a raw
+	// HttpRequestException therefore escaped four "never break folder sync / never treat a hiccup as
+	// a change" guards (CalDavStore's shared-collection probe, DavDiscovery's ctag poll,
+	// DavStoreBase.FindByUidAsync, CardDavStore's GAL fallback). Every other DAV failure mode (HTTP
+	// status, XML parse) already surfaces as BackendException; a transport failure must too.
+	[Fact]
+	public async Task TransportFailure_SurfacesAsBackendException()
+	{
+		ThrowingHandler stub = new(() => new HttpRequestException("connection reset"));
+		using WebDavClient client = new(Base, new HttpClient(stub));
+
+		await Assert.ThrowsAsync<ActiveSync.Contracts.BackendException>(() =>
+			client.PropfindAsync(
+				"/dav/cal/", 1, new XElement(XName.Get("propfind", "DAV:")), CancellationToken.None));
+	}
+
+	private sealed class ThrowingHandler(Func<Exception> makeException) : HttpMessageHandler
+	{
+		protected override Task<HttpResponseMessage> SendAsync(
+			HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			throw makeException();
+		}
+	}
+
 	private static HttpResponseMessage Ok(string body)
 	{
 		return new HttpResponseMessage(HttpStatusCode.OK)

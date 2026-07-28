@@ -250,16 +250,32 @@ public sealed class WebDavClient : IDisposable
 	///   duplicates), update-PUT carries If-Match, DELETE treats 404 as success — and the rest are
 	///   reads, so a replay is always safe.
 	/// </summary>
-	private Task<HttpResponseMessage> SendAsync(Func<HttpRequestMessage> createRequest, CancellationToken ct)
+	private async Task<HttpResponseMessage> SendAsync(Func<HttpRequestMessage> createRequest, CancellationToken ct)
 	{
-		return TransientRetry.SendHttpAsync(
-			() => _redirectSender.SendAsync(createRequest, ct), ct, idempotent: true,
-			onRetry: (reason, attempt) =>
-			{
-				Core.Observability.GatewayMetrics.RecordBackendRetry("dav");
-				_wireLogger?.LogDebug("DAV request transient failure ({Reason}); retry {Attempt}/{Max}",
-					reason, attempt, TransientRetry.DelaysMs.Length);
-			});
+		try
+		{
+			return await TransientRetry.SendHttpAsync(
+				() => _redirectSender.SendAsync(createRequest, ct), ct, idempotent: true,
+				onRetry: (reason, attempt) =>
+				{
+					Core.Observability.GatewayMetrics.RecordBackendRetry("dav");
+					_wireLogger?.LogDebug("DAV request transient failure ({Reason}); retry {Attempt}/{Max}",
+						reason, attempt, TransientRetry.DelaysMs.Length);
+				}).ConfigureAwait(false);
+		}
+		catch (Exception ex) when (ex is HttpRequestException or IOException)
+		{
+			// H16: TransientRetry rethrows the ORIGINAL transport exception once its retry budget is
+			// spent — every DAV call site funnels through this one seam, but several of them (the
+			// shared-collection probe, the ctag poll, FindByUidAsync, the CardDAV GAL fallback) only
+			// ever catch BackendException, so a raw HttpRequestException/IOException escaped every
+			// "never break folder sync / never treat a hiccup as a change" guard built on that catch.
+			// Every other DAV failure mode (HTTP status, XML parse) already surfaces as
+			// BackendException; wrapping here — the single seam every verb funnels through — fixes
+			// every call site at once instead of widening each catch individually.
+			Core.Observability.GatewayMetrics.RecordBackendError("dav");
+			throw new BackendException($"DAV request failed: {ex.Message}", ex);
+		}
 	}
 
 	public async Task<string?> GetPropertyAsync(string href, XName property, CancellationToken ct)
