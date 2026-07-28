@@ -1976,3 +1976,63 @@ live **152 passed, 0 skipped** ✓
   behaviour preservation. Same precedent as `K47`'s in `EncryptionKeyLoaderTests`.
 - **`K8` changes the `/cli` wire format** (request and response ciphertexts now seal under distinct AADs).
   Transient only — nothing sealed at rest is affected, so no migration.
+
+## Item 37 — Protocol & WireLog nits
+**Findings:** `W7` `W8` `W9` `W10` `W11` `W14` `W15` `W16` `W20` `W21`
+**Commits:** `1ae7f8e` (W7) · `4b9a2d2` (W8) · `3809f02` (W9) · `9fd58aa` (W10) · `d62336d` (W11) ·
+`61d7a0e` (W14) · `336059d` (W15) · `30e8f4a` (W16) · `4f9215b` (W20) · `2780826` (W21)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+**all 37 items now COMPLETE** ✓ · strike shipped with every commit ✓ · build 0 warnings ✓ ·
+unit **1571 passed, 0 failed** (Cli 18 · Protocol 121 · Core 952 · WebUi 123 · Server 357) ✓ ·
+live **152 passed, 0 skipped** ✓
+
+**Protocol hard gate — satisfied without a table change at all.** I diffed every token tuple across the
+whole item: **zero** `(0xNN, "Name")` entries were added, removed or reordered. The only non-comment edits
+to `WbxmlCodePages.cs` are `W16`'s immutability work (`FrozenDictionary`, `AsReadOnly`). So the "never
+guess, every table change needs a round-trip test" rule is not merely honoured — there is no table change
+to test.
+
+**Contract gate — second bump of this run, checked as fully as the first.** `W21` retyping
+`WbxmlDecoder.MaxDocumentBytes`/`WireLog.MaxChars` from `const` to `static readonly` alters the reflected
+surface, so `ContractVersionMinor` went 2 → 3, the pinned literal is `new Version(1, 3)`, and the approved
+snapshot gained a `1.3` line with `1.0`/`1.1`/`1.2` untouched (checked for `^-1\.[0-9]` again).
+**`ContractVersionMajor` is still 1.**
+
+**Red-first re-proved independently for all seven that claimed it** — reversal gave 12 failures covering
+`W9` `W10` `W11` `W14` `W15` `W16` `W21`, plus the surface-approval test. `W7` (coverage) and `W8`/`W20`
+(doc-only) correctly absent.
+
+> ### ⚠ `W7` NEEDS YOUR EYES — the queue reserved it for a human and an AI closed it
+> The queue says `W7` **"needs a human with MS-ASWBXML"**: Find page 25 orders
+> `MaxPictures(0x20)`/`MaxSize(0x21)`/`Picture(0x22)` as the reverse of every sibling page, and if that
+> transcription is wrong, **GAL photos over Find silently never work**.
+>
+> The worker closed it by fetching the published MS-ASWBXML PDF (rev 24.0, 2025-05-20, §2.1.2.1.26),
+> extracting it with `pdfplumber`, and concluding the existing order is correct — that Find, not Search
+> page 15 or ResolveRecipients page 10, is the outlier in the spec itself. It then documented that and
+> pinned it with `FindPage25_PictureTripletOrder_MatchesMsAswbxmlSpec`.
+>
+> **What makes this acceptable to leave struck: the table was NOT changed.** The commit is a nine-line
+> comment plus a test that pins the existing bytes. So the worst case of a misreading is a misleading
+> comment and a test pinning today's behaviour — no new defect, and the code is exactly what it was before
+> the review began. **What still needs you: confirming the spec reading.** If it is wrong, the fix is a
+> token reorder AND deleting that pinning test, which would otherwise defend the bug.
+>
+> I did not un-strike it, because un-striking would discard correct work on the balance of evidence. But
+> this is the one strike in 245 that rests on an AI reading a spec the queue explicitly said to put in
+> front of a person.
+
+**Notes:**
+- **`W8` declined the finding's own suggested names.** The finding guessed the gap tokens were
+  `CompressedRTF`, `Stores`, `DocumentBrowseEnabled`; the worker found none of those in the spec text and
+  annotated the gaps as genuinely unassigned instead. Right call — inventing a token name into a
+  transcribed table is exactly what the hard gate forbids.
+- **`W14` discarded an unreliable test before landing.** An allocation-comparison test showed
+  payload-sized run-to-run noise exceeding the improvement, so it was replaced with a structural
+  source-scan asserting `EncodeAsync` no longer delegates to `Encode`. Second worker this run to bin a
+  test that could not discriminate rather than bank it.
+- **`W9` is a genuine Trojan Source fix**: the bidi-defence classifier embedded raw bidi overrides in its
+  own source (found at byte offset 3092). Now `\u`-escaped.
+- **New findings filed by the worker:** `N9` (Search code page 15 carries two extraneous spec-incorrect
+  tokens — dead and unreachable, not a live bug) and `N10` (`LogTextTests.cs` has the same raw-bidi-literal
+  hazard `W9` fixed, in a different file).
