@@ -99,20 +99,14 @@ public static class MailConverter
 		string conversationSeed = message.References.FirstOrDefault() ?? NormalizeTopic(message.Subject);
 		if (!string.IsNullOrEmpty(conversationSeed))
 		{
+			// D23: ConversationIndex used to be written here as a 5-byte stub, 17 bytes short of
+			// the MS-OXOMSG 2.2.1.3 22-byte header (5 time bytes + a 16-byte GUID) and with its own
+			// comment contradicting the bytes it wrote (claimed the high 4 bytes of the message
+			// time, wrote the low 32 bits). No real client can thread on a shape that is neither —
+			// ConversationId alone is correct and sufficient for clients to thread by, so that is
+			// the only conversation-grouping element emitted.
 			byte[] conversationId = MD5.HashData(Encoding.UTF8.GetBytes(conversationSeed));
 			data.Add(Opaque(Email2 + "ConversationId", conversationId));
-			// ConversationIndex header block (MS-OXOMSG 2.2.1.3): byte 0 is a reserved
-			// marker, bytes 1-4 are the high 4 bytes of the message time as minutes since
-			// 1601-01-01 UTC (big-endian). We emit only the 5-byte header (no per-reply
-			// child blocks), which is enough for clients to thread by ConversationId.
-			byte[] index = new byte[5];
-			long minutes = (long)(message.Date.UtcDateTime - new DateTime(1601, 1, 1)).TotalMinutes;
-			index[0] = 1;
-			index[1] = (byte)(minutes >> 24);
-			index[2] = (byte)(minutes >> 16);
-			index[3] = (byte)(minutes >> 8);
-			index[4] = (byte)minutes;
-			data.Add(Opaque(Email2 + "ConversationIndex", index));
 		}
 
 		if (flags.Answered)
