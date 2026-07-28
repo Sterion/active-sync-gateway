@@ -1928,3 +1928,51 @@ run's file was last written 4111 s ago while the agent ran 4083 s, i.e. written 
 **Rule for any future orchestrator: never mutate the working tree — `checkout`, `reset`, `stash` — and
 never spawn a worker for an item, while that item's completion notification has not arrived. Contradicting
 evidence means stop and ask, not pick the convenient signal.**
+
+## Item 36 — Contracts, crypto & plugin nits
+**Findings:** `K8` `K9` `K10` `K12` `K14` `K15` `K16` `K17` `K20` `K22` `K23`
+**Commits:** `ea6c568` (K8) · `9f1d5f7` (K9) · `bccc938` (K10) · `60e31e2` (K12) · `4ea84d8` (K14) ·
+`24b5d0d` (K15) · `a36ce33` (K16) · `3d073aa` (K17) · `0b2f9b4` (K20) · `295aa7d` (K22) · `881f428` (K23)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 37 ✓ · one commit per finding, strike shipped with every one ✓ · build 0 warnings ✓ ·
+unit **1558 passed, 0 failed** (Cli 18 · Protocol 108 · Core 952 · WebUi 123 · Server 357) ✓ ·
+live **152 passed, 0 skipped** ✓
+
+**THE CONTRACT GATE — checked in full, because this is the item that had to move it:**
+- **`ContractVersionMajor` is still `1`.** Only the minor moved. That is the line that must never move
+  without the human, and it did not.
+- **`ContractVersionMinor` raised 1 → 2** in `Directory.Build.props`, required by `K9` retyping the
+  published `TransientRetry.DelaysMs` from `int[]` to `ImmutableArray<int>`.
+- **`ContractSurfaceTests`' pinned literal updated** to `new Version(1, 2)`.
+- **The approved snapshot is genuinely APPEND-ONLY**: `1.0`, `1.1` and the new `1.2` hash lines all
+  present, and no history line was deleted or rewritten — I diffed for `^-1\.[0-9]` specifically, because
+  editing an existing line defeats the guard instead of satisfying it.
+- Under reversal `ContractSurfaceApprovalTests` fails, so the guard demonstrably bites rather than being
+  regenerated into silence.
+
+**Red-first re-proved independently for all five that claimed it** — reversal gave 7 failures:
+`CliEnvelopeCiphertext_IsUnsealableAsAConfigSecret_BeforeDomainSeparation` (K8),
+`DelaysMs_CannotBeMutatedByACaller` + the surface-approval test (K9),
+`RunAsync_IdempotentOmitted_DefaultsToFalse` + `SendHttpAsync_...` (K12),
+`Dispose_ConcurrentCalls_DisposeOwnedResourceAtMostOnce` (K20),
+`Validate_UnknownModeSuffix_MentionsBothRecognizedSuffixes` (K22). `K10`/`K15`/`K16`/`K23` are doc-only,
+`K14` is coverage, `K17` removes dead surface — all correctly absent.
+
+**Notes:**
+- **`K12` is the behaviour change that matters most and it is invisible to the surface hash.**
+  `TransientRetry.RunAsync`/`SendHttpAsync`'s `idempotent` parameter now defaults to **false**, so a plugin
+  author who omits it gets at-most-once instead of at-least-once on a non-idempotent send. Parameter
+  defaults are not rendered in the surface snapshot, so nothing mechanical would have caught this — the
+  version bump covers it only because `K9` forced one in the same item. Worth remembering: a default-value
+  change to a published signature is a silent ABI-behaviour change.
+- **`K16`'s commit is bookkeeping-only.** Its actual doc fix landed inside `K8`'s commit (same XML block),
+  so `a36ce33` carries only the strike. The fix did ship with a fix commit, but between `ea6c568` and
+  `a36ce33` the tree held a finished `K16` the document said was undone. Small window, disclosed by the
+  worker, and the honest alternative (amending K8) would have rewritten a commit hash already recorded.
+- **`K20`'s race was reproduced deterministically** — 16 threads on a barrier over 200 trials, 3/3 runs
+  showing the double disposal pre-fix and 0/3 post-fix — so it is recorded as genuine red-first rather
+  than downgraded to coverage. That is the right call and a better standard than `A6`/`H14` could manage.
+- **`K14` is coverage by necessity**: a memory wipe has no caller-observable handle, so the test only pins
+  behaviour preservation. Same precedent as `K47`'s in `EncryptionKeyLoaderTests`.
+- **`K8` changes the `/cli` wire format** (request and response ciphertexts now seal under distinct AADs).
+  Transient only — nothing sealed at rest is affected, so no migration.
