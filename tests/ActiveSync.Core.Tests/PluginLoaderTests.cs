@@ -88,7 +88,7 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
-	///   K43 — a subdirectory whose entry assembly is missing used to log a warning and continue,
+	///   A subdirectory whose entry assembly is missing used to log a warning and continue,
 	///   which is exactly the silent degradation the loader's fail-fast policy exists to prevent:
 	///   the role config assigned to that plugin falls back to a local store and the deployment
 	///   looks healthy. `docs/plugins.md` already promised an abort. **Behaviour change** — this
@@ -107,7 +107,7 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
-	///   The one exemption to K43's fail-fast: a dot-prefixed directory is by convention not a
+	///   The one exemption to the loader's fail-fast policy: a dot-prefixed directory is by convention not a
 	///   plugin, and Kubernetes projected volumes create exactly that (`..data`) beside the real
 	///   content. Aborting startup on those would make the documented volume-mount deployment
 	///   unusable.
@@ -124,7 +124,7 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
-	///   K39 — the contract-major guard used to read the ENTRY assembly's reference table only, so
+	///   The contract-major guard used to read the ENTRY assembly's reference table only, so
 	///   a plugin whose entry was built against the right major could ship a private helper built
 	///   against another one. The helper's mismatched types then blow up deep inside a sync with a
 	///   TypeLoadException instead of being refused at startup with a comprehensible message.
@@ -160,7 +160,7 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
-	///   K40 — <c>GetTypes()</c> on an untrusted assembly throws <see cref="ReflectionTypeLoadException" />
+	///   <c>GetTypes()</c> on an untrusted assembly throws <see cref="ReflectionTypeLoadException" />
 	///   whenever a type's base type or interface cannot be resolved, which is an ordinary consequence
 	///   of a mis-packaged plugin. That escaped the loader raw, so startup died with a reflection
 	///   exception naming nothing instead of the loader's own "which plugin, and why" message.
@@ -181,7 +181,7 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
-	///   K40 — the loader's "contains no public IGatewayPlugin implementation" message promised a
+	///   The loader's "contains no public IGatewayPlugin implementation" message promised a
 	///   filter the code did not apply: a non-public entry point was instantiated and given the
 	///   host's <see cref="IServiceCollection" /> just like a public one.
 	/// </summary>
@@ -197,7 +197,7 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
-	///   K41 — resolution was host-first for EVERY assembly, not just the shared contract, so any
+	///   Resolution was host-first for EVERY assembly, not just the shared contract, so any
 	///   dependency the host happened to have loaded silently won over the copy the plugin shipped
 	///   beside its entry assembly. A plugin pinned to its own build of a library therefore ran
 	///   against the host's version instead — the classic silent downgrade. Only the contract and
@@ -220,7 +220,7 @@ public sealed class PluginLoaderTests : IDisposable
 	/// <summary>
 	///   The other half of the same rule: the shared contract must still come from the HOST even
 	///   when the plugin ships a copy, or its IBackendProvider is a different type and the registry
-	///   never sees it. Guard against over-correcting K41 into plugin-first for everything.
+	///   never sees it. Guard against over-correcting the host-contract fix into plugin-first for everything.
 	/// </summary>
 	[Fact]
 	public void SharedContract_StillResolvesFromTheHost_EvenWhenThePluginShipsACopy()
@@ -236,7 +236,7 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
-	///   K42 — a configured RELATIVE <c>Plugins:Directory</c> resolved against the process working
+	///   A configured RELATIVE <c>Plugins:Directory</c> resolved against the process working
 	///   directory while the default resolved against the app base, so setting the option to its own
 	///   documented default (<c>plugins</c>) changed which directory was scanned. What the gateway
 	///   loads into itself must not depend on where it was started from.
@@ -268,7 +268,7 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
-	///   K44 — the load context is dependency isolation, not a security boundary: plugin code runs
+	///   The load context is dependency isolation, not a security boundary: plugin code runs
 	///   in-process with the gateway's full rights. The only thing that can gate that is deciding
 	///   *before* loading whether the bytes on disk are the ones the operator reviewed, so the
 	///   loader takes an optional pinned digest per plugin.
@@ -292,7 +292,7 @@ public sealed class PluginLoaderTests : IDisposable
 		Assert.Contains(expected, ex.Message, StringComparison.OrdinalIgnoreCase);
 	}
 
-	/// <summary>K44 — the matching pin is the load path, and a private dependency is part of it.</summary>
+	/// <summary>The matching pin is the load path, and a private dependency is part of it.</summary>
 	[Fact]
 	public void PinnedPlugin_WithTheMatchingDigest_Loads()
 	{
@@ -313,7 +313,7 @@ public sealed class PluginLoaderTests : IDisposable
 		Assert.NotEqual(digest, PluginLoader.ComputeDirectoryDigest(pluginDir));
 	}
 
-	/// <summary>K44 — opt-in strict mode: with RequirePinned set, an unpinned plugin cannot load.</summary>
+	/// <summary>Opt-in strict mode: with RequirePinned set, an unpinned plugin cannot load.</summary>
 	[Fact]
 	public void RequirePinned_RefusesAnUnpinnedPlugin()
 	{
@@ -331,7 +331,7 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
-	///   K4 — RequirePinned was read as a raw configuration string via <c>bool.TryParse</c>, not
+	///   RequirePinned was read as a raw configuration string via <c>bool.TryParse</c>, not
 	///   through the options binder, so a value TryParse cannot read (the natural env-var forms
 	///   "1"/"yes"/"on" — <c>ActiveSync__Plugins__RequirePinned=1</c> is the documented deployment)
 	///   silently fell through to "not required": an operator who set it believed unpinned plugins
@@ -358,7 +358,7 @@ public sealed class PluginLoaderTests : IDisposable
 	}
 
 	/// <summary>
-	///   K3 — the pin is the only enforceable trust control the loader has, and it hashed
+	///   The pin is the only enforceable trust control the loader has, and it hashed
 	///   <c>*.dll</c> files only. On the shipped Linux image a plugin's native P/Invoke payload
 	///   is a <c>.so</c>, never a <c>.dll</c>, and its <c>.deps.json</c> drives where the loader's
 	///   <see cref="System.Runtime.Loader.AssemblyDependencyResolver" /> resolves dependencies from
@@ -378,7 +378,7 @@ public sealed class PluginLoaderTests : IDisposable
 		Assert.NotEqual(before, after);
 	}
 
-	/// <summary>K3 — same defect, the native-library vector named explicitly in the finding.</summary>
+	/// <summary>Same defect, the native-library vector named explicitly.</summary>
 	[Fact]
 	public void ComputeDirectoryDigest_ChangesWhenANativeLibraryIsAdded()
 	{

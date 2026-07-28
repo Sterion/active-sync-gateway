@@ -5,7 +5,7 @@ using ActiveSync.Core.State;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C10 — <c>GET /admin/api/devices</c> and <c>/shares</c> materialized their whole tables per
+///   <c>GET /admin/api/devices</c> and <c>/shares</c> materialized their whole tables per
 ///   request: no Take, no pagination, while the sibling logs endpoint clamps to 500. Tens of
 ///   thousands of devices is a repeatable memory spike an admin can trigger by refreshing, and
 ///   the in-memory <c>blocks.Any(...)</c> cross-join made the devices listing O(devices×blocks)

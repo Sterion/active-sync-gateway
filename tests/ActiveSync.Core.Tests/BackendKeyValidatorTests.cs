@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   B24 — validating a single backend key in isolation. When the key is <c>Provider</c>, it is not
+///   Validating a single backend key in isolation. When the key is <c>Provider</c>, it is not
 ///   enough that the registry can serve the role: the settings ALREADY stored under that role must
 ///   also satisfy the incoming provider's schema, otherwise the switch is accepted over a section
 ///   shaped for the old provider and only surfaces at the next restart.
@@ -131,7 +131,7 @@ public sealed class BackendKeyValidatorTests
 			Registry(), effective, "ActiveSync:Backends:MailStore:Provider", "smtp"));
 	}
 
-	// B25 — the provider's schema is authoritative for secret masking, both ways: a Secret-typed field
+	// The provider's schema is authoritative for secret masking, both ways: a Secret-typed field
 	// whose NAME the heuristic would miss is masked; a String field whose name the heuristic would
 	// (wrongly) flag is not.
 	[Fact]
@@ -165,7 +165,7 @@ public sealed class BackendKeyValidatorTests
 		Assert.False(BackendKeyValidator.IsSecretLeaf(registry, effective, "ActiveSync:Backends:MailStore:Folder"));
 	}
 
-	// B5 — a backend-section WRITE is never re-validated against the declared users. Here, a config
+	// A backend-section WRITE is never re-validated against the declared users. Here, a config
 	// user (bob) has NO Oof provider override of his own, only a per-role Settings entry ("Legacy")
 	// that is merged onto whichever provider the GLOBAL Oof role currently names (UserResolver's
 	// "inherit global settings only when the provider is unchanged" rule ties inheritance to the
@@ -210,7 +210,7 @@ public sealed class BackendKeyValidatorTests
 		Assert.Null(BackendKeyValidator.Validate(registry, effective, "ActiveSync:Backends:Oof:Provider", "new-oof"));
 	}
 
-	/// <summary>Tolerates any settings — the "before" side of the B5 scenario.</summary>
+	/// <summary>Tolerates any settings — stands in for the currently configured provider before a global provider swap.</summary>
 	private sealed class OldOofProvider : IBackendProvider
 	{
 		public string Name => "old-oof";

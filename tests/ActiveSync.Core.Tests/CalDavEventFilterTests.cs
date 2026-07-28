@@ -5,7 +5,7 @@ using ActiveSync.Contracts;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   H30: BuildEventFilter must render the time-range start through EasDateTime.ToCompact so a
+///   BuildEventFilter must render the time-range start through EasDateTime.ToCompact so a
 ///   non-UTC SinceUtc is converted to UTC — not stamped with a trailing Z while still carrying
 ///   local wall-clock (which the hand-rolled ToString("...'Z'") did).
 /// </summary>

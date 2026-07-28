@@ -6,7 +6,7 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C5 (round 2), re-evaluated as an item-12 follow-up. The original C5 fix withheld
+///   Re-evaluated as a follow-up. The original fix withheld
 ///   <c>GET /user/api/me</c>'s <c>userName</c> for a role whose PROVIDER opts no field into
 ///   <c>SelfServiceEditable</c> (the SETTINGS surface — connection knobs like Host/BaseUrl). But
 ///   that gate governs the settings dictionary only; backend CREDENTIALS (userName/password) are a

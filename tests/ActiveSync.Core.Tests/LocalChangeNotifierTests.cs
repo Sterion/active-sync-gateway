@@ -3,7 +3,7 @@ using ActiveSync.Backends.Local;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   G21: <see cref="LocalChangeNotifier" /> had no latch, so a write landing between a caller's
+///   <see cref="LocalChangeNotifier" /> had no latch, so a write landing between a caller's
 ///   entry check (e.g. PingHandler's CheckPendingAsync) and its wait's own registration was
 ///   silently dropped — invisible until the next watchdog re-check. Mirrors ImapIdleWatcher's
 ///   <c>LastChangeUtc</c> latch ("events are latched so a change that fires while no wait is

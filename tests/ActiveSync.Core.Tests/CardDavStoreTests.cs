@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   H22: the default contacts folder (EAS type Contacts) was whichever address book the server
+///   The default contacts folder (EAS type Contacts) was whichever address book the server
 ///   happened to list first in the multistatus — unstable across sessions and servers.
 ///   <c>CalDavStore</c> already sorts the home set before crowning the default calendar; CardDAV
 ///   must do the same so the pick is deterministic.
@@ -63,7 +63,7 @@ public sealed class CardDavStoreTests
 		Assert.Equal("Alpha", def.DisplayName);
 	}
 
-	// H6: a server can accept the addressbook-query REPORT and return a well-formed 207 whose
+	// A server can accept the addressbook-query REPORT and return a well-formed 207 whose
 	// propstats carry getetag but no address-data (unsupported or silently dropped) — that yields an
 	// EMPTY-BUT-NON-NULL card list, indistinguishable from "the REPORT threw" only in that
 	// QueryGalCardsAsync's caller treats it as "genuinely zero matches" instead of falling back to
@@ -135,7 +135,7 @@ public sealed class CardDavStoreTests
 		Assert.Equal(1, getCount); // fell back to a per-contact GET
 	}
 
-	// H14: GAL search issued one HTTP GET per contact (a 5000-contact book = 5000 serial round
+	// GAL search issued one HTTP GET per contact (a 5000-contact book = 5000 serial round
 	// trips per keystroke). A single addressbook-query REPORT returns the matching vCards inline, so
 	// no per-contact GET is needed. Proven by counting GETs: unmodified code fetches every card,
 	// the fixed store fetches none.
@@ -221,7 +221,7 @@ public sealed class CardDavStoreTests
 		Assert.True(reportCount >= 1);   // one addressbook-query REPORT instead
 	}
 
-	// H2: CreateItemAsync fetched a full pre-PUT collection listing (PROPFIND) unconditionally,
+	// CreateItemAsync fetched a full pre-PUT collection listing (PROPFIND) unconditionally,
 	// even when the UID-query REPORT already located the stored item at the exact PUT href —
 	// wasting a full enumeration on every single create against a well-behaved server (the fix
 	// is meant to defer it to the listing-diff fallback only). Counting PROPFIND calls
@@ -271,7 +271,7 @@ public sealed class CardDavStoreTests
 		Assert.False(string.IsNullOrEmpty(revision));
 	}
 
-	// H2 follow-up: the eager pre-PUT listing was turned into a lazy Func consulted only inside
+	// The eager pre-PUT listing was turned into a lazy Func consulted only inside
 	// ResolveStoredHrefAsync, which runs AFTER the PUT — so whenever it IS invoked, it enumerates a
 	// collection that already contains the just-created resource. `before` is documented as the
 	// listing "from before the PUT" but can no longer be that. On a server that stores the resource
@@ -339,7 +339,7 @@ public sealed class CardDavStoreTests
 		Assert.Equal("canon-etag", revision.Trim('"'));
 	}
 
-	// H2: on a server whose listings AND UID-query index lag a PUT (Axigen — AGENTS.md: "listings
+	// On a server whose listings AND UID-query index lag a PUT (Axigen — AGENTS.md: "listings
 	// can lag a PUT by up to ~a minute"), neither FindByUidAsync (REPORT) nor GetItemRevisionsAsync
 	// (PROPFIND) sees the just-created item yet. The old code fell straight from there into a
 	// content scan of the (stale) listing it just fetched — fetching every PRE-EXISTING item in the
@@ -417,7 +417,7 @@ public sealed class CardDavStoreTests
 		Assert.Equal("put-etag", revision.Trim('"'));
 	}
 
-	// H20: when the server exposes no ETag anywhere for a newly created item -- not on the PUT
+	// When the server exposes no ETag anywhere for a newly created item -- not on the PUT
 	// response, not via a direct getetag PROPFIND -- the old code fell back to a fresh
 	// Guid.NewGuid() on every call: a value indistinguishable from a genuine opaque ETag that can
 	// never equal what a later listing reports, so the very next diff treats the item as

@@ -7,8 +7,8 @@ using Microsoft.EntityFrameworkCore;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   The item-2 acceptance tests of docs/design/db-restructure.md: <c>UserId</c> is THE
-///   identity — a login rename is a single-row update that leaves sync state attached and
+///   <c>UserId</c> is THE identity, not the login — a login rename is a single-row update
+///   that leaves sync state attached and
 ///   encrypted local content decryptable, and the id column can never recycle a value
 ///   (security-critical: a reused id would let a new user decrypt a dead user's rows).
 /// </summary>

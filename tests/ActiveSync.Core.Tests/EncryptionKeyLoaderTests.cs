@@ -8,7 +8,7 @@ public class EncryptionKeyLoaderTests
 	private static readonly string RawKeyBase64 = Convert.ToBase64String(
 		Enumerable.Range(0, 32).Select(i => (byte)i).ToArray());
 
-	// K1: a passphrase now requires a per-deployment salt. Tests that exercise the passphrase path
+	// A passphrase now requires a per-deployment salt. Tests that exercise the passphrase path
 	// supply this so they derive a key instead of being fail-closed refused.
 	private const string TestSalt = "unit-test-deployment-salt";
 
@@ -41,9 +41,9 @@ public class EncryptionKeyLoaderTests
 	[Fact]
 	public void Passphrase_AtFloor_LoadsSuccessfully()
 	{
-		// Behaviour change (K46): there is now a hard minimum passphrase length. A passphrase at or
+		// Behaviour change: there is now a hard minimum passphrase length. A passphrase at or
 		// above the floor (but still under the 12-char warn threshold) loads and is usable — the
-		// warning is the only pushback in that band (was "even 'pass' is accepted"). K1: it also needs
+		// warning is the only pushback in that band (was "even 'pass' is accepted"). It also needs
 		// a per-deployment salt to be accepted.
 		byte[]? key = Load("passpass", out string? error, salt: TestSalt); // 8 chars
 		Assert.Null(error);
@@ -56,7 +56,7 @@ public class EncryptionKeyLoaderTests
 	[Fact]
 	public void ShortPassphrase_BelowFloor_IsRejected()
 	{
-		// K46: a passphrase below the hard minimum is refused (previously it only produced a
+		// A passphrase below the hard minimum is refused (previously it only produced a
 		// startup warning and loaded anyway).
 		byte[]? key = Load("pass", out string? error); // 4 chars
 		Assert.Null(key);
@@ -102,7 +102,7 @@ public class EncryptionKeyLoaderTests
 	[Fact]
 	public void Passphrase_WithoutKeyDerivationSalt_IsRejected()
 	{
-		// K1 (red-first): a passphrase (anything but a raw base64 32-byte key) must be stretched
+		// Red-first: a passphrase (anything but a raw base64 32-byte key) must be stretched
 		// against a PER-DEPLOYMENT salt. The historical code fell back to a single global fixed salt
 		// whenever KeyDerivationSalt was unset, so one precomputed rainbow table recovered the master
 		// key of every default deployment. The passphrase path is now REFUSED with an actionable error
@@ -118,7 +118,7 @@ public class EncryptionKeyLoaderTests
 	[Fact]
 	public void KeyDerivationSalt_ProducesDeploymentSpecificKeys()
 	{
-		// K45: a per-deployment PBKDF2 salt, so one precomputed rainbow table cannot cover every
+		// A per-deployment PBKDF2 salt, so one precomputed rainbow table cannot cover every
 		// deployment. The same passphrase under two different salts must yield different keys, while
 		// the unset case stays back-compatible and deterministic.
 		byte[]? a = EncryptionKeyLoader.TryLoadKey(
@@ -135,12 +135,12 @@ public class EncryptionKeyLoaderTests
 	[Fact]
 	public void NonCanonicalBase64_IsNotUsedAsRawKey()
 	{
-		// K14 (red-first): a value that decodes to 32 bytes but is NOT canonical base64 (here an
+		// Red-first: a value that decodes to 32 bytes but is NOT canonical base64 (here an
 		// embedded space — Convert.FromBase64String ignores whitespace) is a passphrase, not a raw
 		// key. The historical code took the raw path for anything that merely decoded to 32 bytes,
 		// using the low-entropy input verbatim as the AES key with NO PBKDF2 stretching. It must
 		// instead fall through to the passphrase path and be stretched. (A salt is supplied so the
-		// passphrase path derives rather than being K1-refused.)
+		// passphrase path derives rather than being refused for a missing salt.)
 		string nonCanonical = RawKeyBase64.Insert(4, " ");
 		byte[] decoded = Convert.FromBase64String(nonCanonical);
 		Assert.Equal(32, decoded.Length);
@@ -174,7 +174,7 @@ public class EncryptionKeyLoaderTests
 	[Fact]
 	public void Passphrase_ByteBasedDerivation_IsBehaviourPreserving_Coverage()
 	{
-		// K47 COVERAGE (not proof): the passphrase is now fed to PBKDF2 as a byte buffer that is
+		// Coverage (not proof): the passphrase is now fed to PBKDF2 as a byte buffer that is
 		// zeroed after derivation, rather than via the string overload, so the highest-value copy
 		// we control is wiped. The wipe has no external handle to observe; this guards that the
 		// byte-based path yields the SAME key (UTF-8 bytes == the string overload's own encoding),

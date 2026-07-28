@@ -19,9 +19,9 @@ namespace ActiveSync.Core.Tests;
 
 /// <summary>
 ///   Session-lifetime behaviour of <see cref="BackendSessionFactory" />: the refcounted lease that
-///   keeps an in-use session alive across an idle-eviction sweep (A2), that the share-grant DB read
-///   happens once per build rather than once per request (A11), and that a disposed factory
-///   unsubscribes from snapshot/settings events (A28).
+///   keeps an in-use session alive across an idle-eviction sweep, that the share-grant DB read
+///   happens once per build rather than once per request, and that a disposed factory
+///   unsubscribes from snapshot/settings events.
 /// </summary>
 public sealed class BackendSessionFactoryTests : IDisposable
 {
@@ -44,7 +44,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public async Task IdleEviction_DoesNotTearDownASessionAnActiveRequestHolds()
 	{
-		// A2: a Ping holds its session for the whole heartbeat (up to ~29.5 min), far longer than
+		// A Ping holds its session for the whole heartbeat (up to ~29.5 min), far longer than
 		// SessionIdleMinutes, so the idle sweep fires while the request is mid-flight. It must evict
 		// the session from the cache WITHOUT disposing the connection the request is still using.
 		FakeMailProvider provider = new();
@@ -83,7 +83,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public async Task ShareGrants_AreReadOncePerBuild_NotPerRequest()
 	{
-		// A11: LoadShareGrantsAsync opened a DbContext on every GetSessionAsync, though the grants
+		// LoadShareGrantsAsync opened a DbContext on every GetSessionAsync, though the grants
 		// are consumed only when a session is actually built. A cache hit must not touch the DB.
 		FakeMailProvider provider = new();
 		CountingContextFactory counting = new(_connection);
@@ -100,7 +100,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public async Task AuthCache_RejectsAVerdictStampedWithAnOlderSnapshotVersion()
 	{
-		// A8: SnapshotChanged clears the auth caches, but a verdict already IN FLIGHT against the
+		// SnapshotChanged clears the auth caches, but a verdict already IN FLIGHT against the
 		// OLD snapshot can still write back to the (now-empty) cache AFTER the clear — a stale
 		// positive verdict re-populates the cache (TOCTOU: the edit that should have invalidated
 		// it already ran). It must be stamped with the snapshot version it was computed under and
@@ -154,7 +154,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public async Task IdleSweep_DoesNotCountAFaultedSessionSlotAsActive()
 	{
-		// A9: EvictIdleSessionsCore derived `activeUsers` from raw _sessions.Keys, which includes
+		// EvictIdleSessionsCore derived `activeUsers` from raw _sessions.Keys, which includes
 		// a slot whose build FAULTED (e.g. a transient backend outage in CreateConnectionAsync) —
 		// IsValueCreated but not IsCompletedSuccessfully. A user whose only slot is faulted has no
 		// live session, so a provider's per-user resources (e.g. IDLE watchers) for that user must
@@ -174,7 +174,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public async Task GetSession_RecoversFromASingleFaultedBuild_WithoutWedgingTheSlot()
 	{
-		// A10: a faulted Lazy build (e.g. a transient backend outage during
+		// A faulted Lazy build (e.g. a transient backend outage during
 		// CreateConnectionAsync) was never swept from the cache, so every subsequent
 		// GetSessionAsync call for the same (user, device) re-awaited the SAME faulted Task and
 		// rethrew the SAME exception forever — wedged until restart. A single faulted attempt
@@ -193,7 +193,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public async Task GetSession_KeyedOnLoginAlone_ServesAReissuedLoginTheOldHoldersSession()
 	{
-		// A4: the cache key was `$"{credentials.UserName}\n{deviceId}"` — no UserId. If a login is
+		// The cache key was `$"{credentials.UserName}\n{deviceId}"` — no UserId. If a login is
 		// freed (rename) and reissued to a DIFFERENT person with the SAME presented password, the
 		// second GetSessionAsync for that login/device must build a session scoped to the NEW
 		// UserId, not reuse the stale entry still carrying the OLD UserId (DB scoping / AAD leak).
@@ -214,7 +214,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public async Task IdleSweep_RemovesAFaultedSessionSlot()
 	{
-		// A10: a faulted slot is never IsBuilt, so the idle-timeout eviction (which only ever
+		// A faulted slot is never IsBuilt, so the idle-timeout eviction (which only ever
 		// checked IsBuilt) never qualified it — it sat in the cache forever. The sweep must
 		// remove a faulted slot on its own too, so a (user, device) that's never retried again
 		// doesn't leak.
@@ -234,7 +234,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public void IdleSweep_RemovalMustBeValueCompared_NotKeyOnly_COVERAGE()
 	{
-		// A6 — COVERAGE, not red-first proof. EvictIdleSessionsCore's foreach captures (key, lazy)
+		// COVERAGE, not red-first proof. EvictIdleSessionsCore's foreach captures (key, lazy)
 		// from ONE enumeration pass over the live _sessions ConcurrentDictionary, then a few
 		// instructions later removes by KEY ALONE: `_sessions.TryRemove(key, out removed)`. If a
 		// concurrent installer (GetSessionAsync's password-rotation path, or a rebuild after a
@@ -275,7 +275,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public async Task RecycleAll_OneThrowingProviderTrim_StillTrimsTheRestUnaffected()
 	{
-		// A7: RecycleAll's per-user resource trim loop was unguarded, unlike the IDENTICAL loop in
+		// RecycleAll's per-user resource trim loop was unguarded, unlike the IDENTICAL loop in
 		// EvictIdleSessionsCore, which wraps the whole sweep specifically "because the trim runs
 		// plugin code". RecycleAll is reached from BackendRolesProvider.Changed (a live
 		// `eas config set Backends:...`), so one provider throwing there must not stop the rest of
@@ -338,7 +338,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public async Task DisposedFactory_UnsubscribesFromSettingsEvents()
 	{
-		// A28: the factory subscribed to BackendRolesProvider.Changed / UserResolver.SnapshotChanged
+		// The factory subscribed to BackendRolesProvider.Changed / UserResolver.SnapshotChanged
 		// but never unsubscribed. After disposal it must detach both handlers, otherwise the disposed
 		// (dead) factory stays reachable and its handlers keep firing on cleared state.
 		FakeMailProvider provider = new();
@@ -366,9 +366,9 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public async Task DisposedFactory_ClearsTheStaticSessionsObserver()
 	{
-		// A10: the ctor wires GatewayMetrics.SetSessionsObserver to a closure over THIS factory's
+		// The ctor wires GatewayMetrics.SetSessionsObserver to a closure over THIS factory's
 		// _sessions dictionary (the activesync_backend_sessions_active gauge). DisposeAsync
-		// detaches the SnapshotChanged/Changed handlers (A28, above) but leaves this observer
+		// detaches the SnapshotChanged/Changed handlers, per the disposal test above, but leaves this observer
 		// installed — a disposed factory's closure stays reachable in the static slot until some
 		// LATER factory happens to overwrite it (last-write-wins), which never happens in a
 		// single-host process. After disposal the static slot must no longer target this factory.
@@ -393,7 +393,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	[Fact]
 	public void IdleSweep_SwallowsAnEscapingException()
 	{
-		// A13: EvictIdleSessions is a System.Threading.Timer callback — an escaping exception
+		// EvictIdleSessions is a System.Threading.Timer callback — an escaping exception
 		// terminates the process. Reading _options.CurrentValue can throw (live-editable settings),
 		// so the whole body must be guarded.
 		FakeMailProvider provider = new();
@@ -507,7 +507,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		}
 	}
 
-	/// <summary>A provider with no roles whose <see cref="TrimUserResources" /> always throws (A7).</summary>
+	/// <summary>A provider with no roles whose <see cref="TrimUserResources" /> always throws.</summary>
 	private sealed class ThrowingResourceOwnerProvider : IBackendProvider, IPerUserResourceOwner
 	{
 		private static readonly IReadOnlySet<BackendRole> None = new HashSet<BackendRole>();
@@ -530,7 +530,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		}
 	}
 
-	/// <summary>A provider with no roles that just records whether it was trimmed (A7).</summary>
+	/// <summary>A provider with no roles that just records whether it was trimmed.</summary>
 	private sealed class TrackingResourceOwnerProvider : IBackendProvider, IPerUserResourceOwner
 	{
 		private static readonly IReadOnlySet<BackendRole> None = new HashSet<BackendRole>();
@@ -552,7 +552,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	/// <summary>
 	///   A MailStore provider whose credential probe pauses on <see cref="Gate" /> until released,
 	///   so a test can control exactly when a concurrent verdict is "in flight" relative to a
-	///   snapshot rebuild (A8).
+	///   snapshot rebuild.
 	/// </summary>
 	private sealed class ControllableVerifierProvider : IBackendProvider, ICredentialVerifier
 	{
@@ -589,7 +589,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 	/// <summary>
 	///   A MailStore provider whose connection build always FAULTS (a transient backend outage) —
 	///   and that also owns per-user resources, so a test can observe exactly which set the idle
-	///   sweep considers "active" (A9).
+	///   sweep considers "active".
 	/// </summary>
 	private sealed class FailingResourceOwnerProvider : IBackendProvider, IPerUserResourceOwner
 	{
@@ -615,7 +615,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 
 	/// <summary>
 	///   A MailStore provider whose connection build FAULTS on the first attempt (a transient
-	///   backend outage) and succeeds on every attempt after (A10).
+	///   backend outage) and succeeds on every attempt after.
 	/// </summary>
 	private sealed class FlakyProvider : IBackendProvider
 	{

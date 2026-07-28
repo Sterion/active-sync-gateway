@@ -8,7 +8,7 @@ using ActiveSync.Contracts;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   H29: <c>GetItemRevisionsAsync</c> ignored the client's calendar FilterType window, so a
+///   <c>GetItemRevisionsAsync</c> ignored the client's calendar FilterType window, so a
 ///   phone asking for "2 weeks" still listed every event ever. The store enumerates all events, so
 ///   it must apply the window in memory — while never dropping a recurring event, whose current
 ///   occurrences may fall inside the window even when its DTSTART does not.
@@ -28,7 +28,7 @@ public sealed class JmapCalendarStoreUnitTests
 	}
 	""";
 
-	// H21: JmapCalendarStore declared IReadOnlyCollectionSource with IsReadOnlyCollection hard-
+	// JmapCalendarStore declared IReadOnlyCollectionSource with IsReadOnlyCollection hard-
 	// coded to `false` — indistinguishable from not implementing the interface at all, but it made
 	// the store LOOK share-aware to IBackendSession.IsReadOnlyFolder's OR and to anyone reading the
 	// type list. docs/backends.md already flags this as unenforced; the honest fix is to drop the
@@ -67,7 +67,7 @@ public sealed class JmapCalendarStoreUnitTests
 		Assert.Contains("REC", revs.Keys);          // recurring — never dropped on a date filter
 	}
 
-	// H7: GetItemRevisionsAsync is invoked once PER CALENDAR within one Sync round; it used to
+	// GetItemRevisionsAsync is invoked once PER CALENDAR within one Sync round; it used to
 	// re-download the FULL account's events every time (CalendarEvent/get ids:null), so M calendars
 	// cost M full downloads of the same N events. The full body download must happen at most once
 	// per account-level state, regardless of how many calendars are listed.
@@ -100,7 +100,7 @@ public sealed class JmapCalendarStoreUnitTests
 		Assert.Equal(1, fullDownloads);
 	}
 
-	// H7: a server that declares a finite maxObjectsInGet answers requestTooLarge to a blind
+	// A server that declares a finite maxObjectsInGet answers requestTooLarge to a blind
 	// "ids:null" over a large calendar. When one is declared, listing must page the ids through
 	// CalendarEvent/query + CalendarEvent/get instead of a single unbounded get.
 	[Fact]
@@ -165,7 +165,7 @@ public sealed class JmapCalendarStoreUnitTests
 		Assert.Equal(2, revs.Count);
 	}
 
-	// H15: the Ping/Sync wait token re-downloaded the FULL JSCalendar body of every event on every
+	// The Ping/Sync wait token re-downloaded the FULL JSCalendar body of every event on every
 	// poll tick (CalendarEvent/get ids:null) and SHA-256'd it. The token must instead be the
 	// account-level CalendarEvent state (a tiny CalendarEvent/get ids:[] call), so a change is
 	// detected without pulling any event body. Proven by advancing ONLY the state between polls
@@ -201,7 +201,7 @@ public sealed class JmapCalendarStoreUnitTests
 		Assert.False(sawFullFetch); // the poll must not pull full event bodies
 	}
 
-	// H5: item revisions used to be a SHA-256 of the raw CalendarEvent JSON text, sensitive to member
+	// Item revisions used to be a SHA-256 of the raw CalendarEvent JSON text, sensitive to member
 	// ORDER and whitespace (both server-defined for a JSON object). A permitted re-serialization
 	// flipped every event's revision, re-syncing the whole calendar. Two logically identical events
 	// whose members differ only in order MUST hash to the same revision. Red-first: over the raw text

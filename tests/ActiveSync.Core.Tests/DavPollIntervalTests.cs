@@ -8,8 +8,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   H11 (coverage — the plumbing is a new seam, so it cannot be observed red-first through
-///   behaviour: the old poller took no interval at all and always waited a hardcoded 60 s). The poll
+///   Coverage — the plumbing is a new seam, so it cannot be observed red-first through
+///   behaviour: the old poller took no interval at all and always waited a hardcoded 60 s. The poll
 ///   interval passed to <see cref="DavDiscovery.PollCtagsAsync" /> is now the operator's
 ///   <c>Eas:DavPollSeconds</c>, so a change is detected at the configured cadence rather than after a
 ///   fixed minute. The test drives the poller with a 1 s interval against a ctag that changes after
@@ -47,8 +47,8 @@ public sealed class DavPollIntervalTests
 			$"change was not detected until {sw.Elapsed.TotalSeconds:F1}s — the poll interval is not honoured");
 	}
 
-	// H5: AGENTS.md documents the full-enumeration posture's cost bound as "one Depth:1 ctag
-	// PROPFIND per home set, not per folder" (the H12 mitigation list) — but the poller issued one
+	// AGENTS.md documents the full-enumeration posture's cost bound as "one Depth:1 ctag
+	// PROPFIND per home set, not per folder" — but the poller issued one
 	// PROPFIND (sometimes two, when getctag is absent) per WATCHED FOLDER. Five calendars sharing
 	// one home set must therefore cost one PROPFIND per snapshot (baseline + one poll = 2 requests
 	// total), not one per folder per snapshot (5 * 2 = 10 on the unmodified loop). A short,

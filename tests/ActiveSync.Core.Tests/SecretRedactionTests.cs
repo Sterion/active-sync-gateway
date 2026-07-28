@@ -3,7 +3,7 @@ using ActiveSync.Core.Administration;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   The unified redactor (S7 / K37): one notion of what is secret and one connection-string
+///   The unified redactor: one notion of what is secret and one connection-string
 ///   redactor, so the CLI, the startup banner, the web settings/backends editors and the
 ///   per-account views can no longer disagree about what to hide.
 /// </summary>
@@ -68,7 +68,7 @@ public class SecretRedactionTests
 		Assert.Contains("Password=***", SecretRedaction.RedactConnectionString(
 			"Host=db;Username=u;Password=hunter2;Pooling=true"));
 
-		// E23: a SQLite/SQLCipher string carrying a Password keyword is masked, not waved through.
+		// A SQLite/SQLCipher string carrying a Password keyword is masked, not waved through.
 		string sqlite = SecretRedaction.RedactConnectionString("Data Source=/data/app.db;Password=cipherkey");
 		Assert.DoesNotContain("cipherkey", sqlite);
 		Assert.Contains("Password=***", sqlite);

@@ -7,7 +7,7 @@ using MimeKit;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D5: meeting-request (iTIP) times must honour the DTSTART/DTEND TZID parameter and folded
+///   Meeting-request (iTIP) times must honour the DTSTART/DTEND TZID parameter and folded
 ///   iCalendar lines, not treat every non-Z value as UTC or truncate a folded property.
 /// </summary>
 public class MailConverterMeetingRequestTests
@@ -88,7 +88,7 @@ public class MailConverterMeetingRequestTests
 		Assert.Equal("2025-06-01T09:00:00.000Z", mr.Element(Email + "StartTime")!.Value);
 	}
 
-	// D30 — coverage, not red-first proof: MailConverter's ORGANIZER read repeated the same
+	// Coverage, not red-first proof: MailConverter's ORGANIZER read repeated the same
 	// substring-Replace("mailto:", "") pattern as CalendarConverter's organizer/attendee reads
 	// (CalendarConverterTests.ToApplicationData_OrganizerEmail_OnlyStripsTheLeadingMailtoPrefix is
 	// the red-first proof for the shared defect/fix — CalendarConverter.StripMailto). Both call
@@ -109,7 +109,7 @@ public class MailConverterMeetingRequestTests
 		Assert.Equal("mailto:boss@example.com", mr.Element(Email + "Organizer")!.Value);
 	}
 
-	// D1 — Outlook/Google/Exchange all emit BEGIN:VTIMEZONE before BEGIN:VEVENT, and its
+	// Outlook/Google/Exchange all emit BEGIN:VTIMEZONE before BEGIN:VEVENT, and its
 	// STANDARD/DAYLIGHT subcomponents each carry a bare (no-Z, no-TZID) DTSTART for the 1970
 	// DST transition. Prop() scanned the whole ICS from the top and returned that line instead
 	// of the real VEVENT DTSTART, showing the phone a meeting starting in 1970.

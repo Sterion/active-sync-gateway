@@ -172,7 +172,7 @@ public class DbAccountTests(GatewayFixture gateway)
 	[BackendFact]
 	public async Task DisabledAccount_IsAlsoRefusedByAutodiscover()
 	{
-		// E14: Autodiscover shared the EAS auth prologue but only checked operator BLOCKS,
+		// Autodiscover shared the EAS auth prologue but only checked operator BLOCKS,
 		// so `eas user disable` refused every device on /Microsoft-Server-ActiveSync while
 		// Autodiscover kept handing the same account a service document.
 		using WebApplicationFactory<Program> factory = gateway.CreateIsolatedFactory(

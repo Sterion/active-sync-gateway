@@ -3,7 +3,7 @@ using ActiveSync.Contracts;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   K19 — <c>ContractVersion</c> silently reported 1.0 if the host assembly's version was ever
+///   <c>ContractVersion</c> silently reported 1.0 if the host assembly's version was ever
 ///   unreadable (<c>typeof(ContractVersion).Assembly.GetName().Version ?? new Version(1, 0)</c>),
 ///   which is the ONLY value <c>PluginLoader.VerifyDeclaredContract</c>/<c>VerifyContractVersions</c>
 ///   compare a plugin's declaration against. 1.0 is not a placeholder — it is a version that once

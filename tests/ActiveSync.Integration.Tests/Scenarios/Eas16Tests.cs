@@ -336,7 +336,7 @@ public sealed class Eas16Tests(GatewayFixture gateway)
 		}
 	}
 
-	// F14: a pre-16.1 device cannot decode AccountOnlyRemoteWipe (16.1-only, MS-ASPROV token
+	// A pre-16.1 device cannot decode AccountOnlyRemoteWipe (16.1-only, MS-ASPROV token
 	// 0x3B), so herding it into Provision — the 16.1 path — produces a 449 loop it can never
 	// escape: it never sends the Status-1 acknowledgment, so CompleteAccountWipeAsync never
 	// runs and the partnership never blocks. The wipe must complete server-side instead.

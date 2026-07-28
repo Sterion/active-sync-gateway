@@ -15,8 +15,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   Item 4 of docs/design/db-restructure.md — THE RESOLUTION RULE, end to end:
-///   <c>user (DB) → user (config) → global (DB) → global (config) → code default</c>, per FIELD.
+///   THE RESOLUTION RULE, end to end — most specific wins, resolved PER FIELD, never per entry:
+///   <c>user (DB) → user (config) → global (DB) → global (config) → code default</c>.
 ///   Levels 3–5 are <c>IConfiguration</c>'s own layering (the database settings provider is
 ///   layered last), so these drive the whole chain through the resolver rather than testing the
 ///   merge helper in isolation.
@@ -198,11 +198,12 @@ public sealed class UserFieldResolutionTests : IDisposable
 	[Fact]
 	public async Task LiveBackendsEditInvalidatingAConfigUser_DoesNotFreezeDatabaseUserPickup()
 	{
-		// B1: a config-declared user ("u") overrides the Oof role and inherits the global sieve
+		// A config-declared user ("u") overrides the Oof role and inherits the global sieve
 		// provider — valid at construction. A LIVE `ActiveSync:Backends` edit then removes the
 		// global Oof role (an `eas config unset`), which BackendRolesProvider applies (Oof is
 		// optional, so the edit is itself shape-valid) and propagates through OnRolesChanged —
-		// already guarded (B6) — leaving u's Oof override unable to inherit a provider.
+		// already guarded to catch a rebuild failure there and keep the previous last-good
+		// snapshot instead of throwing — leaving u's Oof override unable to inherit a provider.
 		//
 		// The bug: EnsureFreshAsync's OWN BuildSnapshot call has no equivalent guard. The very next
 		// completely unrelated database user pickup (an `eas user set bob`) re-runs BuildSnapshot
@@ -249,7 +250,7 @@ public sealed class UserFieldResolutionTests : IDisposable
 		dbSource.Provider.SetData(new Dictionary<string, string?>());
 
 		// A wholly unrelated database change — must still reach every replica within
-		// Auth:UsersRefreshSeconds (db-restructure.md invariant 4).
+		// Auth:UsersRefreshSeconds, per the resolution rule's per-field independence.
 		await _store.UpsertAsync("bob", new UserOptions(), CancellationToken.None);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
@@ -439,7 +440,7 @@ public sealed class UserFieldResolutionTests : IDisposable
 	[Fact]
 	public async Task SnapshotChangedSubscriberThrows_OthersStillRun_AndDoesNotSuppressALaterGenuineFailure()
 	{
-		// B11: `SnapshotChanged?.Invoke()` sits inside the outer try/catch (UserResolver.cs), same
+		// `SnapshotChanged?.Invoke()` sits inside the outer try/catch (UserResolver.cs), same
 		// shape as SettingsRefresher.Changed. A throwing subscriber (1) is a multicast Delegate.Invoke
 		// — it aborts every subscriber registered after it (e.g. BackendSessionFactory's auth-cache
 		// clear), (2) is mislogged as "Could not refresh database accounts; keeping the current

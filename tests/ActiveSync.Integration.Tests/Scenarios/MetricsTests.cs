@@ -73,7 +73,7 @@ public sealed class MetricsTests(GatewayFixture gateway)
 		Assert.Equal(HttpStatusCode.OK, health.StatusCode);
 	}
 
-	// ---------- E1: the dedicated metrics listener must serve ONLY /metrics ----------
+	// ---------- The dedicated metrics listener must serve ONLY /metrics ----------
 
 	[Fact]
 	public async Task DedicatedMetricsPort_AnswersOnlyMetrics_EverythingElseIs404()
@@ -106,7 +106,7 @@ public sealed class MetricsTests(GatewayFixture gateway)
 		Assert.Equal(HttpStatusCode.NotFound, eas.StatusCode);
 	}
 
-	// ---------- B3/E2: Metrics:PerUser is catalogued live-tier and must actually apply live ----------
+	// ---------- Metrics:PerUser is catalogued live-tier and must actually apply live ----------
 
 	[BackendFact]
 	public async Task PerUserLabels_AppliesLive_WithoutRestart()
@@ -146,7 +146,7 @@ public sealed class MetricsTests(GatewayFixture gateway)
 		// TestBackend.User2 is used for the FIRST time here, strictly after the flip has reached
 		// IOptionsMonitor: if PerUser=false actually gates metric emission (not just
 		// configuration), its series collapses to "-" and the literal login never appears in
-		// /metrics. B3/E2: on unmodified code GatewayMetrics.PerUserLabels was assigned once at
+		// /metrics. On unmodified code GatewayMetrics.PerUserLabels was assigned once at
 		// startup and never re-read, so it stays true regardless of this live change.
 		EasTestClient after = new(http, TestBackend.User2, TestBackend.Password,
 			$"DEV{Guid.NewGuid():N}"[..16].ToUpperInvariant());

@@ -84,7 +84,7 @@ public class LocalContentProtectorTests
 	[Fact]
 	public void AadFraming_IsInjective_WithoutCharacterRules()
 	{
-		// K2, v2 framing: "v2" ‖ LE64(userId) ‖ LE32(len) ‖ collection. The fixed-width id and
+		// v2 framing: "v2" ‖ LE64(userId) ‖ LE32(len) ‖ collection. The fixed-width id and
 		// the length prefix make the encoding injective BY CONSTRUCTION — no delimiter exists to
 		// inject, so even a collection containing "\n" binds unambiguously (the old string-user
 		// framing had to reject control characters to stay collision-free).

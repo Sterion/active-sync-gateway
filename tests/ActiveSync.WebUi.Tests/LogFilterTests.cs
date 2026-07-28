@@ -5,7 +5,7 @@ using ActiveSync.Core.State;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C15 — the free-text log filter. Two halves, and only one of them reproduced.
+///   The free-text log filter. Two halves, and only one of them reproduced.
 ///
 ///   The wildcard tests below are COVERAGE, NOT REPRODUCERS. The finding reads the filter as
 ///   passing user input into an unescaped LIKE pattern; it does not. EF translates

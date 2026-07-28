@@ -8,7 +8,7 @@ using ActiveSync.Contracts;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   H15: the JMAP contact store's Ping/Sync wait token re-downloaded the full body of every card
+///   The JMAP contact store's Ping/Sync wait token re-downloaded the full body of every card
 ///   on each poll tick. The token must be the account-level ContactCard state (a tiny
 ///   ContactCard/get ids:[] call) so a change is detected without pulling any card body.
 /// </summary>
@@ -57,7 +57,7 @@ public sealed class JmapContactStoreTests
 		Assert.False(sawFullFetch);
 	}
 
-	// H5: item revisions used to be a SHA-256 of the raw ContactCard JSON text, which is sensitive to
+	// Item revisions used to be a SHA-256 of the raw ContactCard JSON text, which is sensitive to
 	// member ORDER and whitespace — both server-defined for a JSON object. A permitted re-serialization
 	// flipped every card's revision, so the diff engine (which treats the revision map as the whole
 	// truth) re-sent the entire address book. Two logically identical cards whose members differ only
@@ -76,7 +76,7 @@ public sealed class JmapContactStoreTests
 		Assert.Equal(first, second);
 	}
 
-	// H19: SearchGalAsync silently ignored the GalPhotoRequest parameter — a client that asked for
+	// SearchGalAsync silently ignored the GalPhotoRequest parameter — a client that asked for
 	// photos got neither photo data nor the MS-ASCMD "no photo" (173) status element, unlike every
 	// other GAL implementation (which routes through ContactConverter.AppendGalPicture).
 	[Fact]
@@ -104,7 +104,7 @@ public sealed class JmapContactStoreTests
 		Assert.Equal("173", picture!.Elements().FirstOrDefault(e => e.Name.LocalName == "Status")?.Value);
 	}
 
-	// H7: GetItemRevisionsAsync is invoked once PER address book within one Sync round; it used to
+	// GetItemRevisionsAsync is invoked once PER address book within one Sync round; it used to
 	// re-download the FULL account's cards every time (ContactCard/get ids:null), so M address
 	// books cost M full downloads of the same N cards. The full body download must happen at most
 	// once per account-level state, regardless of how many folders are listed.
@@ -137,7 +137,7 @@ public sealed class JmapContactStoreTests
 		Assert.Equal(1, fullDownloads);
 	}
 
-	// H7: a server that declares a finite maxObjectsInGet answers requestTooLarge to a blind
+	// A server that declares a finite maxObjectsInGet answers requestTooLarge to a blind
 	// "ids:null" over a large address book. When one is declared, listing must page the ids
 	// through ContactCard/query + ContactCard/get instead of a single unbounded get.
 	[Fact]

@@ -3,7 +3,7 @@ using ActiveSync.Contracts;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   K56: <see cref="BackendCredentials" /> is a published-contract record, so the
+///   <see cref="BackendCredentials" /> is a published-contract record, so the
 ///   compiler-synthesized <c>ToString()</c> prints every member — including the plaintext
 ///   password — into any log line, exception message or debugger view that stringifies it
 ///   (directly, or nested via <see cref="ResolvedRole" /> / <see cref="BackendConnectionContext" />).

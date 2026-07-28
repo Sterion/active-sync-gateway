@@ -123,7 +123,7 @@ public class WbxmlRoundTripTests
 	[Fact]
 	public void UnknownToken_BecomesAPlaceholderRatherThanThrowing()
 	{
-		// valid header, then token 0x3F (unknown on AirSync page). Behavior change (W5): an
+		// valid header, then token 0x3F (unknown on AirSync page). Behavior change: an
 		// unrecognized TAG token no longer aborts the whole document — it decodes as a
 		// placeholder element in the internal namespace instead, so one missing or
 		// newly-specified token degrades to one unrecognized element rather than 400ing the

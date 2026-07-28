@@ -72,7 +72,7 @@ public class JsContactConverterTests
 		Assert.Equal("preserve-me", rebuilt.GetProperty("x-custom").GetString());
 	}
 
-	// H6 — the birthday was written into anniversaries/b/date/utc and read back out of
+	// The birthday was written into anniversaries/b/date/utc and read back out of
 	// anniversaries/b/date/date, a member nothing ever wrote, so it silently never appeared again.
 	[Fact]
 	public void Birthday_SurvivesTheRoundTrip()
@@ -109,7 +109,7 @@ public class JsContactConverterTests
 		Assert.StartsWith("1815-12-10", birthday);
 	}
 
-	// H4: "anniversaries" is a Managed top-level member (rewritten from the payload on every
+	// "anniversaries" is a Managed top-level member (rewritten from the payload on every
 	// edit), but the writer only ever produces the "birth" entry from EAS Birthday — any other
 	// kind already on the card (e.g. a wedding anniversary; EAS carries it as
 	// contacts2:Anniversary, which this bridge does not read/write) was silently dropped on
@@ -145,7 +145,7 @@ public class JsContactConverterTests
 		Assert.Equal("birth", anniversaries.GetProperty("b").GetProperty("kind").GetString());
 	}
 
-	// H26: `if (V("CompanyName") is { } company || V("Department") is { } department1)` used a
+	// `if (V("CompanyName") is { } company || V("Department") is { } department1)` used a
 	// `{ }` pattern, which matches any NON-NULL string — including an empty one. An empty
 	// <CompanyName/> element (present but cleared, distinct from absent) must leave
 	// "organizations" unset, not produce an org with an empty name.
@@ -163,7 +163,7 @@ public class JsContactConverterTests
 			"an empty CompanyName/Department element must not produce an organization with an empty name");
 	}
 
-	// H11: a malformed angle-bracket EAS email (an unmatched '<' with no closing '>') kept the
+	// A malformed angle-bracket EAS email (an unmatched '<' with no closing '>') kept the
 	// WHOLE original string — including the display-name text and the stray '<' — as the JMAP
 	// "address" member, which isn't a valid email address at all.
 	[Fact]

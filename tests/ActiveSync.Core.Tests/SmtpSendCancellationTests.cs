@@ -9,7 +9,7 @@ using MimeKit;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   G4: the SMTP DATA phase (<see cref="SmtpSubmitBackend.SendAsync" />) must not observe the
+///   The SMTP DATA phase (<see cref="SmtpSubmitBackend.SendAsync" />) must not observe the
 ///   caller's cancellation token once the message is durably accepted server-side — otherwise a
 ///   client that drops the connection right after the server accepts the final "." sees the send
 ///   reported as a (cancelled) failure, resends, and the recipient gets the mail twice. A fake SMTP
@@ -146,7 +146,7 @@ public sealed class SmtpSendCancellationTests
 					}
 
 					// The message is now fully, durably received. Signal the test BEFORE responding —
-					// this is the exact window G4 is about: accepted server-side, response not yet read.
+					// this is the exact race window this test targets: accepted server-side, response not yet read.
 					_dataReceived.TrySetResult();
 					// VSTHRD003: awaiting this TaskCompletionSource on purpose — it is the test's own
 					// signal (set by AllowFinalResponse), not foreign work, matching the same pattern

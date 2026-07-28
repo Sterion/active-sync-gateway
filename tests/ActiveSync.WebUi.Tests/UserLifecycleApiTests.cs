@@ -8,10 +8,10 @@ using ActiveSync.Core.State;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   Item 6b of docs/design/db-restructure.md, admin-API half. The design is explicit that the
-///   guards must hold on BOTH surfaces — "guarding only the CLI leaves the API able to write a
-///   shape the schema no longer has" — so the rename immutability guard, the collision check and
-///   the confirm-and-cascade delete are asserted here as well as in the CLI/store tests.
+///   User lifecycle guards, admin-API half. These must hold on BOTH surfaces — guarding only the
+///   CLI would leave the API able to write a shape the schema no longer has — so the rename
+///   immutability guard, the collision check and the confirm-and-cascade delete are asserted here
+///   as well as in the CLI/store tests.
 /// </summary>
 public sealed class UserLifecycleApiTests
 {

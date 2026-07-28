@@ -15,7 +15,7 @@ namespace ActiveSync.Core.Tests;
 /// </summary>
 public sealed class ContractSurfaceTests
 {
-	// K69: there was no version constant anywhere — the loader gated on the raw assembly version
+	// There was no version constant anywhere — the loader gated on the raw assembly version
 	// and a plugin had nothing to read or assert against. ContractVersion now READS that assembly
 	// version, which is pinned to $(ContractVersion) in Directory.Build.props, so this asserts the
 	// derivation rather than a hand-maintained match.
@@ -42,14 +42,14 @@ public sealed class ContractSurfaceTests
 	[Fact]
 	public void ContractVersion_IsTheExpectedSurfaceVersion()
 	{
-		// W16/W21 (item 37): WbxmlCodePages.Pages/Tokens/Reverse became genuinely immutable
+		// WbxmlCodePages.Pages/Tokens/Reverse became genuinely immutable
 		// (FrozenDictionary/AsReadOnly instead of a castable-back List/Dictionary), and
 		// WbxmlDecoder.MaxDocumentBytes / WireLog.MaxChars became `static readonly` instead of
 		// `const` so a plugin cannot inline a policy knob's build-time value.
 		Assert.Equal(new Version(1, 3), ContractVersion.Current);
 	}
 
-	// K67: BackendItemNotFoundException derived straight from Exception, so the codebase-wide
+	// BackendItemNotFoundException derived straight from Exception, so the codebase-wide
 	// `catch (BackendException)` idiom silently MISSED it — an item-gone thrown from a store
 	// escaped every handler written to funnel backend errors. It must be a BackendException. And
 	// BackendException was sealed, so a plugin could not introduce its own typed backend error;
@@ -78,7 +78,7 @@ public sealed class ContractSurfaceTests
 		Assert.False(typeof(BackendException).IsSealed);
 	}
 
-	// K58: IContentStore was a 12-member mandatory interface even though a third of stores threw
+	// IContentStore was a 12-member mandatory interface even though a third of stores threw
 	// "not supported" for folder mutation and item move — the same members the file already models
 	// as optional capabilities elsewhere. Those four members moved to optional capability interfaces
 	// (IFolderOperations, IItemMoveOperations), so IContentStore no longer declares them and a store
@@ -106,7 +106,7 @@ public sealed class ContractSurfaceTests
 		Assert.False(typeof(IContentStore).IsAssignableFrom(typeof(IFolderOperations)));
 	}
 
-	// K61: CreateConnection was synchronous in an otherwise fully async contract — a provider that
+	// CreateConnection was synchronous in an otherwise fully async contract — a provider that
 	// opens a TCP/TLS connection could not do it without blocking. It is now
 	// Task<IBackendConnection> CreateConnectionAsync(context, ct); the synchronous method is gone.
 	[Fact]
@@ -119,7 +119,7 @@ public sealed class ContractSurfaceTests
 		Assert.Equal(typeof(CancellationToken), method.GetParameters()[^1].ParameterType);
 	}
 
-	// K57: the published plugin surface (ActiveSync.Contracts) must carry only what a plugin
+	// The published plugin surface (ActiveSync.Contracts) must carry only what a plugin
 	// actually builds against. IBackendSession / IBackendSessionFactory / BackendSessionInfo are
 	// the HOST's composite session, its cache/factory and the dashboard projection of that cache —
 	// nothing a plugin implements or receives — so they must NOT be exported by Contracts. They now
@@ -145,7 +145,7 @@ public sealed class ContractSurfaceTests
 		Assert.Equal("ActiveSync.Core.Backend", typeof(Core.Backend.BackendSessionInfo).Namespace);
 	}
 
-	// K59: DeleteItemAsync put the CancellationToken THIRD (before `bool permanent = false`),
+	// DeleteItemAsync put the CancellationToken THIRD (before `bool permanent = false`),
 	// breaking the ct-last convention every other member honours, and used an optional parameter
 	// on an interface method (a compile-time default the implementer cannot see or change). The
 	// token must come last and there must be no optional parameters.

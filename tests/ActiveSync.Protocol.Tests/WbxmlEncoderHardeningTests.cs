@@ -44,7 +44,7 @@ public class WbxmlEncoderHardeningTests
 	{
 		// Convert.TryFromBase64Chars would otherwise leave a raw FormatException uncaught, which
 		// escapes as an uncontrolled 500 instead of the WbxmlException every other codec error
-		// maps to (→ 400). W20: earlier wording here additionally claimed this throws with "the
+		// maps to (→ 400). Earlier wording here additionally claimed this throws with "the
 		// response half written" — Encode() writes into a private MemoryStream, so nothing is
 		// ever half-written to a response; that part was never the actual reason.
 		XElement mime = new(EasNamespaces.ComposeMail + "Mime", text);
@@ -71,7 +71,7 @@ public class WbxmlEncoderHardeningTests
 			result.Root!.Element(EasNamespaces.ComposeMail + "Mime")!.Value));
 	}
 
-	// W15: WriteOpaque's rented scratch buffer holds one user's decoded MIME/attachment plaintext,
+	// WriteOpaque's rented scratch buffer holds one user's decoded MIME/attachment plaintext,
 	// and ArrayPool<byte>.Shared is process-global — unscrubbed, the next renter of the same size
 	// class (potentially a different user's request on the same worker) can read the tail of it.
 	// Best-effort (ArrayPool does not contractually guarantee returning the same array on the next
@@ -179,7 +179,7 @@ public class WbxmlEncoderHardeningTests
 	{
 		// Guards EncodeAsync specifically (not just Encode, which OpaqueElementWithLargePayload_
 		// RoundTrips above already covers) now that it builds and writes its own MemoryStream
-		// rather than delegating to Encode() (W14) — a sizing bug in that path would still show up
+		// rather than delegating to Encode() — a sizing bug in that path would still show up
 		// as a broken round trip even though the allocation improvement itself is not observable
 		// from outside the type.
 		byte[] payload = new byte[200_000];
@@ -196,7 +196,7 @@ public class WbxmlEncoderHardeningTests
 			result.Root!.Element(EasNamespaces.ComposeMail + "Mime")!.Value));
 	}
 
-	// W14: EncodeAsync used to call the synchronous Encode() (which finishes with output.ToArray(),
+	// EncodeAsync used to call the synchronous Encode() (which finishes with output.ToArray(),
 	// a full extra copy of an already-doubled MemoryStream buffer) and then write that array to the
 	// destination — a large ItemOperations attachment response paid roughly an extra payload-sized
 	// allocation for a copy the stream write never needed. The fix is a structural one (which method
@@ -215,7 +215,7 @@ public class WbxmlEncoderHardeningTests
 
 		int encodeAsyncStart = source.IndexOf("public static async Task EncodeAsync(", StringComparison.Ordinal);
 		Assert.True(encodeAsyncStart >= 0, "Could not locate the EncodeAsync method body.");
-		// WriteElement is the next member in the file on both sides of the W14 fix, so it is a
+		// WriteElement is the next member in the file on both sides of the fix, so it is a
 		// stable end-of-body marker regardless of whether BuildStream exists yet.
 		int bodyEnd = source.IndexOf("private static void WriteElement", encodeAsyncStart, StringComparison.Ordinal);
 		Assert.True(bodyEnd > encodeAsyncStart, "Could not locate the end of the EncodeAsync method body.");

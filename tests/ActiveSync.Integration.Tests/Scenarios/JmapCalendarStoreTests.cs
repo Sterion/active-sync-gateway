@@ -85,7 +85,7 @@ public sealed class JmapCalendarStoreTests
 	}
 
 	/// <summary>
-	///   H4 — recurrence must survive create → get against the live server. Stalwart 0.16 speaks
+	///   Recurrence must survive create → get against the live server. Stalwart 0.16 speaks
 	///   the JSCalendar-draft <c>recurrenceRule</c> (a single object) and rejects RFC 8984's
 	///   <c>recurrenceRules</c> array outright, so before the fix this was not merely lossy: the
 	///   create failed with <c>invalidProperties</c>.
@@ -127,7 +127,7 @@ public sealed class JmapCalendarStoreTests
 	}
 
 	/// <summary>
-	///   H5 — the ordinal on a recurrence day must survive the server. "2nd Tuesday of the month"
+	///   The ordinal on a recurrence day must survive the server. "2nd Tuesday of the month"
 	///   degraded to "every Tuesday" because <c>nthOfPeriod</c> was mapped in neither direction.
 	///   Stalwart 0.16 does store and return it, so this is a full end-to-end reproducer.
 	/// </summary>
@@ -166,7 +166,7 @@ public sealed class JmapCalendarStoreTests
 	}
 
 	/// <summary>
-	///   H7 — the calendar half of the PatchObject question. Free → busy is the case that reaches
+	///   The calendar half of the PatchObject question. Free → busy is the case that reaches
 	///   the JSCalendar layer as a *cleared* member: BusyStatus 2 makes the iCalendar TRANSP
 	///   OPAQUE, which the bridge expresses by omitting <c>freeBusyStatus</c> entirely. Under patch
 	///   semantics the server then keeps the old "free" forever unless an explicit null is sent.

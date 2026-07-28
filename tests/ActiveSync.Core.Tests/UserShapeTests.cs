@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   Item 3 of docs/design/db-restructure.md: the <c>UserOptions</c> blob is normalised into
+///   The <c>UserOptions</c> blob is normalised into
 ///   typed columns on <c>Users</c> plus a <c>UserBackendRoles</c> child table, with only the
 ///   provider-defined per-role Settings left serialized. <see cref="UserOptions" /> stays the
 ///   in-memory/config-bound shape, so these tests prove the mapping round-trips both ways and

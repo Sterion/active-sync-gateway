@@ -5,7 +5,7 @@ using ActiveSync.Protocol.Wbxml;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D12: a timed event stored with a real (non-UTC) TZID must keep that zone when a client
+///   A timed event stored with a real (non-UTC) TZID must keep that zone when a client
 ///   Change comes back, so recurrences honour DST instead of being re-anchored to a fixed UTC
 ///   offset (a weekly 09:00 Copenhagen meeting must not drift an hour across a DST boundary).
 /// </summary>

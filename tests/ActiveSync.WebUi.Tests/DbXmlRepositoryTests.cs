@@ -105,7 +105,7 @@ public sealed class DbXmlRepositoryTests : IDisposable
 	[Fact]
 	public void UnreadableRows_AreLogged_NotSilentlyDiscarded()
 	{
-		// C11: skipping the row is right, but doing it silently means a wrong/rotated master key
+		// Skipping the row is right, but doing it silently means a wrong/rotated master key
 		// invalidates every web session with only "users keep getting logged out" as a symptom.
 		DbXmlRepository sealer = CreateRepository(KeyBase64);
 		sealer.StoreElement(new XElement("key", new XAttribute("id", "s1")), "key-friendly-name");

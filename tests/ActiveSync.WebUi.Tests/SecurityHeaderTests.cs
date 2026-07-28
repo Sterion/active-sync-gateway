@@ -3,7 +3,7 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C20 — the Content-Security-Policy of the SPA responses. <c>base-uri</c> is the real gap:
+///   The Content-Security-Policy of the SPA responses. <c>base-uri</c> is the real gap:
 ///   it does NOT fall back to <c>default-src</c>, so an injected <c>&lt;base href&gt;</c> would
 ///   redirect the SPA's dynamic module imports to another origin even with
 ///   <c>default-src 'self'</c> in place. <c>form-action</c> and <c>object-src</c> do not fall
@@ -32,7 +32,7 @@ public sealed class SecurityHeaderTests
 		Assert.Contains("object-src 'none'", csp, StringComparison.Ordinal);
 	}
 
-	// C22 (round 3) — the UI prefixes set CSP, X-Frame-Options and Referrer-Policy but not
+	// The UI prefixes set CSP, X-Frame-Options and Referrer-Policy but not
 	// X-Content-Type-Options, the standard companion for a JSON API plus a static-module SPA and
 	// cheap defence-in-depth against a response whose content type a browser might second-guess.
 	[Theory]

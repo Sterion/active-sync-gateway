@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   B12: a global <c>ActiveSync:Backends:&lt;Role&gt;:Password</c>/<c>UserName</c> is refused by
+///   A global <c>ActiveSync:Backends:&lt;Role&gt;:Password</c>/<c>UserName</c> is refused by
 ///   `eas config set` / the web settings PUT (<see cref="Administration.BackendKeyValidator" />'s
 ///   <c>InertCredentialLeaf</c>), but nothing at startup looked at the SAME key — so an operator who
 ///   put it in a config file got no warning that it is silently read by nothing (no provider binds

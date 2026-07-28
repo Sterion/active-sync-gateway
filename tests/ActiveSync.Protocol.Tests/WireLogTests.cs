@@ -18,7 +18,7 @@ public sealed class WireLogTests
 		Assert.EndsWith("[truncated, 100 chars total]", result);
 	}
 
-	// W11: a negative max falls through to `text[..max]`, which throws — but as an accident of
+	// A negative max falls through to `text[..max]`, which throws — but as an accident of
 	// Range/Substring internals rather than an explicit parameter check, so the caller (a logging
 	// helper, itself called from inside a LogTrace site) sees ParamName "length", not "max": the
 	// parameter Truncate was actually called with.
@@ -30,7 +30,7 @@ public sealed class WireLogTests
 		Assert.Equal("max", ex.ParamName);
 	}
 
-	// W11: when the cap lands between a surrogate pair's high and low half (any emoji or other
+	// When the cap lands between a surrogate pair's high and low half (any emoji or other
 	// non-BMP character in a MIME dump sitting exactly at the MaxChars boundary), the retained
 	// window must not end with a lone high surrogate — a downstream console/JSON sink would render
 	// it as U+FFFD mojibake instead of the truncation marker reading cleanly.
@@ -55,7 +55,7 @@ public sealed class WireLogTests
 	[Fact]
 	public void Payload_HugeInput_IsTruncatedBeforeItIsCopied()
 	{
-		// K33: Payload sanitized the WHOLE input and truncated afterwards, so keeping 16 KB of a
+		// Payload sanitized the WHOLE input and truncated afterwards, so keeping 16 KB of a
 		// 10M-char body allocated a second ~20 MB string on the large-object heap on the way past.
 		string huge = "[31m" + new string('a', 10_000_000);
 
@@ -75,7 +75,7 @@ public sealed class WireLogTests
 		Assert.Same(text, WireLog.Payload(text));
 	}
 
-	// S6/K21: bidi-override characters (U+202A-202E, U+2066-2069) reorder a wire-log dump's visible
+	// Bidi-override characters (U+202A-202E, U+2066-2069) reorder a wire-log dump's visible
 	// content, the same smuggling risk LogTextTests.BidiOverrideCharacters_AreNeutralized covers for
 	// LogText.Clean — but that defense existed on only the Clean path, not here. A hostile SendMail
 	// Subject/body or DAV property containing a bidi override would ride straight through Payload
@@ -84,8 +84,8 @@ public sealed class WireLogTests
 	[Fact]
 	public void Payload_BidiOverrideCharacters_AreNeutralized()
 	{
-		// Right-to-Left Override (U+202E) and Pop Directional Isolate (U+2069) — written as escapes
-		// (W9), never as raw literals: a raw override sitting unterminated in this source line would
+		// Right-to-Left Override (U+202E) and Pop Directional Isolate (U+2069) — written as escapes,
+		// never as raw literals: a raw override sitting unterminated in this source line would
 		// itself be the Trojan Source hazard the classifier exists to defend against.
 		Assert.DoesNotContain('\u202E', WireLog.Payload("Subject: admin\u202Eevil"));
 		Assert.DoesNotContain('\u2069', WireLog.Payload("a\u2069b"));
@@ -94,7 +94,7 @@ public sealed class WireLogTests
 		Assert.Equal("admin?evil", WireLog.Payload("admin\u202Eevil"));
 	}
 
-	// W10: U+2028 (LINE SEPARATOR, category Zl) and U+2029 (PARAGRAPH SEPARATOR, category Zp) are
+	// U+2028 (LINE SEPARATOR, category Zl) and U+2029 (PARAGRAPH SEPARATOR, category Zp) are
 	// line terminators to StringReader/XmlReader, to JSON consumers reading a CLEF sink, and to log
 	// viewers that split on Unicode line boundaries — but neither is char.IsControl (that is why the
 	// bidi overrides needed an explicit range too), so IsUnsafe's control-only check lets them
@@ -111,7 +111,7 @@ public sealed class WireLogTests
 		Assert.True(WireLog.IsUnsafe('\u2029', allowLineStructure: true));
 	}
 
-	// W9: IsUnsafe's own classifier embedded the bidi-override code points it defends against as RAW
+	// IsUnsafe's own classifier embedded the bidi-override code points it defends against as RAW
 	// literal characters in its source line — exactly the Trojan Source hazard (CVE-2021-42574) the
 	// check exists to prevent. An unterminated LRE/RLO sitting in the file reorders how the rest of
 	// that line renders in any bidi-aware viewer (GitHub, most editors, a modern terminal's git
@@ -133,7 +133,7 @@ public sealed class WireLogTests
 			Assert.DoesNotContain(char.ConvertFromUtf32(codePoint), source, StringComparison.Ordinal);
 	}
 
-	// W21: MaxChars is a policy knob, but it was declared `public const`, so a plugin built against
+	// MaxChars is a policy knob, but it was declared `public const`, so a plugin built against
 	// contract 1.x — ActiveSync.Protocol is a published MIT package — has it INLINED into its own
 	// IL rather than reading the host's current value at run time (the same hazard AGENTS.md
 	// documents for ContractVersion.Major/Minor).

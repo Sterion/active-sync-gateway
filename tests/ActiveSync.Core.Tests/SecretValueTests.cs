@@ -59,7 +59,7 @@ public class SecretValueTests
 		Assert.NotNull(error);
 	}
 
-	// K8: SecretValue, LocalCliEnvelope and LocalCliResult all sealed under the SAME constant AAD
+	// SecretValue, LocalCliEnvelope and LocalCliResult all sealed under the SAME constant AAD
 	// ("activesync:config:v1"), so a ciphertext produced for one message type authenticates just
 	// as well through another type's unseal path — only the JSON shape (which the AEAD layer never
 	// looks at) told them apart. Domain separation must live in the AAD itself.

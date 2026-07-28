@@ -88,12 +88,12 @@ public sealed class TlsCertificateResolverTests : IDisposable
 	[Fact]
 	public void LoadExternal_PemPair_PrivateKeyStaysUsable_AfterPfxIsZeroed()
 	{
-		// K13 COVERAGE (not proof): the PEM path re-exports through PKCS#12 into an anonymous
+		// Coverage (not proof): the PEM path re-exports through PKCS#12 into an anonymous
 		// temporary handed straight to LoadPkcs12 — unlike GatewayCertificateStore.Generate, which
 		// hoists the identical export into a named local and zeroes it in a finally. There is no
 		// external handle onto that anonymous buffer to assert it was wiped (the whole point of the
 		// finding is that nothing holds a reference to zero); this is a regression guard, in the same
-		// spirit as GatewayCertificateStoreTests' K9 test, that hoisting it into a zeroed local does
+		// spirit as the analogous zero-after-load regression guard in GatewayCertificateStoreTests, that hoisting it into a zeroed local does
 		// not corrupt the loaded private key. A sign/verify round-trip proves the key survived.
 		TlsOptions tls = new() { CertificatePath = _pemCert, CertificateKeyPath = _pemKey };
 		using X509Certificate2 cert = TlsCertificateResolver.LoadExternal(tls, null);
@@ -116,7 +116,7 @@ public sealed class TlsCertificateResolverTests : IDisposable
 	[Fact]
 	public void LoadExternal_KeylessCertificate_ThrowsInsteadOfLoadingSilently()
 	{
-		// K17: a cert-only PFX (no private key) loaded "successfully" and Kestrel then failed
+		// A cert-only PFX (no private key) loaded "successfully" and Kestrel then failed
 		// opaquely at handshake time — defeating README's documented "fails startup with a clear
 		// error". LoadExternal must reject it itself.
 		using X509Certificate2 fullCert = MakeCert();
@@ -132,7 +132,7 @@ public sealed class TlsCertificateResolverTests : IDisposable
 	[Fact]
 	public void LoadExternal_ExpiredCertificate_ThrowsInsteadOfLoadingSilently()
 	{
-		// K17: an already-expired operator cert loaded "successfully" too, so the failure only
+		// An already-expired operator cert loaded "successfully" too, so the failure only
 		// surfaced later (and opaquely) at the TLS handshake.
 		using RSA rsa = RSA.Create(2048);
 		CertificateRequest request = new(
@@ -150,9 +150,9 @@ public sealed class TlsCertificateResolverTests : IDisposable
 	[Fact]
 	public void LoadExternal_NotYetValidCertificate_ThrowsInsteadOfLoadingSilently()
 	{
-		// K11: a certificate whose NotBefore is in the future (a raced ACME issuance, a pre-staged
+		// A certificate whose NotBefore is in the future (a raced ACME issuance, a pre-staged
 		// rotation mount, clock skew) passed both existing checks and loaded "successfully" — the
-		// mirror-image case of K17's expired-certificate guard, and just as opaque at handshake time.
+		// mirror-image case of the expired-certificate guard above, and just as opaque at handshake time.
 		using RSA rsa = RSA.Create(2048);
 		CertificateRequest request = new(
 			"CN=not-yet-valid.example.com", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -192,7 +192,7 @@ public sealed class TlsCertificateResolverTests : IDisposable
 	[Fact]
 	public async Task Describe_External_CalledRepeatedly_KeepsReturningCorrectKeySize()
 	{
-		// K18 COVERAGE (not proof): Describe's KeySize read via GetRSAPublicKey()/
+		// Coverage (not proof): Describe's KeySize read via GetRSAPublicKey()/
 		// GetECDsaPublicKey()/GetDSAPublicKey() leaked the returned AsymmetricAlgorithm's native
 		// handle (none were disposed) — reachable from the admin TLS panel / `eas tls`, both of
 		// which can poll it repeatedly. A leaked native handle has no directly observable symptom
@@ -239,7 +239,7 @@ public sealed class TlsCertificateResolverTests : IDisposable
 	[Fact]
 	public async Task Describe_External_SealedPassword_UnsealsWithMasterKey_NoError()
 	{
-		// K14 COVERAGE (not proof): the resolver now loads the master key into a buffer it zeroes
+		// Coverage (not proof): the resolver now loads the master key into a buffer it zeroes
 		// after use and logs (rather than discards) a loader error. The wipe itself has no external
 		// handle; this test guards that the key-lifetime refactor still unseals a sealed
 		// CertificatePassword correctly (load -> unseal -> zero, all functional).

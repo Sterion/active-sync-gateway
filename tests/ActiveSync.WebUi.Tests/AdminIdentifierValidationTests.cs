@@ -7,7 +7,7 @@ using ActiveSync.Core.State;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C16 — device blocks and share grants accepted whatever arrived. Only
+///   Device blocks and share grants accepted whatever arrived. Only
 ///   <c>IsNullOrWhiteSpace</c> on the login and <c>StartsWith('/')</c> on the href, so a login
 ///   carrying ':' or a control character (neither can survive Basic auth or the session/watcher
 ///   key separator, which is why every other write path rejects them) and an href like
@@ -125,7 +125,7 @@ public sealed class AdminIdentifierValidationTests
 	[Fact]
 	public async Task Share_Delete_RefusesAMalformedLogin()
 	{
-		// C15: the POST verb validates the login via AdminIdentifiers.LoginProblem (see
+		// The POST verb validates the login via AdminIdentifiers.LoginProblem (see
 		// Share_RefusesAMalformedLogin above); the DELETE verb validated neither shape nor
 		// whitespace, so the two write surfaces disagreed on what a storable login looks like.
 		await using WebUiHost host = await AdminHostAsync();

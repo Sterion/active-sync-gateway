@@ -132,9 +132,10 @@ public sealed class BackendRolesProviderTests
 		Assert.Equal("imap.old", Host(provider, BackendRole.MailStore));
 	}
 
-	// B14 — the live rebuild now runs each provider's ValidateConfiguration, not just shape parsing.
+	// The live rebuild now runs each provider's ValidateConfiguration, not just shape parsing.
 	// Blanking a Host is shape-valid but semantically invalid (imap RequiredHost), so it must be
-	// rejected and the last-good configuration kept — the same delayed-brick class B1 fixes.
+	// rejected and the last-good configuration kept — the same delayed-brick class the startup
+	// validator gap above fixes.
 	[Fact]
 	public void LiveEdit_ThatFailsProviderValidation_IsRejected_KeepsLastGood()
 	{
@@ -160,7 +161,7 @@ public sealed class BackendRolesProviderTests
 		Assert.Equal("imap.new", Host(provider, BackendRole.MailStore));
 	}
 
-	// B14 (compounding) — a materialized snapshot means a REJECTED rebuild's settings never read
+	// Compounding — a materialized snapshot means a REJECTED rebuild's settings never read
 	// through: Host stays the last-good value even though the live section now holds the bad one.
 	[Fact]
 	public void RejectedRebuild_SettingsDoNotReadThrough_TheLiveSection()

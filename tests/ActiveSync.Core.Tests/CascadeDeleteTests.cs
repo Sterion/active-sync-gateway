@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   Item 3b of docs/design/db-restructure.md: the soft links became real foreign keys with
+///   The soft links between users, devices, and command tokens became real foreign keys with
 ///   cascade delete. Two properties are load-bearing — deleting a user removes EXACTLY its own
 ///   rows (and nothing of anyone else's), and deleting a device no longer orphans the
 ///   <see cref="SentCommandToken" /> claims that used to have no FK at all.

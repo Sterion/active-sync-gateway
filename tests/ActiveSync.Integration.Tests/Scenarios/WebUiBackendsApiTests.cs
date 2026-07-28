@@ -276,7 +276,7 @@ public sealed class WebUiBackendsApiTests(GatewayFixture gateway) : IAsyncLifeti
 		})).Content.ReadFromJsonAsync<JsonElement>();
 		Assert.False(unsupported.GetProperty("supported").GetBoolean());
 
-		// INVERTED BY C2. /test used to probe whatever Host/Port the request body carried, which
+		// Behavior inverted: /test used to probe whatever Host/Port the request body carried, which
 		// made the boolean `reachable` answer an SSRF-style oracle for arbitrary operator-supplied
 		// hosts. It now probes only the role's currently-STORED settings — a request-body Settings
 		// override is never fed to the probe. So a listener has to be PERSISTED via the settings

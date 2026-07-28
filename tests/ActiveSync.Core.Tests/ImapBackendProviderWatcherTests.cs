@@ -9,14 +9,14 @@ using Microsoft.Extensions.Options;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   G7: the shared per-(user, folder) IDLE watcher is rebuilt only when the PASSWORD changes, so
+///   The shared per-(user, folder) IDLE watcher is rebuilt only when the PASSWORD changes, so
 ///   a per-user backend edit that changes host/port/security leaves a live watcher connected to
 ///   the decommissioned server. <see cref="ImapIdleWatcher" />'s constructor does no I/O (it only
 ///   connects lazily once a wait is registered), so this is directly unit-testable: build two
 ///   watchers for the same (user, folder) with the same password but different resolved
 ///   <see cref="ImapOptions" />, and the provider must NOT hand back the same cached instance.
 ///   <para>
-///     G22 adds the second per-user resource the provider owns — the shared STATUS-poll
+///     This adds a second per-user resource the provider owns — the shared STATUS-poll
 ///     connection (<see cref="ImapStatusPoller" />) — which is cached, rebuilt and evicted by the
 ///     same rules, and is likewise constructible without I/O.
 ///   </para>
@@ -66,10 +66,10 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	}
 
 	/// <summary>
-	///   G22 (coverage, not proof — the symptom itself is proven red-first against a real IMAP
+	///   Coverage, not proof — the symptom itself is proven red-first against a real IMAP
 	///   server by <c>WaitForChangesAsync_PollsOverOneOwnConnection_NotTheSessionGate</c>, which
 	///   counts connections; this pins the CACHE half of the same invariant deterministically, in
-	///   the suite that always runs). The STATUS-poll connection is one per gateway user, shared by
+	///   the suite that always runs. The STATUS-poll connection is one per gateway user, shared by
 	///   every device and folder — so the provider must hand back the SAME poller, and it must
 	///   survive across sessions rather than being rebuilt per connection.
 	/// </summary>
@@ -86,7 +86,7 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	}
 
 	/// <summary>
-	///   G22 + G7: the poll connection carries the same rebuild rule as the IDLE watcher — a
+	///   The poll connection carries the same rebuild rule as the IDLE watcher — a
 	///   per-user host/port/security edit must not leave an authenticated poll connection open
 	///   against the decommissioned server.
 	/// </summary>
@@ -104,7 +104,7 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	}
 
 	/// <summary>
-	///   G22: the poll connection is a per-user resource with the same lifetime as the watchers —
+	///   The poll connection is a per-user resource with the same lifetime as the watchers —
 	///   the eviction sweep must drop it once the user has no live session, or the gateway holds an
 	///   authenticated IMAP connection per user forever.
 	/// </summary>
@@ -122,7 +122,7 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	}
 
 	/// <summary>
-	///   G27: <see cref="ImapBackendProvider.SnapshotWatchers" /> (feeding the admin dashboard) and
+	///   <see cref="ImapBackendProvider.SnapshotWatchers" /> (feeding the admin dashboard) and
 	///   the constructor's <c>activesync_idle_watchers</c> gauge callback filtered on
 	///   <c>Lazy.IsValueCreated</c> only — but <see cref="ImapBackendProvider.GetOrCreateWatcher" />
 	///   dereferences <c>current.Value</c> on EVERY call just to compare Credentials/Options, so the
@@ -147,7 +147,7 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	}
 
 	/// <summary>
-	///   G28: <c>TrimUserResources</c>'s <c>key[..key.IndexOf('\n')]</c> has no guard against a
+	///   <c>TrimUserResources</c>'s <c>key[..key.IndexOf('\n')]</c> has no guard against a
 	///   missing separator, unlike the defensive form <see cref="ImapBackendProvider.SnapshotWatchers" />
 	///   already uses. Unreachable via <c>GetOrCreateWatcher</c> today (every key it builds is
 	///   "user\nfolder"), but the eviction sweep runs on a background timer thread whose escaping

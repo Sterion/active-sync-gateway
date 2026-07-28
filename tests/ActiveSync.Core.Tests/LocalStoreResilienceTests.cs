@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   G18: a single undecryptable <see cref="LocalItem" /> row (e.g. written under a rotated
+///   A single undecryptable <see cref="LocalItem" /> row (e.g. written under a rotated
 ///   encryption key) must not fail the ENTIRE GAL search or the entire free/busy lookup —
 ///   AGENTS.md: "a free/busy failure must never fail the whole ResolveRecipients." Unlike
 ///   <see cref="LocalGalSearchTests" /> (plaintext protector, behaviour-preserving perf changes),
@@ -92,7 +92,7 @@ public sealed class LocalStoreResilienceTests : IDisposable
 	}
 
 	/// <summary>
-	///   G30: LocalCalendarStore's read sites (RespondToMeetingAsync, GetRawEventAsync,
+	///   LocalCalendarStore's read sites (RespondToMeetingAsync, GetRawEventAsync,
 	///   GetEventAttachmentAsync) hard-coded the AAD collection literal instead of using
 	///   <c>Collection</c>, duplicating the write side's own value. COVERAGE, not red-first proof:
 	///   the literal and <c>Collection</c> agree today, so nothing observably breaks before the

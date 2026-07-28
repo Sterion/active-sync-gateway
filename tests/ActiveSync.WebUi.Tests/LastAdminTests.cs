@@ -7,7 +7,7 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C17 — nothing stopped an admin from removing the last admin, or from disabling their own
+///   Nothing stopped an admin from removing the last admin, or from disabling their own
 ///   account, leaving the web interface with no way back in. Recovery is CLI-only, which is a
 ///   legitimate escape hatch but not something the UI ever warned about.
 /// </summary>
@@ -70,7 +70,7 @@ public sealed class LastAdminTests
 	[Fact]
 	public async Task DeletingTheLastAdminThroughTheDeleteRoute_IsRefused()
 	{
-		// C3: unlike PUT/DELETE/disable, POST /delete (the confirm-and-cascade route) ran no
+		// Unlike PUT/DELETE/disable, POST /delete (the confirm-and-cascade route) ran no
 		// LastAdminProblemAsync check at all, so the sole admin could destroy their own account
 		// outright and lock every operator out of /admin — recovery from there is CLI-only.
 		await using WebUiHost host = await WebUiHost.StartAsync(OneAdmin());

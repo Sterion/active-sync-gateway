@@ -80,7 +80,7 @@ public class UserResolverTests
 	[Fact]
 	public void OrderedRoles_IsStableAndComputedOnce()
 	{
-		// B28 (item 37): OrderedRoles used to sort+ToList on EVERY read, so each access allocated a
+		// OrderedRoles used to sort+ToList on EVERY read, so each access allocated a
 		// fresh list with a different identity. Cache it: repeated reads return the SAME instance
 		// (and the order — enum order, MailStore first — is unchanged).
 		ResolvedUser account = new(
@@ -329,7 +329,7 @@ public class UserResolverTests
 	[Fact]
 	public void NullSettingOverride_CLEARS_TheInheritedGlobalKey_NotIgnored()
 	{
-		// B16 (coverage): the doc used to say "Null values are ignored", but a null user setting
+		// Coverage: the doc used to say "Null values are ignored", but a null user setting
 		// actually CLEARS the inherited global key (the removal loop strips the global subtree the
 		// key addresses, and the write loop then skips the null). Pin that so the corrected doc and
 		// the code cannot drift. If null were ignored, the "clears" user would keep the global value.
@@ -448,8 +448,8 @@ public class UserResolverTests
 	[Fact]
 	public void AutoProvisionOff_RejectsUndeclared_WithoutProbing()
 	{
-		// AutoProvisionUsers=false absorbed the deleted RequireDeclaredUsers allowlist
-		// (db-restructure decisions 6/7): undeclared logins are refused BEFORE any probe.
+		// AutoProvisionUsers=false absorbed the deleted RequireDeclaredUsers allowlist:
+		// undeclared logins are refused BEFORE any probe.
 		ActiveSyncOptions options = HostOptions();
 		options.AutoProvisionUsers = false;
 		options.Users = new Dictionary<string, UserOptions> { ["allowed"] = new() };
@@ -493,7 +493,7 @@ public class UserResolverTests
 	[Fact]
 	public void ValidateUsers_RejectsALoginWithLeadingOrTrailingWhitespace()
 	{
-		// B13: Basic auth delivers a login's leading/trailing spaces verbatim. ValidateLogin only
+		// Basic auth delivers a login's leading/trailing spaces verbatim. ValidateLogin only
 		// rejected ':' and control characters, so " bob" passed validation — it then misses
 		// MergedUsers ( " bob" != "bob" ), degrades to pass-through, and (with AutoProvisionUsers)
 		// mints a second, permanent identity the real "bob" can never see. The login must be
@@ -510,7 +510,7 @@ public class UserResolverTests
 	[Fact]
 	public void ValidateUsers_ValidationMemo_ReplaysSharedFailurePerUser()
 	{
-		// B7 (item 37): validation is memoized per (provider, role, settings-identity). Users that
+		// Validation is memoized per (provider, role, settings-identity). Users that
 		// inherit the same broken global MailStore section share the settings object, so validation
 		// runs once — but the cached failure must still be reported for EVERY user (not just the first).
 		Dictionary<string, string?> config = BaseConfig();
@@ -557,7 +557,7 @@ public class UserResolverTests
 	[Fact]
 	public void ProviderOverride_IsTrimmed_BeforeLookupAndInheritance()
 	{
-		// B17: the global Provider is trimmed but the per-user override was used raw. " imap"
+		// The global Provider is trimmed but the per-user override was used raw. " imap"
 		// failed the equality check → inheritGlobal false → the role dropped the inherited
 		// host/port/TLS, and registry.GetFor(" imap") threw an unrelated "unknown provider".
 		ActiveSyncOptions options = HostOptions();
@@ -580,7 +580,7 @@ public class UserResolverTests
 	[Fact]
 	public void UnconfiguredMailRole_WithUserOverride_ReportsTargetedFailure_NotProviderMisdiagnosis()
 	{
-		// B21: on an unconfigured gateway (no global MailStore) a user MailStore override took
+		// On an unconfigured gateway (no global MailStore) a user MailStore override took
 		// providerName ?? "local" → registry.GetFor("local", MailStore) threw, crashing the
 		// resolver ctor for a CONFIG user (host won't start) and misdiagnosing as "provider
 		// 'local' does not support MailStore". Mirror the Oof handling with a clear message.
@@ -736,7 +736,7 @@ public class UserResolverTests
 	[Fact]
 	public void OnRolesChanged_ConfigUserMergeFailsAfterLiveEdit_KeepsPreviousSnapshot_DoesNotThrow()
 	{
-		// B6: a live backend edit that invalidates a CONFIG user's merge made OnRolesChanged's
+		// A live backend edit that invalidates a CONFIG user's merge made OnRolesChanged's
 		// BuildSnapshot throw (config users are treated as strict — startup already validated them,
 		// which is untrue after a live edit). The throw escaped through the roles-Changed invocation
 		// and out of the settings reload, mislogged as a settings failure, leaving the snapshot stale
@@ -785,7 +785,7 @@ public class UserResolverTests
 	[Fact]
 	public void LiveUsersFileEdit_TakesEffectImmediately_NotAtAnUnrelatedLaterMoment()
 	{
-		// B17: ActiveSyncOptions.UsersFile is loaded with reloadOnChange:false (a restart is required
+		// ActiveSyncOptions.UsersFile is loaded with reloadOnChange:false (a restart is required
 		// to pick up its own edits), but appsettings.json — where ActiveSync:Users can equally be
 		// declared — reloads live by default. That live edit used to mutate
 		// _options.CurrentValue.Users immediately while UserResolver kept resolving against the OLD
@@ -816,7 +816,7 @@ public class UserResolverTests
 	/// <summary>
 	///   Unlike <see cref="TestOptionsMonitor" />'s fixed monitor, this one actually invokes its
 	///   registered listeners on <see cref="Set" /> — needed to exercise a consumer's OnChange
-	///   subscription (B17).
+	///   subscription.
 	/// </summary>
 	private sealed class FiringOptionsMonitor<T>(T initial) : IOptionsMonitor<T>
 	{
@@ -843,7 +843,7 @@ public class UserResolverTests
 	[Fact]
 	public void ValidateUsers_SealedGatewayPassword_IsReported()
 	{
-		// B18: an enc:v1: value in the gateway Password position (NOT a backend role) is never a
+		// An enc:v1: value in the gateway Password position (NOT a backend role) is never a
 		// valid credential. VerifyLocally treats a non-pbkdf2$ stored value as plaintext and
 		// compares SHA256(sealed) against SHA256(presented), which never matches — so the real
 		// password never authenticates and the account is silently locked out, with no report. It

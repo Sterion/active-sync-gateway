@@ -76,7 +76,7 @@ public class ContactConverterTests
 		Assert.Contains("new@example.com", updated);
 		Assert.DoesNotContain("one@example.com", updated);
 		Assert.Contains("four@example.com", updated);
-		// Omitted slots are ghosted, not erased (D4) — Email2/3 and the mobile survive.
+		// Omitted slots are ghosted, not erased — Email2/3 and the mobile survive.
 		Assert.Contains("two@example.com", updated);
 		Assert.Contains("+4512345678", updated);
 	}
@@ -84,7 +84,7 @@ public class ContactConverterTests
 	[Fact]
 	public void GhostedChange_DoesNotEraseOmittedManagedProperties()
 	{
-		// D4 — a Sync Change carrying only <MobilePhoneNumber> used to rebuild the card from
+		// A Sync Change carrying only <MobilePhoneNumber> used to rebuild the card from
 		// the payload alone, wiping name, emails, address, company, note, photo and
 		// categories. MS-ASCMD ghosting: an omitted element means "leave as is".
 		string updated = ContactConverter.FromApplicationData(AppData(
@@ -123,7 +123,7 @@ public class ContactConverterTests
 	}
 
 	/// <summary>
-	///   D24 — Escape only replaced "\r\n" and "\n"; a bare "\r" (not part of a CRLF pair) survived
+	///   Escape only replaced "\r\n" and "\n"; a bare "\r" (not part of a CRLF pair) survived
 	///   into the stored property value unescaped. Some vCard parsers treat a lone CR as a line
 	///   terminator, so this could truncate the NOTE property and turn the remainder into a
 	///   spurious continuation line.
@@ -149,7 +149,7 @@ public class ContactConverterTests
 	}
 
 	/// <summary>
-	///   D34 — the wire photo cap was applied with a strict "&lt;", silently dropping a photo of
+	///   The wire photo cap was applied with a strict "&lt;", silently dropping a photo of
 	///   EXACTLY the cap size even though it fits the budget precisely. Drives the internal
 	///   maxPhotoBytes overload directly with a small cap so the boundary can be pinned exactly,
 	///   instead of needing a 96 KB fixture for the real (MaxWirePhotoBytes) cap.
@@ -183,7 +183,7 @@ public class ContactConverterTests
 	[Fact]
 	public void Picture_CannotInjectVcardLines()
 	{
-		// D6 — <Picture> is client-supplied text. It used to be interpolated raw into
+		// <Picture> is client-supplied text. It used to be interpolated raw into
 		// PHOTO;ENCODING=b;TYPE=JPEG:{picture.Trim()}, and Trim() strips only LEADING and
 		// TRAILING whitespace, so an embedded CRLF wrote arbitrary properties into the
 		// stored card — and, via CardDAV, onto the DAV server.
@@ -221,7 +221,7 @@ public class ContactConverterTests
 	[Fact]
 	public void Folding_CountsOctets_AndNeverSplitsASurrogatePair()
 	{
-		// D23 — RFC 6350 §3.2 specifies 75 OCTETS. Folding at 75 CHARS produces over-long
+		// RFC 6350 §3.2 specifies 75 OCTETS. Folding at 75 CHARS produces over-long
 		// lines for any non-ASCII, and `sb.Append(line, 0, width)` could cut between the two
 		// halves of a surrogate pair, leaving an unpaired surrogate that corrupts the UTF-8
 		// encoding of the stored card. Emoji are 2 UTF-16 units / 4 UTF-8 octets, so a run of
@@ -246,7 +246,7 @@ public class ContactConverterTests
 	[Fact]
 	public void Read_UnparsableCard_ReturnsNull_LikeEverySiblingConverter()
 	{
-		// D22 — CalendarConverter/TasksConverter/NotesConverter all return null so
+		// CalendarConverter/TasksConverter/NotesConverter all return null so
 		// LocalStoreBase skips the item. Throwing here fails the ENTIRE Sync response,
 		// leaving the folder permanently unsyncable over one corrupt card.
 		Assert.Null(ContactConverter.ToApplicationData("this is not a vCard", BodyPreference.PlainText));
@@ -255,7 +255,7 @@ public class ContactConverterTests
 	[Fact]
 	public void Update_PreservedEmail_DoesNotDuplicateAnEmittedOne_WhenPrefReordersTheTop3()
 	{
-		// D3: Email1-3 are picked from vcard.EMails.OrderByPref() (used by ToApplicationData,
+		// Email1-3 are picked from vcard.EMails.OrderByPref() (used by ToApplicationData,
 		// which Ghost() calls to backfill an omitted Email1-3 from the stored card). The old
 		// AppendPreserved instead walked the RAW FILE order and re-emitted every EMAIL past the
 		// 3rd *file position* — correct only when file order already matches pref order. Here an
@@ -310,7 +310,7 @@ public class ContactConverterTests
 	[Fact]
 	public void Update_PreservesUriPhoto_WhenAnUnrelatedFieldChanges()
 	{
-		// D4 — PHOTO is a "managed" property, so AppendPreserved never copies the stored line
+		// PHOTO is a "managed" property, so AppendPreserved never copies the stored line
 		// verbatim; the only source of a re-emitted PHOTO is V("Picture"), filled by
 		// ToApplicationData from decoded bytes. A URI-valued PHOTO (verified against
 		// FolkerKinzel.VCards 8.2.0: Value.Bytes is null for PHOTO;VALUE=URI) produces no
@@ -335,7 +335,7 @@ public class ContactConverterTests
 	[Fact]
 	public void Update_ClearingAByteBackedPhoto_StillWorks_EvenWithTheUriPreservationGuard()
 	{
-		// The URI-preservation fix (D4) must not defeat an explicit clear of a REAL (byte-backed)
+		// The URI-preservation fix must not defeat an explicit clear of a REAL (byte-backed)
 		// stored photo: the guard only preserves PHOTO when the stored card carries no decodable
 		// bytes, so a byte photo the client omits keeps ghosting through Picture as before, and an
 		// explicit empty <Picture/> still clears it.
@@ -349,7 +349,7 @@ public class ContactConverterTests
 	[Fact]
 	public void Read_HomeFaxAndCarNumbers_RoundTripToTheSameSlotTheyWereWrittenTo()
 	{
-		// D9 — the read side is not the inverse of the write side. The writer emits
+		// The read side is not the inverse of the write side. The writer emits
 		// TEL;TYPE=HOME,FAX for HomeFaxNumber and TEL;TYPE=CAR for CarPhoneNumber, but the
 		// reader had no branch for either: a HOME+FAX number fell through to the generic Fax
 		// branch (BusinessFaxNumber) and a CAR number fell through to the untyped fallback
@@ -378,7 +378,7 @@ public class ContactConverterTests
 	[Fact]
 	public void Read_TwoWorkAddresses_EmitOnlyOneSetOfBusinessAddressElements()
 	{
-		// D10 — the address loop used the plain `Add` local (unconditional append), unlike the
+		// The address loop used the plain `Add` local (unconditional append), unlike the
 		// phone loop's AddFirst, so a card with two WORK addresses produced two
 		// BusinessStreet/BusinessCity/... elements in one ApplicationData. MS-ASCNTC declares
 		// these single-instance and iOS is strict about repeated elements.
@@ -403,7 +403,7 @@ public class ContactConverterTests
 	[Fact]
 	public void Read_LargeNote_IsTruncatedToTheRequestedBodyPreference()
 	{
-		// D11 — bodyPreference was accepted and discarded: the note was always written in full
+		// bodyPreference was accepted and discarded: the note was always written in full
 		// (AirSyncBodyWriter.Build(..., truncated: false, ...) hard-coded), against the size
 		// budget the device asked for, and the device was told the body was complete.
 		string longNote = string.Concat(Enumerable.Repeat("0123456789", 200)); // 2000 chars
@@ -425,7 +425,7 @@ public class ContactConverterTests
 	[Fact]
 	public void Update_Birthday_IsFormattedInvariantly_RegardlessOfTheServerCulture()
 	{
-		// D12 — AppendLine(sb, "BDAY", bday.ToString("yyyy-MM-dd")) used no
+		// AppendLine(sb, "BDAY", bday.ToString("yyyy-MM-dd")) used no
 		// CultureInfo.InvariantCulture, so DateTime.ToString honoured the thread's calendar. On a
 		// host whose culture defaults to a non-Gregorian calendar (th-TH -> ThaiBuddhist) the
 		// emitted BDAY is off by centuries.

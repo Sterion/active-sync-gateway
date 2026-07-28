@@ -11,7 +11,7 @@ namespace ActiveSync.Core.Tests;
 /// </summary>
 public class TransientRetryTests
 {
-	// K9: DelaysMs used to be a public static readonly int[] — a mutable reference any plugin (or
+	// DelaysMs used to be a public static readonly int[] — a mutable reference any plugin (or
 	// any host code) could rewrite process-wide, retuning or disabling every backend's backoff.
 	// Reflection avoids a compile-time dependency on the exposed shape (int[] pre-fix,
 	// ImmutableArray<int> post-fix) so this ONE test source compiles — and proves the property —
@@ -82,7 +82,7 @@ public class TransientRetryTests
 		Assert.Equal(2, calls);
 	}
 
-	// K12: the idempotent parameter used to default to true — a caller who omitted it (the easy,
+	// The idempotent parameter used to default to true — a caller who omitted it (the easy,
 	// natural-looking call) silently got at-least-once replay on a possibly non-idempotent
 	// operation. The safe default is NOT to replay unless the caller says so explicitly.
 	[Fact]
@@ -192,7 +192,7 @@ public class TransientRetryTests
 		Assert.Equal(1, calls);
 	}
 
-	// K12: same defect, HTTP side — SendHttpAsync's idempotent default must not silently replay.
+	// Same defect, HTTP side — SendHttpAsync's idempotent default must not silently replay.
 	[Fact]
 	public async Task SendHttpAsync_IdempotentOmitted_DefaultsToFalse()
 	{

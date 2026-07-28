@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   G9: <c>ImapMailBackend.UpdateItemAsync</c>'s Drafts content-rewrite is APPEND-then-DELETE
+///   <c>ImapMailBackend.UpdateItemAsync</c>'s Drafts content-rewrite is APPEND-then-DELETE
 ///   (append the merged draft, then flag+expunge the original). A fault landing between the two
 ///   leaves BOTH the original and the freshly-appended copy in the mailbox, under the ORIGINAL's
 ///   still-valid item key — so a client retry (using that same stale key, exactly the "snapshot

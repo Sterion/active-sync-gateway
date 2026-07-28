@@ -14,8 +14,7 @@ using MimeKit;
 namespace ActiveSync.Integration.Tests.Scenarios;
 
 /// <summary>
-///   Round 3, item 24 — IMAP correctness (<c>G3</c>, <c>G6</c>, <c>G7</c>, <c>G9</c>, <c>G12</c>,
-///   <c>G13</c>, <c>G16</c>, <c>G22</c>). White-box: each test constructs
+///   IMAP correctness coverage. White-box: each test constructs
 ///   <see cref="ImapMailBackend" />/<see cref="ImapSession" /> directly against the real IMAP
 ///   backend (bypassing the EAS wire protocol) so it can drive the exact conditions each finding
 ///   describes, mirroring the direct-construction pattern already used for DAV findings (e.g.
@@ -40,10 +39,10 @@ public class ImapMailBackendCorrectnessTests
 		return (session, backend);
 	}
 
-	// G3 -----------------------------------------------------------------------------------
+	// Unqualified item key rejection --------------------------------------------------------
 
 	/// <summary>
-	///   G3: an unqualified (no "&lt;uidvalidity&gt;:" prefix) mail item key silently gets the
+	///   An unqualified (no "&lt;uidvalidity&gt;:" prefix) mail item key silently gets the
 	///   folder's CURRENT UidValidity stamped onto it instead of being rejected, so a stale or
 	///   hand-crafted key can address whatever message now holds that UID number. Proven against a
 	///   real mailbox: append a message, then delete it by UID alone (no validity prefix) — the
@@ -81,7 +80,7 @@ public class ImapMailBackendCorrectnessTests
 		{
 			string folderKey = ImapSession.ToBackendKey(folderName);
 			// The client-echoed key carries NO "<uidvalidity>:" prefix — exactly the legacy/
-			// hand-crafted shape G3 describes. Correct behavior: refused as not-found, never
+			// hand-crafted shape described above. Correct behavior: refused as not-found, never
 			// silently resolved against the folder's current UidValidity.
 			await Assert.ThrowsAsync<BackendItemNotFoundException>(
 				() => backend.DeleteItemAsync(folderKey, uid.ToString(), true, ct));
@@ -101,10 +100,10 @@ public class ImapMailBackendCorrectnessTests
 		await verify.DisconnectAsync(true, ct);
 	}
 
-	// G12 ----------------------------------------------------------------------------------
+	// Nested Drafts folder classification ---------------------------------------------------
 
 	/// <summary>
-	///   G12: <c>ClassifyFolder</c> (FolderSync's Type element) matches only a special folder's
+	///   <c>ClassifyFolder</c> (FolderSync's Type element) matches only a special folder's
 	///   FullName, while <c>IsDraftsFolder</c> (the Sync write-path gate) also matches the leaf
 	///   Name — so a server without SPECIAL-USE that nests Drafts under a non-INBOX parent (no
 	///   FullName match) is reported to the phone as an ordinary UserMail folder while the backend
@@ -162,10 +161,10 @@ public class ImapMailBackendCorrectnessTests
 		}
 	}
 
-	// G16 ----------------------------------------------------------------------------------
+	// Content change outside Drafts ----------------------------------------------------------
 
 	/// <summary>
-	///   G16: a content-bearing Change to a mail item OUTSIDE the Drafts folder falls through the
+	///   A content-bearing Change to a mail item OUTSIDE the Drafts folder falls through the
 	///   Drafts-only rewrite branch straight into the Read/Flag/Categories handling, which ignores
 	///   the content elements and returns a fresh revision — the client is told Status 1 (applied)
 	///   while the edit was silently discarded. <c>CreateItemAsync</c> already refuses the
@@ -230,10 +229,10 @@ public class ImapMailBackendCorrectnessTests
 		await verify.DisconnectAsync(true, ct);
 	}
 
-	// G13 ----------------------------------------------------------------------------------
+	// SearchFloor date-window widening -------------------------------------------------------
 
 	/// <summary>
-	///   G13: <c>SearchAsync</c> applies the raw <c>since.Date</c> as the SINCE floor, while
+	///   <c>SearchAsync</c> applies the raw <c>since.Date</c> as the SINCE floor, while
 	///   <c>GetItemRevisionsAsync</c> applies <c>SearchFloor(since)</c> (backed off one extra day —
 	///   RFC 3501 SINCE compares the server's own INTERNALDATE calendar day and disregards
 	///   timezone). <c>SearchFloor</c>'s widening makes the sync-filter query a strict SUPERSET of
@@ -293,10 +292,10 @@ public class ImapMailBackendCorrectnessTests
 		}
 	}
 
-	// G22 ----------------------------------------------------------------------------------
+	// Persistent poll connection --------------------------------------------------------------
 
 	/// <summary>
-	///   G22 (REDO — the first fix was rolled back for opening a connection per poll).
+	///   A prior fix for this was rolled back for opening a connection per poll instead of reusing one.
 	///   <c>SnapshotStatusAsync</c>, the STATUS poll that backs every Ping/Sync long-poll, ran
 	///   through the SAME per-session gate as <c>GetItemRevisionsAsync</c>'s whole-mailbox FETCH,
 	///   so one device's Sync round stalled every other device's push detection behind it.
@@ -354,7 +353,7 @@ public class ImapMailBackendCorrectnessTests
 
 			// ...and that own connection must be PERSISTENT. Four WaitForChangesAsync rounds issue
 			// eight STATUS snapshots; a poll that reconnects per call would count nine here, which
-			// is exactly the regression that got the first G22 fix rolled back.
+			// is exactly the regression that got the first fix rolled back.
 			Assert.Equal(2, wire.Connections);
 		}
 		finally

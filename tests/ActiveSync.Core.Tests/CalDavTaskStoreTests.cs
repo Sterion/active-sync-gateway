@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   H15: the tasks folder pick was not sorted, unlike the calendar and contacts picks it
+///   The tasks folder pick was not sorted, unlike the calendar and contacts picks it
 ///   mirrors. Both <c>CalDavStore</c> and <c>CardDavStore</c> href-sort their home-set listing
 ///   before crowning the default folder, precisely because "multistatus order is server whim"
 ///   (AGENTS.md). <c>CalDavTaskStore</c> did not, so when two VTODO collections both match

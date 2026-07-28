@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   Item 6b of docs/design/db-restructure.md — the user lifecycle the surrogate key makes
+///   The user lifecycle the surrogate <c>UserId</c> key makes
 ///   possible: renaming a login without losing anything, and deleting a user without losing
 ///   anything by accident.
 /// </summary>
@@ -174,7 +174,7 @@ public sealed class UserLifecycleTests : IDisposable
 	[Fact]
 	public async Task CountDeletionImpact_IncludesOofSettingsAndWebSessionRevocations()
 	{
-		// B18: OofSetting and WebSessionRevocation both carry a UserId FK with cascade delete —
+		// OofSetting and WebSessionRevocation both carry a UserId FK with cascade delete —
 		// the same shape as the other rows already counted (devices, folders, collection states,
 		// shared-calendar grants, device blocks) — but were silently absent from the operator's
 		// "what will be lost" summary, understating the impact.

@@ -85,7 +85,7 @@ public class EncryptionAtRestTests(GatewayFixture gateway)
 	[BackendFact]
 	public async Task PassphraseKey_EncryptsAndServesLocalItems()
 	{
-		// A passphrase is stretched to the 256-bit key; K1 requires a per-deployment salt for it.
+		// A passphrase is stretched to the 256-bit key; that requires a per-deployment salt for it.
 		using WebApplicationFactory<Program> passphraseGateway = gateway.CreateIsolatedFactory(
 			new Dictionary<string, string?>
 			{

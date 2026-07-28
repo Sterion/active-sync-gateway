@@ -5,7 +5,7 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   B7 (item 37): <see cref="BackendSettingsValidation.CaPath" /> memoizes the exists+PEM-parse of a
+///   <see cref="BackendSettingsValidation.CaPath" /> memoizes the exists+PEM-parse of a
 ///   CA file keyed on (path, last-write-time, length) so validating N users that share the same
 ///   configured CA path no longer re-reads and re-parses the file N times. These are COVERAGE tests:
 ///   the memoization is behaviour-preserving, so they assert the observable result is unchanged

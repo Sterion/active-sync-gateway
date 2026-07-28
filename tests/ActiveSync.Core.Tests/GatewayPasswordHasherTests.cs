@@ -45,8 +45,9 @@ public class GatewayPasswordHasherTests
 	[Fact]
 	public void TryParse_WeakerThanGeneratedSaltAndHash_IsRejected()
 	{
-		// K15: Hash() always emits a 16-byte salt / 32-byte hash, but TryParse's floor is only
-		// 8/16 bytes — so an externally-supplied (or lower-privilege-written, cf. K3) value with
+		// Hash() always emits a 16-byte salt / 32-byte hash, but TryParse's floor is only
+		// 8/16 bytes — so an externally-supplied (or lower-privilege-written, see the excessive
+		// iteration-count case below) value with
 		// an 8-byte salt / 16-byte hash is accepted even though it is weaker than anything the
 		// generator itself would ever produce.
 		const string stored = "pbkdf2$100000$MTIzNDU2Nzg=$QUJDREVGR0hJSktMTU5PUA=="; // salt=8B, hash=16B
@@ -57,7 +58,7 @@ public class GatewayPasswordHasherTests
 	[Fact]
 	public void TryParse_ExcessiveIterationCount_IsRejected()
 	{
-		// K3: no upper bound on the stored iteration count means an attacker able to write an
+		// No upper bound on the stored iteration count means an attacker able to write an
 		// account row (e.g. `eas user set ... Password pbkdf2$2000000000$...`) can force every
 		// login verify against that account to run ~2 billion PBKDF2 rounds, tying up the
 		// request thread for seconds — a password-verify denial-of-service. The stored value
@@ -74,7 +75,7 @@ public class GatewayPasswordHasherTests
 	[Fact]
 	public void TryParse_OversizedHash_IsRejected()
 	{
-		// K5: TryParse enforced only a FLOOR on salt/hash length (`<`), not the exact size
+		// TryParse enforced only a FLOOR on salt/hash length (`<`), not the exact size
 		// Hash() always emits (16/32 bytes) — so a stored value with a much longer hash (e.g. a
 		// 1 MB base64 blob) passes the floor check and turns every PBKDF2 verify against that
 		// account into a multi-minute denial-of-service. The reachable writer is
@@ -90,7 +91,7 @@ public class GatewayPasswordHasherTests
 	[Fact]
 	public void Hash_RejectsAnIterationCountItsOwnVerifyWouldReject()
 	{
-		// K21: Hash() enforced no bounds on `iterations`, while TryParse (and therefore Verify)
+		// Hash() enforced no bounds on `iterations`, while TryParse (and therefore Verify)
 		// enforces MinIterations..MaxIterations. Hash(pw, 1) returned a well-formed-looking
 		// "pbkdf2$1$..." value that Verify then silently rejects for EVERY password (IsHashed
 		// still returns true, so nothing upstream falls back) -- a caller can mint a permanently

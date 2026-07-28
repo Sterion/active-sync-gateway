@@ -3,7 +3,7 @@ using ActiveSync.Backends.Imap;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D2: <see cref="ImapMailBackend.SearchFloor" /> backs the IMAP SINCE search floor off by one
+///   <see cref="ImapMailBackend.SearchFloor" /> backs the IMAP SINCE search floor off by one
 ///   extra day so a UTC filter boundary is never later than the server's own (possibly
 ///   non-UTC) notion of "today" — RFC 3501's SINCE comparison disregards timezone entirely, so
 ///   a message near a day boundary could otherwise be silently excluded from the revision map on

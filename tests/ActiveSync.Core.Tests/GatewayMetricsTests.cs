@@ -44,7 +44,7 @@ public sealed class GatewayMetricsTests
 	[Fact]
 	public void RecordEasRequest_UnknownCommand_NeverReachesTheLabel()
 	{
-		// K1/E2: an unauthenticated caller picks the query string, so the raw command text
+		// An unauthenticated caller picks the query string, so the raw command text
 		// becomes a Prometheus label value — one new time series per distinct string.
 		const string evil = "<script>cardinality-bomb-1</script>";
 		List<string> commands = CollectCommandLabels(
@@ -65,7 +65,7 @@ public sealed class GatewayMetricsTests
 		Assert.All(commands, c => Assert.Equal("FolderSync", c));
 	}
 
-	// K4: every instrument sits under the activesync_ namespace.
+	// Every instrument sits under the activesync_ namespace.
 	[Fact]
 	public void Instruments_AreNamespaced()
 	{
@@ -83,7 +83,7 @@ public sealed class GatewayMetricsTests
 		Assert.All(names, n => Assert.StartsWith("activesync_", n));
 	}
 
-	// K4: the duration histogram carries the HTTP status dimension (it used to drop it).
+	// The duration histogram carries the HTTP status dimension (it used to drop it).
 	[Fact]
 	public void RecordEasRequest_DurationHistogram_CarriesStatus()
 	{
@@ -108,7 +108,7 @@ public sealed class GatewayMetricsTests
 		Assert.True(sawStatus, "the duration histogram must record a status tag");
 	}
 
-	// K5: throttle rejections are tagged by source so EAS and WebUi are distinguishable.
+	// Throttle rejections are tagged by source so EAS and WebUi are distinguishable.
 	[Fact]
 	public void RecordThrottleRejection_CarriesSource()
 	{
@@ -133,7 +133,7 @@ public sealed class GatewayMetricsTests
 		Assert.Equal("eas", source);
 	}
 
-	// K5 (coverage — additive capability): auth outcomes are recorded with source + outcome.
+	// Coverage — additive capability: auth outcomes are recorded with source + outcome.
 	[Fact]
 	public void RecordAuthOutcome_RecordsSourceAndOutcome()
 	{
@@ -165,7 +165,7 @@ public sealed class GatewayMetricsTests
 		Assert.Contains(("eas", "failure"), seen);
 	}
 
-	// A3: `user` on RecordAuthOutcome's throttled/failure/error paths is the RAW HTTP Basic
+	// `user` on RecordAuthOutcome's throttled/failure/error paths is the RAW HTTP Basic
 	// username — fully attacker-controlled, unlike Command() which already folds every
 	// out-of-set value to "other". Only a successful outcome has actually verified the
 	// identity; every other outcome must collapse to the same sentinel PerUserLabels=false uses,
@@ -199,7 +199,7 @@ public sealed class GatewayMetricsTests
 		Assert.All(users, u => Assert.Equal("-", u));
 	}
 
-	// A3: independent of the RecordAuthOutcome sentinel above — User() itself must bound length
+	// Independent of the RecordAuthOutcome sentinel above — User() itself must bound length
 	// and neutralize control characters, so ANY future call site handed an unauthenticated value
 	// directly cannot reintroduce an unbounded or log-injecting label value.
 	[Fact]
@@ -232,7 +232,7 @@ public sealed class GatewayMetricsTests
 		Assert.DoesNotContain('\n', user);
 	}
 
-	// K5 (coverage — additive capability): the TLS-expiry gauge reflects the wired observer.
+	// Coverage — additive capability: the TLS-expiry gauge reflects the wired observer.
 	[Fact]
 	public void CertificateExpiryGauge_ReflectsTheObserver()
 	{
@@ -253,7 +253,7 @@ public sealed class GatewayMetricsTests
 		Assert.InRange(captured!.Value, 3000, 3600); // ~1 hour of seconds, minus test time
 	}
 
-	// K2: a disposed long-poll scope removes its dictionary entry, not just zeroes it — otherwise
+	// A disposed long-poll scope removes its dictionary entry, not just zeroes it — otherwise
 	// the map keeps one dead slot per distinct user for the process lifetime.
 	[Fact]
 	public void TrackLongPoll_Dispose_RemovesTheEntry()

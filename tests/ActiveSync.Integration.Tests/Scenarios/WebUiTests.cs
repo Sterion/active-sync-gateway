@@ -116,7 +116,7 @@ public sealed class WebUiTests(GatewayFixture gateway)
 		// GatewayFixture turns ActiveSync:WebUi:AllowInsecureCookies ON, because the suite talks
 		// to the portals over plain http and a cookie container would drop a Secure cookie on
 		// every response. This host turns it back OFF — the production default — so the harness
-		// opt-out cannot quietly become a blind spot for C2: the real Set-Cookie the gateway
+		// opt-out cannot quietly become a blind spot: the real Set-Cookie the gateway
 		// emits has to carry Secure.
 		Dictionary<string, string?> settings = UserSettings();
 		settings["ActiveSync:WebUi:AllowInsecureCookies"] = "false";
@@ -217,7 +217,7 @@ public sealed class WebUiTests(GatewayFixture gateway)
 	[Fact]
 	public async Task CliEndpoint_Returns404ForAMalformedBody_BeforeEverParsingIt()
 	{
-		// E3: CliRequest used to be bound as a complex parameter on the MapPost delegate, so
+		// CliRequest used to be bound as a complex parameter on the MapPost delegate, so
 		// ASP.NET's request-delegate factory deserialized the body BEFORE the lambda ran the
 		// loopback pre-filter — a malformed body got 400 (and a wrong content type gets 415),
 		// both distinguishable from the 404 that is supposed to make the endpoint invisible to a

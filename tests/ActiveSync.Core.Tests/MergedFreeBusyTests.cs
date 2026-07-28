@@ -65,7 +65,7 @@ public sealed class MergedFreeBusyTests
 	}
 
 	/// <summary>
-	///   D35 — FBTYPE was classified by substring-scanning the WHOLE parameter segment
+	///   FBTYPE was classified by substring-scanning the WHOLE parameter segment
 	///   (`parameters.Contains("BUSY-TENTATIVE", ...)`), so an unrelated parameter whose value
 	///   merely CONTAINS that text anywhere before the colon is misclassified, even though it is
 	///   not the FBTYPE parameter at all. Here an X- parameter happens to embed the substring, and
@@ -92,7 +92,7 @@ public sealed class MergedFreeBusyTests
 		Assert.Equal("00", MergedFreeBusy.Build(Start, Start.AddHours(1), [before, after]));
 	}
 
-	// A15 — "no data" ('4') must NOT outrank a known "busy" ('2'). Char precedence made '4'
+	// "no data" ('4') must NOT outrank a known "busy" ('2'). Char precedence made '4'
 	// (the highest ASCII digit) win, so a definitely-busy interval was reported as unknown and
 	// the meeting picker would suggest it as free-to-book.
 	[Fact]
@@ -103,7 +103,7 @@ public sealed class MergedFreeBusyTests
 		Assert.Equal("2", MergedFreeBusy.Build(Start, Start.AddMinutes(30), [busy, noData]));
 	}
 
-	// A15 — full precedence ladder: OOF('3') > busy('2') > tentative('1') > no-data('4') > free('0').
+	// Full precedence ladder: OOF('3') > busy('2') > tentative('1') > no-data('4') > free('0').
 	[Fact]
 	public void Precedence_IsFreeThenNoDataThenTentativeThenBusyThenOof()
 	{
@@ -117,7 +117,7 @@ public sealed class MergedFreeBusyTests
 			[new BusyPeriod(Start, Start.AddMinutes(30), '2'), new BusyPeriod(Start, Start.AddMinutes(30), '3')]));
 	}
 
-	// A16 — an inverted window (end < start) previously clamped to a single all-free digit,
+	// An inverted window (end < start) previously clamped to a single all-free digit,
 	// silently reporting "completely free" for a nonsense request.
 	[Fact]
 	public void InvertedWindow_Throws()
@@ -126,7 +126,7 @@ public sealed class MergedFreeBusyTests
 			MergedFreeBusy.Build(Start, Start.AddHours(-1), []));
 	}
 
-	// A16 — a period whose Kind is outside '0'..'4' (a buggy provider returning '\0' or 'B')
+	// A period whose Kind is outside '0'..'4' (a buggy provider returning '\0' or 'B')
 	// must not be copied verbatim into the digit string, which then rides into WBXML.
 	[Fact]
 	public void MalformedKind_IsNotEmitted()

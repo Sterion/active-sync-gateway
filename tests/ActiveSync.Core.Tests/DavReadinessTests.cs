@@ -9,7 +9,7 @@ using ActiveSync.Backends.Dav;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   H1: the DAV readiness probe used to hardcode
+///   The DAV readiness probe used to hardcode
 ///   <c>RemoteCertificateValidationCallback =&gt; true</c>, so an https endpoint presenting a
 ///   certificate the operator never opted into was still reported reachable — overriding the very
 ///   TLS settings the operator configured. The probe must instead honor

@@ -139,7 +139,7 @@ public class ImipTests
 	[Fact]
 	public void FromApplicationData_SerializesWithCrlf_NotThePlatformLineEnding()
 	{
-		// D37 — Ical.Net's serializer emits Environment.NewLine: bare LF on the Linux containers
+		// Ical.Net's serializer emits Environment.NewLine: bare LF on the Linux containers
 		// this ships in, while RFC 5545 §3.1 mandates CRLF. IcalHelpers.Serialize normalizes it, so
 		// every iCalendar the gateway PUTs to a CalDAV backend — the raw-string DAV path, no MimeKit
 		// — is compliant. This REPRODUCES on Linux (unfixed code leaves bare LF, this fails) and
@@ -158,7 +158,7 @@ public class ImipTests
 	[Fact]
 	public void BuildCancel_CannotInjectIcalendarProperties()
 	{
-		// D7 — uid/organizer/attendee were interpolated unescaped and unfolded. For a
+		// uid/organizer/attendee were interpolated unescaped and unfolded. For a
 		// DAV-backed event the UID comes from client ApplicationData, so a crafted value
 		// injected arbitrary properties (an extra ATTENDEE, a METHOD override) into an
 		// outbound iTIP message.

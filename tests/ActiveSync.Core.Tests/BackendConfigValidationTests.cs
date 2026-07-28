@@ -4,7 +4,7 @@ using ActiveSync.Core.Backend;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   A14 — the schema-shape field validator. Scalar lookups used the caller-supplied dictionary's
+///   The schema-shape field validator. Scalar lookups used the caller-supplied dictionary's
 ///   comparer while list checks compared ordinal-ignore-case, so an entered key differing in case
 ///   from the field name ("host" vs "Host") was treated as unset and rejected as missing.
 /// </summary>

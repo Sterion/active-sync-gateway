@@ -74,7 +74,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.Equal(2, key2);
 
 		// Replay: client resends the previous key. The rollback is now DEFERRED to the round's own
-		// commit (A1), so the tracked entity is NOT mutated by validation — the snapshot to diff
+		// commit, so the tracked entity is NOT mutated by validation — the snapshot to diff
 		// against is the previous generation, read via ReadPreviousSnapshot (mirrors PeekSyncKeyAsync).
 		(validation, state) = await _service.ValidateSyncKeyAsync(device, "5", "1", CancellationToken.None);
 		Assert.Equal(SyncKeyValidation.Replay, validation);
@@ -89,12 +89,12 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task ReplayRollback_NotCorruptedBySiblingCollectionFlush()
 	{
-		// A1: every <Collection> of one Sync request runs on ONE request-scoped context. Collection A
+		// Every <Collection> of one Sync request runs on ONE request-scoped context. Collection A
 		// is a Replay (the client re-sent the one-behind key); its one-generation rollback must live
 		// only until A's OWN commit. A sibling collection B committing — or resetting on key 0 — in the
 		// same request must NOT flush A's rolled-back-but-uncommitted state. If it does, A is stranded
 		// with no replay generation, so A's next same-key attempt validates as Current and re-delivers
-		// already-sent items (the F12 bug, made reachable across collections). Client-controlled
+		// already-sent items, made reachable across collections. Client-controlled
 		// collection order makes this reachable.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a1x"), "DEV1", "Phone", CancellationToken.None);
 
@@ -128,7 +128,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task KeyZeroReset_Deferred_DoesNotDestroyLiveStateOnAbandonedRound()
 	{
-		// A11: a spurious/duplicated client key 0 must not wipe live snapshot + ledger state until the
+		// A spurious/duplicated client key 0 must not wipe live snapshot + ledger state until the
 		// round's own commit. ValidateSyncKeyAsync used to SaveChanges the wipe immediately, so a key 0
 		// whose round never commits (or a key 0 processed before a sibling that then flushes)
 		// destroyed the collection's committed generation with no undo.
@@ -162,7 +162,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	{
 		// On an unknown key the method used to return a detached, never-added CollectionState
 		// whose type gave no hint it was inert; callers could mistake it for real state. Invalid
-		// must return a null state (A17).
+		// must return a null state.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a17"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? seed) = await _service.ValidateSyncKeyAsync(device, "5", "0", CancellationToken.None);
 		await _service.CommitCollectionStateAsync(seed!, [], 0, SyncKeyValidation.Initial, CancellationToken.None);
@@ -249,7 +249,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	{
 		// EF's real interception point is SaveChangesAsync(bool, ct) — an execution-strategy retry
 		// or any caller using it bypassed stamping when only the 0/1-arg forms were overridden,
-		// writing a CollectionState without a fresh token and defeating lost-update detection (A5).
+		// writing a CollectionState without a fresh token and defeating lost-update detection.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a5"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? state) = await _service.ValidateSyncKeyAsync(device, "1", "0", CancellationToken.None);
 		Assert.NotNull(state);
@@ -288,7 +288,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	{
 		// A concurrent first-sync insert makes the reconcile retry; the retry must discard only
 		// the folder rows it re-reads, never an unrelated tracked mutation (here the device's
-		// FolderSyncKey bump) that shares the same request-scoped context (A1).
+		// FolderSyncKey bump) that shares the same request-scoped context.
 		FaultInjectingInterceptor faults = new();
 		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
 		SyncStateService service = new(db);
@@ -310,7 +310,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	public async Task SoftDelete_StampsDeletedUtcOnce_AndClearsOnReappearance()
 	{
 		// The retention sweep can only reclaim a folder whose DeletedUtc is set, and the clock must
-		// start when it first vanished, not reset every sync; a reappearance clears it (A35).
+		// start when it first vanished, not reset every sync; a reappearance clears it.
 		List<BackendFolder> both =
 		[
 			new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
@@ -338,7 +338,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task RefreshFolderRegistry_DuplicateBackendKey_DedupesInsteadOfPermanentlyFailing()
 	{
-		// A9: a duplicate BackendKey in one store's listing (a plugin bug, or a misbehaving store)
+		// A duplicate BackendKey in one store's listing (a plugin bug, or a misbehaving store)
 		// used to take the insert branch twice — byKey is built once at the top of the loop, so
 		// the second occurrence of the SAME key is never recognised as "already staged" — tripping
 		// the unique index on every one of the four retry attempts identically, so the LAST
@@ -389,7 +389,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// Two pipelined FolderSyncs read the same FolderSyncKey generation. Without a concurrency
 		// token on Device both wrote N+1 (a lost update, both clients told N+1); the racing
 		// DeviceFolder RemoveRange/Add batches could also 500 on the unique index. The second
-		// writer off the stale generation must be rejected, not silently applied (A6).
+		// writer off the stale generation must be rejected, not silently applied.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a6"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a6"),
 			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email")], CancellationToken.None);
@@ -409,12 +409,12 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task CommitFolderHierarchy_ConcurrencyConflict_DoesNotPoisonLaterSaveOnSameContext()
 	{
-		// A5: after CommitFolderHierarchyAsync loses a concurrency race, the incremented
+		// After CommitFolderHierarchyAsync loses a concurrency race, the incremented
 		// FolderSyncKey and stale ConcurrencyToken must not stay tracked Modified on the shared
 		// request-scoped context — otherwise a later, completely unrelated SaveChangesAsync on the
 		// SAME request (e.g. persisting an idempotent last-seen stamp) retries the doomed UPDATE and
 		// throws a second, unrelated DbUpdateConcurrencyException. Mirrors
-		// CollectionStateStore.CommitCollectionStateAsync's reload-before-rethrow (A18).
+		// CollectionStateStore.CommitCollectionStateAsync's reload-before-rethrow.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a5"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a5"),
 			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email")], CancellationToken.None);
@@ -440,7 +440,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	public async Task FolderDiff_DoesNotTrackTheDeviceFoldersItOnlyCompares()
 	{
 		// ComputeFolderDiffAsync loads every DeviceFolder purely to compare against the registry;
-		// tracking them is pure overhead on the request-scoped context (A19).
+		// tracking them is pure overhead on the request-scoped context.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a19"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a19"),
 			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
@@ -462,7 +462,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	{
 		// A folder whose EAS Type changes (e.g. IMAP folder gaining \Sent, 12 -> 5) but keeps its
 		// name and parent was never issued an Update, so the client rendered it in the wrong class
-		// forever (A8).
+		// forever.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a8"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a8"),
 			[new BackendFolder("imap:Archive", "Archive", null, 12, "Email")], CancellationToken.None);
@@ -482,7 +482,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	{
 		// The commit reconciled by deleting the whole hierarchy and reinserting it, so one
 		// renamed folder churned every row's primary key. A commit that changes nothing must
-		// leave the existing rows untouched (A7).
+		// leave the existing rows untouched.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a7"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a7"),
 			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
@@ -552,7 +552,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	{
 		// After a concurrency failure the entity kept its failed values and stayed Modified, so a
 		// later SaveChangesAsync on the same request retried the doomed UPDATE from an unrelated
-		// call site. The catch must reload it back to Unchanged (A18).
+		// call site. The catch must reload it back to Unchanged.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a18"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? seed) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
 		Assert.NotNull(seed);
@@ -585,7 +585,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// CompleteAccountWipeAsync did AnyAsync then AddAsync against the unique (UserName, DeviceId)
 		// LoginBlock index. Two concurrent wipe acks raced the insert → unhandled DbUpdateException
 		// → 500. A unique violation must be treated as success, with the wipe-completion flag still
-		// persisted (A22).
+		// persisted.
 		FaultInjectingInterceptor faults = new();
 		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
 		SyncStateService service = new(db);
@@ -606,11 +606,11 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task CompleteAccountWipe_ConcurrentDeviceConflict_DoesNotThrow()
 	{
-		// CompleteAccountWipeAsync's catch filter only covered a LoginBlock unique violation
-		// (A22). Device is concurrency-token-stamped, so a concurrent write to the SAME device
+		// CompleteAccountWipeAsync's catch filter only covered a LoginBlock unique violation.
+		// Device is concurrency-token-stamped, so a concurrent write to the SAME device
 		// row (e.g. a touch from GetOrCreateDeviceAsync, or a pipelined FolderSync bump) racing
 		// the wipe ack raises an unhandled DbUpdateConcurrencyException — a 500 on a
-		// security-critical wipe acknowledgement instead of the ack completing (A6).
+		// security-critical wipe acknowledgement instead of the ack completing.
 		FaultInjectingInterceptor faults = new();
 		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
 		SyncStateService service = new(db);
@@ -634,7 +634,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// The insert-race catch assumed every DbUpdateException was "someone inserted first" and
 		// re-read with FirstAsync. A non-unique failure (disk full, SQLITE_BUSY, NOT NULL) then
 		// finds no row and throws "Sequence contains no elements", destroying the real
-		// diagnostic. A non-unique failure must surface unchanged (A9).
+		// diagnostic. A non-unique failure must surface unchanged.
 		FaultInjectingInterceptor faults = new();
 		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
 		SyncStateService service = new(db);
@@ -651,7 +651,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// The DAV id allocation runs its own commit mid-Sync; sharing the request-scoped context
 		// meant it flushed everything tracked — including a half-mutated CollectionState, bumping
 		// its ConcurrencyToken before the round was known good. With a factory it runs on its own
-		// context and leaves the request's unsaved state untouched (A10).
+		// context and leaves the request's unsaved state untouched.
 		TestDbContextFactory factory = new(_connection);
 		SyncStateService service = new(_db, factory);
 
@@ -680,7 +680,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// The snapshot column held plaintext JSON of every item ever sent — 2-3 MB on a large
 		// mailbox, stored twice (current + previous) and rewritten every round. It is now gzipped:
 		// the persisted bytes must be a fraction of the plaintext and carry no plaintext ServerId,
-		// while the in-memory round trip stays exact (A4).
+		// while the in-memory round trip stays exact.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a4"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? state) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
 		Assert.NotNull(state);
@@ -720,7 +720,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	{
 		// Per-item GetOrAddDavItemIdAsync does one SELECT + one full SaveChanges per href, so a
 		// 100-item Sync window is 100 transactions. The batch path must map every href in ONE
-		// flush (A3). Counting saves across the DavItemMap's own short-lived contexts proves it.
+		// flush. Counting saves across the DavItemMap's own short-lived contexts proves it.
 		SaveCountingInterceptor counter = new();
 		CountingDbContextFactory factory = new(_connection, counter);
 		SyncStateService service = new(_db, factory);
@@ -773,7 +773,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task GetOrAddDavItemIds_ConcurrentUniqueViolation_DoesNotDropThisRequestsNewHrefs()
 	{
-		// A2: SaveChangesAsync is atomic — one href's unique violation rolls back the WHOLE staged
+		// SaveChangesAsync is atomic — one href's unique violation rolls back the WHOLE staged
 		// batch. The recovery re-reads the map, but a href new to THIS request (not created by any
 		// racer) is genuinely absent from that re-read, so it silently drops out of the returned map
 		// and that item gets no ServerId this Sync round. Simulating the violation with no real
@@ -803,7 +803,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task SaveOof_ConcurrentInsertRace_UpsertsInsteadOfThrowing()
 	{
-		// A3: OofSetting carries no concurrency token, and SaveOofAsync's insert path has no
+		// OofSetting carries no concurrency token, and SaveOofAsync's insert path has no
 		// unique-violation guard on the (UserName) index — two concurrent first-time writers (e.g.
 		// the phone's Settings->Oof racing an `eas` CLI edit) can both read no row and both attempt
 		// to insert. The second insert used to surface the real constraint violation as an unhandled
@@ -839,7 +839,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public void Decompress_UsesOrdinalComparer_MatchingTheDiffEngine()
 	{
-		// A7: FolderRegistry/DavItemMap build their snapshot maps with StringComparer.Ordinal
+		// FolderRegistry/DavItemMap build their snapshot maps with StringComparer.Ordinal
 		// explicitly, and diff correctness (echo suppression/windowing) silently depends on every
 		// snapshot map using the SAME comparer. Decompress used the parameterless Dictionary ctor
 		// (EqualityComparer<string>.Default) instead of the explicit Ordinal comparer its siblings

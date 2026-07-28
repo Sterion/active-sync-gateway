@@ -6,7 +6,7 @@ using ActiveSync.Contracts;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   H9: the session's core capability object was parsed as a bare URN set, so its limits were
+///   The session's core capability object was parsed as a bare URN set, so its limits were
 ///   discarded and <c>HasCapability</c> went unused. A store therefore issued requests with
 ///   <c>using:[…contacts]</c> the server never advertised, getting an opaque 400. Each store must
 ///   check the capability up front and fail with a clear, named error before sending anything.

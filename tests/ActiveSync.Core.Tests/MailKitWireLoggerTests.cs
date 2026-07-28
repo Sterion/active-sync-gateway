@@ -70,7 +70,7 @@ public sealed class MailKitWireLoggerTests
 		Assert.Contains("C: A3 LOGOUT", Assert.Single(lines));
 	}
 
-	// D28: Append re-stringified its WHOLE pending buffer via pending.ToString() twice per line
+	// Append re-stringified its WHOLE pending buffer via pending.ToString() twice per line
 	// found, inside the loop over every line in the chunk -- so a chunk of N lines allocated on
 	// the order of N copies of the (shrinking) remaining buffer, i.e. roughly O(N^2) total bytes
 	// rather than O(N). Only reached when Trace is enabled (exactly when someone is debugging a

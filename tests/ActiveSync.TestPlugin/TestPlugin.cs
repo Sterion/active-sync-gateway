@@ -14,7 +14,7 @@ public sealed class TestPlugin : IGatewayPlugin
 }
 
 /// <summary>
-///   K40 — a NON-public plugin entry point. The loader's error message promises it looks for a
+///   A NON-public plugin entry point. The loader's error message promises it looks for a
 ///   public <see cref="IGatewayPlugin" />, so this type must be ignored; it registers a provider
 ///   under its own name purely so a test can assert the provider never appears.
 /// </summary>
@@ -59,7 +59,7 @@ public sealed class TestBackendProvider : IBackendProvider
 	{
 	}
 
-	// Names the copy of the plugin's private dependency this provider bound to (K41).
+	// Names the copy of the plugin's private dependency this provider bound to.
 	public string DescribeRole(BackendRole role, ProviderSettings settings) =>
 		$"test plugin provider (dep: {PluginPrivateLib.PrivateDependency.LoadedFrom})";
 

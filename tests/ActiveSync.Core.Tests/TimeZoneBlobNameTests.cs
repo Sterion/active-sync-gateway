@@ -3,7 +3,7 @@ using ActiveSync.Backends.Common.Converters;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D32 — TimeZoneBlob.WriteName truncates the 32-UTF-16-unit StandardName/DaylightName field at
+///   TimeZoneBlob.WriteName truncates the 32-UTF-16-unit StandardName/DaylightName field at
 ///   an arbitrary byte offset (62 of the 64-byte field, reserving 2 bytes). When the cut lands
 ///   between the two UTF-16 code units of a surrogate pair (an astral character, e.g. an emoji),
 ///   the written blob ends in a lone high surrogate with no matching low surrogate — invalid

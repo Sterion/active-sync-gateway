@@ -5,7 +5,7 @@ using ActiveSync.Contracts;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   S3: <c>IsSafeRedirect</c> used to be duplicated near-verbatim in <c>WebDavClient</c> and
+///   <c>IsSafeRedirect</c> used to be duplicated near-verbatim in <c>WebDavClient</c> and
 ///   <c>JmapClient</c> (relocated from the old <c>WebDavRedirectTests</c>). It now lives once, in
 ///   the shared <see cref="RedirectingHttpSender" /> (<c>Backends.Common</c>) that both clients call.
 /// </summary>
@@ -31,7 +31,7 @@ public class RedirectingHttpSenderTests
 		Assert.Equal(expected, RedirectingHttpSender.IsSafeRedirect(new Uri(baseUri), new Uri(target)));
 	}
 
-	// D26: IsSafeRedirect was consulted only for a Location target on hop >= 1 — the very first
+	// IsSafeRedirect was consulted only for a Location target on hop >= 1 — the very first
 	// request (built by the caller, e.g. WebDavClient.Resolve on a server-supplied absolute href)
 	// was sent as-is with no same-origin check at all, riding the shared HttpClient's Authorization
 	// header off-origin. The guard must be enforced once, here, for every caller.

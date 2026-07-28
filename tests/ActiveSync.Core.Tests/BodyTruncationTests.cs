@@ -70,7 +70,7 @@ public class BodyTruncationTests
 	}
 
 	/// <summary>
-	///   D29 — maxBytes originates from the client's BodyPreference.TruncationSize (a plain
+	///   maxBytes originates from the client's BodyPreference.TruncationSize (a plain
 	///   long?); a negative value made `len` negative and `bytes[len]` throw
 	///   IndexOutOfRangeException out of the converter instead of degrading gracefully.
 	/// </summary>

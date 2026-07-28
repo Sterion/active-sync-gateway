@@ -4,7 +4,7 @@ using ActiveSync.Contracts;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   K60: <see cref="BackendConnection.DisposeAsync" /> must be idempotent, must keep disposing the
+///   <see cref="BackendConnection.DisposeAsync" /> must be idempotent, must keep disposing the
 ///   remaining resources when one throws (and surface the failures as an <see cref="AggregateException" />),
 ///   and must dispose disposable content stores (which may themselves hold live connections).
 /// </summary>
@@ -37,7 +37,7 @@ public class BackendConnectionDisposalTests
 		Assert.Equal(1, resource.DisposeCount);
 	}
 
-	// K20: `_disposed` was a plain bool — a read-then-write with no atomicity, so two callers
+	// `_disposed` was a plain bool — a read-then-write with no atomicity, so two callers
 	// racing DisposeAsync (a session-eviction sweep vs. a request completing, both plausible
 	// call sites in BackendSessionFactory) could both observe "not yet disposed" and both go on
 	// to dispose the owned resource. This is a genuine data race with no single deterministic
@@ -82,7 +82,7 @@ public class BackendConnectionDisposalTests
 
 		// Interlocked so the COUNTER itself is never the source of a lost update — it must report
 		// the true number of DisposeAsync calls even when BackendConnection lets more than one
-		// through concurrently (the exact defect K20 is about).
+		// through concurrently.
 		public int DisposeCount => Volatile.Read(ref _disposeCount);
 
 		public ValueTask DisposeAsync()

@@ -4,12 +4,12 @@ using System.Xml.Linq;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D25 — `Limit` (`value.Length <= max ? value : value[..max]`) can cut a UTF-16 surrogate
+///   `Limit` (`value.Length <= max ? value : value[..max]`) can cut a UTF-16 surrogate
 ///   pair in half, e.g. in the To/From/Cc/ReplyTo header strings it truncates. A lone surrogate
 ///   in an XElement's text makes the response unserializable -- XmlWriter rejects it -- sinking
 ///   the whole Sync response over one oversized header rather than one message.
 ///   `MailConverter.Limit` is private; invoked via reflection to prove the defect at the exact
-///   site the finding names without depending on MimeKit's address-list formatting.
+///   truncation site without depending on MimeKit's address-list formatting.
 /// </summary>
 public class MailConverterLimitTests
 {

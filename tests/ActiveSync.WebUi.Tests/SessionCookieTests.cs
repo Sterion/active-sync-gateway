@@ -13,7 +13,7 @@ using Microsoft.Extensions.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   Cookie hardening of the web session as it is actually wired into DI (C2/C4): the session
+///   Cookie hardening of the web session as it is actually wired into DI: the session
 ///   cookie and the OIDC correlation/nonce cookies must carry Secure unconditionally, with one
 ///   explicit opt-out for plain-http local development.
 /// </summary>
@@ -97,8 +97,8 @@ public sealed class SessionCookieTests : IDisposable
 			.GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>().Get("Oidc");
 
 		// COVERAGE, not a reproducer: ASP.NET Core already defaults CorrelationCookie and
-		// NonceCookie to SecurePolicy.Always on this framework version, so C4's symptom does not
-		// bite here. The assertion pins the property against a future framework default change
+		// NonceCookie to SecurePolicy.Always on this framework version, so the SameAsRequest-behind-a-proxy
+		// symptom the session cookie had does not bite here. The assertion pins the property against a future framework default change
 		// and against anyone re-deriving these cookies from the session cookie's settings.
 		Assert.Equal(CookieSecurePolicy.Always, oidc.CorrelationCookie.SecurePolicy);
 		Assert.Equal(CookieSecurePolicy.Always, oidc.NonceCookie.SecurePolicy);

@@ -7,16 +7,16 @@ using Microsoft.Extensions.Logging;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   WebDAV client request-shaping. H2: hrefs from a multistatus were percent-decoded and then
+///   WebDAV client request-shaping. hrefs from a multistatus were percent-decoded and then
 ///   re-resolved as URIs, so a resource whose name contains <c>#</c>/<c>?</c>/<c>%</c> was fetched
-///   at the wrong path. H3: an <c>If-Match</c> ETag that is not RFC-quoted was silently dropped,
+///   at the wrong path. Also, an <c>If-Match</c> ETag that is not RFC-quoted was silently dropped,
 ///   turning a conditional update into an unconditional PUT (lost update).
 /// </summary>
 public sealed class WebDavClientTests
 {
 	private static readonly Uri Base = new("https://dav.example.com/");
 
-	// H2: the address book/calendar contains a resource literally named "a#b.ics"; the server
+	// The address book/calendar contains a resource literally named "a#b.ics"; the server
 	// reports its href percent-encoded as ".../a%23b.ics". Fetching it must hit that exact path,
 	// not "/dav/cal/a" (with "#b.ics" swallowed as a URI fragment).
 	[Fact]
@@ -52,7 +52,7 @@ public sealed class WebDavClientTests
 		Assert.Equal("/dav/cal/a%23b.ics", getUri!.AbsolutePath);
 	}
 
-	// H3: many servers (Stalwart among them) hand back a bare, unquoted ETag. EntityTagHeaderValue
+	// Many servers (Stalwart among them) hand back a bare, unquoted ETag. EntityTagHeaderValue
 	// .TryParse rejects it, so the old code omitted If-Match entirely — an unconditional PUT that
 	// clobbers a concurrent update. The header must be present and carry the quoted ETag.
 	[Fact]
@@ -72,7 +72,7 @@ public sealed class WebDavClientTests
 		Assert.Equal("\"12345\"", ifMatch);
 	}
 
-	// H27: a per-resource failure inside an otherwise-207 multistatus (here a 403 on b.ics) used to
+	// A per-resource failure inside an otherwise-207 multistatus (here a 403 on b.ics) used to
 	// vanish without a trace, hiding a permission problem behind a short listing. It must be logged;
 	// the successful sibling is still returned.
 	[Fact]
@@ -106,7 +106,7 @@ public sealed class WebDavClientTests
 		Assert.Contains(logger.Messages, m => m.Contains("failure response"));
 	}
 
-	// H27: the old Contains("200") match dropped any legitimate 2xx that was not literally "200"
+	// The old Contains("200") match dropped any legitimate 2xx that was not literally "200"
 	// (e.g. 204). The status code is now parsed as a number in the 2xx range.
 	[Fact]
 	public async Task Multistatus_Non200SuccessStatus_IsAccepted()
@@ -131,7 +131,7 @@ public sealed class WebDavClientTests
 		Assert.Equal("/dav/cal/c.ics", Assert.Single(resources).Href);
 	}
 
-	// H28: a hostile/compromised DAV server must never get the client to resolve an external
+	// A hostile/compromised DAV server must never get the client to resolve an external
 	// entity. This is COVERAGE, not a red-first reproducer: XDocument.Parse already prohibits DTDs
 	// by default, so the multistatus is rejected before and after the fix; the test pins the
 	// hardening so a future refactor to a DTD-permitting reader is caught.
@@ -156,11 +156,11 @@ public sealed class WebDavClientTests
 			client.PropfindAsync("/dav/cal/", 1, new XElement(XName.Get("propfind", "DAV:")), CancellationToken.None));
 	}
 
-	// H18: a create-PUT (If-None-Match:*) whose response was lost gets replayed by the transient
+	// A create-PUT (If-None-Match:*) whose response was lost gets replayed by the transient
 	// retry and lands on the resource it just created. Stalwart signals "already exists" with 412 —
 	// RFC 7232 ties 412 unambiguously to the If-* precondition itself, so it is treated as success
 	// with no further check needed (unlike 409 below, which is a genuine RFC 4918 conflict code and
-	// gets narrowed by H10).
+	// gets narrowed by an extra presence check).
 	[Fact]
 	public async Task CreatePut_WhenServerReports412AlreadyExists_IsTreatedAsSuccess()
 	{
@@ -174,10 +174,10 @@ public sealed class WebDavClientTests
 		Assert.Null(etag); // success sentinel — caller re-resolves the stored href/ETag
 	}
 
-	// H10: RFC 4918 §9.7.1 defines 409 Conflict on PUT as "the parent collection does not exist" —
+	// RFC 4918 §9.7.1 defines 409 Conflict on PUT as "the parent collection does not exist" —
 	// NOT "already exists" the way 412 does. Axigen answers a replayed create-PUT with 409 rather
-	// than 412 (the case H18 above widened for), but blindly treating EVERY create-PUT 409 as
-	// success (the old, unnarrowed H18 fix) hid a genuine failure: a collection deleted/renamed
+	// than 412 (the case above widened for), but blindly treating EVERY create-PUT 409 as
+	// success (the old, unnarrowed fix) hid a genuine failure: a collection deleted/renamed
 	// server-side while the session was cached. The gateway would report Sync Add Status 1,
 	// ResolveStoredHrefAsync could never find the item, and the snapshot's phantom entry gets
 	// deleted by the very next diff — the create the client was told succeeded silently vanishes. A
@@ -195,9 +195,9 @@ public sealed class WebDavClientTests
 				CancellationToken.None));
 	}
 
-	// H10 (continued): when the verifying GET confirms the target really is present, the 409 IS a
-	// safe replay (Axigen's genuine "already exists" signal) and must still be treated as success —
-	// this is the case H18 exists for and must keep working.
+	// Continued from the case above: when the verifying GET confirms the target really is present,
+	// the 409 IS a safe replay (Axigen's genuine "already exists" signal) and must still be treated
+	// as success — this is the legitimate case the presence check must preserve.
 	[Fact]
 	public async Task CreatePut_When409AndTargetPresent_IsTreatedAsSuccess()
 	{
@@ -227,7 +227,7 @@ public sealed class WebDavClientTests
 				CancellationToken.None));
 	}
 
-	// H13: every DAV verb funnels through the same fast transient retry (SendAsync), PUT included.
+	// Every DAV verb funnels through the same fast transient retry (SendAsync), PUT included.
 	// If the server applies an update-PUT and the response is then lost (a reset, or a 503 from a
 	// load balancer after the write landed), the retry replays the SAME If-Match header against a
 	// resource whose ETag the replay's own first attempt already moved — a genuine-looking 412 for
@@ -255,7 +255,7 @@ public sealed class WebDavClientTests
 		Assert.Equal("\"new-etag\"", etag);
 	}
 
-	// H13 (continued): a REAL concurrent conflict — the stored content is someone else's edit, not
+	// Continued from the case above: a REAL concurrent conflict — the stored content is someone else's edit, not
 	// ours — must keep surfacing as a failure. Only a content match proves it was our own replay.
 	[Fact]
 	public async Task UpdatePut_When412AndStoredContentDiffers_StillThrows()
@@ -270,7 +270,7 @@ public sealed class WebDavClientTests
 				"text/calendar", etag: "\"old-etag\"", ifNoneMatch: false, CancellationToken.None));
 	}
 
-	// H1/D26: RFC 4918 permits a multistatus <D:href> to be an absolute URI, and every href fed to
+	// RFC 4918 permits a multistatus <D:href> to be an absolute URI, and every href fed to
 	// Resolve() is server-controlled (current-user-principal, home-set, every multistatus <href>,
 	// schedule-outbox-URL). A malicious/compromised DAV server can therefore hand back an absolute
 	// off-origin href; the Basic Authorization header lives on the shared HttpClient and rides
@@ -293,7 +293,7 @@ public sealed class WebDavClientTests
 		Assert.False(requestReachedHandler, "credentials must never be attached to an off-origin URL");
 	}
 
-	// H24: multistatus/GET/REPORT bodies were read with ReadAsStringAsync — fully buffered with no
+	// Multistatus/GET/REPORT bodies were read with ReadAsStringAsync — fully buffered with no
 	// size ceiling, so a malicious or malfunctioning server could stream an unbounded body into
 	// memory and OOM the gateway. A response whose declared Content-Length exceeds the ceiling must
 	// be refused before it is buffered.
@@ -318,7 +318,7 @@ public sealed class WebDavClientTests
 			client.PropfindAsync("/dav/cal/", 1, new XElement(XName.Get("propfind", "DAV:")), CancellationToken.None));
 	}
 
-	// H24: the ceiling must also stop a body with NO declared Content-Length (chunked) — the read
+	// The ceiling must also stop a body with NO declared Content-Length (chunked) — the read
 	// itself is capped, not just the header check — while a body under the ceiling still parses.
 	[Fact]
 	public async Task Propfind_ChunkedBodyOverCeiling_IsCappedMidRead()
@@ -334,7 +334,7 @@ public sealed class WebDavClientTests
 			client.PropfindAsync("/dav/cal/", 1, new XElement(XName.Get("propfind", "DAV:")), CancellationToken.None));
 	}
 
-	// H16: TransientRetry.SendHttpAsync rethrows the ORIGINAL transport exception once its retry
+	// TransientRetry.SendHttpAsync rethrows the ORIGINAL transport exception once its retry
 	// budget is spent (see TransientRetry.IsTransientHttpException). Every DAV call site funnels
 	// through WebDavClient.SendAsync and only ever catches BackendException — a raw
 	// HttpRequestException therefore escaped four "never break folder sync / never treat a hiccup as
@@ -361,7 +361,7 @@ public sealed class WebDavClientTests
 		}
 	}
 
-	// H17: WebDavClient.DefaultMaxResponseBytes shared the SAME 128 MiB ceiling as JMAP's blob
+	// WebDavClient.DefaultMaxResponseBytes shared the SAME 128 MiB ceiling as JMAP's blob
 	// downloads (BackendHttpClientFactory.MaxBackendResponseBytes) — but a DAV multistatus is legitimately
 	// several MB, never remotely close to a legitimate JMAP attachment, and XDocument materializes
 	// roughly 5-10x the wire size (an XElement/XAttribute/XText per node) on top of the already-buffered
@@ -377,7 +377,7 @@ public sealed class WebDavClientTests
 			"proportionate to a multistatus listing, not JMAP's much larger blob-download ceiling");
 	}
 
-	// H17: there was no MaxCharactersInDocument ceiling at all on the XmlReaderSettings used to parse
+	// There was no MaxCharactersInDocument ceiling at all on the XmlReaderSettings used to parse
 	// a multistatus — only the byte-level MaxResponseBytes cap existed. A response entirely within the
 	// byte ceiling can still amplify into an excessive character count during parse; the ceiling below
 	// must be independently enforced regardless of how generous the byte cap is.

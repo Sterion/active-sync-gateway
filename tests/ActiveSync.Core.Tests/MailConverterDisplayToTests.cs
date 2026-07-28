@@ -7,7 +7,7 @@ using MimeKit;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D13 — DisplayTo used `m.Name ?? m.Address`, but MimeKit's MailboxAddress.Name returns ""
+///   DisplayTo used `m.Name ?? m.Address`, but MimeKit's MailboxAddress.Name returns ""
 ///   (never null) for a bare address with no display name, so `??` never fires and a message
 ///   To'd at a bare address renders an empty DisplayTo. Devices use DisplayTo to label rows in
 ///   Sent/Drafts, so those folders show blank recipients.

@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   JMAP outbound submission (RFC 8621 EmailSubmission). H1: the outgoing MIME is Email/imported
+///   JMAP outbound submission (RFC 8621 EmailSubmission). The outgoing MIME is Email/imported
 ///   into Drafts as a staging copy and destroyed on submission success via
 ///   <c>onSuccessDestroyEmail</c>. When the submission is REJECTED (recipient/quota/greylist →
 ///   <c>notCreated</c>) that cleanup never fires, so the staged <c>$draft</c> lingers in Drafts and
@@ -39,7 +39,7 @@ public sealed class JmapMailSubmitTests
 	private const string Mime =
 		"From: sender@example.test\r\nTo: rcpt@example.test\r\nSubject: hi\r\n\r\nbody\r\n";
 
-	// H9: no submission capability advertised at all.
+	// No submission capability advertised at all.
 	private const string SessionJsonNoSubmission = """
 	{
 	  "capabilities": {
@@ -55,7 +55,7 @@ public sealed class JmapMailSubmitTests
 	}
 	""";
 
-	// H9: mail and submission resolve to DIFFERENT primary accounts.
+	// Mail and submission resolve to DIFFERENT primary accounts.
 	private const string SessionJsonDualAccounts = """
 	{
 	  "capabilities": {
@@ -73,7 +73,7 @@ public sealed class JmapMailSubmitTests
 	}
 	""";
 
-	// H1: a rejected submission (EmailSubmission/set returns the submission in notCreated) must not
+	// A rejected submission (EmailSubmission/set returns the submission in notCreated) must not
 	// leave the staged draft behind — the store must issue an Email/set destroy for the imported
 	// email's id before throwing. Red-first: the unmodified store only throws and never destroys.
 	[Fact]
@@ -123,7 +123,7 @@ public sealed class JmapMailSubmitTests
 		Assert.True(destroyedStaged, "the staged draft STAGED1 must be destroyed after a submission failure");
 	}
 
-	// H9: EmailSubmission never gated on urn:ietf:params:jmap:submission before issuing the
+	// EmailSubmission never gated on urn:ietf:params:jmap:submission before issuing the
 	// request. A server without it rejects the whole batch (RFC 8620 §3.6.1 unknownCapability),
 	// which reaches the caller as an opaque "JMAP POST api failed: 400" — indistinguishable from
 	// any other failure. Red-first: the unmodified store lets the request go out and surfaces
@@ -152,7 +152,7 @@ public sealed class JmapMailSubmitTests
 		Assert.DoesNotContain("400", ex.Message);
 	}
 
-	// H9: the account id for EmailSubmission/set was taken from primaryAccounts["...:mail"], but
+	// The account id for EmailSubmission/set was taken from primaryAccounts["...:mail"], but
 	// RFC 8621 §7 gives submission its own primaryAccounts entry — on a server where the two
 	// differ, submitting under the mail account fails with accountNotFound. The Email/import call
 	// (a Mail-capability method) must still use the mail account.

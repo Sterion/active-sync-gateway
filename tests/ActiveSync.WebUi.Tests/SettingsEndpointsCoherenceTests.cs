@@ -7,7 +7,7 @@ using ActiveSync.Core.Settings;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C7 / C18 — coherence gaps in <c>SettingsEndpoints</c>.
+///   Coherence gaps in <c>SettingsEndpoints</c>.
 /// </summary>
 public sealed class SettingsEndpointsCoherenceTests
 {
@@ -15,7 +15,7 @@ public sealed class SettingsEndpointsCoherenceTests
 		WebUiHost.Users(("root", new UserOptions { MailAddress = "root@example.com", Admin = true }));
 
 	/// <summary>
-	///   C7 — `GET settings`'s "surface stray stored keys so they can be cleared" branch could
+	///   `GET settings`'s "surface stray stored keys so they can be cleared" branch could
 	///   never fire: `extra` is already `db.Keys` minus every catalogue key, so
 	///   `SettingKeys.Find(key)` can only return non-null for exactly the OTHER shape the
 	///   `!IsBackendKey` guard excludes. A row for a key the catalogue no longer recognizes (a
@@ -32,7 +32,7 @@ public sealed class SettingsEndpointsCoherenceTests
 		await store.UpsertAsync("ActiveSync:RequireDeclaredUsers", "true", CancellationToken.None);
 
 		JsonElement settings = await host.ReadJsonAsync(await client.GetAsync("/admin/api/settings"));
-		// B7 normalizes a stored row's key to lowercase — the point here is that the row is
+		// A stored row's key is normalized to lowercase on write — the point here is that the row is
 		// surfaced AT ALL (it used to be dropped entirely), not its display casing.
 		JsonElement stray = settings.EnumerateArray()
 			.Single(s => string.Equals(
@@ -44,7 +44,7 @@ public sealed class SettingsEndpointsCoherenceTests
 	}
 
 	/// <summary>
-	///   C18 — resetting a setting badges its source as "default" even when the config file still
+	///   Resetting a setting badges its source as "default" even when the config file still
 	///   supplies a value for the same key. The DELETE response must report the recomputed
 	///   effective source (it already recomputes tier), so the JS badge does not lie until reload.
 	/// </summary>

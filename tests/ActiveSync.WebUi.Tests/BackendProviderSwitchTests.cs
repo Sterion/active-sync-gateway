@@ -6,7 +6,7 @@ using ActiveSync.Core.Settings;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C5 — switching a role's provider on the Backends page left the previous provider's stored
+///   Switching a role's provider on the Backends page left the previous provider's stored
 ///   leaves in the database, and any leaf name the two providers share is silently adopted by
 ///   the new one. <c>BackendsEndpoints.PersistAsync</c> only iterated the request's own
 ///   <c>Settings</c> (plus the provider key), so a stored row for a leaf the request does not

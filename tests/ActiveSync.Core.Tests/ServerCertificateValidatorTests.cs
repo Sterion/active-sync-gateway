@@ -39,7 +39,7 @@ public class ServerCertificateValidatorTests : IDisposable
 		_unrelated = otherRequest.CreateSelfSigned(
 			DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(10));
 
-		// D17: a private PKI with an ISSUING (intermediate) CA — the documented CaCertificatePath
+		// A private PKI with an ISSUING (intermediate) CA — the documented CaCertificatePath
 		// use case is trusting a private ROOT, not every intermediate it ever issues.
 		using RSA intermediateKey = RSA.Create(2048);
 		CertificateRequest intermediateRequest = new(
@@ -153,9 +153,9 @@ public class ServerCertificateValidatorTests : IDisposable
 		Assert.Null(ServerCertificateValidator.CreateCallback(false, null));
 	}
 
-	// K13 (coverage — checkRevocation is a new knob this fix introduces; unmodified code has no
+	// Coverage — checkRevocation is a new knob this fix introduces; unmodified code has no
 	// such parameter to exercise, so there is no black-box red state to observe without first
-	// changing the signature). RevocationMode was hardcoded to NoCheck unconditionally, so a
+	// changing the signature. RevocationMode was hardcoded to NoCheck unconditionally, so a
 	// revoked backend certificate on a real private PKI was silently accepted with no opt-out.
 	// This proves the knob is actually wired into the chain build, not merely accepted and
 	// ignored: the test CA/leaf carry no CRL/OCSP endpoint (as most lab/private CAs don't), so
@@ -210,7 +210,7 @@ public class ServerCertificateValidatorTests : IDisposable
 		Assert.Empty(failures);
 	}
 
-	// D17 — CreateCallback's returned delegate discarded its own 3rd parameter (the X509Chain the
+	// CreateCallback's returned delegate discarded its own 3rd parameter (the X509Chain the
 	// TLS stack built from the handshake's own certificates), then built a FRESH chain with only
 	// the custom-CA PEM and no ExtraStore. A leaf signed by a private INTERMEDIATE (not directly
 	// by the trusted root — CaCertificatePath's documented use case is trusting a private ROOT)
@@ -232,7 +232,7 @@ public class ServerCertificateValidatorTests : IDisposable
 		Assert.True(result);
 	}
 
-	// D27: LoadCaCertificates keyed its cache on the path alone with no invalidation, so an
+	// LoadCaCertificates keyed its cache on the path alone with no invalidation, so an
 	// operator rotating a private CA at the same CaCertificatePath (a live, DB-settable option
 	// that otherwise applies on session recycle per AGENTS.md) kept seeing the OLD CA forever --
 	// including past the point the old root expires, with no configuration change able to fix it.

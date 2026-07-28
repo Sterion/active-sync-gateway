@@ -259,7 +259,10 @@ public sealed class DependencyRuleTests
 		// rather than only when punctuated, because the citations run to prose — "see C10", "the same
 		// rule G7 gave the IDLE watcher", "Mirrors the mail store's H19 token" — and an earlier,
 		// punctuation-anchored version of this rule missed 168 of them.
-		Regex idCitation = new(@"(?<![A-Za-z0-9])[ABCDEFGHKLNSW][0-9]{1,2}(?![A-Za-z0-9])", RegexOptions.Compiled);
+		// The number is 1-99, never 0: findings are numbered from 1, so "C0" is not an ID — and "C0
+		// control characters" is the standard Unicode name for the 0x00-0x1F range, which an earlier
+		// version of this rule flagged as a citation.
+		Regex idCitation = new(@"(?<![A-Za-z0-9])[ABCDEFGHKLNSW][1-9][0-9]?(?![A-Za-z0-9])", RegexOptions.Compiled);
 		// The one false positive that shape produces is a hex dump in a comment, where a byte like
 		// "B7" reads as an ID (e.g. the MS-OXOMSG class-id "0x04000000 82 00 E0 00 74 C5 B7 10 ...").
 		// Three or more space-separated two-digit hex groups is a dump, not prose.
@@ -267,9 +270,12 @@ public sealed class DependencyRuleTests
 		Regex idTestName = new(@"\b(?:Task|void)\s+[ABCDEFGHKLNSW][0-9]{1,2}_", RegexOptions.Compiled);
 
 		List<string> scanned = [];
+		// .csproj/.props/.targets are in scope because XML comments there carried citations too — a
+		// scan limited to .cs/.js let three of them through.
+		string[] extensions = [".cs", ".js", ".csproj", ".props", ".targets"];
 		foreach (string dir in (string[])["src", "tests"])
 			scanned.AddRange(Directory.EnumerateFiles(Path.Combine(root, dir), "*.*", SearchOption.AllDirectories)
-				.Where(f => f.EndsWith(".cs", StringComparison.Ordinal) || f.EndsWith(".js", StringComparison.Ordinal))
+				.Where(f => extensions.Any(e => f.EndsWith(e, StringComparison.Ordinal)))
 				.Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
 				         && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)));
 		scanned.Add(Path.Combine(root, "AGENTS.md"));
@@ -309,7 +315,8 @@ public sealed class DependencyRuleTests
 		string t = line.TrimStart();
 		return t.StartsWith("//", StringComparison.Ordinal)
 		    || t.StartsWith("*", StringComparison.Ordinal)
-		    || t.StartsWith("/*", StringComparison.Ordinal);
+		    || t.StartsWith("/*", StringComparison.Ordinal)
+		    || t.StartsWith("<!--", StringComparison.Ordinal); // MSBuild project files
 	}
 
 	private static string FindRepoRoot()

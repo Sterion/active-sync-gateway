@@ -8,9 +8,9 @@ using ActiveSync.WebUi.Auth;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   Item 17's portal-side findings — C4, C12, C13 — all trace back to the same root: parts of the
-///   portal API resolve the caller's effective account from the DATABASE ROW alone, or from a stale
-///   snapshot, instead of the MERGED (config over database) view `GET backends/meta` renders from.
+///   Three portal-side gaps below all trace back to the same root: parts of the portal API resolve
+///   the caller's effective account from the DATABASE ROW alone, or from a stale snapshot, instead
+///   of the MERGED (config over database) view `GET backends/meta` renders from.
 /// </summary>
 public sealed class PortalMergedViewTests
 {
@@ -30,7 +30,7 @@ public sealed class PortalMergedViewTests
 	}
 
 	/// <summary>
-	///   C4 — `PUT backends/{roleName}` computes its self-service permission gate from
+	///   `PUT backends/{roleName}` computes its self-service permission gate from
 	///   `UserEditing.LoadStartingEntryAsync` (the database row alone), while `GET backends/meta`
 	///   computes the same thing from the merged view. When a role's provider is set only in the
 	///   user's own CONFIGURATION override (never written to the database), the GET renders fields
@@ -55,8 +55,9 @@ public sealed class PortalMergedViewTests
 	}
 
 	/// <summary>
-	///   C12 — the portal's `PUT backends/{roleName}` freezes config-supplied self-service values
-	///   into the database row for the same reason as C2. `userName` is pre-filled from the MERGED
+	///   The portal's `PUT backends/{roleName}` freezes config-supplied self-service values into
+	///   the database row for the same reason the admin Users PUT elides matching fields.
+	///   `userName` is pre-filled from the MERGED
 	///   view (`GET /user/api/me`), which reports a config-supplied backend user name too, so a save
 	///   the holder never touched resubmits it verbatim — and the handler wrote it straight into the
 	///   row as a permanent database override.
@@ -124,7 +125,7 @@ public sealed class PortalMergedViewTests
 	}
 
 	/// <summary>
-	///   C13 — `GET /user/api/backends/meta` reads `resolver.MergedUsers` without ever refreshing
+	///   `GET /user/api/backends/meta` reads `resolver.MergedUsers` without ever refreshing
 	///   it: the handler is synchronous and never calls `EnsureFreshAsync`, unlike every other
 	///   endpoint under `Api/` that touches `MergedUsers`. An admin who has just moved the caller's
 	///   role to another provider (a DIFFERENT request, via the database) hands the portal a form

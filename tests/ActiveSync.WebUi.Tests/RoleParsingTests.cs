@@ -6,7 +6,7 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C21 — the same four-line "parse the role or 400" block appeared five times across two
+///   The same four-line "parse the role or 400" block appeared five times across two
 ///   files, with a different message in one of them, and every handler minted its own
 ///   <c>{ error = … }</c> object so the SPA's <c>e.body?.error</c> convention was load-bearing
 ///   but written down nowhere. One parse, one message, one error shape.

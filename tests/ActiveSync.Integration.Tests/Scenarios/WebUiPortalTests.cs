@@ -86,7 +86,7 @@ public sealed class WebUiPortalTests(GatewayFixture gateway) : IAsyncLifetime
 		});
 		Assert.Equal(HttpStatusCode.OK, update.StatusCode);
 
-		// A connection setting is NOT part of the self-service surface (C1): the imap
+		// A connection setting is NOT part of the self-service surface: the imap
 		// provider marks no field SelfServiceEditable, so every settings key is refused.
 		HttpResponseMessage repoint = await SendAsync(clientA, "PUT", "/user/api/backends/MailStore", new
 		{
@@ -154,7 +154,7 @@ public sealed class WebUiPortalTests(GatewayFixture gateway) : IAsyncLifetime
 
 		// The fixture serves mail over imap. The provider is named so the portal can label the
 		// credential fields, but the FIELD list is only what this caller may write for
-		// themselves (C1) — imap opts nothing in, so it is empty. Host/Port are connection
+		// themselves — imap opts nothing in, so it is empty. Host/Port are connection
 		// settings and live in the admin editor.
 		JsonElement mailStore = meta.GetProperty("MailStore");
 		Assert.Equal("imap", mailStore.GetProperty("provider").GetString());
@@ -172,7 +172,7 @@ public sealed class WebUiPortalTests(GatewayFixture gateway) : IAsyncLifetime
 	[Fact]
 	public async Task Saving_RefusesAdministeredSettings_AndLeavesThemAlone()
 	{
-		// INVERTED BY C1. This used to assert that the portal carried undescribed keys through
+		// Behavior inverted: this used to assert that the portal carried undescribed keys through
 		// its own save. It no longer accepts them at all: a connection key is refused with 400,
 		// and keys an administrator set are preserved by the server instead of being echoed
 		// back by the client. Same guarantee ("a portal save does not delete them"), moved to

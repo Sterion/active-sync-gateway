@@ -5,7 +5,7 @@ using ActiveSync.Protocol.Wbxml;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D24: a malformed client-supplied date must not surface as an uncontrolled exception that
+///   A malformed client-supplied date must not surface as an uncontrolled exception that
 ///   fails the whole Sync. Every client-input site parses defensively (like ParseUid /
 ///   base64 handling elsewhere) and skips the bad field rather than throwing.
 /// </summary>

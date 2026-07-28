@@ -6,7 +6,7 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C5 — a per-account backend role's free-form <c>Settings</c> were returned verbatim by the
+///   A per-account backend role's free-form <c>Settings</c> were returned verbatim by the
 ///   admin and portal account APIs, unlike the global backends editor which masks secret fields.
 ///   A secret-named setting (ApiKey/Token/ClientSecret) on a role override therefore left the
 ///   server in the clear.
@@ -55,11 +55,11 @@ public sealed class AccountSettingsRedactionTests
 		// Masking on read must not clobber on write: an unchanged (re-posted "***") secret setting
 		// keeps its effective value, so an admin editing an unrelated field doesn't wipe the ApiKey.
 		//
-		// C2 behaviour change: alice's Calendar role here is entirely CONFIG-declared, and every
+		// Behaviour change: alice's Calendar role here is entirely CONFIG-declared, and every
 		// resubmitted field (provider, ApiKey behind the mask, BaseUrl) is now unmasked against the
 		// merged view and then compared against configuration — since all three match config exactly,
 		// nothing is a real deviation, so no database override is written at all (previously this
-		// wrote the unmasked secret straight into the row, freezing it there — precisely the C2
+		// wrote the unmasked secret straight into the row, freezing it there — precisely the config-value-freeze
 		// trap this item closes). The secret is unaffected either way: it keeps resolving through
 		// configuration, and a later GET still reports it set and masked, never as the literal "***".
 		await using WebUiHost host = await WebUiHost.StartAsync(AliceWithSecretSetting());
@@ -96,7 +96,7 @@ public sealed class AccountSettingsRedactionTests
 	public async Task AdminUserApi_RePostedMask_OnADatabaseOverride_KeepsTheStoredSecretInTheRow()
 	{
 		// The database-override counterpart of the test above: when the secret is a REAL database
-		// deviation (no config counterpart), resubmitting the mask must still keep it stored — C2's
+		// deviation (no config counterpart), resubmitting the mask must still keep it stored — the
 		// elision only drops a value that matches configuration, never one with nothing to match.
 		await using WebUiHost host = await WebUiHost.StartAsync(WebUiHost.Users(("alice", new UserOptions { Admin = true })));
 		UserStore store = new(host.Factory);

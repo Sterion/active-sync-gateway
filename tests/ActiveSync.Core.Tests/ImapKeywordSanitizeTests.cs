@@ -3,7 +3,7 @@ using ActiveSync.Backends.Imap;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D6: EAS categories are free text but IMAP keywords are RFC 3501 atoms. The old
+///   EAS categories are free text but IMAP keywords are RFC 3501 atoms. The old
 ///   char-by-char '_' substitution collapsed distinct categories ("a b" and "a_b") onto the same
 ///   keyword, so the server-derived category could never match the client's original and the mail
 ///   revision string thrashed every Sync. A non-atom category is now DROPPED (returns empty, which
@@ -28,7 +28,7 @@ public class ImapKeywordSanitizeTests
 	[Fact]
 	public void DistinctCategories_DoNotCollide()
 	{
-		// The heart of D6: "a b" (non-atom) and "a_b" (valid atom) must not sanitize to the same
+		// The heart of it: "a b" (non-atom) and "a_b" (valid atom) must not sanitize to the same
 		// keyword, or the two categories fold together and churn the revision.
 		string spaced = ImapMailBackend.SanitizeKeyword("a b");
 		string underscored = ImapMailBackend.SanitizeKeyword("a_b");

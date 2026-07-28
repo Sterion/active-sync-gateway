@@ -7,7 +7,7 @@ using MimeKit;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D23 — the emitted email2:ConversationIndex was a 5-byte stub whose own comment contradicted
+///   The emitted email2:ConversationIndex was a 5-byte stub whose own comment contradicted
 ///   the bytes it wrote (claimed "high 4 bytes", wrote the low 32 bits) and was 17 bytes short of
 ///   the MS-OXOMSG 2.2.1.3 22-byte header with no GUID — a shape no real client can parse for
 ///   threading. The element is dropped; ConversationId (already correct and sufficient for

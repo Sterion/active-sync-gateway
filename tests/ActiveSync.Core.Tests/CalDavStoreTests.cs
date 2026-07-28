@@ -9,10 +9,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   H22: self free/busy folded shared read-only calendars into the user's own availability — a
+///   Self free/busy folded shared read-only calendars into the user's own availability — a
 ///   colleague's or team calendar shared TO the user made ResolveRecipients report the user busy
 ///   whenever the shared calendar was busy, degrading meeting scheduling against them.
-///   H23: the "a share never claims the default slot" rule (deliberate, per AGENTS.md) had no
+///   Also, the "a share never claims the default slot" rule (deliberate, per AGENTS.md) had no
 ///   floor — a delegate account whose home set contains only granted collections got zero folders
 ///   of EAS type 8 (Calendar), though iOS expects exactly one default calendar folder to exist.
 /// </summary>

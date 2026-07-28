@@ -11,7 +11,7 @@ namespace ActiveSync.Protocol.Tests;
 ///   call runs inside the record constructor invoked from the <c>static readonly Pages</c>
 ///   field initializer, so the very first touch of <see cref="WbxmlCodePages" /> anywhere in the
 ///   process caches a <see cref="TypeInitializationException" /> and rethrows it on every
-///   subsequent access for the life of the process — every EAS request 500s (W4).
+///   subsequent access for the life of the process — every EAS request 500s.
 /// </summary>
 public class WbxmlCodePagesTests
 {
@@ -101,7 +101,7 @@ public class WbxmlCodePagesTests
 		Assert.Equal(expected, bytes);
 	}
 
-	// W16: Pages and Tokens are declared as the read-only INTERFACE types (IReadOnlyList /
+	// Pages and Tokens are declared as the read-only INTERFACE types (IReadOnlyList /
 	// IReadOnlyDictionary), but that is documentation, not protection — Build() actually returns a
 	// List<CodePage> and T(...) actually returns a Dictionary<byte, string>, so a cast back to the
 	// concrete mutable type succeeds and a plugin (this assembly is a published MIT package loaded

@@ -7,7 +7,7 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C1 — what a NON-ADMIN portal user may change about their own backend connection.
+///   What a NON-ADMIN portal user may change about their own backend connection.
 ///   <c>PUT /user/api/backends/{role}</c> withholds Enabled and Provider as admin surface but
 ///   used to take the settings dictionary wholesale, and a user key replaces the whole global
 ///   subtree it addresses. Setting BaseUrl therefore repointed the caller's own CalDAV role at
@@ -177,7 +177,7 @@ public sealed class PortalBackendEditingTests
 	}
 
 	/// <summary>
-	///   C14 — <c>RoleSelfUpdate.UserName</c> had no keep-sentinel: <c>Password</c> in the same
+	///   <c>RoleSelfUpdate.UserName</c> had no keep-sentinel: <c>Password</c> in the same
 	///   DTO treats null = keep / "" = clear, and <c>Settings</c> preserves administered keys, but
 	///   <c>UserName</c> mapped any omitted value straight to null, silently clearing a stored
 	///   backend user name on any save that does not resend it.

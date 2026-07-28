@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   H6: the SSE watcher signalled on any non-ping <c>data:</c> line without buffering a full
+///   The SSE watcher signalled on any non-ping <c>data:</c> line without buffering a full
 ///   record, so a ping whose <c>data:</c> line happens to precede its <c>event:</c> line (both
 ///   legal per the SSE spec — field order within a record is not fixed) spuriously woke every
 ///   wait, defeating the accelerator (over-signalling is otherwise harmless — the poll backstop
@@ -58,7 +58,7 @@ public sealed class JmapEventSourceWatcherTests
 	public async Task StateChangeRecord_DoesSignal()
 	{
 		// A genuine push (RFC 8620 §7.3 names the event type "state") must still wake the wait,
-		// so the H6 fix (only dispatching at the record boundary) doesn't accidentally swallow
+		// so the fix (only dispatching at the record boundary) doesn't accidentally swallow
 		// real changes along with the ping fix.
 		const string sse = "event: state\r\ndata: {\"changed\":{}}\r\n\r\n";
 
@@ -76,18 +76,18 @@ public sealed class JmapEventSourceWatcherTests
 		Assert.Same(wait, winner); // the state-change record must have signalled
 	}
 
-	// H14 (coverage, not red-first proof — see fix-review.md's "genuinely cannot be reproduced"
-	// clause). The defect was a single-VM-instruction gap in WaitForChangeAsync between reading
-	// the latch and capturing the signal TCS: nothing between those two statements ever yields, so
-	// no external caller can suspend execution in that exact gap to force the interleaving without
-	// an invasive test seam — an attempted stress-test version of this test (many concurrent
-	// Signal() calls racing many waits) was tried and discarded: it passed identically on the
-	// unfixed code, because a tight, continuous stream of Signal() calls completes whatever TCS is
-	// current within a cycle or two either way, masking the one-signal loss the fix closes. What
-	// IS verifiable from outside the class is that the refactor (capturing `pending` before the
-	// latch check, instead of reading `_signal` after it) did not change the two behaviours the
-	// method contracts to: an already-latched call returns synchronously-completed, and a genuine
-	// signal still wakes an in-flight wait.
+	// This is a coverage test, not a red-first proof: the race window below genuinely cannot be
+	// reproduced from outside the class. The defect was a single-VM-instruction gap in
+	// WaitForChangeAsync between reading the latch and capturing the signal TCS: nothing between
+	// those two statements ever yields, so no external caller can suspend execution in that exact
+	// gap to force the interleaving without an invasive test seam — an attempted stress-test
+	// version of this test (many concurrent Signal() calls racing many waits) was tried and
+	// discarded: it passed identically on the unfixed code, because a tight, continuous stream of
+	// Signal() calls completes whatever TCS is current within a cycle or two either way, masking
+	// the one-signal loss the fix closes. What IS verifiable from outside the class is that the
+	// refactor (capturing `pending` before the latch check, instead of reading `_signal` after it)
+	// did not change the two behaviours the method contracts to: an already-latched call returns
+	// synchronously-completed, and a genuine signal still wakes an in-flight wait.
 	[Fact]
 	public async Task WaitForChangeAsync_AlreadyLatched_ReturnsSynchronously()
 	{
@@ -110,7 +110,7 @@ public sealed class JmapEventSourceWatcherTests
 		Assert.Equal(TaskStatus.RanToCompletion, wait.Status); // no await needed — already latched
 	}
 
-	// H12: the SSE stream read through a plain StreamReader.ReadLineAsync with no size cap, on a
+	// The SSE stream read through a plain StreamReader.ReadLineAsync with no size cap, on a
 	// path BackendHttpClientFactory documents as exempt from the response ceiling (it opens the
 	// stream with ResponseHeadersRead, so MaxResponseContentBufferSize never applies). A server
 	// that emits an endless line with no '\n' grows the reader's internal buffer without bound.

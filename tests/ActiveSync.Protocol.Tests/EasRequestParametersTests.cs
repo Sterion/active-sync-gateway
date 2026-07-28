@@ -126,7 +126,7 @@ public class EasRequestParametersTests
 	[Fact]
 	public void Base64Query_DeviceTypeWithControlCharacters_IsHexEncoded_LikeDeviceId()
 	{
-		// W13: DeviceId goes through DecodeIdField (hex-encoded whenever not fully printable
+		// DeviceId goes through DecodeIdField (hex-encoded whenever not fully printable
 		// ASCII), but DeviceType, two lines later in FromBase64, was handed out via a bare
 		// Encoding.ASCII.GetString -- \r/\n/ESC survived into a value that is persisted on the
 		// Device row and rendered in the admin UI and startup banner.
@@ -148,7 +148,7 @@ public class EasRequestParametersTests
 	[Fact]
 	public void Base64Query_TagFieldWithControlCharacter_IsRejected()
 	{
-		// W13: AttachmentName/CollectionId/ItemId/LongId/Occurrence/User are UTF-8 decoded with
+		// AttachmentName/CollectionId/ItemId/LongId/Occurrence/User are UTF-8 decoded with
 		// no character validation at all -- unlike DeviceId/DeviceType, a control character in
 		// one of these is neither filtered nor hex-encoded, it is handed straight to callers
 		// (including whatever wire-logs or renders it).
@@ -190,7 +190,7 @@ public class EasRequestParametersTests
 	[Fact]
 	public void Base64Query_UnknownVersionByte_IsRejected()
 	{
-		// W17: 255 decoded arithmetically as "25.5", which satisfies every >= V160 / >= V161
+		// 255 decoded arithmetically as "25.5", which satisfies every >= V160 / >= V161
 		// gate -- an unauthenticated caller unlocked 16.x behaviour it never negotiated.
 		MemoryStream ms = new();
 		ms.WriteByte(255);
@@ -207,7 +207,7 @@ public class EasRequestParametersTests
 	[Fact]
 	public void Base64Query_UnknownFieldTag_IsRejected()
 	{
-		// W4: the field-loop switch had no default case, so an unknown tag was silently
+		// The field-loop switch had no default case, so an unknown tag was silently
 		// consumed (length-prefixed) and the parse "succeeded" with wrong/missing values --
 		// a misaligned or hostile query hid its desync as success instead of a clean 400.
 		MemoryStream ms = new();
@@ -228,11 +228,11 @@ public class EasRequestParametersTests
 	[Fact]
 	public void Base64Query_MultiByteFields_AreLittleEndianOnTheWire()
 	{
-		// W2 COVERAGE (not red-first): MS-ASHTTP packs the locale and policy key little-endian,
+		// COVERAGE (not red-first): MS-ASHTTP packs the locale and policy key little-endian,
 		// but the codec read/wrote them with BitConverter (host endianness). On a little-endian
 		// host (every CI/dev arm64/amd64 box) BitConverter and the little-endian primitives agree,
 		// so this asserts the on-the-wire bytes are explicitly little-endian to guard the format
-		// against a big-endian regression; it passes with and without the W2 fix on LE hardware.
+		// against a big-endian regression; it passes with and without the endianness fix on LE hardware.
 		EasRequestParameters original = new()
 		{
 			Command = "Sync",
@@ -258,7 +258,7 @@ public class EasRequestParametersTests
 	[Fact]
 	public void ToBase64_LengthPrefixedFieldOver255Bytes_IsRejected()
 	{
-		// W6: the length prefix is a single byte (byte)bytes.Length -- a 300-byte AttachmentName
+		// The length prefix is a single byte (byte)bytes.Length -- a 300-byte AttachmentName
 		// silently writes length 44 followed by all 300 bytes, producing a blob FromBase64 cannot
 		// read back correctly. Must fail fast instead of emitting a corrupt query.
 		EasRequestParameters original = new()
@@ -285,7 +285,7 @@ public class EasRequestParametersTests
 	[Fact]
 	public void ToBase64_NonAsciiDeviceId_IsRejectedRatherThanSilentlyMangled()
 	{
-		// W6: Encoding.ASCII.GetBytes silently maps every non-ASCII character to '?' instead of
+		// Encoding.ASCII.GetBytes silently maps every non-ASCII character to '?' instead of
 		// failing, so a non-ASCII DeviceId round-trips to a DIFFERENT device id with no error.
 		EasRequestParameters original = new()
 		{
@@ -299,7 +299,7 @@ public class EasRequestParametersTests
 	[Fact]
 	public void ToBase64_UnknownProtocolVersion_IsRejected()
 	{
-		// W12: versionByte = (byte)(major * 10 + minor) is never checked against
+		// versionByte = (byte)(major * 10 + minor) is never checked against
 		// ProtocolVersionBytes, so "15.0" silently writes byte 150, which FromBase64 (correctly)
 		// refuses to read back -- the two halves of the documented round trip disagree. ToBase64
 		// must reject an unknown version itself rather than emit a query FromBase64 cannot parse.
@@ -311,7 +311,7 @@ public class EasRequestParametersTests
 	[Fact]
 	public void ToBase64_ProtocolVersionByteOverflow_DoesNotWrapIntoAnAllowedByte()
 	{
-		// W12: the unchecked (byte) cast means a version whose arithmetic value overflows 255
+		// The unchecked (byte) cast means a version whose arithmetic value overflows 255
 		// could wrap around and coincidentally land on an allowlisted byte (e.g. 281 wraps to
 		// 25, which decodes back as "2.5") -- a completely different, wrong version silently
 		// accepted. Must be rejected on the pre-cast value, not the wrapped one.

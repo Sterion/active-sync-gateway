@@ -5,11 +5,12 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C8 — `GET /admin/api/users` advertises per-field provenance it does not carry.
+///   `GET /admin/api/users` advertises per-field provenance it does not carry.
 ///   `docs/webui.md` documents "declared users with per-field provenance (each value tagged with
 ///   the level that supplied it)", and `MergedUser.Sources` already computes exactly that, but
 ///   `UsersEndpoints.ToDto` never read it and emitted only one coarse `Origin` string for the
-///   whole user — which is also what makes C2's freeze invisible to the operator.
+///   whole user — which is also what makes a resubmitted config value silently freezing into a
+///   database override invisible to the operator.
 /// </summary>
 public sealed class UserFieldProvenanceTests
 {

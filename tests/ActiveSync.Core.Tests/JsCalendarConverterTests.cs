@@ -80,7 +80,7 @@ public class JsCalendarConverterTests
 		Assert.Equal("20260721T140000Z", V("StartTime"));
 	}
 
-	// H4 — the recurrence member is written in one shape and read in another, so recurrence never
+	// The recurrence member is written in one shape and read in another, so recurrence never
 	// survives a round trip. Both spellings are exercised: RFC 8984 names it "recurrenceRules" and
 	// types it as an array; Stalwart 0.16 (the live backend) emits and accepts the JSCalendar-draft
 	// "recurrenceRule", a single object, and rejects the plural name outright.
@@ -132,7 +132,7 @@ public class JsCalendarConverterTests
 		Assert.Equal("1", recurrence.Elements().First(e => e.Name.LocalName == "Type").Value);
 	}
 
-	// H5 — the ordinal on a day ("2nd Tuesday"), byMonthDay, byMonth and bySetPosition were
+	// The ordinal on a day ("2nd Tuesday"), byMonthDay, byMonth and bySetPosition were
 	// unmapped in both directions, so "2nd Tuesday of the month" degraded to "every Tuesday" and
 	// "the 15th" to "the day the event happens to start on".
 	[Theory]
@@ -175,7 +175,7 @@ public class JsCalendarConverterTests
 			back.Elements().FirstOrDefault(e => e.Name.LocalName == expectedElement)?.Value);
 	}
 
-	// H23 — a JSCalendar event with no timeZone is *floating* (RFC 8984 §4.1.2): it happens at
+	// A JSCalendar event with no timeZone is *floating* (RFC 8984 §4.1.2): it happens at
 	// that wall-clock time wherever the viewer is. Anchoring it to UTC moves it by the viewer's
 	// offset — an 09:00 daily standup becomes 11:00 in Copenhagen.
 	[Fact]
@@ -212,7 +212,7 @@ public class JsCalendarConverterTests
 		Assert.Equal("2026-07-20T09:00:00", back.GetProperty("start").GetString());
 	}
 
-	// H3: duration was computed by subtracting two floating (TZID-local) CalDateTime.Value
+	// Duration was computed by subtracting two floating (TZID-local) CalDateTime.Value
 	// wall-clock values, ignoring the zone — wrong whenever start and end straddle a DST
 	// transition. This spans the 2026-03-29 Europe/Copenhagen spring-forward (02:00 -> 03:00
 	// local, so that day is only 23 real hours): wall-clock 22:00 -> next day 04:00 naively
@@ -233,7 +233,7 @@ public class JsCalendarConverterTests
 		Assert.Equal("PT5H", back.GetProperty("duration").GetString());
 	}
 
-	// H8: recurrence "until" is a RFC 8984 LocalDateTime in the event's OWN zone, unlike an
+	// Recurrence "until" is a RFC 8984 LocalDateTime in the event's OWN zone, unlike an
 	// iCalendar RRULE UNTIL (always UTC when DTSTART carries a TZID). Writing the raw UTC digits
 	// as if they were already local shifts the recurrence end by the zone's offset. 2026-10-01 is
 	// still Europe/Copenhagen summer time (CEST, UTC+2; DST doesn't end until 2026-10-25), so
@@ -268,7 +268,7 @@ public class JsCalendarConverterTests
 		Assert.False(update.ContainsKey("id"));
 	}
 
-	// H11: the preserve-unknowns loop copied every member of the stored event into the update
+	// The preserve-unknowns loop copied every member of the stored event into the update
 	// patch, minus a fixed ten-name denylist. draft-ietf-jmap-calendars defines "utcStart",
 	// "utcEnd" (server-computed) and "baseEventId" (server-set) on CalendarEvent, and none of the
 	// three was in that denylist — a server that returns them gets them echoed straight back in

@@ -9,7 +9,7 @@ using MimeKit;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   G29: the RFC 1870 SIZE preflight measured <c>mime.LongLength</c> — the caller-supplied bytes
+///   The RFC 1870 SIZE preflight measured <c>mime.LongLength</c> — the caller-supplied bytes
 ///   BEFORE <see cref="SmtpOptions.ForceFrom" /> rewrites the <c>From</c> header — not what
 ///   <c>SmtpClient.SendAsync</c> actually transmits (it re-serializes the, possibly mutated,
 ///   <see cref="MimeMessage" />). Reproduced deterministically against a fake SMTP server that

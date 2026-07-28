@@ -8,11 +8,10 @@ using ActiveSync.Core.Backend;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   Round 3, item 6 — ManageSieve protocol safety (<c>G1</c>, <c>G2</c>, <c>G5</c>, <c>G10</c>,
-///   <c>G17</c>, <c>G23</c>, <c>G24</c>). Each test drives <see cref="ManageSieveClient" /> (and, for
-///   <c>G23</c>, <see cref="SieveOofBackend" />) against <see cref="RawSieveServer" /> — a scripted
+///   ManageSieve protocol safety. Each test drives <see cref="ManageSieveClient" /> (and, for
+///   the SETACTIVE-orphan case, <see cref="SieveOofBackend" />) against <see cref="RawSieveServer" /> — a scripted
 ///   loopback TCP double with no RFC 5804 logic of its own, so each test can supply the exact
-///   (including malformed/adversarial) wire bytes the finding describes.
+///   (including malformed/adversarial) wire bytes each scenario describes.
 /// </summary>
 public sealed class ManageSieveClientTests
 {
@@ -20,10 +19,10 @@ public sealed class ManageSieveClientTests
 
 	private static readonly BackendCredentials Credentials = new("user@example.test", "pw");
 
-	// G1 -----------------------------------------------------------------------------------
+	// Literal name + trailing ACTIVE flag ---------------------------------------------------
 
 	/// <summary>
-	///   G1: RFC 5804 §2.7 lets a LISTSCRIPTS name arrive as a literal, with " ACTIVE" trailing on the
+	///   RFC 5804 §2.7 lets a LISTSCRIPTS name arrive as a literal, with " ACTIVE" trailing on the
 	///   SAME physical line after the literal's raw octets. `ReadResponseAsync` folds the literal into a
 	///   quoted name but drops that trailing text — Cyrus timsieved emits names as literals, so a real
 	///   user's own scripts read back with `Active == false` for all of them.
@@ -61,10 +60,10 @@ public sealed class ManageSieveClientTests
 		Assert.True(script.Active, "the ACTIVE flag trailing a literal-encoded name must survive folding");
 	}
 
-	// G2 -----------------------------------------------------------------------------------
+	// Oversized server literal ---------------------------------------------------------------
 
 	/// <summary>
-	///   G2: a server-controlled literal length is used directly as an allocation size with no
+	///   A server-controlled literal length is used directly as an allocation size with no
 	///   ceiling. A hostile/misbehaving server can advertise an enormous length and the client must
 	///   reject it outright — not allocate a buffer for it and then block waiting for bytes that never
 	///   arrive.
@@ -101,10 +100,10 @@ public sealed class ManageSieveClientTests
 		await serverTask;
 	}
 
-	// G5 -----------------------------------------------------------------------------------
+	// DisposeAsync hang on unanswered LOGOUT --------------------------------------------------
 
 	/// <summary>
-	///   G5: `DisposeAsync`'s goodbye LOGOUT round trip uses `CancellationToken.None`, so a half-dead
+	///   `DisposeAsync`'s goodbye LOGOUT round trip uses `CancellationToken.None`, so a half-dead
 	///   sieve server that accepts LOGOUT and never answers leaves disposal — and the caller's
 	///   `await using` — pending forever. Proven by a fake server that reads LOGOUT and then goes
 	///   silent; disposal must still complete within a short bound.
@@ -147,10 +146,10 @@ public sealed class ManageSieveClientTests
 		}
 	}
 
-	// G10 ----------------------------------------------------------------------------------
+	// SASL capability check -------------------------------------------------------------------
 
 	/// <summary>
-	///   G10: `AUTHENTICATE "PLAIN"` is sent unconditionally, never checked against the server's
+	///   `AUTHENTICATE "PLAIN"` is sent unconditionally, never checked against the server's
 	///   advertised `"SASL"` capability line. A server that advertises SASL mechanisms excluding PLAIN
 	///   (or an empty list) must be refused locally, with the client never putting the plaintext
 	///   credentials on the wire at all.
@@ -196,10 +195,10 @@ public sealed class ManageSieveClientTests
 		await serverTask;
 	}
 
-	// G17 ----------------------------------------------------------------------------------
+	// Quoting control characters ----------------------------------------------------------
 
 	/// <summary>
-	///   G17: <see cref="ManageSieveClient.Quote" /> escapes only backslash and double-quote — never
+	///   <see cref="ManageSieveClient.Quote" /> escapes only backslash and double-quote — never
 	///   control characters — even though RFC 5804's <c>quoted-string</c> forbids them. A script name
 	///   containing a raw CR/LF (arriving as a literal, later re-quoted into a SETACTIVE/DELETESCRIPT
 	///   command) therefore injects a line break into the command stream.
@@ -214,7 +213,7 @@ public sealed class ManageSieveClientTests
 	}
 
 	/// <summary>
-	///   G17 (folding side): a literal-encoded name containing a bare line feed — not a CRLF pair —
+	///   Folding side (the counterpart to the quoting case above): a literal-encoded name containing a bare line feed — not a CRLF pair —
 	///   must not survive into the parsed script name as a raw control character; only the CRLF-pair
 	///   case is normalized today.
 	/// </summary>
@@ -248,10 +247,10 @@ public sealed class ManageSieveClientTests
 		Assert.DoesNotContain('\r', script.Name);
 	}
 
-	// G23 ----------------------------------------------------------------------------------
+	// SETACTIVE refused: orphaned script cleanup ----------------------------------------------
 
 	/// <summary>
-	///   G23: when SETACTIVE is refused after PUTSCRIPT already landed, <see cref="SieveOofBackend" />
+	///   When SETACTIVE is refused after PUTSCRIPT already landed, <see cref="SieveOofBackend" />
 	///   propagates the failure but never cleans up — the gateway's own vacation script is orphaned on
 	///   the user's sieve server forever, since <c>DisableAsync</c> only runs when the DB row says Oof
 	///   was actually armed.
@@ -293,10 +292,10 @@ public sealed class ManageSieveClientTests
 		Assert.Contains(commands, c => c.StartsWith("DELETESCRIPT", StringComparison.OrdinalIgnoreCase));
 	}
 
-	// G24 ----------------------------------------------------------------------------------
+	// Brace-guard ordering ---------------------------------------------------------------
 
 	/// <summary>
-	///   G24 (coverage, not proof — see the test body): the <c>open >= 0</c> guard runs AFTER the slice
+	///   Coverage, not proof — see the test body: the <c>open >= 0</c> guard runs AFTER the slice
 	///   it is meant to protect. Today that slice happens to stay in range whenever the line ends with
 	///   '}' (the minimum such line, "}", has length 1, so `line[0..^1]` is always a valid — possibly
 	///   empty — range), so no input reproduces a crash on unmodified code; the finding itself says so

@@ -9,13 +9,13 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C9 — the admin backend probe's failure detail. The SSRF is acceptable (an admin who sets
+///   The admin backend probe's failure detail. The SSRF is acceptable (an admin who sets
 ///   the backend URL permanently can already make the gateway connect anywhere, and the probe
 ///   is capped at 5 s); returning <c>GetBaseException().Message</c> is not. It turns the probe
 ///   into a precise internal-network scanner — refused, timed out, DNS failure and TLS mismatch
 ///   are four distinguishable answers — and can surface file paths out of the exception text.
 ///
-///   C2 — the boolean <c>reachable</c> answer itself is the oracle. The role's STORED BaseUrl
+///   Separately, the boolean <c>reachable</c> answer itself is the oracle. The role's STORED BaseUrl
 ///   ("http://127.0.0.1:1/", nothing listens there) is deliberately unreachable so a test that
 ///   still observes <c>reachable:true</c> proves the request body's Settings — not the stored
 ///   configuration — chose the probed host.
@@ -69,7 +69,7 @@ public sealed class BackendProbeTests
 	}
 
 	/// <summary>
-	///   C2: a request-body Settings override must never choose the probed host. The role is
+	///   A request-body Settings override must never choose the probed host. The role is
 	///   stored pointing at a closed port (unreachable); the request asks the probe to hit a real,
 	///   answering local listener instead. If the override were honored, <c>reachable</c> would
 	///   come back true for a host the role was never actually configured to reach — an SSRF-style

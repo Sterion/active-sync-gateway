@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   F2: the send-dedup primitive (<see cref="SyncStateService.TryClaimSendAsync" /> /
+///   The send-dedup primitive (<see cref="SyncStateService.TryClaimSendAsync" /> /
 ///   <see cref="SyncStateService.MarkSendCompletedAsync" /> / <see cref="SentCommandToken" />) that
 ///   <c>SyncHandler.ApplyClientCommandAsync</c> uses to durably claim an irreversible action BEFORE
 ///   it happens, independently of the round's own SyncKey/ledger commit. Coverage of the primitive's
@@ -65,7 +65,7 @@ public sealed class SendDedupStoreTests : IDisposable
 		await _service.MarkSendCompletedAsync(device, "5", 1, "add:c1", CancellationToken.None);
 
 		SendClaimOutcome second = await _service.TryClaimSendAsync(device, "5", 1, "add:c1", CancellationToken.None);
-		// The exact protection F2 needs: a resend of an attempt that ALREADY SUCCEEDED is a no-op.
+		// The core dedup guarantee: a resend of an attempt that ALREADY SUCCEEDED is a no-op.
 		Assert.Equal(SendClaimOutcome.AlreadySent, second);
 	}
 

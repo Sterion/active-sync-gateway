@@ -7,7 +7,7 @@ using MimeKit;
 namespace ActiveSync.Integration.Tests.Scenarios;
 
 /// <summary>
-///   D9 (coverage): once the SMTP DATA phase is accepted, the QUIT teardown must never fail the
+///   Coverage: once the SMTP DATA phase is accepted, the QUIT teardown must never fail the
 ///   operation — the fix disconnects with <c>CancellationToken.None</c> inside a try/catch, so a
 ///   cancelled request or a flaky disconnect cannot make an already-sent message look like a send
 ///   failure (which would drive a client resend and duplicate the mail). The precise cancel-after-

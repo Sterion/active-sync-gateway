@@ -6,7 +6,7 @@ using ActiveSync.WebUi.Auth;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   K7: a successful web login must clear ONLY its own per-(address, user) key — never the
+///   A successful web login must clear ONLY its own per-(address, user) key — never the
 ///   shared per-address ceiling. This replaces a test that asserted the opposite (a leftover from
 ///   an earlier review round): clearing the ceiling on any one account's success let an attacker
 ///   holding any single valid credential reset the address-wide counter after every batch of

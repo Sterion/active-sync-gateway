@@ -4,7 +4,7 @@ using ActiveSync.Contracts;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   G3: <see cref="ImapMailBackend.ParseUid(uint, string, string)" /> must require the qualified
+///   <see cref="ImapMailBackend.ParseUid(uint, string, string)" /> must require the qualified
 ///   "&lt;uidvalidity&gt;:&lt;uid&gt;" form — an unqualified key must never be resolved against the
 ///   folder's current UidValidity. The live symptom (an unqualified key silently deleting/mutating
 ///   whatever now holds that UID) is proven red-first against a real IMAP backend in

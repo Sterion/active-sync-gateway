@@ -5,7 +5,7 @@ using ActiveSync.Protocol.Wbxml;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D13: RecurrenceMapper.Parse is internal, so it is exercised through
+///   RecurrenceMapper.Parse is internal, so it is exercised through
 ///   CalendarConverter.FromApplicationData (the one public entry point that calls it) — a
 ///   Recurrence element that carries both Occurrences and Until must not silently drop Until.
 /// </summary>

@@ -7,7 +7,7 @@ using MimeKit;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D16 — every attachment of every message was fully decoded into a MemoryStream just to
+///   Every attachment of every message was fully decoded into a MemoryStream just to
 ///   report its size (`EstimateSize`), on every windowed Sync batch. A batch of messages
 ///   carrying tens of MB of attachments therefore materialized that much memory repeatedly.
 /// </summary>

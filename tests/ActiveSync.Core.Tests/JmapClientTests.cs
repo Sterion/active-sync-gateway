@@ -48,8 +48,8 @@ public class JmapClientTests
 		Assert.Equal("/.well-known/jmap", stub.Requests[0].RequestUri!.AbsolutePath);
 	}
 
-	// H9 (coverage — the parse is a new seam, so it cannot be observed red-first through behaviour
-	// without the field it introduces): the numeric limits inside the core capability object are
+	// Coverage — the parse is a new seam, so it cannot be observed red-first through behaviour
+	// without the field it introduces: the numeric limits inside the core capability object are
 	// captured rather than discarded, and an omitted field falls back to the no-ceiling sentinel.
 	[Fact]
 	public async Task GetSession_CapturesCoreCapabilityLimits()
@@ -79,7 +79,7 @@ public class JmapClientTests
 		Assert.Equal(long.MaxValue, session.CoreLimits.MaxSizeUpload);
 	}
 
-	// H9 (coverage): a server that omits the core capability object entirely still yields usable
+	// Coverage: a server that omits the core capability object entirely still yields usable
 	// (unbounded) limits rather than throwing.
 	[Fact]
 	public async Task GetSession_MissingCoreCapabilityObject_YieldsUnknownLimits()
@@ -241,7 +241,7 @@ public class JmapClientTests
 		Assert.Equal(1, apiCalls); // never replayed
 	}
 
-	// H17: a non-success EventSource open must dispose the response (and its connection),
+	// A non-success EventSource open must dispose the response (and its connection),
 	// not leak it on the error path.
 	[Fact]
 	public async Task OpenEventSource_OnErrorStatus_DisposesTheResponse()
@@ -257,12 +257,12 @@ public class JmapClientTests
 		Assert.True(tracker.Disposed, "the failed EventSource response must be disposed, not leaked");
 	}
 
-	// H9 (coverage — Rebase already forces every advertised URL onto this client's own origin at
+	// Coverage — Rebase already forces every advertised URL onto this client's own origin at
 	// session-parse time, so an off-origin download/upload/eventSource URL cannot currently be
 	// produced through the public API; there is no black-box red state to observe against
 	// unmodified code without first defeating Rebase. This proves the guard RequireSameOrigin
 	// wires up its send-seam callers are supposed to use, as a defense against a future Rebase
-	// regression rather than a reachable defect today.)
+	// regression rather than a reachable defect today.
 	[Fact]
 	public void RequireSameOrigin_OffOriginUrl_Throws()
 	{
@@ -284,18 +284,19 @@ public class JmapClientTests
 		Assert.Equal("http://localhost:5232/jmap/download/x", result.ToString());
 	}
 
-	// H24: InvokeAsync posted to session.ApiUrl directly, skipping the RequireSameOrigin guard that
+	// InvokeAsync posted to session.ApiUrl directly, skipping the RequireSameOrigin guard that
 	// every other credential-attaching call site (download/upload/eventSource) applies. Rebase
 	// forces every advertised URL onto this client's own origin at session-parse time, so an
 	// off-origin ApiUrl cannot be produced through the public GetSessionAsync path — the cached
 	// session is injected via reflection to simulate what a future Rebase regression (or a template
 	// that smuggles an absolute URL) would hand InvokeAsync. This was proven red against the
-	// pristine baseline (no exception, the evil host was reached) before the H1/D26 fix landed;
-	// because both JmapClient and WebDavClient now route through RedirectingHttpSender's shared
-	// hop-0 guard, that fix alone already made this test pass structurally, before this call site's
-	// own RequireSameOrigin was ever added. This test is therefore COVERAGE for H24's own change
-	// (it pins the explicit, symmetric guard InvokeAsync is supposed to carry, matching the other
-	// three call sites) rather than a fresh red-to-green proof at this commit.
+	// pristine baseline (no exception, the evil host was reached) before the RedirectingHttpSender
+	// hop-0 guard fix landed; because both JmapClient and WebDavClient now route through
+	// RedirectingHttpSender's shared hop-0 guard, that fix alone already made this test pass
+	// structurally, before this call site's own RequireSameOrigin was ever added. This test is
+	// therefore coverage for this call site's own RequireSameOrigin addition (it pins the
+	// explicit, symmetric guard InvokeAsync is supposed to carry, matching the other three call
+	// sites) rather than a fresh red-to-green proof at this commit.
 	[Fact]
 	public async Task Invoke_WithOffOriginApiUrl_IsRefused_NotSent()
 	{

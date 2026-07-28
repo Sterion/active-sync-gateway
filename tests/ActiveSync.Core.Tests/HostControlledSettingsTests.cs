@@ -5,7 +5,7 @@ using Microsoft.Extensions.Configuration;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   Host-controlled settings (K38 / B22): keys that name something the host executes or reads
+///   Host-controlled settings: keys that name something the host executes or reads
 ///   from the filesystem at startup must come from the environment or a config file only. A
 ///   database row for one of them turns settings-write access (admin UI, `eas config set`, a
 ///   DBA, SQL injection anywhere) into "point the gateway at another directory of assemblies" —

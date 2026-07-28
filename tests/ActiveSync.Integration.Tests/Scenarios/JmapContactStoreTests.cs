@@ -82,7 +82,7 @@ public sealed class JmapContactStoreTests
 	}
 
 	/// <summary>
-	///   H7 — settles JMAP <c>*/set update</c> semantics against the live server: is the value a
+	///   Settles JMAP <c>*/set update</c> semantics against the live server: is the value a
 	///   PatchObject (RFC 8620 §5.3, absent member = untouched) or a full replacement (absent
 	///   member = cleared)? EAS sends the complete managed set on every Change, so a field the
 	///   client cleared arrives as an *absent* element. If update patches, the gateway must send
@@ -126,7 +126,7 @@ public sealed class JmapContactStoreTests
 	}
 
 	/// <summary>
-	///   H6 — the birthday was written into <c>anniversaries/b/date/utc</c> and read back out of
+	///   The birthday was written into <c>anniversaries/b/date/utc</c> and read back out of
 	///   <c>anniversaries/b/date/date</c>, so it never survived a round trip. Live, because the
 	///   unit test cannot show that the server also stores and returns the member.
 	/// </summary>

@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D28: <see cref="ImapSession" /> disposal must not strand late callers with an
+///   <see cref="ImapSession" /> disposal must not strand late callers with an
 ///   <see cref="ObjectDisposedException" /> from the disposed gate — a caller arriving after
 ///   disposal gets a clean <see cref="BackendException" /> instead.
 /// </summary>
@@ -42,7 +42,7 @@ public class ImapSessionTests
 	}
 
 	/// <summary>
-	///   G11: <c>DisposeAsync</c> used to dispose the internal gate unconditionally. RunAsync's
+	///   <c>DisposeAsync</c> used to dispose the internal gate unconditionally. RunAsync's
 	///   disposed-flag check and the gate wait/release are two separate steps, so a caller already
 	///   past the flag check (or racing DisposeAsync's own 5 s bounded wait) can still touch the gate
 	///   after it is torn down, surfacing a raw <see cref="ObjectDisposedException" /> instead of the

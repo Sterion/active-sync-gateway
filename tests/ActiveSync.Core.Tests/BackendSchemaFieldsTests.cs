@@ -4,7 +4,7 @@ using ActiveSync.Contracts;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D31 — the derived default for the standard mail ports (Host/Port unset, Security unset) is
+///   The derived default for the standard mail ports (Host/Port unset, Security unset) is
 ///   opportunistic STARTTLS (StartTlsWhenAvailable), which downgrades to cleartext silently when
 ///   a server's greeting omits the STARTTLS capability (an on-path attacker can strip it). The
 ///   Security field's help text is the one place an operator reading the settings form would learn

@@ -11,12 +11,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   G19/G20: local writes race concurrent devices through <see cref="LocalItem.ConcurrencyToken" />
+///   Local writes race concurrent devices through <see cref="LocalItem.ConcurrencyToken" />
 ///   (stamped on every save — <see cref="SyncDbContext" />). <see cref="LocalStoreBase.UpdateItemAsync" />
 ///   already retries a losing attempt up to 4 times; these tests cover the two paths that did not
 ///   behave like every other local write: an update that EXHAUSTS its retries must surface a
-///   <see cref="BackendException" />, not a raw EF type (G19), and
-///   <see cref="LocalCalendarStore.RespondToMeetingAsync" /> must retry a losing attempt at all (G20).
+///   <see cref="BackendException" />, not a raw EF type, and
+///   <see cref="LocalCalendarStore.RespondToMeetingAsync" /> must retry a losing attempt at all.
 /// </summary>
 public sealed class LocalStoreConcurrencyTests : IDisposable
 {

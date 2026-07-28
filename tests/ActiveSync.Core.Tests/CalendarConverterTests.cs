@@ -72,7 +72,7 @@ public class CalendarConverterTests
 	}
 
 	/// <summary>
-	///   D5: DTSTART/DTEND;VALUE=DATE carry no time and no zone — the "date" IS the whole value,
+	///   DTSTART/DTEND;VALUE=DATE carry no time and no zone — the "date" IS the whole value,
 	///   so reading it must never go through zone-conversion arithmetic. COVERAGE, not red-first
 	///   proof: on the pinned Ical.Net 5.2.3, CalDateTime.AsUtc already special-cases
 	///   HasTime=false internally and returns the correct unshifted midnight for every all-day
@@ -113,7 +113,7 @@ public class CalendarConverterTests
 	[Fact]
 	public void AllDayEvent_MissingDtEnd_DefaultsToOneNominalDay_NotOneHour()
 	{
-		// D5 (adjacent): the DTEND-absent fallback used start + 1 HOUR unconditionally, which is
+		// The DTEND-absent fallback used start + 1 HOUR unconditionally, which is
 		// nonsensical for an all-day event (a timed default makes sense only for timed events).
 		const string ics = """
 		                    BEGIN:VCALENDAR
@@ -133,7 +133,7 @@ public class CalendarConverterTests
 		Assert.Equal("20260402T000000Z", end);
 	}
 
-	// D3 — a client-created all-day event lands one day early for half the year, because
+	// A client-created all-day event lands one day early for half the year, because
 	// TimeZoneBlob.ReadBaseOffset returns only the STANDARD bias (Copenhagen +1h) while the
 	// wire value for a DST-season all-day event is anchored on the actual CEST (+2h) local
 	// midnight. Verified against a real MS-ASTZ blob for Europe/Copenhagen: on 2026-07-16
@@ -155,7 +155,7 @@ public class CalendarConverterTests
 		Assert.Contains("DTEND;VALUE=DATE:20260717", ics);
 	}
 
-	// D5 — AllDayEvent is the one calendar field read back without a presence guard: a partial
+	// AllDayEvent is the one calendar field read back without a presence guard: a partial
 	// 16.x Change that carries StartTime/EndTime but omits AllDayEvent must keep the stored
 	// event's all-day-ness (ghosting), not silently convert it to a timed event.
 	[Fact]
@@ -219,7 +219,7 @@ public class CalendarConverterTests
 	[Fact]
 	public void ToApplicationData_IgnoresNonDisplayAlarms_ForReminder()
 	{
-		// D6 — the read picked the first alarm with ANY trigger duration, but the write only
+		// The read picked the first alarm with ANY trigger duration, but the write only
 		// ever touches DISPLAY alarms. An event whose only alarm is ACTION:EMAIL therefore
 		// echoed that alarm's minutes as Reminder even though a client changing Reminder can
 		// never alter it (the write leaves non-DISPLAY alarms untouched) — read and write
@@ -250,7 +250,7 @@ public class CalendarConverterTests
 	[Fact]
 	public void ToApplicationData_SkipsReminder_ForAlarmScheduledAfterStart()
 	{
-		// D6 (trigger sign) — a positive TRIGGER duration fires AFTER DTSTART, which the
+		// Trigger sign — a positive TRIGGER duration fires AFTER DTSTART, which the
 		// EAS Reminder (a minutes-BEFORE value) cannot express. Math.Abs used to report it as
 		// a minutes-before value instead of recognising it cannot be represented that way.
 		const string ics = """
@@ -279,7 +279,7 @@ public class CalendarConverterTests
 	[Fact]
 	public void ToApplicationData_MeetingStatus_ReflectsWhetherTheActingUserIsTheOrganizer()
 	{
-		// D7 — MeetingStatus 1 means "meeting, and I am the organizer"; 3 means "meeting, and
+		// MeetingStatus 1 means "meeting, and I am the organizer"; 3 means "meeting, and
 		// I am not". The converter unconditionally emitted 1 whenever there were attendees, so
 		// an invitee syncing someone ELSE's meeting was offered organizer actions
 		// (cancel/edit attendees) instead of accept/tentative/decline.
@@ -304,7 +304,7 @@ public class CalendarConverterTests
 	}
 
 	/// <summary>
-	///   D30 — the organizer/attendee email read used a substring Replace("mailto:", "") rather
+	///   The organizer/attendee email read used a substring Replace("mailto:", "") rather
 	///   than a prefix strip, so the literal text "mailto:" anywhere in the value is removed, not
 	///   just the leading URI scheme. A value that legitimately carries the substring more than
 	///   once (a malformed upstream re-write, or a resource address embedding it) is mangled: only
@@ -363,7 +363,7 @@ public class CalendarConverterTests
 	[Fact]
 	public void BusyStatus_TentativeAndOutOfOffice_RoundTripInsteadOfCollapsingToBusy()
 	{
-		// D8 — TRANSP only expresses TRANSPARENT/OPAQUE (free/busy), so Tentative (1) and
+		// TRANSP only expresses TRANSPARENT/OPAQUE (free/busy), so Tentative (1) and
 		// Out-of-Office (3) both wrote OPAQUE and both read back as Busy (2), silently
 		// discarding the user's actual choice. X-MICROSOFT-CDO-BUSYSTATUS is the property
 		// Outlook and every major CalDAV server use to round-trip the extra states.
@@ -391,7 +391,7 @@ public class CalendarConverterTests
 	[Fact]
 	public void DeletedOccurrence_OnAllDayRecurringEvent_EmitsDateValuedExdate()
 	{
-		// D18 — an all-day DTSTART is DATE-valued (no time, no zone); RFC 5545 §3.8.5.1
+		// An all-day DTSTART is DATE-valued (no time, no zone); RFC 5545 §3.8.5.1
 		// requires EXDATE's value type to match DTSTART's. The occurrence-delete path
 		// unconditionally wrote a UTC DATE-TIME EXDATE, which Ical.Net tolerates on its own
 		// read-back but other CalDAV servers/clients are not required to.
@@ -419,7 +419,7 @@ public class CalendarConverterTests
 	[Fact]
 	public void SetPartStat_UpdatesTheMaster_EvenWhenTheIcsListsAnOverrideFirst()
 	{
-		// D19 — every OTHER entry point in this file deliberately selects the master
+		// Every OTHER entry point in this file deliberately selects the master
 		// (RecurrenceId is null) first; SetPartStat just took Events.FirstOrDefault(). For a
 		// stored recurring meeting whose ICS happens to list a modified-occurrence override
 		// before the master VEVENT, accepting the invitation updated the override's attendee
@@ -460,7 +460,7 @@ public class CalendarConverterTests
 	[Fact]
 	public void WeeklyRecurrence_WithNoExplicitByDay_AnchorsOnTheEventsLocalWeekday_NotTheUtcInstant()
 	{
-		// D21 — a weekly RRULE with no BYDAY defaults (per RFC 5545) to DTSTART's weekday IN
+		// A weekly RRULE with no BYDAY defaults (per RFC 5545) to DTSTART's weekday IN
 		// DTSTART'S OWN ZONE. The mapper anchored on the UTC instant instead: a 00:30
 		// Copenhagen (CEST, UTC+2) standup on a Monday is 22:30Z the previous day (Sunday), so
 		// the emitted DayOfWeek mask was Sunday's, not Monday's.

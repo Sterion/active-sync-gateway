@@ -12,8 +12,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   Item 5 of docs/design/db-restructure.md — backend credentials resolve with one extra tier
-///   of SCOPE on top of the per-field rule:
+///   Backend credentials resolve with one extra tier of SCOPE on top of the per-field
+///   most-specific-wins rule:
 ///   <c>user · role → user · default → pass-through</c>.
 ///   <para>
 ///     The FALLBACKS are what matter and are asserted first: they are what preserves the

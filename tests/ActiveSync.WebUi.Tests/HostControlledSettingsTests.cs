@@ -8,7 +8,7 @@ using ActiveSync.Core.Settings;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   K38 / B22 — the admin settings editor must not be able to write the keys that decide what
+///   The admin settings editor must not be able to write the keys that decide what
 ///   the host loads from disk. <c>ActiveSync:Plugins:Directory</c> names the directory scanned
 ///   for plugin ASSEMBLIES, which are loaded into the gateway process with the master key in
 ///   memory; <c>ActiveSync:UsersFile</c> is read with <c>optional:false</c> at startup. Both were

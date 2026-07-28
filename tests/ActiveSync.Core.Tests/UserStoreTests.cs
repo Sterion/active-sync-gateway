@@ -209,7 +209,7 @@ public sealed class UserStoreTests : IDisposable
 	[Fact]
 	public async Task InvalidDbEntry_FailsClosed_DoesNotFallBackToShadowedConfig()
 	{
-		// B3 (behaviour change): a DB row REPLACES the whole config entry, so an invalid row must NOT
+		// Behaviour change: a DB row REPLACES the whole config entry, so an invalid row must NOT
 		// silently fall back to the shadowed config identity. Previously it was skipped and the config
 		// entry stayed active; now the invalid row wins (replace semantics) and fails closed — the
 		// login is refused and surfaced as invalid until the row is corrected or removed.
@@ -240,7 +240,7 @@ public sealed class UserStoreTests : IDisposable
 	[Fact]
 	public async Task InvalidDbEntry_FailsClosed_DoesNotDegradeToPassThrough_OrUnDisable()
 	{
-		// B3: a DB row that fails validation (e.g. a live backend edit invalidated a previously-good
+		// A DB row that fails validation (e.g. a live backend edit invalidated a previously-good
 		// row) used to be SKIPPED — leaving no entry, so Resolve degraded to pass-through (presented
 		// credentials forwarded verbatim to every role) and IsLoginDisabled returned false, which
 		// UN-disabled a disabled account. It must instead honour Enabled==false and fail closed.
@@ -269,13 +269,13 @@ public sealed class UserStoreTests : IDisposable
 		// Item 6: an edit must record only DEVIATIONS. Starting from a copy of the config entry
 		// (which is what a whole-entry-replacement world needed) would freeze every config value
 		// as a database override, so a later configuration change would stop reaching the user.
-		// B19: the method takes no ActiveSyncOptions at all -- it never consulted config, so there
+		// The method takes no ActiveSyncOptions at all -- it never consulted config, so there
 		// is nothing here that could copy one.
 		UserOptions fresh = await UserEditing.LoadStartingEntryAsync(
 			_store, "PHONE1", CancellationToken.None);
 		Assert.Null(fresh.MailAddress);
 
-		// An existing database declaration IS the starting point, matched case-insensitively (B8).
+		// An existing database declaration IS the starting point, matched case-insensitively.
 		await _store.UpsertAsync("phone1", new UserOptions { Admin = true }, CancellationToken.None);
 		UserOptions existing = await UserEditing.LoadStartingEntryAsync(
 			_store, "PHONE1", CancellationToken.None);
@@ -286,7 +286,7 @@ public sealed class UserStoreTests : IDisposable
 	[Fact]
 	public async Task GetAndList_TolerateAnUnparseableSettingsBlob_InsteadOfThrowing()
 	{
-		// B15: every read path must tolerate the one remaining blob — `eas user show`/`eas users`/
+		// Every read path must tolerate the one remaining blob — `eas user show`/`eas users`/
 		// the admin list are the very tools for finding the bad row, so they must render it
 		// FLAGGED rather than hard-failing with JsonException.
 		await _store.UpsertAsync("good", new UserOptions { MailAddress = "g@x" }, CancellationToken.None);
@@ -318,7 +318,7 @@ public sealed class UserStoreTests : IDisposable
 	[Fact]
 	public async Task Upsert_IsCaseInsensitive_NoDuplicateRow()
 	{
-		// B2: the store matched the login case-SENSITIVELY in SQL but case-INsensitively in memory,
+		// The store matched the login case-SENSITIVELY in SQL but case-INsensitively in memory,
 		// so an upsert under a different casing inserted a SECOND row; LoadAllAsync then collapsed
 		// both with a last-row-wins winner that flipped across restarts.
 		await _store.UpsertAsync("phone1", new UserOptions { MailAddress = "first@x" }, CancellationToken.None);
@@ -335,9 +335,9 @@ public sealed class UserStoreTests : IDisposable
 	[Fact]
 	public async Task Upsert_IsWhitespaceInsensitive_NoDuplicateRow()
 	{
-		// B13: NormalizeLogin case-folded but did not trim, so an upsert under a whitespace-padded
+		// NormalizeLogin case-folded but did not trim, so an upsert under a whitespace-padded
 		// login (Basic auth delivers it verbatim) inserted a SECOND row rather than matching the
-		// existing one — mirroring the B2 case-folding bug this normalization already fixed.
+		// existing one — mirroring the case-folding bug this normalization already fixed.
 		await _store.UpsertAsync("phone1", new UserOptions { MailAddress = "first@x" }, CancellationToken.None);
 		await _store.UpsertAsync(" phone1 ", new UserOptions { MailAddress = "second@x" }, CancellationToken.None);
 
@@ -349,7 +349,7 @@ public sealed class UserStoreTests : IDisposable
 	[Fact]
 	public async Task GetOrCreateUser_HotPath_DoesNotJoinBackendRoles()
 	{
-		// B8: UserProvisioner.EnsureUserAsync calls GetOrCreateUserAsync on EVERY authenticated
+		// UserProvisioner.EnsureUserAsync calls GetOrCreateUserAsync on EVERY authenticated
 		// request (the Ping/Sync hot path), but the BackendRoles collection is needed only in the
 		// two branches that WRITE a declaration — essentially never after first sign-in. The
 		// common path (row exists and is already declared) must not join/materialize
@@ -395,7 +395,7 @@ public sealed class UserStoreTests : IDisposable
 	[Fact]
 	public async Task Upsert_NormalizesStoredCasing_SoIndexAndLookupAgree()
 	{
-		// B1/B8: the stored Login must be canonical (lowercase) so the raw unique index enforces
+		// The stored Login must be canonical (lowercase) so the raw unique index enforces
 		// case-folded uniqueness and lookups are exact (index seek), not a non-sargable LOWER() scan
 		// that leaves the case-variant pair reachable. Round 1's fix only added LOWER() to the read
 		// predicates; it never normalized the stored value.
@@ -409,7 +409,7 @@ public sealed class UserStoreTests : IDisposable
 	[Fact]
 	public async Task LoadAll_WarnsOnCaseVariantDuplicate_InsteadOfSilentlyDropping()
 	{
-		// B1: two case-only-variant rows can coexist under the raw unique index (a pre-fix pair, a
+		// Two case-only-variant rows can coexist under the raw unique index (a pre-fix pair, a
 		// restored dump, or a direct DB write). LoadAllAsync collapsed them into an OrdinalIgnoreCase
 		// dictionary, silently discarding one user's entire override set. The collapse must be SURFACED.
 		await using (SyncDbContext db = _factory.CreateDbContext())
@@ -429,12 +429,12 @@ public sealed class UserStoreTests : IDisposable
 
 	// (The NormalizeAccountUserNameCasing data-migration test is gone with the migration chain:
 	// the schema reinit replaced the chain with a fresh Initial pair, and the store has always
-	// written the login case-folded since B1/B8 — covered by Upsert_NormalizesStoredCasing.)
+	// written the login case-folded since — covered by Upsert_NormalizesStoredCasing.)
 
 	[Fact]
 	public async Task LoadAll_CaseVariantDuplicate_DeterministicallyKeepsTheHighestUserId()
 	{
-		// B20 — COVERAGE, NOT PROOF: the collapsing query had no OrderBy, so "keeping the last"
+		// COVERAGE, NOT PROOF: the collapsing query had no OrderBy, so "keeping the last"
 		// depended on storage/enumeration order rather than a defined rule. This cannot be proven
 		// red-first against SQLite: UserId is SQLite's ROWID alias (INTEGER PRIMARY KEY), and a
 		// full table scan with no applicable index always enumerates in ascending rowid order
@@ -471,7 +471,7 @@ public sealed class UserStoreTests : IDisposable
 	[Fact]
 	public async Task ConcurrentRoleChange_DuringAccountRefresh_IsNotLostToTheStaleRefreshFinishingLast()
 	{
-		// B4: EnsureFreshAsync (account refresh — captures _rolesProvider.Current at BuildSnapshot
+		// EnsureFreshAsync (account refresh — captures _rolesProvider.Current at BuildSnapshot
 		// time) and OnRolesChanged (a live "Backends" edit, on the config-reload thread) swap
 		// _snapshot with no shared lock. If a role change lands WHILE an account refresh's
 		// BuildSnapshot is still running against the OLD roles, the refresh can finish (and swap)
@@ -509,7 +509,7 @@ public sealed class UserStoreTests : IDisposable
 			})
 			.Add(dbSource)
 			.Build();
-		// No registry here: this BackendRolesProvider's OWN live-edit provider validation (B14) must
+		// No registry here: this BackendRolesProvider's OWN live-edit provider validation must
 		// stay OUT of the gate — only UserResolver's BuildSnapshot should hit the slow provider.
 		BackendRolesProvider rolesProvider = new(root);
 
@@ -559,7 +559,7 @@ public sealed class UserStoreTests : IDisposable
 	}
 
 	/// <summary>Test-only provider whose ValidateConfiguration blocks ONCE, on the first call, until
-	/// released — used to open a deterministic window inside BuildSnapshot (B4).</summary>
+	/// released — used to open a deterministic window inside BuildSnapshot.</summary>
 	private sealed class GateProvider : IBackendProvider
 	{
 		private int _callCount;

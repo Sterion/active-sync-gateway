@@ -30,7 +30,7 @@ public class SyncStateCorrectnessTests(GatewayFixture gateway)
 		// An anomalous GetItemEstimate carrying SyncKey 0 used to reset the snapshot/key. Key 0
 		// always means "as if starting fresh" (PeekSyncKeyAsync classifies it Initial regardless of
 		// whatever real state is already primed — the same interpretation Sync itself uses), so the
-		// answer is MS-ASCMD Status 3 (SYNCSTATENOTPRIMED), not an estimate (F18, round 3) — the
+		// answer is MS-ASCMD Status 3 (SYNCSTATENOTPRIMED), not an estimate — the
 		// point of this test is that answering it this way must not touch the REAL primed state.
 		XDocument? estimate = await client.PostAsync("GetItemEstimate", new XDocument(
 			new XElement(GIE + "GetItemEstimate",

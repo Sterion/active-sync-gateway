@@ -63,7 +63,7 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 	[Fact]
 	public async Task GeneratedCertificate_HasServerShape()
 	{
-		// K4 BEHAVIOUR CHANGE: validity was historically 20 years (asserted here); it is now
+		// Behaviour change: validity was historically 20 years (asserted here); it is now
 		// capped at ~397 days (see GeneratedCertificate_ValidityIsCappedForAppleCompatibility)
 		// with self-renewal ahead of expiry (see NearExpiryCertificate_IsRegeneratedAheadOfExpiry).
 		using LocalContentProtector protector = Protector();
@@ -85,7 +85,7 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 	[Fact]
 	public async Task GeneratedCertificate_IpHost_GetsAnIpSubjectAlternativeName()
 	{
-		// K5: SANs were DNS-only, so an IP-addressed client (the common Docker/k8s NodePort
+		// SANs were DNS-only, so an IP-addressed client (the common Docker/k8s NodePort
 		// case, or a phone pointed at a bare IP) got RemoteCertificateNameMismatch even though
 		// the certificate was generated "for" that IP.
 		using LocalContentProtector protector = Protector();
@@ -133,7 +133,7 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 	[Fact]
 	public async Task ConcurrentReplace_OfAnUnreadableRow_IsDetectedAsAConflict()
 	{
-		// K6: GetOrCreateAsync's "unreadable row -> replace" path had no concurrency guard, so
+		// GetOrCreateAsync's "unreadable row -> replace" path had no concurrency guard, so
 		// two replicas racing to replace the same unreadable row could both silently succeed —
 		// each overwriting the other with no exception raised, flip-flopping the served
 		// fingerprint on restart (indistinguishable from an active MITM to a device). This
@@ -166,7 +166,7 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 	[Fact]
 	public async Task GenuineDatabaseFailure_WithNoWinnerRowWritten_SurfacesTheOriginalError()
 	{
-		// K18: the catch(DbUpdateException) fallback assumes the exception always means "another
+		// The catch(DbUpdateException) fallback assumes the exception always means "another
 		// replica won the race", so it re-queries for the winner's row. DbUpdateException is the
 		// base type: it also covers a full disk, a permission failure, a truncated column, or a
 		// provider-level constraint violation — none of which leave a row behind. In that case
@@ -189,7 +189,7 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 	[Fact]
 	public async Task GeneratedCertificate_ValidityIsCappedForAppleCompatibility()
 	{
-		// K4: iOS/macOS refuse server certs valid for more than 398 days (Apple's ≤825/≤398-day
+		// iOS/macOS refuse server certs valid for more than 398 days (Apple's ≤825/≤398-day
 		// rule); the historical 20-year validity is hard-refused by the primary EAS client.
 		using LocalContentProtector protector = Protector();
 		using X509Certificate2 certificate = await Store(protector).GetOrCreateAsync(
@@ -203,7 +203,7 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 	[Fact]
 	public async Task NearExpiryCertificate_IsRegeneratedAheadOfExpiry()
 	{
-		// K4: with validity now capped well under a year, a certificate that is never renewed
+		// With validity now capped well under a year, a certificate that is never renewed
 		// would eventually be refused by clients (or expire outright). GetOrCreateAsync must
 		// notice a stored certificate is close to its NotAfter and regenerate ahead of time,
 		// the same way it already replaces an unreadable row.
@@ -237,7 +237,7 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 	[Fact]
 	public async Task GeneratedCertificate_PrivateKeyStaysUsable_AfterPfxIsZeroed()
 	{
-		// K9 COVERAGE (not proof): the fix zeroes the unencrypted PKCS#12 byte buffers after they
+		// Coverage (not proof): the fix zeroes the unencrypted PKCS#12 byte buffers after they
 		// are loaded/sealed — there is no external handle to observe the wipe itself, so this test
 		// is a regression guard that zeroing the buffer after LoadPkcs12 does not corrupt the loaded
 		// private key. A sign/verify round-trip proves the key survived.
@@ -256,7 +256,7 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 	[Fact]
 	public async Task GeneratedCertificate_UnusableHost_FallsBackInsteadOfThrowing()
 	{
-		// K19: Generate could throw at first serve on an odd PublicUrl host with no fallback —
+		// Generate could throw at first serve on an odd PublicUrl host with no fallback —
 		// an unhandled-exception startup death instead of degrading to FallbackHost. This host is
 		// not a valid IDN name, so SubjectAlternativeNameBuilder.AddDnsName throws ArgumentException.
 		using LocalContentProtector protector = Protector();
@@ -289,7 +289,7 @@ public sealed class GatewayCertificateStoreTests : IDisposable
 		}
 	}
 
-	/// <summary>K18: stands in for a genuine database failure — SaveChangesAsync always throws
+	/// <summary>Stands in for a genuine database failure — SaveChangesAsync always throws
 	/// DbUpdateException without ever writing a row, so a caller that assumes the exception means
 	/// "a race, go find the winner" finds nothing.</summary>
 	private sealed class ThrowingFactory(SqliteConnection connection) : ISyncDbContextFactory

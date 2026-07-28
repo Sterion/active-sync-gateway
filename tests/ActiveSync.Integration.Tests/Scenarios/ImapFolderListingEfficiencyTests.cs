@@ -11,9 +11,9 @@ using MimeKit;
 namespace ActiveSync.Integration.Tests.Scenarios;
 
 /// <summary>
-///   Round 3, item 35 — <c>G14</c>/<c>G15</c>: folder-listing round-trip counts against a real IMAP
-///   backend, both counted through the wire logger's client "LIST" lines (the same technique item
-///   24's <c>ConnectionCountingLogger</c> uses for connects).
+///   Folder-listing round-trip counts against a real IMAP backend, counted through the wire
+///   logger's client "LIST" lines (the same technique <c>ConnectionCountingLogger</c> uses for
+///   connects elsewhere in this suite).
 /// </summary>
 [Collection("gateway")]
 [Trait("Category", "Integration")]
@@ -28,7 +28,7 @@ public class ImapFolderListingEfficiencyTests
 	};
 
 	/// <summary>
-	///   G14: <c>ListFoldersAsync.Walk</c> issued one LIST per folder (a non-recursive
+	///   <c>ListFoldersAsync.Walk</c> issued one LIST per folder (a non-recursive
 	///   <c>GetSubfoldersAsync</c> call at every level), all under the session gate — the command
 	///   count SCALED with the number of folders. A single namespace-wide LIST costs the same no
 	///   matter how many folders exist (MailKit's own <c>GetFoldersAsync</c> still issues a small,
@@ -77,7 +77,7 @@ public class ImapFolderListingEfficiencyTests
 	}
 
 	/// <summary>
-	///   G15: <c>FindSpecialFolderAsync</c> re-enumerated the personal namespace (a LIST round trip)
+	///   <c>FindSpecialFolderAsync</c> re-enumerated the personal namespace (a LIST round trip)
 	///   on every single delete/save-to-Sent, on servers WITHOUT SPECIAL-USE (<c>client.GetFolder
 	///   (special)</c> returns null/throws, falling back to <c>personal.GetSubfoldersAsync</c> +
 	///   name matching). Stalwart — the only live backend available where this item was worked —

@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   B9 — the build-time settings load must tell "fresh install" (table missing → Debug) apart from
+///   The build-time settings load must tell "fresh install" (table missing → Debug) apart from
 ///   a real outage (→ Warning that says database-stored settings are NOT applied). The old catch-all
 ///   logged both at Debug, silently reverting restart-tier settings (TLS/metrics enable, ports) to
 ///   their POCO defaults.

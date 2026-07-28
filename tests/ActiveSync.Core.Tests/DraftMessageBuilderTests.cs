@@ -59,7 +59,7 @@ public class DraftMessageBuilderTests
 		return Existing(mixed);
 	}
 
-	// D15 — an attachment with no file name must not be matched by every delete reference.
+	// An attachment with no file name must not be matched by every delete reference.
 	// The FileReferences we mint end in the attachment INDEX, so a name-tail match against an
 	// empty name is true for any reference: one unrelated <Delete> used to drop every unnamed
 	// attachment (inline images, message/rfc822 parts) while leaving the named target alone.
@@ -76,7 +76,7 @@ public class DraftMessageBuilderTests
 		Assert.Equal("application/pdf", attachment.ContentType.MimeType);
 	}
 
-	// D15 — deleting the unnamed attachment by its index must keep the named one.
+	// Deleting the unnamed attachment by its index must keep the named one.
 	[Fact]
 	public void Change_DeleteUnnamedAttachment_KeepsTheNamedSibling()
 	{
@@ -89,7 +89,7 @@ public class DraftMessageBuilderTests
 		Assert.Equal("notes.txt", (attachment as MimePart)?.FileName);
 	}
 
-	// D15 — a FileReference we did not mint targets nothing rather than being guessed at.
+	// A FileReference we did not mint targets nothing rather than being guessed at.
 	[Fact]
 	public void Change_DeleteWithForeignFileReference_KeepsEverything()
 	{
@@ -101,7 +101,7 @@ public class DraftMessageBuilderTests
 		Assert.Equal(2, result.Attachments.Count());
 	}
 
-	// D16 — a client-supplied <ContentType> must reach the MIME part, or a phone photo arrives
+	// A client-supplied <ContentType> must reach the MIME part, or a phone photo arrives
 	// as application/octet-stream and the recipient cannot open it.
 	[Fact]
 	public void Add_WithDeclaredContentType_UsesIt()
@@ -119,7 +119,7 @@ public class DraftMessageBuilderTests
 		Assert.Equal("image/jpeg", attachment.ContentType.MimeType);
 	}
 
-	// D16 — no <ContentType> from the client: infer from the display name rather than
+	// No <ContentType> from the client: infer from the display name rather than
 	// falling back to octet-stream for everything.
 	[Fact]
 	public void Add_WithoutContentType_InfersFromDisplayName()
@@ -136,7 +136,7 @@ public class DraftMessageBuilderTests
 		Assert.Equal("application/pdf", attachment.ContentType.MimeType);
 	}
 
-	// D16 — an unrecognisable name, and an unparsable declared type, still land on octet-stream.
+	// An unrecognisable name, and an unparsable declared type, still land on octet-stream.
 	[Theory]
 	[InlineData("blob.zzz", null)]
 	[InlineData("blob.zzz", "this is not a media type")]
@@ -155,7 +155,7 @@ public class DraftMessageBuilderTests
 		Assert.Equal("application/octet-stream", attachment.ContentType.MimeType);
 	}
 
-	// D16 — a flag-only Change carries no <Body>; the stored multipart/alternative must survive
+	// A flag-only Change carries no <Body>; the stored multipart/alternative must survive
 	// whole. Picking the first TextPart out of it silently downgraded a rich draft to plain text.
 	[Fact]
 	public void Change_WithoutBody_KeepsTheHtmlAlternative()
@@ -175,7 +175,7 @@ public class DraftMessageBuilderTests
 		Assert.Equal("plain body", result.TextBody);
 	}
 
-	// D16 — the same with an attachment alongside: the alternative survives the rebuild into
+	// The same with an attachment alongside: the alternative survives the rebuild into
 	// multipart/mixed, and the carried-over attachment is not duplicated.
 	[Fact]
 	public void Change_WithoutBody_KeepsTheHtmlAlternativeAlongsideAttachments()
@@ -197,7 +197,7 @@ public class DraftMessageBuilderTests
 		Assert.Equal("notes.txt", (attachment as MimePart)?.FileName);
 	}
 
-	// D16 — inline images live in a multipart/related that MimeKit does not report as an
+	// Inline images live in a multipart/related that MimeKit does not report as an
 	// attachment, so nothing carries them over; keeping the body entity whole is what saves them.
 	[Fact]
 	public void Change_WithoutBody_KeepsInlineRelatedParts()
@@ -223,7 +223,7 @@ public class DraftMessageBuilderTests
 		Assert.Contains(result.BodyParts, p => p.ContentType.MimeType == "image/png");
 	}
 
-	// D2 — Email:To/Cc are RFC-5322 comma-separated address lists (this repo's own emitter,
+	// Email:To/Cc are RFC-5322 comma-separated address lists (this repo's own emitter,
 	// MailConverter, produces exactly that shape: `message.To.ToString()`), not the ';'-joined
 	// DisplayTo convention. MailboxAddress.TryParse rejects a whole comma-joined string, so the
 	// naive per-';' split silently dropped every recipient of a multi-recipient draft.
@@ -241,7 +241,7 @@ public class DraftMessageBuilderTests
 		Assert.Contains(result.To.Mailboxes, m => m.Address == "bob@example.com");
 	}
 
-	// D2 (adjacent) — the historical ';'-separated DisplayTo convention must still work when a
+	// Adjacent case — the historical ';'-separated DisplayTo convention must still work when a
 	// client uses it instead.
 	[Fact]
 	public void Change_SemicolonSeparatedRecipients_StillWork()
@@ -256,7 +256,7 @@ public class DraftMessageBuilderTests
 		Assert.Contains(result.To.Mailboxes, m => m.Address == "bob@example.com");
 	}
 
-	// D20 — a fresh `MimeMessage message = new()` is constructed and only
+	// A fresh `MimeMessage message = new()` is constructed and only
 	// From/To/Cc/Bcc/Subject/Importance/Body/Date are copied from `existing`. In-Reply-To,
 	// References and any custom headers on the stored draft were dropped, so a reply draft
 	// started elsewhere and merely touched on the phone (e.g. a subject rename) is sent as a

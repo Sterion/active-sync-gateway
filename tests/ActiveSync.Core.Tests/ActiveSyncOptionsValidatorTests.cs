@@ -81,7 +81,7 @@ public class ActiveSyncOptionsValidatorTests
 	[Fact]
 	public void DbMinimumLevel_AcceptsTheSameAliasesAsEasLogs()
 	{
-		// B12: `eas logs -l critical` (LogQueryService.LevelsAtOrAbove) already accepted the "critical"
+		// `eas logs -l critical` (LogQueryService.LevelsAtOrAbove) already accepted the "critical"
 		// alias for Fatal, but this validator only matched the four exact enum names — so a value the
 		// CLI understood fine bricked startup (and, via SettingKeys' identical exact-match check, a
 		// live `eas config set`/web write of the same value too). Both now share
@@ -137,7 +137,7 @@ public class ActiveSyncOptionsValidatorTests
 	[InlineData("passphrase")] // a passphrase at/above the length floor
 	public void AnyPassphrase_WithDerivationSalt_IsAccepted(string key)
 	{
-		// K1: a passphrase is accepted only alongside a per-deployment KeyDerivationSalt.
+		// A passphrase is accepted only alongside a per-deployment KeyDerivationSalt.
 		ActiveSyncOptions options = Valid();
 		options.Encryption = new EncryptionOptions { Key = key, KeyDerivationSalt = "deployment-salt" };
 		ValidateOptionsResult result = Validator.Validate(null, options);
@@ -147,7 +147,7 @@ public class ActiveSyncOptionsValidatorTests
 	[Fact]
 	public void Passphrase_WithoutDerivationSalt_FailsStartup()
 	{
-		// Behaviour change (K1): a passphrase with no KeyDerivationSalt is refused — it would
+		// Behaviour change: a passphrase with no KeyDerivationSalt is refused — it would
 		// otherwise stretch against a single global salt shared by every deployment. The raw
 		// base64-key path (openssl rand -base64 32) still needs no salt.
 		ActiveSyncOptions options = Valid();
@@ -160,7 +160,7 @@ public class ActiveSyncOptionsValidatorTests
 	[Fact]
 	public void ShortPassphrase_IsRejected_AtStartup()
 	{
-		// Behaviour change (K46): a passphrase below the hard floor now fails startup validation
+		// Behaviour change: a passphrase below the hard floor now fails startup validation
 		// (it used to be warned about and accepted — the "pass" case above).
 		ActiveSyncOptions options = Valid();
 		options.Encryption = new EncryptionOptions { Key = "pass" };
@@ -347,7 +347,7 @@ public class ActiveSyncOptionsValidatorTests
 		Assert.True(Validator.Validate(null, options).Succeeded);
 	}
 
-	// B26 — bounds the catalogue enforces on writes were missing from the startup validator, so
+	// Bounds the catalogue enforces on writes were missing from the startup validator, so
 	// file/env values bypassed them. A DefaultWindowSize of 0 starts clean and produces empty Syncs.
 	[Fact]
 	public void Eas_DefaultWindowSizeZero_Fails()
@@ -423,7 +423,7 @@ public class ActiveSyncOptionsValidatorTests
 		Assert.True(Validator.Validate(null, options).Succeeded);
 	}
 
-	// B14 — ActiveSyncOptionsValidator mirrors only part of the SettingKeys catalogue's bounds, so a
+	// ActiveSyncOptionsValidator mirrors only part of the SettingKeys catalogue's bounds, so a
 	// file/env value starts clean where the identical `eas config set` write is refused.
 	[Theory]
 	[InlineData(-1)]
@@ -462,7 +462,7 @@ public class ActiveSyncOptionsValidatorTests
 		Assert.Contains("UsersRefreshSeconds", string.Join(";", result.Failures!));
 	}
 
-	// E8 — `eas config set`/the web PUT accept a Tls:Port or Metrics:Port that collides with
+	// `eas config set`/the web PUT accept a Tls:Port or Metrics:Port that collides with
 	// another listener, and the NEXT start dies on bind (IOException: Failed to bind to address).
 	// Nothing compared Tls:Port, Metrics:Port and the base Kestrel HTTP endpoint against each other.
 	[Fact]

@@ -3,7 +3,7 @@ using ActiveSync.Backends.Dav;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   H12: a transient ctag/sync-token read failure must be treated as "unknown", never "changed".
+///   A transient ctag/sync-token read failure must be treated as "unknown", never "changed".
 ///   The old poll stuffed a sentinel into the map, so a failed read compared unequal to the real
 ///   baseline and forced a full re-sync on every DAV hiccup. The Ping entry check and watchdog are
 ///   the correctness guarantee, so a key we could not read stays silent.

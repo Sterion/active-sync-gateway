@@ -21,7 +21,7 @@ using Microsoft.Extensions.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   Live revalidation of an existing web session (C3): disabling an account, blocking the
+///   Live revalidation of an existing web session: disabling an account, blocking the
 ///   login, deleting it or clearing its Admin flag has to reach sessions that are ALREADY
 ///   signed in — the ticket is self-contained and slides for 12 hours, so without this the
 ///   two features the UI advertises as the lockout mechanism do nothing until it expires.
@@ -54,7 +54,7 @@ public sealed class SessionRevalidationTests : IDisposable
 
 	/// <summary>
 	///   As <see cref="ValidateAsync" />, optionally capturing every log message the validation
-	///   hook emits (used only to assert on the termination log's wording — C16).
+	///   hook emits (used only to assert on the termination log's wording).
 	/// </summary>
 	private async Task<CookieValidatePrincipalContext> ValidateCoreAsync(
 		Dictionary<string, UserOptions>? users, string login, bool admin,
@@ -230,7 +230,7 @@ public sealed class SessionRevalidationTests : IDisposable
 	[Fact]
 	public async Task ReissuedSessionAfterASameInstantRevocation_Survives()
 	{
-		// C1: RevokeSessionsBeforeAsync stores DateTime.UtcNow at full (sub-second) precision, but
+		// RevokeSessionsBeforeAsync stores DateTime.UtcNow at full (sub-second) precision, but
 		// SessionValidation.SessionStart floors to the whole second. A password change revokes at
 		// instant T, then immediately re-signs the caller in at instant T' (T' > T, same wall-clock
 		// second) — the reissued ticket must survive its own revocation. Construct that exact
@@ -265,8 +265,9 @@ public sealed class SessionRevalidationTests : IDisposable
 	[Fact]
 	public async Task TerminationLog_DoesNotMentionTheRemovedBlockedMechanism()
 	{
-		// C16: `blocked` is hard-wired false at the only production call site (decision 19 — a web
-		// session has no device, so per-device blocks cannot apply here), but the log line still
+		// `blocked` is hard-wired false at the only production call site — blocks are per-device
+		// (`LoginBlock` FKs to a device, not a user) and a web session has no device, so per-device
+		// blocks cannot apply here — but the log line still
 		// claimed a live "blocked" possibility. Assert the wording, not just the dead parameter, so
 		// this is provable rather than a pure refactor with nothing to observe.
 		List<string> logs = [];

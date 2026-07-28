@@ -8,7 +8,7 @@ using MimeKit;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D14 — DateReceived was taken from the sender-supplied Date: header
+///   DateReceived was taken from the sender-supplied Date: header
 ///   (`EasDateTime.ToLong(message.Date.UtcDateTime)`), which defaults to year 0001 when that
 ///   header is missing on the wire — MS-ASEMAIL DateReceived is meant to be the *delivery* time,
 ///   not the (possibly absent, possibly forged) sender-claimed send time.
@@ -53,7 +53,7 @@ public class MailConverterDateReceivedTests
 		// Coverage, not red-first proof: this exercises the new `receivedUtc` parameter, which
 		// cannot be expressed against the pre-fix 4-argument signature — there is no way to
 		// observe this specific path fail on unmodified code (it wouldn't compile). The year-1
-		// fallback test above is the red-first proof for D14; this pins the "prefer the backend's
+		// fallback test above is the red-first proof for this fix; this pins the "prefer the backend's
 		// own delivery timestamp" half of the fix, e.g. IMAP INTERNALDATE / JMAP receivedAt.
 		MimeMessage message = new();
 		message.From.Add(MailboxAddress.Parse("sender@example.com"));

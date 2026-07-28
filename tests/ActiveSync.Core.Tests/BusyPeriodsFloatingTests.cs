@@ -3,7 +3,7 @@ using ActiveSync.Backends.Common.Converters;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D33 COVERAGE (not red-first proof): the finding is that a null (unresolvable floating)
+///   Coverage (not red-first proof): a null (unresolvable floating)
 ///   occurrence start makes the window TakeWhile predicate false and silently ends enumeration,
 ///   dropping every later occurrence. The specific null trigger cannot be produced
 ///   deterministically here — Ical.Net resolves floating times via the system zone, so a plain

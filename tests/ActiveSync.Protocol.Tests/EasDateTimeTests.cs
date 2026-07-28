@@ -5,7 +5,7 @@ namespace ActiveSync.Protocol.Tests;
 
 public class EasDateTimeTests
 {
-	// W15: ToLong/ToCompact must NOT shift a DateTimeKind.Unspecified value by the machine
+	// ToLong/ToCompact must NOT shift a DateTimeKind.Unspecified value by the machine
 	// offset. The parameter is named `utc` — an Unspecified value is taken at face value as UTC,
 	// never treated as local-and-converted (which subtracts the host offset, corrupting the wire
 	// value on any non-UTC host while looking fine in UTC CI).
@@ -37,7 +37,7 @@ public class EasDateTimeTests
 		Assert.Equal("20260601T090000Z", EasDateTime.ToCompact(utc));
 	}
 
-	// W16: Parse must not throw an uncontrolled FormatException on phone-supplied garbage — it
+	// Parse must not throw an uncontrolled FormatException on phone-supplied garbage — it
 	// routes through the protocol-error channel (WbxmlException → HTTP 400) instead of a 500.
 	[Fact]
 	public void Parse_Garbage_ThrowsWbxmlException_NotFormatException()
@@ -45,7 +45,7 @@ public class EasDateTimeTests
 		Assert.Throws<WbxmlException>(() => EasDateTime.Parse("not-a-date"));
 	}
 
-	// W16: the loose DateTime.Parse fallback accepted spec-violating, culture-dependent forms
+	// The loose DateTime.Parse fallback accepted spec-violating, culture-dependent forms
 	// like "3/4/2026". Only the exact MS-ASDTYPE formats are valid now.
 	[Fact]
 	public void Parse_LooseCultureDependentForm_Rejected()
@@ -53,7 +53,7 @@ public class EasDateTimeTests
 		Assert.Throws<WbxmlException>(() => EasDateTime.Parse("3/4/2026"));
 	}
 
-	// W16 coverage: the exact MS-ASDTYPE forms (all Z-terminated, per spec).
+	// Coverage: the exact MS-ASDTYPE forms (all Z-terminated, per spec).
 	[Theory]
 	[InlineData("2026-06-01T09:00:00.000Z")]
 	[InlineData("2026-06-01T09:00:00Z")]
@@ -65,7 +65,7 @@ public class EasDateTimeTests
 		Assert.Equal(DateTimeKind.Utc, result.Kind);
 	}
 
-	// W18: the tolerant no-Z basic form is not an MS-ASDTYPE format at all -- it exists only so a
+	// The tolerant no-Z basic form is not an MS-ASDTYPE format at all -- it exists only so a
 	// non-conforming client is not rejected -- but combined with AssumeUniversal it does not merely
 	// accept the value, it ASSERTS UTC for the one string that, by omitting the 'Z', is the one
 	// case where the client did NOT say UTC. A client in UTC+10 sending "20260713T120000" for a

@@ -6,7 +6,7 @@ using ActiveSync.Protocol.Wbxml;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D22 — IcalHelpers.Load's doc comment claims "falls back to a fresh empty one if
+///   IcalHelpers.Load's doc comment claims "falls back to a fresh empty one if
 ///   unparsable", but `Calendar.Load(ics) ?? new Calendar()` only handles the NULL-return case.
 ///   Verified against Ical.Net 5.2.3: Calendar.Load on genuinely unparsable text THROWS
 ///   SerializationException, which escapes every caller (NotesConverter/TasksConverter/

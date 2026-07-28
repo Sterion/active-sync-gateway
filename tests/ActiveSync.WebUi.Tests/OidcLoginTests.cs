@@ -210,7 +210,7 @@ public sealed class OidcLoginTests
 		Assert.Equal(("alice", "sub-alice"), Assert.Single(bound));
 
 		// A config-declared account is never written to — that would mint a database row
-		// shadowing the configuration entry. It simply stays unbound, which (C9) now refuses the
+		// shadowing the configuration entry. It simply stays unbound, which now refuses the
 		// sign-in outright by default; opt in to the old login-only matching to still observe that
 		// it never binds.
 		Dictionary<string, MergedUser> configUsers = new(StringComparer.OrdinalIgnoreCase)
@@ -233,11 +233,11 @@ public sealed class OidcLoginTests
 	[Fact]
 	public async Task UnboundConfigAdmin_IsNotGrantedAdmin_OnLoginClaimAlone()
 	{
-		// C4 (round 2): a config-declared account is never written to, so it can never TOFU-bind a
+		// A config-declared account is never written to, so it can never TOFU-bind a
 		// subject — it stays keyed on the user-MUTABLE login claim. Honoring its Admin flag on a
 		// bare login match is exactly the preferred_username takeover the subject binding exists
 		// to stop: a directory user who renames themselves onto the admin's login would inherit
-		// admin. C9 (this round) since made the unbound case refuse outright by default; opt in to
+		// admin. A later fix since made the unbound case refuse outright by default; opt in to
 		// the old login-only matching here to keep observing that even then the admin bit is
 		// withheld until the operator binds a subject.
 		Dictionary<string, MergedUser> configAdmin = new(StringComparer.OrdinalIgnoreCase)
@@ -266,7 +266,7 @@ public sealed class OidcLoginTests
 	[Fact]
 	public async Task UnboundConfigAccount_IsRefused_WhenTheTicketCarriesASubject()
 	{
-		// C9: a config-declared account is never written to, so it can never TOFU-bind a subject
+		// A config-declared account is never written to, so it can never TOFU-bind a subject
 		// and stays keyed on the mutable login claim forever. A bare login match used to still
 		// sign such an account in (withholding only the Admin flag) — but the login claim is
 		// user-editable at common IdPs, so any directory user who renames themselves onto it gets

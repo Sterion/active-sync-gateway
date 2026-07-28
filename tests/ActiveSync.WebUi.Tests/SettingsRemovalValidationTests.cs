@@ -5,13 +5,13 @@ using ActiveSync.Core.Settings;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   B4 — the settings DELETE endpoint deleted the database row with no validation at all, unlike a
+///   The settings DELETE endpoint deleted the database row with no validation at all, unlike a
 ///   write (which runs <see cref="SettingKeys.ValidateStartupImpact" />). Removing
 ///   <c>ActiveSync:Backends:Calendar:BaseUrl</c> while its provider assignment (caldav) remains
 ///   leaves a section the running gateway tolerates but the NEXT start's
 ///   <c>BackendConfigurationValidator</c> refuses ("BaseUrl ... must be an absolute http(s) URL");
-///   this is the finding's own MailStore:Host example, reproduced against a role WebUiHost's fixed
-///   registry actually serves (caldav/Calendar).
+///   the same delayed-brick shape as an unreachable MailStore:Host, reproduced against a role
+///   WebUiHost's fixed registry actually serves (caldav/Calendar).
 /// </summary>
 public sealed class SettingsRemovalValidationTests
 {

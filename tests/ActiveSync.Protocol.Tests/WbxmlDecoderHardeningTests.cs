@@ -177,7 +177,7 @@ public class WbxmlDecoderHardeningTests
 		// 200,001 empty STR_I runs (2 bytes each: STR_I token + null terminator) inside one
 		// open element. No single run is large and neither MaxElements nor MaxDepth ever
 		// fires (one element, depth 1) — only the RUN COUNT is hostile, and each run
-		// allocates a fresh XText with no cap (W1).
+		// allocates a fresh XText with no cap.
 		const int runCount = 200_001;
 		byte[] runs = new byte[runCount * 2];
 		for (int i = 0; i < runCount; i++)
@@ -195,7 +195,7 @@ public class WbxmlDecoderHardeningTests
 		// ENTITY for U+000B (vertical tab) — a valid Unicode scalar value, so the old guard
 		// (out-of-range / surrogate only) let it through into an XText; it is NOT a legal
 		// XML 1.0 Char, so XNode.ToString() (wire-trace logging) throws ArgumentException —
-		// turning a 400 into an uncontrolled 500 on any Trace-enabled gateway (W2).
+		// turning a 400 into an uncontrolled 500 on any Trace-enabled gateway.
 		byte[] doc = Doc([0x45], [0x02], [0x0B], [0x01]);
 		Assert.Throws<WbxmlException>(() => WbxmlDecoder.Decode(doc));
 	}
@@ -214,7 +214,7 @@ public class WbxmlDecoderHardeningTests
 	{
 		// Token 0x2A on code page 0 (AirSync) is unassigned — every token 0x05-0x29 on that
 		// page is taken, so this really is "unknown", not a table gap. A single missing or
-		// newly-specified token must not abort the WHOLE document (W5); the sibling stream
+		// newly-specified token must not abort the WHOLE document; the sibling stream
 		// after it should still decode instead of the whole Sync/FolderSync 400ing.
 		byte[] doc = Doc(
 			[0x45], // Sync, with content
@@ -246,7 +246,7 @@ public class WbxmlDecoderHardeningTests
 	public void TooManyTextCharacters_IsAParseError()
 	{
 		// One STR_I run whose decoded length alone exceeds the 8 MB text-character ceiling —
-		// the amplification W1 describes doesn't need many runs, a single huge one works too;
+		// the same amplification doesn't need many runs, a single huge one works too;
 		// this proves the character-count ceiling independently of the run-count one above.
 		byte[] text = new byte[8 * 1024 * 1024 + 1];
 		Array.Fill(text, (byte)'a');
@@ -254,7 +254,7 @@ public class WbxmlDecoderHardeningTests
 		Assert.Throws<WbxmlException>(() => WbxmlDecoder.Decode(doc));
 	}
 
-	// W15: DecodeAsync's 80 KB scratch buffer holds one user's raw request bytes — including any
+	// DecodeAsync's 80 KB scratch buffer holds one user's raw request bytes — including any
 	// plaintext SyncKey/ClientId/etc it carries — and ArrayPool<byte>.Shared is process-global, so
 	// an unscrubbed Return leaves that plaintext readable by the next renter of the same size
 	// class, potentially a different user's request on the same worker. Best-effort (ArrayPool does
@@ -283,7 +283,7 @@ public class WbxmlDecoderHardeningTests
 		}
 	}
 
-	// W21: MaxDocumentBytes is a policy knob (unlike EasFolderType/EasClass, which are genuinely
+	// MaxDocumentBytes is a policy knob (unlike EasFolderType/EasClass, which are genuinely
 	// frozen protocol constants), but it was declared `public const`, so a plugin built against
 	// contract 1.x — ActiveSync.Protocol is a published MIT package — has it INLINED into its own
 	// IL. If the host later raises the ceiling, the plugin keeps passing the OLD value wherever it

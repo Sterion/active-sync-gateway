@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   Identity provisioning at the auth boundary (db-restructure item 2): every authenticated
+///   Identity provisioning at the auth boundary: every authenticated
 ///   login gets a user row and a UserId — an auto-provisioned DECLARATION for undeclared logins
 ///   (flag on), an identity-only row for config-declared ones (no shadowing) — and the id is
 ///   stable across repeats and case variants.

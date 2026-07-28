@@ -78,7 +78,7 @@ public class CollectionDiffTests
 	[Fact]
 	public void Deletes_AreChargedToTheWindow_AndDrainAcrossRounds()
 	{
-		// F2/A21: emptying a 50k folder must not produce one response with 50k <Delete>
+		// Emptying a 50k folder must not produce one response with 50k <Delete>
 		// elements. Deletes are charged to the same budget as adds/changes, unsent ones stay
 		// in the snapshot so they resurface, and truncation sets MoreAvailable.
 		Dictionary<string, string> snapshot = Map(Enumerable.Range(1, 20).Select(i => (i.ToString(), "r")).ToArray());
@@ -135,7 +135,7 @@ public class CollectionDiffTests
 	[Fact]
 	public void MixedNumericAndNonNumericIds_SortOrderIsIndependentOfInputOrder()
 	{
-		// W3: CompareIds computed "9" < "10" (numeric), "10" < "1a" (ordinal fallback), but
+		// CompareIds computed "9" < "10" (numeric), "10" < "1a" (ordinal fallback), but
 		// "9" > "1a" (ordinal fallback) -- an intransitive comparator. List.Sort has no
 		// obligation to produce the same result for the same *set* of ids when the comparator
 		// is not a total order; empirically it produces a different order depending purely on
@@ -160,7 +160,7 @@ public class CollectionDiffTests
 	[Fact]
 	public void CallerSuppliedCaseInsensitiveComparer_DoesNotForkTheSnapshot()
 	{
-		// W17: Compute reads membership via snapshot.TryGetValue/current.ContainsKey using EACH
+		// Compute reads membership via snapshot.TryGetValue/current.ContainsKey using EACH
 		// dictionary's OWN comparer, then always materializes NewSnapshot with
 		// StringComparer.Ordinal -- so a caller passing an OrdinalIgnoreCase map gets a diff
 		// computed case-insensitively but a snapshot persisted case-sensitively.

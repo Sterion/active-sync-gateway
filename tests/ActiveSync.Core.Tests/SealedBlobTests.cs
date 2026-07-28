@@ -35,7 +35,7 @@ public class SealedBlobTests
 		Assert.Equal(SealedBlobError.AuthenticationFailed, error);
 	}
 
-	// K14 COVERAGE (not proof): Seal/TryUnseal now wipe the plaintext buffer they allocate
+	// Coverage (not proof): Seal/TryUnseal now wipe the plaintext buffer they allocate
 	// internally (CryptographicOperations.ZeroMemory in a finally) instead of leaving it for the
 	// GC to collect whenever it gets around to it. The wipe has no external handle to observe —
 	// the buffer is a local the caller never sees — so this only guards that the change is

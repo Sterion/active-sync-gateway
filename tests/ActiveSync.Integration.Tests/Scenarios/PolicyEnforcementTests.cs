@@ -125,7 +125,7 @@ public sealed class PolicyEnforcementTests(GatewayFixture gateway)
 	[BackendFact]
 	public async Task Provision_AckWithWrongPolicyKey_IsRefused_AndDoesNotUnlock()
 	{
-		// F23: phase 2 used to issue a final key to ANY request that merely carried a
+		// Phase 2 used to issue a final key to ANY request that merely carried a
 		// PolicyKey element, without comparing it to the key the device was handed in
 		// phase 1 — so a single hand-crafted Provision unlocked the whole gate.
 		string dbPath = TempDbPath();
@@ -159,7 +159,7 @@ public sealed class PolicyEnforcementTests(GatewayFixture gateway)
 	[BackendFact]
 	public async Task Provision_AckReportingFailure_DoesNotIssueTheFinalKey()
 	{
-		// F23, second half: the client's ack Status was never read, so a device reporting
+		// Second half of the same finding: the client's ack Status was never read, so a device reporting
 		// "I could not apply this policy" was provisioned exactly like one that had.
 		string dbPath = TempDbPath();
 		try
@@ -196,7 +196,7 @@ public sealed class PolicyEnforcementTests(GatewayFixture gateway)
 	[BackendFact]
 	public async Task Provision_UnknownPolicyType_IsRefused()
 	{
-		// F24: PolicyType was accepted unread, so a client asking for the 2.5 WAP XML
+		// PolicyType was accepted unread, so a client asking for the 2.5 WAP XML
 		// document was handed the WBXML one and told it succeeded.
 		string dbPath = TempDbPath();
 		try

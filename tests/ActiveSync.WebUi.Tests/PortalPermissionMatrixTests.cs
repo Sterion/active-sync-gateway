@@ -7,9 +7,9 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   Item 6 of docs/design/db-restructure.md — the permission table, which the design calls out
-///   as "the security property of this design". Admin and holder write the SAME slot; the
-///   difference between them is purely WHICH FIELDS each may write:
+///   The permission table for per-field user resolution — the security property of the whole
+///   design, since there is one stored slot per field and admin/holder write access differs only
+///   by WHICH FIELDS each may write, never by storage:
 ///   <list type="bullet">
 ///     <item>Enabled / Provider (serving topology) — admin only</item>
 ///     <item>Backend credentials (UserName / Password) — both</item>

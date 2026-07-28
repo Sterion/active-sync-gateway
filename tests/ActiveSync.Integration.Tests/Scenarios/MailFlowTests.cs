@@ -114,7 +114,7 @@ public class MailFlowTests(GatewayFixture gateway)
 	/// <summary>
 	///   A permanent EAS delete must remove exactly the requested message. It used to issue a
 	///   folder-wide EXPUNGE, which permanently destroys every <c>\Deleted</c> message in the
-	///   mailbox — including the ones another client marked and has not expunged yet (D1).
+	///   mailbox — including the ones another client marked and has not expunged yet.
 	/// </summary>
 	[BackendFact]
 	public async Task PermanentDelete_RemovesOnlyThatMessage_LeavingAnotherClientsDeletedMail()
@@ -156,7 +156,7 @@ public class MailFlowTests(GatewayFixture gateway)
 	///   A raw IMAP UID is not a stable identifier: RFC 3501 lets a server reset UIDVALIDITY
 	///   (mailbox recreated, restored from backup, migrated) and reuse the same numbers for
 	///   different messages. A client holding an item id from before the reset must not be able
-	///   to mutate whatever now occupies that UID (D2). Reproduced here by deleting and
+	///   to mutate whatever now occupies that UID. Reproduced here by deleting and
 	///   recreating a folder, which is exactly what a restore looks like from the outside.
 	/// </summary>
 	[BackendFact]
@@ -197,10 +197,10 @@ public class MailFlowTests(GatewayFixture gateway)
 	/// <summary>
 	///   Baseline coverage for ItemOperations EmptyFolderContents, which had none. It clears mail
 	///   delivered after the gateway last synced the folder, i.e. without the client having seen
-	///   it. NOTE: this does NOT reproduce D17 — Stalwart's untagged EXISTS is drained by the
-	///   commands the request issues anyway, so the stale folder.Count it fixed does not bite
-	///   here; D17's remaining symptom (sequence numbers renumbered by a concurrent expunge) has
-	///   no deterministic test.
+	///   it. NOTE: this does NOT reproduce the untagged-EXISTS renumbering issue — Stalwart's
+	///   untagged EXISTS is drained by the commands the request issues anyway, so the stale
+	///   folder.Count it fixed does not bite here; the remaining symptom (sequence numbers
+	///   renumbered by a concurrent expunge) has no deterministic test.
 	/// </summary>
 	[BackendFact]
 	public async Task EmptyFolderContents_RemovesMailDeliveredSinceTheFolderWasSelected()
@@ -244,8 +244,8 @@ public class MailFlowTests(GatewayFixture gateway)
 			$"delivery of '{subject}'");
 
 		// EAS Categories → IMAP keywords: a valid RFC 3501 atom applies; a non-atom category
-		// ("spaced name") is DROPPED rather than mangled to a colliding "spaced_name" (D6 behaviour
-		// change — mangling collapsed distinct categories and thrashed the revision every Sync).
+		// ("spaced name") is DROPPED rather than mangled to a colliding "spaced_name" (mangling
+		// collapsed distinct categories and thrashed the revision every Sync).
 		SyncResult change = await clientB.ChangeItemAsync(inboxB, item.ServerId,
 			new XElement(Email + "Categories",
 				new XElement(Email + "Category", "Project-X"),

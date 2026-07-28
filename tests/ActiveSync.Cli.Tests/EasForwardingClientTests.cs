@@ -5,7 +5,7 @@ using ActiveSync.Crypto;
 
 namespace ActiveSync.Cli.Tests;
 
-// S8: the slim `eas` client's forwarding logic lived entirely in top-level statements in Program.cs —
+// The slim `eas` client's forwarding logic lived entirely in top-level statements in Program.cs —
 // no namespace, no seam to construct it against a fake clock/environment, so none of it was covered by
 // any test project. These exercise the pieces that decide what a real `eas` invocation actually does:
 // the local-only verbs, EAS_NO_FORWARD, the sealed-envelope construction (round-tripped against the real
@@ -28,7 +28,7 @@ public sealed class EasForwardingClientTests
 	[Fact]
 	public void IsLocalOnlyVerb_NoArgs_ReturnsTrue()
 	{
-		// E6: a bare `eas` invocation forwarded to a running gateway ran BannerCommand inside the
+		// A bare `eas` invocation forwarded to a running gateway ran BannerCommand inside the
 		// live process, which then told the operator "The gateway is NOT running" — true only when
 		// nothing answered /cli. Bare eas must always run locally, matching docs/cli.md's "the
 		// config that WOULD run" framing, which is only meaningful against a process that is not
@@ -64,7 +64,7 @@ public sealed class EasForwardingClientTests
 			name => name == "Kestrel__Endpoints__Http__Url" ? "http://0.0.0.0:5080/" : null,
 			Path.GetTempPath()));
 
-	// E23: ASPNETCORE_URLS=http://+:5080 and http://*:5080 are idiomatic Kestrel wildcard hosts (the
+	// ASPNETCORE_URLS=http://+:5080 and http://*:5080 are idiomatic Kestrel wildcard hosts (the
 	// shipped image instead sets Kestrel__Endpoints__Http__Url, so it never hits this), but
 	// ResolveBaseUrl only normalized 0.0.0.0/[::]/localhost — a hand-rolled deployment using either
 	// wildcard form got a base URL naming a host ("+" or "*") that fails DNS, so every command

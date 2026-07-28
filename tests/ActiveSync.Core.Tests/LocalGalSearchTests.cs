@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D19: GAL search over the local contact store used to ToListAsync the WHOLE collection, then
+///   GAL search over the local contact store used to ToListAsync the WHOLE collection, then
 ///   decrypt and vCard-parse each matching card three times. The fix streams the rows
 ///   (AsAsyncEnumerable so the maxResults break stops work), parses each card once (BuildGalEntry)
 ///   and reads with AsNoTracking. These are behaviour-preserving performance changes, so this is
@@ -66,8 +66,8 @@ public sealed class LocalGalSearchTests : IDisposable
 	}
 
 	/// <summary>
-	///   G26: <c>SearchGalAsync</c>'s <c>maxResults</c> break was checked BEFORE adding the current
-	///   match, one row later than the D19 comment's stated intent ("stops pulling and decrypting
+	///   <c>SearchGalAsync</c>'s <c>maxResults</c> break was checked BEFORE adding the current
+	///   match, one row later than the streaming rewrite's stated intent ("stops pulling and decrypting
 	///   rows once enough matches are found") — the enumerator had already pulled/materialized one
 	///   extra row by the time the old check ran. The fix moves the check to after the add. COVERAGE,
 	///   not red-first proof: the actual waste is one extra streamed-row fetch from the open SQLite

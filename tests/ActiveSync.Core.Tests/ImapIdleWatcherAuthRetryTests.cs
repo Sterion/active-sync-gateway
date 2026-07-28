@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   G6: <see cref="ImapIdleWatcher.RunAsync" /> treats ANY <c>AuthenticationException</c> as a
+///   <see cref="ImapIdleWatcher.RunAsync" /> treats ANY <c>AuthenticationException</c> as a
 ///   permanent credential rejection and latches the watcher unavailable forever — but MailKit
 ///   raises that exception for any negative LOGIN/AUTHENTICATE reply, including a transient one
 ///   (Dovecot's "NO [UNAVAILABLE] Maximum number of connections from user+IP exceeded", which the

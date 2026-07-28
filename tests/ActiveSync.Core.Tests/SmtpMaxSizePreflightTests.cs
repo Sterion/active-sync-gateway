@@ -5,7 +5,7 @@ using MailKit.Net.Smtp;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   D1 (coverage): the RFC 1870 SIZE preflight decision in <see cref="SmtpSubmitBackend" />. The
+///   Coverage: the RFC 1870 SIZE preflight decision in <see cref="SmtpSubmitBackend" />. The
 ///   symptom the fix prevents — an oversized message streaming the whole DATA body before a 552
 ///   reject — needs a real submission MSA advertising a small <c>MaxSize</c>, which the unit
 ///   environment cannot exhibit; this proves the guard's boundary logic directly (throws only when

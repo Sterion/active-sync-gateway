@@ -6,8 +6,8 @@ namespace ActiveSync.Core.Tests;
 /// <summary>
 ///   Item 24 — config validation unification. The write path (CLI `eas config set` and the web
 ///   settings editor) must reject at write time exactly what the startup validator would reject at
-///   boot, so a value can never persist, run, then brick the next start (B1). Also covers the
-///   Number-branch bounds (B10) and the provider-schema secret detection (B25).
+///   boot, so a value can never persist, run, then brick the next start. Also covers the
+///   Number-branch bounds and the provider-schema secret detection.
 /// </summary>
 public sealed class ConfigWriteValidationTests
 {
@@ -24,7 +24,7 @@ public sealed class ConfigWriteValidationTests
 		return new ConfigurationBuilder().AddInMemoryCollection(data).Build();
 	}
 
-	// B1 — the delayed brick: the catalogue accepts WatchdogSeconds=5 (Min 0 / Max 86400) but the
+	// The delayed brick: the catalogue accepts WatchdogSeconds=5 (Min 0 / Max 86400) but the
 	// startup validator requires 0 or >= 15, so 5 persists, runs, then refuses the next boot.
 	[Fact]
 	public void WatchdogSeconds_BelowStartupFloor_PassesCatalogue_ButStartupImpactRejects()
@@ -40,7 +40,7 @@ public sealed class ConfigWriteValidationTests
 		Assert.Contains("WatchdogSeconds", error);
 	}
 
-	// B1 — a cross-field failure the single-key catalogue can never see: MaxHeartbeatSeconds below
+	// A cross-field failure the single-key catalogue can never see: MaxHeartbeatSeconds below
 	// the currently-effective MinHeartbeatSeconds.
 	[Fact]
 	public void MaxHeartbeat_BelowEffectiveMin_IsRejectedAtWriteTime()
@@ -51,7 +51,7 @@ public sealed class ConfigWriteValidationTests
 		Assert.NotNull(error);
 	}
 
-	// B1 — a good value must still pass, and a pre-existing UNRELATED invalid value must not block
+	// A good value must still pass, and a pre-existing UNRELATED invalid value must not block
 	// an unrelated edit (only newly-introduced failures are surfaced).
 	[Fact]
 	public void GoodValue_Passes_AndUnrelatedPreExistingFailure_DoesNotBlock()
@@ -64,7 +64,7 @@ public sealed class ConfigWriteValidationTests
 		Assert.Null(SettingKeys.ValidateStartupImpact(broken, "ActiveSync:ReadOnly", "true"));
 	}
 
-	// B10 — a Number setting accepted NaN/Infinity (NumberStyles.Float parses them), which then
+	// A Number setting accepted NaN/Infinity (NumberStyles.Float parses them), which then
 	// degrades the refreshers to a point-read on every request.
 	[Theory]
 	[InlineData("NaN")]
@@ -86,7 +86,7 @@ public sealed class ConfigWriteValidationTests
 		Assert.Null(SettingKeys.Validate(key, value));
 	}
 
-	// B10 — the Number branch now honours the key's Max (it ignored Min/Max entirely before).
+	// The Number branch now honours the key's Max (it ignored Min/Max entirely before).
 	[Fact]
 	public void NumberSetting_AboveMax_IsRejected()
 	{
@@ -94,7 +94,7 @@ public sealed class ConfigWriteValidationTests
 		Assert.NotNull(SettingKeys.Validate(key, "999999999"));
 	}
 
-	// B12 — the CLI's `eas logs -l critical` already accepts the alias (LogQueryService.LevelsAtOrAbove);
+	// The CLI's `eas logs -l critical` already accepts the alias (LogQueryService.LevelsAtOrAbove);
 	// this write path's enum check knew only the four exact names, so a value the CLI understood
 	// fine was rejected here (and, for a file/env value, at startup — see ActiveSyncOptionsValidatorTests).
 	[Fact]
@@ -104,7 +104,7 @@ public sealed class ConfigWriteValidationTests
 		Assert.Null(SettingKeys.Validate(key, "critical"));
 	}
 
-	// B2 — the OIDC admin-claim pair could never be configured through either write surface. Writing
+	// The OIDC admin-claim pair could never be configured through either write surface. Writing
 	// AdminClaim alone introduces the failure "...AdminClaimValue is required when AdminClaim is set"
 	// (ActiveSyncOptionsValidator.cs:187-190), and that failure string names a DIFFERENT, still-unset
 	// key (AdminClaimValue) — but the substring test `failure.Contains(key)` matched anyway, because
@@ -120,7 +120,7 @@ public sealed class ConfigWriteValidationTests
 		Assert.Null(error);
 	}
 
-	// B2 — the reverse write (AdminClaimValue alone, with AdminClaim still unset) is a REAL,
+	// The reverse write (AdminClaimValue alone, with AdminClaim still unset) is a REAL,
 	// self-contained failure — the value just written is exactly what is missing its partner — and
 	// must stay rejected so the fix does not become a blanket "ignore this whole failure" hack.
 	[Fact]
@@ -132,7 +132,7 @@ public sealed class ConfigWriteValidationTests
 		Assert.Contains("AdminClaimValue", error);
 	}
 
-	// B2 — once AdminClaim is on file, completing the pair by writing AdminClaimValue must pass (both
+	// Once AdminClaim is on file, completing the pair by writing AdminClaimValue must pass (both
 	// requirements are then satisfied), proving the pair is actually reachable in sequence.
 	[Fact]
 	public void CompletingThePair_InEitherOrder_Succeeds()

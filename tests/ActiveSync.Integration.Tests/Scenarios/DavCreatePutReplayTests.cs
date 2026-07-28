@@ -6,7 +6,7 @@ using ActiveSync.Integration.Tests.Infrastructure;
 namespace ActiveSync.Integration.Tests.Scenarios;
 
 /// <summary>
-///   H18: the transient retry replays create-PUTs. A create carries If-None-Match:*, so if the
+///   The transient retry replays create-PUTs. A create carries If-None-Match:*, so if the
 ///   first attempt reached the server and only its response was lost, the replay lands on the
 ///   resource it just created and comes back 412 — which used to surface as a "precondition failed"
 ///   BackendException, telling the client the create failed though the item exists. Reproduced

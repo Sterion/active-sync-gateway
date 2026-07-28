@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   E7 — COVERAGE, NOT PROOF. <c>ProgramServer.InitializeAsync</c>'s actual symptom (a container
+///   COVERAGE, NOT PROOF. <c>ProgramServer.InitializeAsync</c>'s actual symptom (a container
 ///   SIGTERMed during a slow first boot hangs to SIGKILL because four post-migration awaits pass
 ///   <c>CancellationToken.None</c> instead of <c>app.Lifetime.ApplicationStopping</c>) needs I/O slow
 ///   enough to race a real shutdown signal against one specific await among five that all complete in

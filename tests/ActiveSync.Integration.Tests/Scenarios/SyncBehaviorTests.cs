@@ -199,7 +199,7 @@ public class SyncBehaviorTests(GatewayFixture gateway)
 	}
 
 	/// <summary>
-	///   F3: an item that slides out of the FilterType window is still on the server, so
+	///   An item that slides out of the FilterType window is still on the server, so
 	///   MS-ASCMD requires <c>SoftDelete</c> — <c>Delete</c> tells the client the item is gone
 	///   for good. Reproduced without waiting for real time to pass by appending a message with
 	///   a 30-day-old INTERNALDATE (what the gateway's <c>SEARCH SINCE</c> filters on), syncing
@@ -242,7 +242,7 @@ public class SyncBehaviorTests(GatewayFixture gateway)
 	}
 
 	/// <summary>
-	///   The other half of F3: a message actually removed from the backend must still be a hard
+	///   The other half of the same finding: a message actually removed from the backend must still be a hard
 	///   <c>Delete</c>, even on a filtered collection where the SoftDelete lookup runs.
 	/// </summary>
 	[BackendFact]

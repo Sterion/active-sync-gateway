@@ -5,12 +5,15 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.WebUi.Tests;
 
 /// <summary>
-///   C2 — the admin Users editor round-trips the MERGED (config over database) view back into the
+///   The admin Users editor round-trips the MERGED (config over database) view back into the
 ///   database row. `GET /admin/api/users` reports config-supplied fields as part of the effective
 ///   entry, `users.js` pre-fills the editor from them, and a save that resubmits them UNCHANGED used
 ///   to write them straight into the database row — freezing every config-supplied field as a
-///   permanent override (`docs/design/db-restructure.md` deviation 2 says this trap was designed
-///   out). A later edit to the same key in configuration would then silently stop reaching the user.
+///   permanent override. This is exactly the trap per-field resolution is meant to avoid: loading a
+///   starting entry used to clone config values into the row, which is right for whole-entry
+///   replacement but wrong once resolution is per field, since it freezes config values as
+///   overrides. A later edit to the same key in configuration would then silently stop reaching
+///   the user.
 /// </summary>
 public sealed class UsersMergedViewWriteBackTests
 {

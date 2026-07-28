@@ -8,9 +8,9 @@ using Microsoft.EntityFrameworkCore;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   Coverage for the shared admin services extracted in item 18 (S3/C18): the single validated
+///   Coverage for the shared admin services extracted in item 18: the single validated
 ///   read/write path over the device, share and log tables that both the web admin API and the
-///   `eas` CLI now consume. These are coverage, not reproducers — S3/C18 is a structural finding
+///   `eas` CLI now consume. These are coverage, not reproducers — the finding was structural
 ///   (two write paths to one table), so the proof is the refactor plus the unchanged HTTP/CLI
 ///   behaviour tests; these pin the extracted behaviour so a later drift is caught.
 /// </summary>
@@ -250,7 +250,7 @@ public sealed class AdminServicesTests : IDisposable
 	[Fact]
 	public async Task Logs_UserFilter_IsCaseInsensitive()
 	{
-		// B15: the User filter compared with ==, case-sensitively, while logins are
+		// The User filter compared with ==, case-sensitively, while logins are
 		// case-insensitive everywhere else (UserStore.NormalizeLogin). A device that presented
 		// "Bob@x.com" writes rows an operator's `eas logs -u bob@x.com` must still find.
 		await SeedAsync(db =>

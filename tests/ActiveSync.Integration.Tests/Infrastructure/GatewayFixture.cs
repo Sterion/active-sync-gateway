@@ -242,7 +242,7 @@ public sealed class GatewayFixture : IAsyncLifetime
 			// suite's deliberate bad-credential tests would otherwise trip the shared
 			// brute-force throttle for every later test.
 			["ActiveSync:Auth:MaxFailures"] = "1000000",
-			// The WebUi session cookie is Secure unconditionally (C2); the suite drives the
+			// The WebUi session cookie is Secure unconditionally; the suite drives the
 			// portals over plain http with a cookie container, which would discard it on every
 			// response. This is the documented local-http opt-out, used exactly as intended.
 			// WebUiTests.SessionCookie_CarriesSecure_WhenTheHttpOptOutIsOff turns it back off on

@@ -8,7 +8,7 @@ using ActiveSync.Contracts;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   JMAP mail-store long-poll detection. H19: the per-folder change token was
+///   JMAP mail-store long-poll detection. The per-folder change token was
 ///   <c>totalEmails:unreadEmails</c>, which is blind to a flag-only change (it moves no counter)
 ///   and to an equal add+delete (the counts net out). The token must also track the account-level
 ///   Email state so those changes wake a Ping.
@@ -28,7 +28,7 @@ public sealed class JmapMailStoreTests
 	}
 	""";
 
-	// H19: mailbox counts stay identical across the two poll cycles (a flag-only change) but the
+	// Mailbox counts stay identical across the two poll cycles (a flag-only change) but the
 	// account Email state advances. WaitForChangesAsync must report the folder as changed.
 	[Fact]
 	public async Task WaitForChanges_FlagOnlyChange_IsDetectedViaEmailState()
@@ -58,7 +58,7 @@ public sealed class JmapMailStoreTests
 		Assert.Contains(JmapMailStore.ToKey("INBOXID"), changed);
 	}
 
-	// H10: a permanent delete whose Email/set returns the id in notDestroyed used to be ignored
+	// A permanent delete whose Email/set returns the id in notDestroyed used to be ignored
 	// (the response leaked, undisposed) and reported as success. It must surface as a failure.
 	[Fact]
 	public async Task DeleteItem_ServerReportsNotDestroyed_Throws()
@@ -80,7 +80,7 @@ public sealed class JmapMailStoreTests
 			store.DeleteItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", permanent: true, CancellationToken.None));
 	}
 
-	// H20: updating a message the server has since deleted (Email/set returns it in notUpdated with
+	// Updating a message the server has since deleted (Email/set returns it in notUpdated with
 	// type notFound) must surface as BackendItemNotFoundException so the host reconciles, not as a
 	// generic error or a silent success.
 	[Fact]
@@ -105,7 +105,7 @@ public sealed class JmapMailStoreTests
 			store.UpdateItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", change, CancellationToken.None));
 	}
 
-	// H25: a flag/read update issued Email/set then a SEPARATE Email/get — two sequential round
+	// A flag/read update issued Email/set then a SEPARATE Email/get — two sequential round
 	// trips where JMAP's whole point is batching. The set and the trailing get must go in ONE
 	// request, so a routine "mark read" costs one API call, not two.
 	[Fact]
@@ -121,7 +121,7 @@ public sealed class JmapMailStoreTests
 		Assert.Equal(1, stub.ApiCalls); // set + get in one request, not two
 	}
 
-	// H25: a non-permanent delete calls FindMailboxByRoleAsync, which did Mailbox/get with ids:null
+	// A non-permanent delete calls FindMailboxByRoleAsync, which did Mailbox/get with ids:null
 	// (the ENTIRE mailbox list) on every delete, uncached. The role→mailbox map must be cached on
 	// the store, so deleting many messages does not re-list the mailboxes each time.
 	[Fact]
@@ -137,7 +137,7 @@ public sealed class JmapMailStoreTests
 		Assert.Equal(1, stub.FullMailboxListings); // one Mailbox/get ids:null for both deletes
 	}
 
-	// H7: delete-to-trash replaced "mailboxIds" wholesale with just {trash: true}, so a message
+	// Delete-to-trash replaced "mailboxIds" wholesale with just {trash: true}, so a message
 	// filed under more than one mailbox (e.g. a label plus Inbox) lost every other membership on
 	// a single-folder EAS delete. The update must PATCH only the two affected keys.
 	[Fact]
@@ -156,7 +156,7 @@ public sealed class JmapMailStoreTests
 		Assert.True(patch.GetProperty("mailboxIds/TRASHID").GetBoolean());
 	}
 
-	// H7: MoveItemAsync has the identical shape — moving a multi-filed message must drop only the
+	// MoveItemAsync has the identical shape — moving a multi-filed message must drop only the
 	// source mailbox, not every mailbox the message happened to be in.
 	[Fact]
 	public async Task MoveItem_PatchesMailboxIds_InsteadOfReplacing()
@@ -175,7 +175,7 @@ public sealed class JmapMailStoreTests
 		Assert.True(patch.GetProperty("mailboxIds/ARCHIVEID").GetBoolean());
 	}
 
-	// H4: category keywords were spliced into the JMAP PatchObject path without RFC 6901 escaping,
+	// Category keywords were spliced into the JMAP PatchObject path without RFC 6901 escaping,
 	// so a category containing '/' (legal EAS free text and a legal JMAP keyword) produced a path
 	// the server reads as a NESTED pointer ("keywords/Work/Home") and rejects with invalidPatch,
 	// failing the whole Sync Change. '/' must become "~1" per RFC 6901.
@@ -197,7 +197,7 @@ public sealed class JmapMailStoreTests
 		Assert.False(patch.TryGetProperty("keywords/Work/Home", out _));
 	}
 
-	// H4: a category containing a character the JMAP keyword grammar forbids (RFC 8621 §4.1.1 —
+	// A category containing a character the JMAP keyword grammar forbids (RFC 8621 §4.1.1 —
 	// '(' ')' '{' ']' '%' '*' '"' '\' and non-ASCII) must be dropped, mirroring
 	// ImapMailBackend.SanitizeKeyword's drop-don't-mangle rule, rather than sent verbatim.
 	[Fact]
@@ -217,7 +217,7 @@ public sealed class JmapMailStoreTests
 		            !stub.CapturedUpdate!.Value.GetProperty("E1").EnumerateObject().Any());
 	}
 
-	// H3: position-based paging over a descending sort is not stable under a concurrent mailbox
+	// Position-based paging over a descending sort is not stable under a concurrent mailbox
 	// change. Server-side timeline: [A,B,C,D,E] (positions 0-4). Page 1 (position 0, limit 2)
 	// returns [A,B] under queryState "s1". Before page 2 is issued, B is deleted, so the live
 	// order becomes [A,C,D,E] under queryState "s2" — C has shifted from position 2 down to
@@ -240,7 +240,7 @@ public sealed class JmapMailStoreTests
 			"an item that shifted position under a concurrent delete must not be dropped from the revision map");
 	}
 
-	// H18: the query never sets calculateTotal, so RFC 8620 §5.5 says `total` is normally absent
+	// The query never sets calculateTotal, so RFC 8620 §5.5 says `total` is normally absent
 	// and the `position >= total` break is dead — termination rests solely on `returned == 0`. A
 	// server that ignores the `position` argument and always reports `position: 0` (while still
 	// returning non-empty pages) must not spin this loop forever. Bounded with a cancellation
@@ -260,7 +260,7 @@ public sealed class JmapMailStoreTests
 		Assert.NotEmpty(map);
 	}
 
-	// H8: Email/import is defined under urn:ietf:params:jmap:mail (RFC 8621 §4.8) and needs no
+	// Email/import is defined under urn:ietf:params:jmap:mail (RFC 8621 §4.8) and needs no
 	// blob-management capability. Requiring urn:ietf:params:jmap:blob (RFC 9404) as well means a
 	// server that does not implement that separate extension rejects the WHOLE request (RFC 8620
 	// §3.6.1's `unknownCapability`) — breaking every Save-to-Sent and draft create/edit, not a
@@ -482,9 +482,9 @@ public sealed class JmapMailStoreTests
 
 	/// <summary>
 	///   Models a server that ignores the requested <c>position</c> and always reports <c>0</c>
-	///   while still returning a non-empty page — the H18 hang. Caps itself so a still-broken loop
-	///   fails the test's iteration-count assertion instead of only being caught by the
-	///   cancellation token.
+	///   while still returning a non-empty page, which would otherwise hang the pagination loop
+	///   forever. Caps itself so a still-broken loop fails the test's iteration-count assertion
+	///   instead of only being caught by the cancellation token.
 	/// </summary>
 	private sealed class StuckPositionStub : HttpMessageHandler
 	{

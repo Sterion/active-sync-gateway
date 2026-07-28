@@ -81,7 +81,7 @@ public class BackendProviderTests
 	[Fact]
 	public async Task CreateAsync_DisposesAlreadyOpenedConnections_WhenALaterProviderFails()
 	{
-		// A1: the provider loop in CreateAsync has no try/catch — when a LATER provider's
+		// The provider loop in CreateAsync has no try/catch — when a LATER provider's
 		// CreateConnectionAsync throws (a bad BaseUrl, an unsupported role, a transport-open
 		// failure), the half-built session is never returned and nothing disposes the EARLIER
 		// provider's already-open connection. One request against a half-broken multi-provider
@@ -116,11 +116,11 @@ public class BackendProviderTests
 	[Fact]
 	public async Task Session_Dispose_ContinuesPastAThrowingConnection_WithoutThrowing()
 	{
-		// A12 (still true): a provider whose connection throws on dispose (e.g. IMAP LOGOUT on a
+		// A provider whose connection throws on dispose (e.g. IMAP LOGOUT on a
 		// dead socket) must not strand the other providers' connections — they still hold live
 		// sockets.
 		//
-		// A2 (behaviour change): DisposeAsync used to rethrow the collected failures as an
+		// Behaviour change: DisposeAsync used to rethrow the collected failures as an
 		// AggregateException. EasEndpoint's `await using session = ...` sits OUTSIDE its
 		// try/catch, so that escaped as an unhandled exception on a request whose response had
 		// ALREADY been written successfully — for a lease release that has nothing to do with the
@@ -233,7 +233,7 @@ public class BackendProviderTests
 			string folderBackendKey, string itemKey, bool permanent, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		// K58: item move and folder mutation are optional capabilities; this aggregation double
+		// Item move and folder mutation are optional capabilities; this aggregation double
 		// implements neither.
 
 		public Task<IReadOnlyList<string>> WaitForChangesAsync(

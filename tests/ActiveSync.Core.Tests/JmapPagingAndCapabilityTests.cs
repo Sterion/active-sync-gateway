@@ -7,7 +7,7 @@ using ActiveSync.Contracts;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   H8: <c>JmapMailStore.GetItemRevisionsAsync</c> hardcoded a 500-item page and terminated the
+///   <c>JmapMailStore.GetItemRevisionsAsync</c> hardcoded a 500-item page and terminated the
 ///   loop on <c>returned &lt; page</c>. A server that caps its <c>Email/query</c> response below the
 ///   requested limit truncates the folder silently (the device sees the tail as deleted), and a
 ///   server advertising <c>maxObjectsInGet</c> below 500 fails the whole sync with
@@ -35,7 +35,7 @@ public sealed class JmapPagingAndCapabilityTests
 		""";
 	}
 
-	// H8 — the server caps every Email/query response at 2 ids even when 500 are requested, and holds
+	// The server caps every Email/query response at 2 ids even when 500 are requested, and holds
 	// 4 messages. The old loop broke after the first (short) page, syncing only 2 of 4; the tail then
 	// looks deleted to the device. Paging must keep going until a page returns empty/total is reached.
 	[Fact]
@@ -52,7 +52,7 @@ public sealed class JmapPagingAndCapabilityTests
 		Assert.Equal(new[] { "E0", "E1", "E2", "E3" }, map.Keys.OrderBy(k => k));
 	}
 
-	// H8/H9 — the server advertises maxObjectsInGet=2 and answers requestTooLarge to any Email/get
+	// The server advertises maxObjectsInGet=2 and answers requestTooLarge to any Email/get
 	// carrying more ids. The old code back-referenced up to 500 query ids into one Email/get, so the
 	// whole folder sync threw. Paging at min(500, maxObjectsInGet) keeps every Email/get within the
 	// advertised ceiling.

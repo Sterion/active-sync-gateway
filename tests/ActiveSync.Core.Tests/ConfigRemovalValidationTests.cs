@@ -9,13 +9,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   B4 — `eas config unset`/the web settings DELETE deleted the database row with no validation at
+///   `eas config unset`/the web settings DELETE deleted the database row with no validation at
 ///   all, unlike the write direction (<see cref="SettingKeys.ValidateStartupImpact" />). A removal can
 ///   just as easily persist a configuration the NEXT start refuses to boot on: a catalogue key whose
 ///   POCO default violates a cross-field rule now in force (here: a TLS certificate path removed while
 ///   its paired key path row remains), or a backend section a live gateway tolerates but
-///   <c>BackendConfigurationValidator</c> throws on at the next restart (here: MailStore:Host, the
-///   finding's own example).
+///   <c>BackendConfigurationValidator</c> throws on at the next restart (here: MailStore:Host).
 /// </summary>
 public sealed class ConfigRemovalValidationTests : IDisposable
 {
@@ -53,7 +52,7 @@ public sealed class ConfigRemovalValidationTests : IDisposable
 			new SmtpBackendProvider(NullLoggerFactory.Instance),
 		], NullLogger<BackendProviderRegistry>.Instance);
 
-	// B4's own example: `eas config unset ActiveSync:Backends:MailStore:Host` leaves a section the
+	// Config-removal example: `eas config unset ActiveSync:Backends:MailStore:Host` leaves a section the
 	// running gateway survives (BackendRolesProvider keeps the last-good config), but
 	// BackendConfigurationValidator.Validate throws "Host is required" at the very next start.
 	[Fact]

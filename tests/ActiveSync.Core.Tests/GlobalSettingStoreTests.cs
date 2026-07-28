@@ -53,7 +53,7 @@ public sealed class GlobalSettingStoreTests : IDisposable
 		await _store.UpsertAsync("ActiveSync:ReadOnly", "false", CancellationToken.None);
 		Assert.Equal("false", await _store.GetAsync("ActiveSync:ReadOnly", CancellationToken.None));
 
-		// B7 (behaviour change): the stored Key is normalized to lowercase — a sargable equality
+		// Behaviour change: the stored Key is normalized to lowercase — a sargable equality
 		// seek on the primary key needs the row itself normalized, not just the comparison — so a
 		// caller that reads rows directly (rather than through Find's canonical casing) sees
 		// lowercase. Case-insensitive lookup and single-row-per-key uniqueness are unaffected.
@@ -68,7 +68,7 @@ public sealed class GlobalSettingStoreTests : IDisposable
 	[Fact]
 	public async Task Upsert_IsCaseInsensitive_NoDuplicateRow()
 	{
-		// B2: the store matched the key case-SENSITIVELY in SQL but case-INsensitively in memory,
+		// The store matched the key case-SENSITIVELY in SQL but case-INsensitively in memory,
 		// so an upsert under a different casing inserted a SECOND row; the loaded snapshot then
 		// collapsed both with a nondeterministic winner across restarts.
 		await _store.UpsertAsync("ActiveSync:ReadOnly", "true", CancellationToken.None);
@@ -81,7 +81,7 @@ public sealed class GlobalSettingStoreTests : IDisposable
 		Assert.Empty(await _store.ListAsync(CancellationToken.None));
 	}
 
-	// B7 — GlobalSetting.Key IS the primary key, and lookups matched it via
+	// GlobalSetting.Key IS the primary key, and lookups matched it via
 	// `s.Key.ToLower() == key.ToLower()`: a function on the indexed column defeats the PK index
 	// (a full scan on every get/upsert/delete), and the PK itself stays case-SENSITIVE, so two rows
 	// differing only in case are representable (two replicas racing UpsertAsync, a restored dump).
@@ -186,7 +186,7 @@ public sealed class GlobalSettingStoreTests : IDisposable
 	[Fact]
 	public async Task NegativeRefreshInterval_StillPicksUpLaterChanges_NoLockout()
 	{
-		// B11: a negative cadence used to PERMANENTLY disable live refresh after the first load —
+		// A negative cadence used to PERMANENTLY disable live refresh after the first load —
 		// including the pickup of an operator setting it back — so recovery needed a restart. It is
 		// now clamped to "every request", so a later change is still picked up.
 		DbSettingsConfigurationSource source = new();
@@ -207,7 +207,7 @@ public sealed class GlobalSettingStoreTests : IDisposable
 	[Fact]
 	public async Task Refresher_ReloadSubscriberThrows_RecordsStamp_AppliesData_AndKeepsGoing()
 	{
-		// B6: a downstream reload-token subscriber that throws (e.g. the account-snapshot rebuild)
+		// A downstream reload-token subscriber that throws (e.g. the account-snapshot rebuild)
 		// escaped through SetData, so the refresher's own progress markers (_lastStamp/_hasLoaded)
 		// were never set and Changed never fired — the same stamp was retried forever and mislogged
 		// as a settings failure. The subscriber failure must be isolated: the data is applied, the
@@ -236,7 +236,7 @@ public sealed class GlobalSettingStoreTests : IDisposable
 	[Fact]
 	public async Task Refresher_ChangedSubscriberThrows_OthersStillRun_AndDoesNotSuppressALaterGenuineFailure()
 	{
-		// B11: `Changed?.Invoke()` sits inside the outer try/catch, so a throwing subscriber (1) is a
+		// `Changed?.Invoke()` sits inside the outer try/catch, so a throwing subscriber (1) is a
 		// multicast Delegate.Invoke — it aborts every subscriber registered AFTER it, (2) is mislogged
 		// as "Could not refresh database settings; keeping the current snapshot" even though the data
 		// WAS already applied (the throw happens after SetData succeeded), and (3) skips the
@@ -297,7 +297,7 @@ public sealed class GlobalSettingStoreTests : IDisposable
 	[InlineData("ActiveSync:UsersFile")]
 	public async Task Upsert_RefusesHostControlledKeys_LastChokepoint(string key)
 	{
-		// B12: even bypassing the write surfaces, the store must never persist a bootstrap /
+		// Even bypassing the write surfaces, the store must never persist a bootstrap /
 		// host-controlled key — a stored ConnectionString/Encryption row would be trusted next boot.
 		await Assert.ThrowsAsync<InvalidOperationException>(
 			() => _store.UpsertAsync(key, "attacker-value", CancellationToken.None));

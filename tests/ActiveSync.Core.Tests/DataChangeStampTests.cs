@@ -8,8 +8,8 @@ using Microsoft.EntityFrameworkCore;
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   Item 3a of docs/design/db-restructure.md: the two single-row stamp tables merge into one
-///   <see cref="DataChange" /> table keyed by watched area. The property that matters is
+///   The two single-row stamp tables merge into one <see cref="DataChange" /> table keyed by
+///   watched area. The property that matters is
 ///   INDEPENDENCE — one row per area, never one row total — because a shared version would make
 ///   a user write invalidate the settings snapshot (and vice versa), so every consumer would
 ///   reload on every unrelated change.
@@ -129,7 +129,7 @@ public sealed class DataChangeStampTests : IDisposable
 	[Fact]
 	public async Task UserStore_ConcurrentFirstBump_IsToleratedInsteadOfARawPkViolation()
 	{
-		// A8, through the actual PUBLIC call site named in the finding (UserStore.cs — the
+		// Exercised through the actual public call site (UserStore.cs — the
 		// BumpStampAsync wrapper): UpsertAsync's insert branch stages the new User row, THEN
 		// stages the "users" area's first-ever DataChange row (BumpStampAsync's own BumpAsync
 		// call finds no row yet), and only then saves. ConcurrentWriteInterceptor injects a
@@ -162,7 +162,7 @@ public sealed class DataChangeStampTests : IDisposable
 	[Fact]
 	public async Task GlobalSettingStore_ConcurrentFirstBump_IsToleratedInsteadOfARawPkViolation()
 	{
-		// A8, through the second call site the finding names (GlobalSettingStore.cs): same
+		// Exercised through the second call site (GlobalSettingStore.cs): same
 		// mechanism as UserStore_ConcurrentFirstBump_..., but for the "settings" area and
 		// UpsertAsync's own BumpStampAsync wrapper.
 		ConcurrentWriteInterceptor interceptor = new(() =>
