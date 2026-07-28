@@ -289,6 +289,15 @@ public static class WbxmlCodePages
 				(0x18, "RemoveRightsManagementDistribution"))),
 
 			// Page 25: Find (16.1). Token gaps at 0x0F/0x10 and 0x1A-0x1F are per MS-ASWBXML.
+			// W7: the MaxPictures(0x20)/MaxSize(0x21)/Picture(0x22) order below is the REVERSE of
+			// every sibling page (Search page 15 and ResolveRecipients page 10 both put Picture
+			// before its MaxSize/MaxPictures children) and was flagged as needing a human check
+			// against the actual spec rather than trusting the internal pattern. Verified against
+			// the published [MS-ASWBXML] spec, revision 24.0 (2025-05-20), section 2.1.2.1.26
+			// "Code Page 25: Find" — the table there lists exactly MaxPictures=0x20, MaxSize=0x21,
+			// Picture=0x22 in that order, so this transcription is correct as written; it is Find,
+			// not the other two pages, that is the outlier in MS-ASWBXML itself. Pinned by
+			// WbxmlCodePagesTests.FindPage25_PictureTripletOrder_MatchesMsAswbxmlSpec.
 			new(25, EasNamespaces.Find, T(
 				(0x05, "Find"), (0x06, "SearchId"), (0x07, "ExecuteSearch"),
 				(0x08, "MailBoxSearchCriterion"), (0x09, "Query"), (0x0A, "Status"),
