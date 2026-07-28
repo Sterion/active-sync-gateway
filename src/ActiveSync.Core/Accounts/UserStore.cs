@@ -70,12 +70,18 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
 		string normalized = NormalizeLogin(login);
-		User? row = await db.Users.Include(u => u.BackendRoles)
+		// B8: no Include here — UserProvisioner.EnsureUserAsync calls this on EVERY authenticated
+		// request (the Ping/Sync hot path), but BackendRoles is only needed in the branches below
+		// that actually WRITE a declaration (essentially never after first sign-in). Re-load with
+		// the Include only when a write is about to happen.
+		User? row = await db.Users
 			.FirstOrDefaultAsync(u => u.Login == normalized, ct).ConfigureAwait(false);
 		if (row is not null)
 		{
 			if (row.Declared || declarationIfMissing is null)
 				return (row.UserId, false);
+			row = await db.Users.Include(u => u.BackendRoles)
+				.FirstAsync(u => u.UserId == row.UserId, ct).ConfigureAwait(false);
 			ToEntity(declarationIfMissing, row);
 			await BumpStampAsync(db, ct).ConfigureAwait(false);
 			return (row.UserId, true);

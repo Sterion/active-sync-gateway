@@ -1,3 +1,4 @@
+using System.Data.Common;
 using ActiveSync.Core.Accounts;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Administration;
@@ -8,6 +9,7 @@ using ActiveSync.Core.State;
 using ActiveSync.Crypto;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -349,6 +351,31 @@ public sealed class UserStoreTests : IDisposable
 	}
 
 	[Fact]
+	public async Task GetOrCreateUser_HotPath_DoesNotJoinBackendRoles()
+	{
+		// B8: UserProvisioner.EnsureUserAsync calls GetOrCreateUserAsync on EVERY authenticated
+		// request (the Ping/Sync hot path), but the BackendRoles collection is needed only in the
+		// two branches that WRITE a declaration — essentially never after first sign-in. The
+		// common path (row exists and is already declared) must not join/materialize
+		// UserBackendRoles at all.
+		await _store.UpsertAsync("anna", new UserOptions
+		{
+			MailAddress = "a@x",
+			Backends = new Dictionary<string, BackendRoleOverride> { ["MailStore"] = new() { UserName = "imap-anna" } },
+		}, CancellationToken.None);
+
+		SqlCapturingInterceptor capture = new();
+		UserStore hot = new(new InterceptedDbContextFactory(_connection, capture));
+		(int userId, bool declarationWritten) =
+			await hot.GetOrCreateUserAsync("anna", new UserOptions(), CancellationToken.None);
+
+		Assert.False(declarationWritten); // the hot-path "already declared" branch, not a write
+		Assert.True(userId > 0);
+		Assert.DoesNotContain(capture.CommandTexts,
+			sql => sql.Contains("UserBackendRoles", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Fact]
 	public async Task Store_ListAndGet_RoundTrip()
 	{
 		Assert.Null(await _store.ReadStampAsync(CancellationToken.None));
@@ -581,6 +608,27 @@ public sealed class UserStoreTests : IDisposable
 				.UseSqlite(connection)
 				.Options;
 			return new SqliteSyncDbContext(options);
+		}
+	}
+
+	/// <summary>Records every SQL command text executed, so a test can assert a table was/was not touched.</summary>
+	private sealed class SqlCapturingInterceptor : DbCommandInterceptor
+	{
+		public List<string> CommandTexts { get; } = [];
+
+		public override InterceptionResult<DbDataReader> ReaderExecuting(
+			DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result)
+		{
+			CommandTexts.Add(command.CommandText);
+			return base.ReaderExecuting(command, eventData, result);
+		}
+
+		public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+			DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+			CancellationToken cancellationToken = default)
+		{
+			CommandTexts.Add(command.CommandText);
+			return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
 		}
 	}
 }
