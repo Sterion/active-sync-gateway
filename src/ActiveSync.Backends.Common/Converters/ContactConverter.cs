@@ -32,15 +32,18 @@ public static class ContactConverter
 	/// </summary>
 	public static List<XElement>? ToApplicationData(string vcf, BodyPreference bodyPreference)
 	{
-		return ToApplicationData(vcf, 96 * 1024);
+		return ToApplicationData(vcf, 96 * 1024, bodyPreference.TruncationSize);
 	}
 
 	/// <summary>
 	///   <paramref name="maxPhotoBytes" /> caps PHOTO on the wire; the ghosting merge passes
 	///   <see cref="int.MaxValue" /> so an oversized stored photo survives an update it was
-	///   never sent in.
+	///   never sent in. <paramref name="noteTruncationSize" /> is null (no truncation) on the
+	///   ghosting path — the merge needs the FULL stored note to re-embed in the vCard, never a
+	///   client-budget-truncated one, or an unrelated edit would permanently cut the note down to
+	///   whatever a past sync's TruncationSize allowed.
 	/// </summary>
-	private static List<XElement>? ToApplicationData(string vcf, int maxPhotoBytes)
+	private static List<XElement>? ToApplicationData(string vcf, int maxPhotoBytes, long? noteTruncationSize = null)
 	{
 		if (Vcf.Parse(vcf).FirstOrDefault() is not { } vcard)
 			return null;
@@ -155,7 +158,11 @@ public static class ContactConverter
 			data.Add(new XElement(Contacts + "Picture", Convert.ToBase64String(bytes)));
 
 		string? note = vcard.Notes?.FirstOrDefault(n => n is not null)?.Value;
-		if (!string.IsNullOrEmpty(note)) data.Add(AirSyncBodyWriter.Build(Encoding.UTF8.GetByteCount(note), false, note));
+		if (!string.IsNullOrEmpty(note))
+		{
+			(string sent, bool truncated, long estimated) = BodyText.ForBody(note, noteTruncationSize);
+			data.Add(AirSyncBodyWriter.Build(estimated, truncated, sent));
+		}
 
 		IReadOnlyList<string>? categories = vcard.Categories?.FirstOrDefault(c => c is not null)?.Value;
 		if (categories is not null && categories.Any())

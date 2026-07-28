@@ -352,4 +352,26 @@ public class ContactConverterTests
 		Assert.Single(data, e => e.Name == Contacts + "BusinessCity");
 		Assert.Equal("First Street 1", data.First(e => e.Name == Contacts + "BusinessStreet").Value);
 	}
+
+	[Fact]
+	public void Read_LargeNote_IsTruncatedToTheRequestedBodyPreference()
+	{
+		// D11 — bodyPreference was accepted and discarded: the note was always written in full
+		// (AirSyncBodyWriter.Build(..., truncated: false, ...) hard-coded), against the size
+		// budget the device asked for, and the device was told the body was complete.
+		string longNote = string.Concat(Enumerable.Repeat("0123456789", 200)); // 2000 chars
+		string vcard =
+			"BEGIN:VCARD\r\nVERSION:3.0\r\nUID:c-note\r\nN:Person;Test;;;\r\nFN:Test Person\r\n" +
+			$"NOTE:{longNote}\r\nEND:VCARD\r\n";
+
+		List<XElement>? data = ContactConverter.ToApplicationData(vcard, new BodyPreference(1, 256, false));
+
+		Assert.NotNull(data);
+		XElement body = data!.Single(e => e.Name == AirSyncBase + "Body");
+		string truncatedFlag = body.Element(AirSyncBase + "Truncated")!.Value;
+		string sent = body.Element(AirSyncBase + "Data")!.Value;
+
+		Assert.Equal("1", truncatedFlag);
+		Assert.True(Encoding.UTF8.GetByteCount(sent) <= 256);
+	}
 }
