@@ -2,6 +2,7 @@ using System.Xml.Linq;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.State;
+using ActiveSync.Protocol;
 using ActiveSync.Protocol.Sync;
 using ActiveSync.Protocol.Wbxml;
 
@@ -33,13 +34,19 @@ public sealed class GetItemEstimateHandler(
 			                 ?? collection.Element(GIE + "SyncKey")?.Value ?? "0";
 			string? filterType = collection.Descendants(AS + "FilterType").FirstOrDefault()?.Value;
 
-			XElement Response(string status, int? estimate)
+			XElement Response(string status, int? estimate, IContentStore? resolvedStore = null)
 			{
+				XElement collectionElement = new(GIE + "Collection",
+					new XElement(GIE + "CollectionId", collectionId),
+					estimate is null ? null : new XElement(GIE + "Estimate", estimate.ToString()));
+				// F28: a 12.1 client identifies a collection by Class + CollectionId (mirroring the
+				// deliberate EchoClassIfLegacy handling in SyncHandler.Collection.cs) — only once the
+				// store is known, since Class names the collection's EAS class.
+				if (context.Version <= EasVersion.V121 && resolvedStore is not null)
+					collectionElement.AddFirst(new XElement(GIE + "Class", resolvedStore.EasClass));
 				return new XElement(GIE + "Response",
 					new XElement(GIE + "Status", status),
-					new XElement(GIE + "Collection",
-						new XElement(GIE + "CollectionId", collectionId),
-						estimate is null ? null : new XElement(GIE + "Estimate", estimate.ToString())));
+					collectionElement);
 			}
 
 			(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
@@ -84,12 +91,12 @@ public sealed class GetItemEstimateHandler(
 				// A flaky store must not 500 the whole multi-collection request; report status 2
 				// for this collection and let the survivors through (as SyncHandler does).
 				logger.LogError(ex, "GetItemEstimate revision listing failed for {CollectionId}", collectionId);
-				responses.Add(Response("2", null));
+				responses.Add(Response("2", null, store));
 				continue;
 			}
 
 			CollectionChanges diff = CollectionDiff.Compute(snapshot, current, int.MaxValue);
-			responses.Add(Response("1", diff.Adds.Count + diff.Changes.Count + diff.Deletes.Count));
+			responses.Add(Response("1", diff.Adds.Count + diff.Changes.Count + diff.Deletes.Count, store));
 		}
 
 		await context.WriteResponseAsync(new XDocument(

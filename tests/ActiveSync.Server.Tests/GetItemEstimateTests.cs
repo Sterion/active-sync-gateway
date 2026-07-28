@@ -92,6 +92,39 @@ public sealed class GetItemEstimateTests : IDisposable
 		Assert.Equal("2", resp?.Element(GIE + "Status")?.Value);
 	}
 
+	// F28 (round 3) — a 12.1 client identifies a collection by Class + CollectionId (mirroring the
+	// deliberate EchoClassIfLegacy handling in SyncHandler.Collection.cs), but the response never
+	// carried Class at all.
+	[Fact]
+	public async Task LegacyClient_ReportsClassAlongsideCollectionId()
+	{
+		UserFolder inbox = await InboxAsync();
+		_harness.Session.Store.Revisions["10"] = "a";
+
+		// Prime the collection with a real Sync round first (key 0 -> 1) so GetItemEstimate reaches
+		// the estimate path rather than the unprimed Status 3 short-circuit.
+		await _harness.RunAsync(NewSyncHandler(), "Sync", new XDocument(
+			new XElement(AS + "Sync",
+				new XElement(AS + "Collections",
+					new XElement(AS + "Collection",
+						new XElement(AS + "SyncKey", "0"),
+						new XElement(AS + "CollectionId", inbox.ServerId))))));
+
+		XDocument? response = await _harness.RunAsync(
+			new GetItemEstimateHandler(_harness.Folders, NullLogger<GetItemEstimateHandler>.Instance),
+			"GetItemEstimate",
+			new XDocument(new XElement(GIE + "GetItemEstimate",
+				new XElement(GIE + "Collections",
+					new XElement(GIE + "Collection",
+						new XElement(AS + "SyncKey", "1"),
+						new XElement(GIE + "CollectionId", inbox.ServerId))))),
+			protocolVersion: "12.1");
+
+		XElement? collection = response?.Root?.Element(GIE + "Response")?.Element(GIE + "Collection");
+		Assert.Equal("1", response?.Root?.Element(GIE + "Response")?.Element(GIE + "Status")?.Value);
+		Assert.Equal(EasClass.Email, collection?.Element(GIE + "Class")?.Value);
+	}
+
 	private async Task<UserFolder> InboxAsync()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
