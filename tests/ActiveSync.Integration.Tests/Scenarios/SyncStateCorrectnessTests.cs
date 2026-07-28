@@ -27,14 +27,18 @@ public class SyncStateCorrectnessTests(GatewayFixture gateway)
 		string inbox = client.FolderOfType(EasFolderType.Inbox).ServerId;
 		string key = await client.InitialSyncAsync(inbox); // key is now > 0
 
-		// An anomalous GetItemEstimate carrying SyncKey 0 used to reset the snapshot/key.
+		// An anomalous GetItemEstimate carrying SyncKey 0 used to reset the snapshot/key. Key 0
+		// always means "as if starting fresh" (PeekSyncKeyAsync classifies it Initial regardless of
+		// whatever real state is already primed — the same interpretation Sync itself uses), so the
+		// answer is MS-ASCMD Status 3 (SYNCSTATENOTPRIMED), not an estimate (F18, round 3) — the
+		// point of this test is that answering it this way must not touch the REAL primed state.
 		XDocument? estimate = await client.PostAsync("GetItemEstimate", new XDocument(
 			new XElement(GIE + "GetItemEstimate",
 				new XElement(GIE + "Collections",
 					new XElement(GIE + "Collection",
 						new XElement(AS + "SyncKey", "0"),
 						new XElement(AS + "CollectionId", inbox))))));
-		Assert.Equal("1", estimate?.Root?.Element(GIE + "Response")?.Element(GIE + "Status")?.Value);
+		Assert.Equal("3", estimate?.Root?.Element(GIE + "Response")?.Element(GIE + "Status")?.Value);
 
 		// The real sync key must still validate — proof the estimate did not touch state.
 		SyncResult afterEstimate = await client.SyncAsync(inbox);

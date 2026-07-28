@@ -3,15 +3,20 @@ using ActiveSync.Contracts;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Server.Eas;
 using ActiveSync.Server.Eas.Handlers;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Server.Tests;
 
 /// <summary>
-///   GetItemEstimate (MS-ASCMD 2.2.1.9) status-code conformance: an unprimed/invalid sync key
-///   is status 3 (re-sync from 0), not 4 (F19); a flaky backend during the revision listing
-///   degrades that one collection to status 2 rather than 500-ing the whole request (F20).
+///   GetItemEstimate (MS-ASCMD 2.2.1.9) status-code conformance: an unprimed collection (key 0)
+///   is status 3 (SYNCSTATENOTPRIMED) without estimating; a stale/mismatched/unparseable key is
+///   status 4 (INVALIDSYNCKEY) (F18 — round 3; this corrects an earlier round's F19, which landed
+///   the two the wrong way round, see the note on <see cref="StaleOrMismatchedSyncKey_ReportsStatus4" />);
+///   a flaky backend during the revision listing degrades that one collection to status 2 rather
+///   than 500-ing the whole request (F20, an earlier round).
 /// </summary>
 public sealed class GetItemEstimateTests : IDisposable
 {
@@ -25,29 +30,63 @@ public sealed class GetItemEstimateTests : IDisposable
 		_harness.Dispose();
 	}
 
-	// F19 — a stale/unprimed sync key must be status 3 ("invalid sync key, re-sync from 0"),
-	// not 4 ("collection invalid"), which makes the client drop the folder from the hierarchy.
+	// F18 (round 3): the collection has never completed a Sync round (key 0) — there is no
+	// snapshot to diff against, so MS-ASCMD Status 3 (SYNCSTATENOTPRIMED) tells the client to run
+	// an initial Sync first, rather than silently estimating against an empty baseline (which
+	// would report every item on the backend as "new" — a meaningless number for a client that
+	// has never synced).
 	[Fact]
-	public async Task InvalidSyncKey_ReportsStatus3()
+	public async Task UnprimedInitialKey_ReportsStatus3_WithoutEstimating()
+	{
+		UserFolder inbox = await InboxAsync();
+		_harness.Session.Store.Revisions["10"] = "a";
+		_harness.Session.Store.Revisions["11"] = "b";
+
+		XDocument? response = await RunAsync(inbox.ServerId, "0");
+
+		XElement? resp = response?.Root?.Element(GIE + "Response");
+		Assert.Equal("3", resp?.Element(GIE + "Status")?.Value);
+		Assert.Null(resp?.Element(GIE + "Estimate"));
+	}
+
+	// F18 (round 3) — corrects an earlier round's F19, which read MS-ASCMD's GetItemEstimate
+	// status table by analogy to the unrelated Sync command's table and landed the two swapped:
+	// a stale/mismatched/unparseable key was answered 3, and this test used to assert exactly
+	// that. Confirmed against the published MS-ASCMD GetItemEstimate Status element: 3 is
+	// SYNCSTATENOTPRIMED (see the Initial test above), 4 is INVALIDSYNCKEY — this case.
+	[Fact]
+	public async Task StaleOrMismatchedSyncKey_ReportsStatus4()
 	{
 		UserFolder inbox = await InboxAsync();
 
 		XDocument? response = await RunAsync(inbox.ServerId, "5"); // nonzero key, no primed state
 
 		XElement? resp = response?.Root?.Element(GIE + "Response");
-		Assert.Equal("3", resp?.Element(GIE + "Status")?.Value);
+		Assert.Equal("4", resp?.Element(GIE + "Status")?.Value);
 	}
 
-	// F20 — a single flaky store must not take down the multi-collection request. The endpoint
-	// has a catch-all that would turn an unguarded throw into HTTP 500; the handler must catch it
-	// and report status 2 for that collection instead (matching SyncHandler's per-collection path).
+	// F20 (an earlier round) — a single flaky store must not take down the multi-collection
+	// request. The endpoint has a catch-all that would turn an unguarded throw into HTTP 500; the
+	// handler must catch it and report status 2 for that collection instead (matching
+	// SyncHandler's per-collection path).
 	[Fact]
 	public async Task BackendListingFailure_ReportsStatus2_DoesNotThrow()
 	{
 		UserFolder inbox = await InboxAsync();
+
+		// F18 (round 3): GetItemEstimate's own key-0 handling now short-circuits to Status 3
+		// without ever reaching the listing, so exercising the listing failure needs a real,
+		// primed (Current) key — commit one via an actual Sync round first.
+		await _harness.RunAsync(NewSyncHandler(), "Sync", new XDocument(
+			new XElement(AS + "Sync",
+				new XElement(AS + "Collections",
+					new XElement(AS + "Collection",
+						new XElement(AS + "SyncKey", "0"),
+						new XElement(AS + "CollectionId", inbox.ServerId))))));
+
 		_harness.Session.Store.GetRevisionsFailWith = () => new BackendException("listing blew up");
 
-		XDocument? response = await RunAsync(inbox.ServerId, "0"); // initial → reaches the listing
+		XDocument? response = await RunAsync(inbox.ServerId, "1"); // primed key → reaches the listing
 
 		XElement? resp = response?.Root?.Element(GIE + "Response");
 		Assert.Equal("2", resp?.Element(GIE + "Status")?.Value);
@@ -70,5 +109,26 @@ public sealed class GetItemEstimateTests : IDisposable
 					new XElement(GIE + "Collection",
 						new XElement(AS + "SyncKey", syncKey),
 						new XElement(AS + "CollectionId", collectionId))))));
+	}
+
+	private SyncHandler NewSyncHandler()
+	{
+		return new SyncHandler(
+			_harness.Folders,
+			TestOptionsMonitor.SnapshotOf(_harness.Options),
+			new StubLifetime(),
+			new MeetingInvitationService(NullLogger<MeetingInvitationService>.Instance),
+			NullLogger<SyncHandler>.Instance);
+	}
+
+	private sealed class StubLifetime : IHostApplicationLifetime
+	{
+		public CancellationToken ApplicationStarted => CancellationToken.None;
+		public CancellationToken ApplicationStopping => CancellationToken.None;
+		public CancellationToken ApplicationStopped => CancellationToken.None;
+
+		public void StopApplication()
+		{
+		}
 	}
 }

@@ -55,12 +55,19 @@ public sealed class GetItemEstimateHandler(
 			// (ValidateSyncKeyAsync, used by Sync, would reset the snapshot on key 0).
 			(SyncKeyValidation validation, Dictionary<string, string> snapshot, int stateFilterType) =
 				await context.State.PeekSyncKeyAsync(context.Device, collectionId, syncKey, ct);
+			// F18: MS-ASCMD's GetItemEstimate Status element is its own table, distinct from Sync's —
+			// 3 is SYNCSTATENOTPRIMED (the collection has never completed a Sync round) and 4 is
+			// INVALIDSYNCKEY (a stale/mismatched/unparseable key). Initial (key 0) falls through to
+			// the estimate below only in valid states (Current/Replay); it must not estimate against
+			// an empty baseline, which would report every backend item as "new".
+			if (validation == SyncKeyValidation.Initial)
+			{
+				responses.Add(Response("3", null));
+				continue;
+			}
 			if (validation == SyncKeyValidation.Invalid)
 			{
-				// Status 3 = "invalid synchronization key" (client re-syncs from 0). Status 4 is
-				// "the specified collection is invalid" — reporting it makes the client drop the
-				// folder from the hierarchy instead of re-priming it.
-				responses.Add(Response("3", null));
+				responses.Add(Response("4", null));
 				continue;
 			}
 
