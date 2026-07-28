@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Ruben Andersen
 // SPDX-License-Identifier: MIT
 
+using System.Globalization;
+
 namespace ActiveSync.Protocol;
 
 /// <summary>
@@ -32,9 +34,13 @@ public readonly record struct EasVersion(int Major, int Minor) : IComparable<Eas
 		if (value is null)
 			return V141;
 		int dot = value.IndexOf('.');
+		// W19: NumberStyles.None + InvariantCulture (rather than the default
+		// NumberStyles.Integer + CurrentCulture) so whitespace- or sign-padded text ("
+		// 16.1", "+16.+1") does not parse -- the Known allowlist below is meant to gate the
+		// literal wire text, not a culture-tolerant reading of it.
 		if (dot <= 0 ||
-		    !int.TryParse(value.AsSpan(0, dot), out int major) ||
-		    !int.TryParse(value.AsSpan(dot + 1), out int minor))
+		    !int.TryParse(value.AsSpan(0, dot), NumberStyles.None, CultureInfo.InvariantCulture, out int major) ||
+		    !int.TryParse(value.AsSpan(dot + 1), NumberStyles.None, CultureInfo.InvariantCulture, out int minor))
 			return V141;
 		EasVersion parsed = new(major, minor);
 		return Array.IndexOf(Known, parsed) >= 0 ? parsed : V141;

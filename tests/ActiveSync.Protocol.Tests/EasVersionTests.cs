@@ -43,6 +43,18 @@ public sealed class EasVersionTests
 		Assert.False(EasVersion.Parse(input) >= EasVersion.V160);
 	}
 
+	// W19: int.TryParse defaults to NumberStyles.Integer + CurrentCulture, which allows leading/
+	// trailing whitespace and a leading sign -- against the repo's invariant-culture rule. Because
+	// " 16" and "+1" still parse to 16/1, a whitespace- or sign-padded header matches the Known
+	// allowlist (V161) even though it is not the literal "16.1" the allowlist is meant to gate.
+	[Theory]
+	[InlineData(" 16.1")]
+	[InlineData("+16.+1")]
+	public void Parse_WhitespaceOrSignPadded_IsRejected_FallsBackTo141(string input)
+	{
+		Assert.Equal(EasVersion.V141, EasVersion.Parse(input));
+	}
+
 	[Fact]
 	public void Ordering_GatesWork()
 	{
