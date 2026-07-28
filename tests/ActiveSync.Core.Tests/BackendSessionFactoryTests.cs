@@ -6,6 +6,7 @@ using ActiveSync.Core.Accounts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Observability;
 using ActiveSync.Core.Options;
+using ActiveSync.Core.Settings;
 using ActiveSync.Core.State;
 using ActiveSync.Crypto;
 using Microsoft.Data.Sqlite;
@@ -271,6 +272,61 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		Assert.Equal(2, survivor);
 	}
 
+	[Fact]
+	public async Task RecycleAll_OneThrowingProviderTrim_StillTrimsTheRestUnaffected()
+	{
+		// A7: RecycleAll's per-user resource trim loop was unguarded, unlike the IDENTICAL loop in
+		// EvictIdleSessionsCore, which wraps the whole sweep specifically "because the trim runs
+		// plugin code". RecycleAll is reached from BackendRolesProvider.Changed (a live
+		// `eas config set Backends:...`), so one provider throwing there must not stop the rest of
+		// the fleet from being trimmed against the new settings.
+		FakeMailProvider mail = new(); // supports the mandatory MailStore/MailSubmit roles
+		ThrowingResourceOwnerProvider throwing = new(); // registered FIRST, so an unguarded loop
+		TrackingResourceOwnerProvider tracking = new(); // never reaches this one
+		BackendProviderRegistry registry = new([mail, throwing, tracking], NullLogger<BackendProviderRegistry>.Instance);
+
+		// FakeMailProvider supports every role, so assigning "fake" everywhere avoids needing the
+		// "local" fallback provider (which isn't registered in this test's registry) — otherwise
+		// ValidateProviders' per-role lookup would fail and the rebuild would never fire Changed.
+		Dictionary<string, string?> backendConfig = new()
+		{
+			["ActiveSync:Backends:MailStore:Provider"] = "fake",
+			["ActiveSync:Backends:MailStore:Host"] = "old.example.com",
+			["ActiveSync:Backends:MailSubmit:Provider"] = "fake",
+		};
+		foreach (string role in new[] { "Calendar", "Contacts", "Tasks", "Notes" })
+			backendConfig[$"ActiveSync:Backends:{role}:Provider"] = "fake";
+
+		DbSettingsConfigurationSource dbSource = new();
+		IConfigurationRoot config = new ConfigurationBuilder()
+			.AddInMemoryCollection(backendConfig)
+			.Add(dbSource)
+			.Build();
+		BackendRolesProvider rolesProvider = new(config, registry);
+
+		ActiveSyncOptions options = new()
+		{
+			Encryption = new EncryptionOptions { AllowPlaintext = true }, Eas = new EasOptions()
+		};
+		IOptionsMonitor<ActiveSyncOptions> monitor = TestOptionsMonitor.Of(options);
+		UserResolver resolver = new(monitor, rolesProvider, registry);
+		// The factory's ctor subscribes RecycleAll to rolesProvider.Changed — the live recycle path.
+		await using BackendSessionFactory factory = new(monitor, resolver, rolesProvider, _dbFactory, registry,
+			NullLogger<BackendSessionFactory>.Instance);
+
+		// A live backend-settings edit (e.g. `eas config set ActiveSync:Backends:MailStore:Host ...`)
+		// changes the Backends subtree, firing BackendRolesProvider.Changed -> RecycleAll.
+		Record.Exception(() => dbSource.Provider.SetData(new Dictionary<string, string?>
+		{
+			["ActiveSync:Backends:MailStore:Provider"] = "fake",
+			["ActiveSync:Backends:MailStore:Host"] = "new.example.com",
+			["ActiveSync:Backends:MailSubmit:Provider"] = "fake",
+		}));
+
+		Assert.True(throwing.WasCalled); // the throwing provider was reached
+		Assert.True(tracking.WasCalled); // and the sibling AFTER it in the loop still got trimmed
+	}
+
 	private static bool SessionsContainsKey(BackendSessionFactory factory, string key)
 	{
 		object sessions = typeof(BackendSessionFactory)
@@ -449,6 +505,48 @@ public sealed class BackendSessionFactoryTests : IDisposable
 			return Task.FromResult<IBackendConnection>(
 				new BackendConnection([new FakeMailStore()], new FakeSubmit(), ownedResources: [LastResource]));
 		}
+	}
+
+	/// <summary>A provider with no roles whose <see cref="TrimUserResources" /> always throws (A7).</summary>
+	private sealed class ThrowingResourceOwnerProvider : IBackendProvider, IPerUserResourceOwner
+	{
+		private static readonly IReadOnlySet<BackendRole> None = new HashSet<BackendRole>();
+
+		public bool WasCalled { get; private set; }
+
+		public string Name => "throwing";
+		public IReadOnlySet<BackendRole> SupportedRoles => None;
+
+		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures) { }
+		public string DescribeRole(BackendRole role, ProviderSettings settings) => "throwing";
+
+		public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct) =>
+			throw new NotSupportedException();
+
+		public void TrimUserResources(IReadOnlySet<string> activeGatewayLogins)
+		{
+			WasCalled = true;
+			throw new InvalidOperationException("simulated plugin failure trimming per-user resources");
+		}
+	}
+
+	/// <summary>A provider with no roles that just records whether it was trimmed (A7).</summary>
+	private sealed class TrackingResourceOwnerProvider : IBackendProvider, IPerUserResourceOwner
+	{
+		private static readonly IReadOnlySet<BackendRole> None = new HashSet<BackendRole>();
+
+		public bool WasCalled { get; private set; }
+
+		public string Name => "tracking";
+		public IReadOnlySet<BackendRole> SupportedRoles => None;
+
+		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures) { }
+		public string DescribeRole(BackendRole role, ProviderSettings settings) => "tracking";
+
+		public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct) =>
+			throw new NotSupportedException();
+
+		public void TrimUserResources(IReadOnlySet<string> activeGatewayLogins) => WasCalled = true;
 	}
 
 	/// <summary>

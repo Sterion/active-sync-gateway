@@ -324,10 +324,21 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 				_ = DisposeLazyAsync(removed);
 		_authCache.Clear();
 		_authNegativeCache.Clear();
-		// With no live sessions left, every provider's per-user resources (IDLE watchers) are trimmed.
+		// With no live sessions left, every provider's per-user resources (IDLE watchers) are
+		// trimmed. A7: unlike EvictIdleSessionsCore's periodic sweep (which gets another chance a
+		// minute later), RecycleAll runs once per settings edit — so one throwing provider must not
+		// skip the rest; each is guarded individually rather than the whole loop.
 		foreach (IBackendProvider provider in _registry.All)
 			if (provider is IPerUserResourceOwner owner)
-				owner.TrimUserResources(new HashSet<string>(StringComparer.Ordinal));
+				try
+				{
+					owner.TrimUserResources(new HashSet<string>(StringComparer.Ordinal));
+				}
+				catch (Exception ex)
+				{
+					_logger.LogError(ex, "Provider {Provider} failed to trim per-user resources during recycle",
+						provider.Name);
+				}
 	}
 
 	private void EvictIdleSessions()
