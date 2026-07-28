@@ -46,7 +46,7 @@ The `imap` settings are below; for `jmap` see [the JMAP subsection](#backends-pr
 | `Host` | — | IMAP server host. **Required** — startup fails without it. |
 | `Port` | `993` | IMAP port. |
 | `UseSsl` | `true` | Implicit TLS on connect (used when `Security` is unset). |
-| `Security` | `null` | Explicit transport security: `None` \| `SslOnConnect` \| `StartTls` \| `StartTlsWhenAvailable` \| `Auto`. When unset, derived from `UseSsl`/`Port`. `None` also skips opportunistic STARTTLS (needed for plaintext test servers advertising STARTTLS with self-signed certs). |
+| `Security` | `null` | Explicit transport security: `None` \| `SslOnConnect` \| `StartTls` \| `StartTlsWhenAvailable` \| `Auto`. When unset, derived from `UseSsl`/`Port`, defaulting to **opportunistic STARTTLS** on the standard mail ports — this downgrades to cleartext *silently* if the server's greeting omits the capability (an on-path attacker can strip it). Set `StartTls` explicitly to require the upgrade. `None` also skips opportunistic STARTTLS (needed for plaintext test servers advertising STARTTLS with self-signed certs). |
 | `AllowInvalidCertificates` | `false` | Accept any TLS certificate (lab use; wins over `CaCertificatePath`). |
 | `CaCertificatePath` | `null` | PEM file with CA certificates trusted in addition to the system store (private PKI). Validated at startup. |
 | `CheckRevocation` | `false` | Check CRL/OCSP revocation status against `CaCertificatePath`'s trust store. Off by default — most private CAs behind a self-signed/lab setup publish no revocation info, so enabling this against one fails every connection closed. |

@@ -37,8 +37,14 @@ public static class BackendSchemaFields
 			Help: "TLS from the first byte. Only consulted when Security is left unset.");
 		yield return new BackendConfigField("Security", "Transport security", BackendFieldType.Enum,
 			EnumValues: ["None", "SslOnConnect", "StartTls", "StartTlsWhenAvailable", "Auto"],
-			Help: "Explicit override. Unset derives from implicit TLS and the port. " +
-			      "\"None\" also skips opportunistic STARTTLS.");
+			// D31: unset does NOT mean "TLS is required" — the derived default for the standard
+			// mail ports is opportunistic STARTTLS (StartTlsWhenAvailable), which downgrades to
+			// cleartext SILENTLY if a server's greeting omits the STARTTLS capability (an on-path
+			// attacker can strip it). Choose "StartTls" explicitly to make the upgrade mandatory.
+			Help: "Explicit override. Unset derives from implicit TLS and the port, defaulting to " +
+			      "opportunistic STARTTLS on the standard mail ports — this downgrades to cleartext " +
+			      "silently if the server omits the capability. Choose \"StartTls\" to require the " +
+			      "upgrade. \"None\" also skips opportunistic STARTTLS.");
 		foreach (BackendConfigField field in Network())
 			yield return field;
 	}
