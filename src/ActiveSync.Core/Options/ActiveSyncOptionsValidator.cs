@@ -42,6 +42,8 @@ public sealed class ActiveSyncOptionsValidator(IConfiguration? configuration = n
 			failures.Add("ActiveSync:Eas:WatchdogSeconds must be 0 (disabled) or at least 15.");
 		if (options.Eas.FolderRetentionDays is < 0 or > 3650)
 			failures.Add("ActiveSync:Eas:FolderRetentionDays must be between 0 (disabled) and 3650.");
+		if (options.Eas.SendDedupRetentionDays is < 0 or > 3650)
+			failures.Add("ActiveSync:Eas:SendDedupRetentionDays must be between 0 (disabled) and 3650.");
 
 		// Mirror the three SettingKeys catalogue bounds this validator never checked, so a
 		// file/env typo is held to the same range the identical `eas config set` write already is.

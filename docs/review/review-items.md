@@ -538,7 +538,7 @@ HTTP round trip in `EasForwardingClient.RunAsync` still unexercised.
 have no entry in `review-items-detail.md` by design, so the definition-adequacy check is expected to list
 them under "missing detail".)*
 
-`N1` **Low** The F1/F7 send-dedup claims (`SentCommandTokens` rows keyed on the fixed collection
+~~`N1`~~ **Low — FIXED** The F1/F7 send-dedup claims (`SentCommandTokens` rows keyed on the fixed collection
 namespaces `"compose"`/`"meetingresponse"`, generation `0`) are never pruned. `SendDedupStore.PruneAsync`
 only runs from `CollectionStateStore.CommitCollectionStateAsync`, keyed to a REAL Sync collection's own
 new SyncKey (`SyncStateService.cs`, right after a Sync round commits) — it never touches rows whose

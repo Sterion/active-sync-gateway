@@ -51,6 +51,17 @@ public sealed class EasOptions
 	public int FolderRetentionDays { get; set; } = 30;
 
 	/// <summary>
+	///   Days a COMPLETED send-dedup claim (<c>SentCommandToken</c> rows keyed on the fixed
+	///   ComposeMail/MeetingResponse collection namespaces, which no Sync round ever commits under)
+	///   is kept before a background sweep deletes it. Every other claim is reclaimed within a
+	///   generation or two by the owning collection's own commit; these two are not, so without this
+	///   sweep they accumulate one row per mail ever sent by reference and per meeting ever responded
+	///   to, for the life of the device. 0 disables the sweep (rows are kept forever). An unconfirmed
+	///   (never-completed) claim is never swept by age — it may still be genuinely in flight.
+	/// </summary>
+	public int SendDedupRetentionDays { get; set; } = 30;
+
+	/// <summary>
 	///   Use a dedicated IMAP IDLE connection for the priority mail folder during Ping/Sync
 	///   waits (sub-30 s push). Falls back to STATUS polling when disabled or unsupported.
 	/// </summary>
