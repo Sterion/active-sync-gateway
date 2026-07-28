@@ -59,6 +59,21 @@ public class SecretValueTests
 		Assert.NotNull(error);
 	}
 
+	// K8: SecretValue, LocalCliEnvelope and LocalCliResult all sealed under the SAME constant AAD
+	// ("activesync:config:v1"), so a ciphertext produced for one message type authenticates just
+	// as well through another type's unseal path — only the JSON shape (which the AEAD layer never
+	// looks at) told them apart. Domain separation must live in the AAD itself.
+	[Fact]
+	public void CliEnvelopeCiphertext_IsUnsealableAsAConfigSecret_BeforeDomainSeparation()
+	{
+		byte[] key = Key();
+		string cliCiphertext = LocalCliEnvelope.Create(["user", "list"], null, 1234L).Seal(key);
+
+		// The config-secret unseal path must never accept a /cli request envelope's ciphertext.
+		Assert.False(SecretValue.TryUnseal(cliCiphertext, key, out string? plaintext, out _));
+		Assert.Null(plaintext);
+	}
+
 	[Fact]
 	public void LocalContentProtectorOutput_IsNotUnsealable()
 	{

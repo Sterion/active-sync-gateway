@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Linq;
 
@@ -18,6 +19,9 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 {
 	private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+	/// <summary>K8: this type's own AAD — never shared with a config secret or a <see cref="LocalCliResult" />.</summary>
+	private static readonly byte[] RequestAad = Encoding.UTF8.GetBytes("activesync:cli:req:v1");
+
 	/// <summary>
 	///   How far a timestamp may run AHEAD of the gateway's clock. Deliberately far smaller than the
 	///   backwards window: a future timestamp buys an attacker replay time, and the two clocks are
@@ -30,7 +34,7 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 		new(args, stdin, nowUnixMs, Convert.ToBase64String(RandomNumberGenerator.GetBytes(16)));
 
 	/// <summary>AES-256-GCM seals the envelope with the master key (reuses the <c>enc:v1:</c> format).</summary>
-	public string Seal(byte[] key) => SecretValue.Seal(JsonSerializer.Serialize(this, Json), key);
+	public string Seal(byte[] key) => SecretValue.Seal(JsonSerializer.Serialize(this, Json), key, RequestAad);
 
 	/// <summary>
 	///   Opens a sealed envelope: unseals with the key (wrong/absent key ⇒ false), then rejects it
@@ -58,7 +62,7 @@ public sealed record LocalCliEnvelope(string[] Args, string? Stdin, long Timesta
 		envelope = null;
 		if (string.IsNullOrEmpty(sealedValue))
 			return false;
-		if (!SecretValue.TryUnseal(sealedValue, key, out string? json, out _) || json is null)
+		if (!SecretValue.TryUnseal(sealedValue, key, RequestAad, out string? json, out _) || json is null)
 			return false;
 
 		LocalCliEnvelope? decoded;
@@ -123,8 +127,11 @@ public sealed record LocalCliResult(
 {
 	private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+	/// <summary>K8: this type's own AAD — never shared with a config secret or a <see cref="LocalCliEnvelope" />.</summary>
+	private static readonly byte[] ResponseAad = Encoding.UTF8.GetBytes("activesync:cli:res:v1");
+
 	/// <summary>AES-256-GCM seals the result with the master key (reuses the <c>enc:v1:</c> format).</summary>
-	public string Seal(byte[] key) => SecretValue.Seal(JsonSerializer.Serialize(this, Json), key);
+	public string Seal(byte[] key) => SecretValue.Seal(JsonSerializer.Serialize(this, Json), key, ResponseAad);
 
 	/// <summary>
 	///   Opens a sealed result. Returns false — never throws — on any malformed, absent or
@@ -135,7 +142,7 @@ public sealed record LocalCliResult(
 		result = null;
 		if (string.IsNullOrEmpty(sealedValue))
 			return false;
-		if (!SecretValue.TryUnseal(sealedValue, key, out string? json, out _) || json is null)
+		if (!SecretValue.TryUnseal(sealedValue, key, ResponseAad, out string? json, out _) || json is null)
 			return false;
 
 		try
