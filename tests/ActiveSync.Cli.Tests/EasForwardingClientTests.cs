@@ -64,6 +64,23 @@ public sealed class EasForwardingClientTests
 			name => name == "Kestrel__Endpoints__Http__Url" ? "http://0.0.0.0:5080/" : null,
 			Path.GetTempPath()));
 
+	// E23: ASPNETCORE_URLS=http://+:5080 and http://*:5080 are idiomatic Kestrel wildcard hosts (the
+	// shipped image instead sets Kestrel__Endpoints__Http__Url, so it never hits this), but
+	// ResolveBaseUrl only normalized 0.0.0.0/[::]/localhost — a hand-rolled deployment using either
+	// wildcard form got a base URL naming a host ("+" or "*") that fails DNS, so every command
+	// silently falls back to a full cold start of ActiveSync.Server.dll with no diagnostic.
+	[Fact]
+	public void ResolveBaseUrl_PlusWildcardHost_BecomesLoopback() =>
+		Assert.Equal("http://127.0.0.1:5080", EasForwardingClient.ResolveBaseUrl(
+			name => name == "ASPNETCORE_URLS" ? "http://+:5080" : null,
+			Path.GetTempPath()));
+
+	[Fact]
+	public void ResolveBaseUrl_StarWildcardHost_BecomesLoopback() =>
+		Assert.Equal("http://127.0.0.1:5080", EasForwardingClient.ResolveBaseUrl(
+			name => name == "Kestrel__Endpoints__Http__Url" ? "http://*:5080" : null,
+			Path.GetTempPath()));
+
 	[Fact]
 	public void BuildRequest_NoKey_IsThePlaintextFallback()
 	{

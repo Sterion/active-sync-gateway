@@ -60,7 +60,11 @@ internal static class EasForwardingClient
 			?? ConfigValue(getEnvironmentVariable, appDirectory, null, "Kestrel", "Endpoints", "Http", "Url")
 			?? "http://127.0.0.1:5080";
 		return url.Replace("0.0.0.0", "127.0.0.1").Replace("[::]", "127.0.0.1")
-			.Replace("://localhost", "://127.0.0.1").TrimEnd('/');
+			.Replace("://localhost", "://127.0.0.1")
+			// E23: ASPNETCORE_URLS=http://+:5080 and http://*:5080 are idiomatic Kestrel wildcard
+			// hosts too — left unhandled, the client tries to resolve a host literally named "+"/"*",
+			// fails DNS, and silently falls back to a full cold start for every command.
+			.Replace("://+:", "://127.0.0.1:").Replace("://*:", "://127.0.0.1:").TrimEnd('/');
 	}
 
 	// Env var (when named) wins, else the nested value from the co-located appsettings.json.
