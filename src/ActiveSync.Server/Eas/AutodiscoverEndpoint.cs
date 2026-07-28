@@ -145,7 +145,10 @@ public static class AutodiscoverEndpoint
 		// forwarded scheme/host are ignored (they would otherwise hand an authenticated client an
 		// attacker-chosen sync URL); set ActiveSync:PublicUrl to pin the advertised URL entirely.
 		bool trusted = EndpointAuth.IsFromTrustedProxy(http, auth);
-		string scheme = (trusted ? http.Request.Headers["X-Forwarded-Proto"].FirstOrDefault() : null)
+		// E16: the header may itself be a comma-separated chain (each proxy appends its own hop) —
+		// take the LAST entry, matching WebApplicationExtensions.ResolvePublicScheme, not the first
+		// (which, under an appending proxy, is whatever the client itself sent).
+		string scheme = (trusted ? http.Request.Headers["X-Forwarded-Proto"].FirstOrDefault()?.Split(',')[^1].Trim() : null)
 		                ?? http.Request.Scheme;
 		string? host = (trusted ? http.Request.Headers["X-Forwarded-Host"].FirstOrDefault() : null)
 		               ?? http.Request.Host.Value;

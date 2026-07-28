@@ -58,4 +58,19 @@ public sealed class AutodiscoverUrlTests
 
 		Assert.Equal($"https://eas.example.com{Path}", url);
 	}
+
+	// E16: X-Forwarded-Proto may itself be a comma-separated chain (multiple proxies each appended a
+	// hop) — the same shape WebApplicationExtensions.ResolvePublicScheme handles by taking the LAST
+	// entry (the outermost trusted proxy's own observed value), not the first (whatever the client
+	// itself sent). BuildEasUrl used the raw header value verbatim with no split at all, so a chained
+	// value fell through to Request.Scheme instead of ever matching a real "http"/"https" scheme.
+	[Fact]
+	public void ForwardedProto_Chain_TakesTheLastEntry()
+	{
+		AuthOptions auth = new() { TrustedProxies = ["10.0.0.0/8"] };
+		string url = AutodiscoverEndpoint.BuildEasUrl(
+			Request("10.1.2.3", "gateway.local", proto: "https, http"), auth, null);
+
+		Assert.Equal($"http://gateway.local{Path}", url);
+	}
 }

@@ -271,13 +271,16 @@ public static class WebApplicationExtensions
 
 	/// <summary>
 	///   The scheme to force onto the request, or null to keep its own. A configured
-	///   <paramref name="publicUrl" /> beats the <paramref name="forwardedProto" /> header (which may
-	///   be a proxy-chain list — the first entry, the original client, wins).
+	///   <paramref name="publicUrl" /> beats the <paramref name="forwardedProto" /> header. E16: unlike
+	///   <c>X-Forwarded-For</c>'s rightmost-untrusted-hop rule (<see cref="EndpointAuth.ClientKey" />),
+	///   a proxy-chain list here takes the LAST entry, not the first — under a proxy that APPENDS
+	///   rather than overwrites the header, the leftmost value is whatever the client itself sent, so
+	///   a direct client could otherwise self-certify the scheme the header is meant to convey.
 	/// </summary>
 	internal static string? ResolvePublicScheme(string? publicUrl, string? forwardedProto)
 	{
 		if (!string.IsNullOrWhiteSpace(publicUrl) && Uri.TryCreate(publicUrl, UriKind.Absolute, out Uri? uri))
 			return uri.Scheme;
-		return string.IsNullOrWhiteSpace(forwardedProto) ? null : forwardedProto.Split(',')[0].Trim();
+		return string.IsNullOrWhiteSpace(forwardedProto) ? null : forwardedProto.Split(',')[^1].Trim();
 	}
 }

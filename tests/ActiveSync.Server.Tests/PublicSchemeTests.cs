@@ -23,10 +23,16 @@ public sealed class PublicSchemeTests
 		Assert.Equal("https", WebApplicationExtensions.ResolvePublicScheme(null, "https"));
 	}
 
+	// E16 (behaviour change): X-Forwarded-Proto used to take the LEFTMOST entry of a comma-separated
+	// chain, unlike X-Forwarded-For's rightmost-untrusted-hop rule (EndpointAuth.ClientKey) — behind
+	// a proxy that APPENDS rather than overwrites the header, the leftmost value is whatever the
+	// CLIENT sent, so a direct client could force the scheme downstream by sending its own
+	// "http, https" and having the proxy append its own hop. Taking the last entry matches the
+	// header's actual semantics under an appending proxy (the trusted proxy's own observed value).
 	[Fact]
-	public void ForwardedProto_ChainTakesTheFirst()
+	public void ForwardedProto_ChainTakesTheLast()
 	{
-		Assert.Equal("https", WebApplicationExtensions.ResolvePublicScheme(null, "https, http"));
+		Assert.Equal("http", WebApplicationExtensions.ResolvePublicScheme(null, "https, http"));
 	}
 
 	[Fact]
