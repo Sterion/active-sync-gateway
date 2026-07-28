@@ -92,9 +92,9 @@ public sealed class LocalContentProtector : IDisposable
 			CryptographicOperations.ZeroMemory(_key);
 	}
 
-	// K2: the AAD binds a ciphertext row to its (user, collection) so it cannot be replayed under
+	// The AAD binds a ciphertext row to its (user, collection) so it cannot be replayed under
 	// another identity. The owner is the immutable UserId — never the login, so a rename leaves
-	// every sealed row decryptable (db-restructure item 2). Framing is versioned and
+	// every sealed row decryptable. Framing is versioned and
 	// self-delimiting: "v2" ‖ LE64(userId) ‖ LE32(byteLen(collection)) ‖ UTF8(collection). The
 	// fixed-width id and the length prefix make the encoding injective by construction — no
 	// delimiter, so no delimiter-injection ambiguity, and no control-character rules to depend on.

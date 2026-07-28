@@ -104,7 +104,7 @@ internal sealed class DeviceStore(SyncDbContext db)
 		{
 			// A concurrent first request for the same (user, device) inserted the row first.
 			// Re-read the winner and re-apply the touch as an update. Only a unique violation
-			// takes this path — any other failure propagates with its diagnostic intact (A9).
+			// takes this path — any other failure propagates with its diagnostic intact.
 			db.Entry(device).State = EntityState.Detached;
 			device = await db.Devices
 				.FirstAsync(d => d.UserId == userId && d.DeviceId == deviceId, ct).ConfigureAwait(false);
@@ -150,7 +150,7 @@ internal sealed class DeviceStore(SyncDbContext db)
 	/// </summary>
 	public async Task CompleteAccountWipeAsync(Device device, CancellationToken ct)
 	{
-		// A6: bounded retry — either failure below means this attempt's save never landed, so
+		// Bounded retry — either failure below means this attempt's save never landed, so
 		// each pass re-derives its own state from a fresh read rather than assuming the first
 		// attempt's decisions still hold.
 		const int maxAttempts = 4;
@@ -179,7 +179,7 @@ internal sealed class DeviceStore(SyncDbContext db)
 				// A concurrent wipe ack already inserted this device's block between our
 				// AnyAsync check and this insert — the block we want exists, so this is success, not
 				// a 500. Drop our duplicate insert; the next pass's AnyAsync sees the winner and
-				// skips the insert, persisting only the wipe-completion flag (A22).
+				// skips the insert, persisting only the wipe-completion flag.
 				db.Entry(added).State = EntityState.Detached;
 			}
 			catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
@@ -188,7 +188,7 @@ internal sealed class DeviceStore(SyncDbContext db)
 				// GetOrCreateDeviceAsync, or a pipelined FolderSync bumping FolderSyncKey)
 				// advanced its ConcurrencyToken between our read and this save. Reload the row
 				// and re-apply the wipe-completion flag on the next pass rather than surfacing a
-				// 500 on this security-critical ack (A6).
+				// 500 on this security-critical ack.
 				if (added is not null)
 					db.Entry(added).State = EntityState.Detached;
 				await db.Entry(device).ReloadAsync(ct).ConfigureAwait(false);

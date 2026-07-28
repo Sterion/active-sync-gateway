@@ -10,7 +10,7 @@ namespace ActiveSync.Core.Observability;
 ///   increments happen deep in handlers and backends where DI plumbing would be pure
 ///   ceremony — the OpenTelemetry provider in the Server project subscribes by meter name.
 ///   Per-user labels are on by default and gated by <see cref="PerUserLabels" />; when off,
-///   the user tag value collapses to "-". Metrics:PerUser is a LIVE-tier setting (B3/E2), so
+///   the user tag value collapses to "-". Metrics:PerUser is a LIVE-tier setting, so
 ///   <see cref="PerUserLabels" /> reads through a provider wired by
 ///   <see cref="SetPerUserLabelsProvider" /> — the same live <c>IOptionsMonitor</c> snapshot
 ///   every other live setting reads, rather than a value captured once at startup.
@@ -19,7 +19,7 @@ public static class GatewayMetrics
 {
 	public const string MeterName = "ActiveSync.Gateway";
 
-	// K4: every instrument shares one Prometheus namespace prefix so the gateway's series are
+	// Every instrument shares one Prometheus namespace prefix so the gateway's series are
 	// grep-able and don't collide with a co-scraped app's generic names (sync_items, mail_sent, …).
 	private const string Prefix = "activesync_";
 
@@ -49,7 +49,7 @@ public static class GatewayMetrics
 		Prefix + "auth_throttle_rejections", null,
 		"Authentication attempts rejected by the brute-force throttle, by source (eas|webui).");
 
-	// K5: auth outcomes, so a dashboard can see the success/failure/throttle mix per source rather
+	// Auth outcomes, so a dashboard can see the success/failure/throttle mix per source rather
 	// than only counting rejections.
 	private static readonly Counter<long> AuthOutcomes = Meter.CreateCounter<long>(
 		Prefix + "auth_outcomes", null, "Authentication outcomes by source, outcome and user.");
@@ -57,7 +57,7 @@ public static class GatewayMetrics
 	private static readonly ConcurrentDictionary<string, int> ActiveLongPolls =
 		new(StringComparer.OrdinalIgnoreCase);
 
-	// K3: observer slots are read (from the gauge callback on the metrics-collection thread) and
+	// Observer slots are read (from the gauge callback on the metrics-collection thread) and
 	// written (from startup / provider registration) on different threads, so they are volatile to
 	// publish the reference safely. Last-write-wins: the per-process single owner plugs its live
 	// counts in; test hosts overwrite each other harmlessly.
@@ -76,7 +76,7 @@ public static class GatewayMetrics
 				.Where(pair => pair.Value > 0)
 				.Select(pair => new Measurement<long>(pair.Value, new KeyValuePair<string, object?>("user", pair.Key))),
 			null, "EAS long-polls (Ping/Sync waits) currently parked, by user.");
-		// K5: seconds until the serving TLS certificate expires (negative once expired). Emits nothing
+		// Seconds until the serving TLS certificate expires (negative once expired). Emits nothing
 		// until an observer is wired (plaintext / no cert), like the other gauges.
 		Meter.CreateObservableGauge(Prefix + "tls_certificate_expiry_seconds",
 			() =>
@@ -89,7 +89,7 @@ public static class GatewayMetrics
 			"s", "Seconds until the serving TLS certificate expires (negative if already expired).");
 	}
 
-	// B3/E2: last-write-wins, same rationale as the observer slots above — a fresh test host's
+	// Last-write-wins, same rationale as the observer slots above — a fresh test host's
 	// wiring must win over a previous one's, and the two only ever race benignly.
 	private static volatile Func<bool>? _perUserLabelsProvider;
 
@@ -113,7 +113,7 @@ public static class GatewayMetrics
 		_perUserLabelsProvider = read;
 	}
 
-	// A3: bounds any future call site that hands User() an unauthenticated, attacker-controlled
+	// Bounds any future call site that hands User() an unauthenticated, attacker-controlled
 	// value directly — the same 128-char budget EndpointAuth's LogText.Clean uses for the same
 	// field.
 	private const int MaxUserLabelLength = 128;
@@ -164,7 +164,7 @@ public static class GatewayMetrics
 			new KeyValuePair<string, object?>("command", label),
 			new KeyValuePair<string, object?>("status", statusCode),
 			new KeyValuePair<string, object?>("user", User(user)));
-		// K4: the duration histogram carries the same status dimension as the counter, so
+		// The duration histogram carries the same status dimension as the counter, so
 		// latency can be sliced by outcome (e.g. 401s are cheap, 200 Syncs are not).
 		EasRequestDuration.Record(seconds,
 			new KeyValuePair<string, object?>("command", label),
@@ -176,7 +176,7 @@ public static class GatewayMetrics
 	/// </summary>
 	public static void RecordAuthOutcome(string source, string outcome, string user)
 	{
-		// A3: `user` on every non-success path is the raw HTTP Basic username — an unauthenticated
+		// `user` on every non-success path is the raw HTTP Basic username — an unauthenticated
 		// caller controls it outright (a throttled/rejected/errored request never proved the
 		// identity), so it becomes its own Prometheus series for any distinct string a sprayer
 		// cares to send. Only "success" has actually verified the login; every other outcome
@@ -238,7 +238,7 @@ public static class GatewayMetrics
 
 	/// <summary>
 	///   Removes the sessions observer, but only if it is still the EXACT delegate passed in
-	///   (A10) — a disposed <c>BackendSessionFactory</c> must not clear a later factory's observer
+	///   — a disposed <c>BackendSessionFactory</c> must not clear a later factory's observer
 	///   (e.g. a fresh <c>WebApplicationFactory</c> in a test host) out from under it; it may only
 	///   ever clear its own. Benign race with a concurrent <see cref="SetSessionsObserver" />, same
 	///   as the rest of this last-write-wins slot.
@@ -254,7 +254,7 @@ public static class GatewayMetrics
 		_idleWatchersObserver = observe;
 	}
 
-	/// <summary>Publishes the serving TLS certificate's expiry for the expiry gauge (K5).</summary>
+	/// <summary>Publishes the serving TLS certificate's expiry for the expiry gauge.</summary>
 	public static void SetCertificateExpiryObserver(Func<DateTimeOffset?> observe)
 	{
 		_certificateExpiryObserver = observe;
@@ -277,7 +277,7 @@ public static class GatewayMetrics
 			if (_disposed)
 				return;
 			_disposed = true;
-			// K2: decrement, and drop the entry once it hits zero — otherwise the dictionary keeps one
+			// Decrement, and drop the entry once it hits zero — otherwise the dictionary keeps one
 			// dead slot per distinct user that ever parked a long-poll, for the process lifetime. The
 			// KeyValuePair Remove overload deletes only if the value is still the one we read, so a
 			// concurrent increment cannot lose its slot.

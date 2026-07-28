@@ -36,7 +36,7 @@ internal static class BackendKeyValidator
 		if (shapeError is not null)
 			return shapeError;
 
-		// B5: the shape check above only judges the leaf/provider in isolation — it does not know
+		// The shape check above only judges the leaf/provider in isolation — it does not know
 		// that a config-declared user's OWN settings (BackendRoleOverride.Settings, merged onto
 		// whichever provider a role currently names) can become invalid under a NEW provider even
 		// though nothing about the write itself looks wrong. UserResolver.ValidateUsers is the
@@ -146,7 +146,7 @@ internal static class BackendKeyValidator
 			: null;
 
 	/// <summary>
-	///   B12: the write surfaces (`eas config set`, the web settings PUT) already refuse a global
+	///   The write surfaces (`eas config set`, the web settings PUT) already refuse a global
 	///   Password/UserName leaf via <see cref="InertCredentialLeaf" /> — but that check runs only on
 	///   the value being WRITTEN, so the identical key placed directly in a config file (never going
 	///   through either write surface) was silently accepted and silently inert. Applied to an
@@ -169,7 +169,7 @@ internal static class BackendKeyValidator
 
 	/// <summary>
 	///   Whether a backend leaf key holds a secret, for masking in `eas config list/get`. The
-	///   provider's own schema is authoritative (B25) — a declared <see cref="BackendFieldType.Secret" />
+	///   provider's own schema is authoritative — a declared <see cref="BackendFieldType.Secret" />
 	///   field, whatever its name — with the <see cref="SecretRedaction.IsSecretName" /> name heuristic
 	///   as the fallback when no field claims the leaf (a plugin describing part or none of its surface).
 	/// </summary>
@@ -215,10 +215,10 @@ internal static class BackendKeyValidator
 			return ex.Message;
 		}
 
-		// B24: switching a role's Provider is not just "can this provider serve the role" — a value
+		// Switching a role's Provider is not just "can this provider serve the role" — a value
 		// ALREADY stored under the role that is mis-SHAPED for the NEW provider (an out-of-range Port,
 		// an unknown enum) must be rejected now, not surface at the next restart (the live rebuild
-		// doesn't validate it — B14). Only PRESENT values are checked, per-field, exactly as the
+		// validates providers but not per-field shape). Only PRESENT values are checked, per-field, exactly as the
 		// non-Provider branch checks a single leaf — completeness (a still-missing required field) is
 		// a startup concern the operator is mid-filling, so it must not block assigning the provider.
 		IReadOnlyList<BackendConfigField> schema = provider.DescribeConfiguration(role);

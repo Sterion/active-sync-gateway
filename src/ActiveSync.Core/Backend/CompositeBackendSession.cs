@@ -14,12 +14,12 @@ public sealed class CompositeBackendSession : IBackendSession
 {
 	private readonly List<IBackendConnection> _connections = [];
 	private readonly List<IContentStore> _stores = [];
-	// A2: only used so a disposal failure can be logged instead of thrown into the caller's
+	// Only used so a disposal failure can be logged instead of thrown into the caller's
 	// `await using` — optional because most callers (tests, in particular) have no logger handy
 	// and a swallow-silently fallback is still strictly better than the previous throw.
 	private readonly ILogger? _logger;
 
-	// A2: the session is a refcounted lease. The cache owns the initial reference; every
+	// The session is a refcounted lease. The cache owns the initial reference; every
 	// GetSessionAsync hands out an additional lease that the request releases (via DisposeAsync)
 	// when it finishes. The connections are torn down only when the last lease is released — so
 	// the idle sweep evicting a session a long-running Ping is still using drops the cache's
@@ -38,7 +38,7 @@ public sealed class CompositeBackendSession : IBackendSession
 	}
 
 	/// <summary>
-	///   Opens one connection per provider (K61: <see cref="IBackendProvider.CreateConnectionAsync" />
+	///   Opens one connection per provider (<see cref="IBackendProvider.CreateConnectionAsync" />
 	///   is async — the composite awaits each provider's transport open) and aggregates the resulting
 	///   stores and side operations.
 	/// </summary>
@@ -54,13 +54,13 @@ public sealed class CompositeBackendSession : IBackendSession
 	{
 		CompositeBackendSession session = new(gatewayCredentials, userId, mailAddress, logger);
 
-		// A1: everything below can throw AFTER one or more providers already opened a live
+		// Everything below can throw AFTER one or more providers already opened a live
 		// connection (a later provider's bad BaseUrl, an unsupported role, a transport-open
 		// failure, or either `?? throw` below). Without this guard the half-built session is
 		// discarded — never returned, so nothing ever disposes the connections already gathered
 		// in `session._connections` — and a phone Pinging against a half-broken configuration
 		// leaks one provider's sockets per attempt. Dispose whatever was opened so far before
-		// letting the failure propagate; DisposeConnectionsAsync never throws (A2), so this
+		// letting the failure propagate; DisposeConnectionsAsync never throws, so this
 		// cleanup cannot mask the original exception.
 		try
 		{
@@ -98,7 +98,7 @@ public sealed class CompositeBackendSession : IBackendSession
 		}
 	}
 
-	// A24: written on the request path and read by the eviction timer thread — a bare DateTime is
+	// Written on the request path and read by the eviction timer thread — a bare DateTime is
 	// larger than a word and has no read/write atomicity guarantee, so the timer could read a torn
 	// or indefinitely-stale value. Backed by long ticks with Interlocked read/write.
 	private long _lastUsedTicks = DateTime.UtcNow.Ticks;
@@ -154,7 +154,7 @@ public sealed class CompositeBackendSession : IBackendSession
 		return false;
 	}
 
-	/// <summary>Releases one lease (A2). The connections are disposed only on the last release.</summary>
+	/// <summary>Releases one lease. The connections are disposed only on the last release.</summary>
 	public async ValueTask DisposeAsync()
 	{
 		if (Interlocked.Decrement(ref _leaseCount) != 0)
@@ -164,7 +164,7 @@ public sealed class CompositeBackendSession : IBackendSession
 
 	private async ValueTask DisposeConnectionsAsync()
 	{
-		// A12: one throwing connection (e.g. an IMAP LOGOUT on a dead socket) must not abort the
+		// One throwing connection (e.g. an IMAP LOGOUT on a dead socket) must not abort the
 		// loop and strand the remaining connections' live sockets — dispose them all, then surface
 		// the failures together.
 		List<Exception>? failures = null;
@@ -178,12 +178,12 @@ public sealed class CompositeBackendSession : IBackendSession
 				(failures ??= []).Add(ex);
 			}
 
-		// A2: this used to rethrow, but the public DisposeAsync() above is reached through the
+		// This used to rethrow, but the public DisposeAsync() above is reached through the
 		// request's `await using` in EasEndpoint — which sits OUTSIDE its try/catch — so a
 		// throwing teardown (e.g. an IMAP LOGOUT on a dead socket) surfaced as an unhandled
 		// exception for a lease release that has nothing to do with the request's own outcome
 		// (the response may already be written). It also reaches here from CreateAsync's failure
-		// cleanup (A1), where throwing would replace the ORIGINAL build failure. Log instead —
+		// cleanup, where throwing would replace the ORIGINAL build failure. Log instead —
 		// every connection was still given its chance to dispose above.
 		if (failures is { Count: > 0 })
 			_logger?.LogWarning(new AggregateException(failures),

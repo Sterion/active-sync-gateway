@@ -30,7 +30,7 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options, Tim
 	private const int PruneIntervalSeconds = 30;
 
 	/// <summary>
-	///   Number of candidates inspected by <see cref="EvictOldestToMakeRoom" /> (K6). A full O(n)
+	///   Number of candidates inspected by <see cref="EvictOldestToMakeRoom" />. A full O(n)
 	///   scan over up to <see cref="MaxTrackedKeys" /> entries on every over-capacity insert would
 	///   itself become an O(n)-per-request cost once an attack keeps the table pinned at the cap
 	///   (the exact problem the prune rate-limit exists to avoid) — a small bounded sample is
@@ -44,7 +44,7 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options, Tim
 
 	/// <summary>
 	///   UTC ticks of the next allowed prune scan, 0 (== <see cref="DateTime.MinValue" />) until
-	///   the first call. K8: a plain <c>DateTime</c> field here was mutated by a bare
+	///   the first call. A plain <c>DateTime</c> field here was mutated by a bare
 	///   check-then-set under concurrent <see cref="RecordFailure" /> calls — not just a benign
 	///   double-scan race, but a torn 8-byte read/write with no atomicity guarantee, able to
 	///   observe a garbage timestamp (far-future → pruning wedges off; far-past → the O(n) scan
@@ -99,7 +99,7 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options, Tim
 			// pays for cleanup — the old code scanned on EVERY failure once the table was large,
 			// which handed a username-rotating attacker an O(n) cost per request.
 			Prune();
-			// K6: beyond the cap, EVICT rather than refuse. Refusing meant one address that fills
+			// Beyond the cap, EVICT rather than refuse. Refusing meant one address that fills
 			// the table by rotating usernames permanently starves every OTHER address of its own
 			// per-address ceiling key for the rest of the failure window — a two-host attacker
 			// (host A floods and accepts its own throttling, host B then brute-forces) faced no
@@ -127,7 +127,7 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options, Tim
 	/// <summary>
 	///   Clears a key on a successful login. Pass <paramref name="isAddressKey" /> = true ONLY for
 	///   the shared per-address ceiling key (<see cref="IpWideLimit" />) — the call is then a
-	///   deliberate no-op (K7): a valid login for one account must never reset the address-wide
+	///   deliberate no-op: a valid login for one account must never reset the address-wide
 	///   ceiling, or an attacker holding any one valid credential could rotate usernames
 	///   indefinitely from that address. Only a granular (address, username) key may ever be
 	///   cleared here.
@@ -162,7 +162,7 @@ public sealed class AuthThrottle(IOptionsMonitor<ActiveSyncOptions> options, Tim
 
 	/// <summary>
 	///   Makes room for one more key by dropping the oldest-windowed entry among a bounded sample
-	///   (K6) — an approximate LRU eviction, not an exact global-oldest scan, so the cost per
+	///   — an approximate LRU eviction, not an exact global-oldest scan, so the cost per
 	///   over-capacity insert stays O(<see cref="EvictionSampleSize" />) instead of O(table size).
 	/// </summary>
 	private void EvictOldestToMakeRoom()

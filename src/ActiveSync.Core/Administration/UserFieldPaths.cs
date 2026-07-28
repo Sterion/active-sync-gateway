@@ -23,7 +23,7 @@ internal static class UserFieldPaths
 		/// <summary>
 		///   True only for the gateway login password (hashed via pbkdf2); false for the per-role
 		///   backend passwords (sealed via enc:v1:) and for non-secret fields. An explicit flag so
-		///   callers stop inferring "gateway vs backend" from the absence of a ':' in the key (L43).
+		///   callers stop inferring "gateway vs backend" from the absence of a ':' in the key.
 		/// </summary>
 		public bool IsGatewayPassword { get; init; }
 	}

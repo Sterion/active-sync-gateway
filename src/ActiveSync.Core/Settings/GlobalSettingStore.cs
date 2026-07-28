@@ -33,7 +33,7 @@ public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)
 	public async Task<string?> GetAsync(string key, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
-		// B7: the row's Key is normalized to lowercase on write (see UpsertAsync), so a plain
+		// The row's Key is normalized to lowercase on write (see UpsertAsync), so a plain
 		// equality on the normalized value is both case-insensitive AND a sargable seek on the
 		// primary-key index — unlike the previous `s.Key.ToLower() == key.ToLower()`, which put a
 		// function on the indexed column and forced a full table scan on every lookup.
@@ -53,7 +53,7 @@ public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)
 
 	public async Task UpsertAsync(string key, string value, CancellationToken ct)
 	{
-		// Defence in depth (B12): the write surfaces (`eas config set`, the web settings API) already
+		// Defence in depth: the write surfaces (`eas config set`, the web settings API) already
 		// refuse bootstrap/host-controlled keys, and DbSettingsConfigurationProvider drops any that
 		// reach the table by another route — but the store is the last common chokepoint, so refuse
 		// here too. A stored Database:ConnectionString / Encryption:Key row would be read on the next
@@ -61,7 +61,7 @@ public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)
 		if (SettingKeys.HostControlledReason(key) is { } reason)
 			throw new InvalidOperationException($"'{key}' cannot be stored in the database: {reason}.");
 
-		// B7: normalize the STORED key itself (not just the comparison) — every get/upsert/delete
+		// Normalize the STORED key itself (not just the comparison) — every get/upsert/delete
 		// then becomes a sargable equality seek on the primary key, and the primary key (case-
 		// sensitive on both providers) can no longer hold two rows that differ only in case (a race
 		// between two replicas' UpsertAsync calls, a restored dump, or any out-of-band write): both
@@ -103,7 +103,7 @@ public sealed class GlobalSettingStore(ISyncDbContextFactory contextFactory)
 
 	/// <summary>
 	///   Bumps the "settings" area AND saves — the one SaveChangesAsync for whichever mutation the
-	///   caller staged. A8: uses <see cref="DataChangeStamps.BumpAndSaveAsync" /> rather than the
+	///   caller staged. Uses <see cref="DataChangeStamps.BumpAndSaveAsync" /> rather than the
 	///   racing <see cref="DataChangeStamps.BumpAsync" /> + a bare save, so two replicas' very first
 	///   bump of this area resolves as an update instead of a raw PK violation.
 	/// </summary>

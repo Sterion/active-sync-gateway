@@ -12,7 +12,7 @@ internal static class DbExceptions
 	///   insert-race guards may swallow and re-read. Every other <see cref="DbUpdateException" />
 	///   (disk full, SQLITE_BUSY, a NOT NULL violation, a lost connection) is a real error and
 	///   must propagate with its original diagnostic intact rather than be re-read into a
-	///   confusing "Sequence contains no elements" (A9).
+	///   confusing "Sequence contains no elements".
 	/// </summary>
 	public static bool IsUniqueViolation(DbUpdateException ex)
 		=> ex.InnerException switch

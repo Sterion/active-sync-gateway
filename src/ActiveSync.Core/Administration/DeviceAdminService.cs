@@ -8,7 +8,7 @@ namespace ActiveSync.Core.Administration;
 ///   The single read/write path over the device registry and its login blocks (`eas devices`,
 ///   `eas block`/`unblock`, `eas device wipe`, `eas purge`, and the web Devices page). Both
 ///   surfaces used to hand-roll the same EF against <see cref="Device" /> and
-///   <see cref="LoginBlock" /> — the S3/C18 defect. The public surface speaks LOGINS (what the
+///   <see cref="LoginBlock" /> separately and drifted. The public surface speaks LOGINS (what the
 ///   operator types); rows are keyed by the immutable <c>UserId</c>, so every method translates
 ///   through the <see cref="User" /> table (case-folded seek). Presentation (paging clamps,
 ///   confirmation echoes, the disabled-account flag from <c>UserResolver</c>) stays with the
@@ -18,7 +18,7 @@ public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, Use
 {
 	/// <summary>
 	///   A device paired with its owner's login, whether the DEVICE is blocked, and whether the
-	///   USER is disabled. The two are distinct mechanisms now (db-restructure decision 19): a
+	///   USER is disabled. The two are distinct mechanisms, each with exactly one owner: a
 	///   block cuts off this device, <c>User.Enabled = false</c> turns the user off everywhere.
 	/// </summary>
 	public sealed record DeviceListing(Device Device, string Login, bool Blocked, bool UserDisabled);
@@ -97,7 +97,7 @@ public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, Use
 	}
 
 	/// <summary>
-	///   Blocks ONE DEVICE. Device-scoped is the only shape there is (decision 19): a bare user
+	///   Blocks ONE DEVICE. Device-scoped is the only shape there is: a bare user
 	///   is refused with <see cref="BlockOutcome.DeviceRequired" /> rather than silently doing
 	///   something subtly different from <c>eas user disable</c>. Enforced HERE, in the seam both
 	///   the CLI and the admin API share, so neither surface can write a shape the schema no
@@ -191,7 +191,7 @@ public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, Use
 	///   itself survives — purging is not deleting the user. Returns one row per affected table
 	///   (Devices first) so the caller can report it.
 	///   <para>
-	///     B16: the DEVICE-scoped form (<paramref name="deviceId" /> set) really is reclaimable sync
+	///     The DEVICE-scoped form (<paramref name="deviceId" /> set) really is reclaimable sync
 	///     state only. The USER-scoped form (<paramref name="deviceId" /> null) is NOT — it also
 	///     deletes every <see cref="LocalItem" /> the user owns (contacts/calendar/tasks/notes
 	///     content, which in a local-stores deployment exists nowhere else) via
@@ -309,7 +309,7 @@ public sealed class DeviceAdminService(ISyncDbContextFactory contextFactory, Use
 				.CountAsync(g => g.UserId == userId, ct).ConfigureAwait(false)),
 			new PurgeCount("device blocks", await db.LoginBlocks
 				.CountAsync(b => b.Device.UserId == userId, ct).ConfigureAwait(false)),
-			// B18: OofSetting and WebSessionRevocation both carry a UserId FK with cascade delete,
+			// OofSetting and WebSessionRevocation both carry a UserId FK with cascade delete,
 			// the same shape as every other row counted above — they were silently absent, which
 			// understated what the operator's confirmation prompt claims to be the full impact.
 			new PurgeCount("oof settings", await db.OofSettings

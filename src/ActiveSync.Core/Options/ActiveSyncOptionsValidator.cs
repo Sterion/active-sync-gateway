@@ -14,7 +14,7 @@ namespace ActiveSync.Core.Options;
 ///   needs the provider registry so each provider can validate its own settings.
 /// </summary>
 /// <param name="configuration">
-///   Optional — only needed for the E8 cross-listener port check, which compares
+///   Optional — only needed for the cross-listener port check, which compares
 ///   <see cref="TlsOptions.Port" />/<see cref="MetricsOptions.Port" /> against the base Kestrel
 ///   HTTP endpoint (<c>Kestrel:Endpoints:Http:Url</c> / <c>ASPNETCORE_URLS</c>), neither of which
 ///   is part of <see cref="ActiveSyncOptions" /> itself. Null (every call site historically
@@ -43,12 +43,12 @@ public sealed class ActiveSyncOptionsValidator(IConfiguration? configuration = n
 		if (options.Eas.FolderRetentionDays is < 0 or > 3650)
 			failures.Add("ActiveSync:Eas:FolderRetentionDays must be between 0 (disabled) and 3650.");
 
-		// B14: mirror the three SettingKeys catalogue bounds this validator never checked, so a
+		// Mirror the three SettingKeys catalogue bounds this validator never checked, so a
 		// file/env typo is held to the same range the identical `eas config set` write already is.
 		if (options.Eas.MaxPingFolders is < 0 or > 65535)
 			failures.Add("ActiveSync:Eas:MaxPingFolders must be between 0 (disabled) and 65535.");
 
-		// B26: mirror the SettingKeys catalogue bounds so file/env values are held to the same range a
+		// Mirror the SettingKeys catalogue bounds so file/env values are held to the same range a
 		// CLI/web write is — otherwise a typo (DefaultWindowSize=0 → empty Sync responses) starts clean.
 		if (options.Eas.DavPollSeconds is < 1 or > 86400)
 			failures.Add("ActiveSync:Eas:DavPollSeconds must be between 1 and 86400.");
@@ -88,7 +88,7 @@ public sealed class ActiveSyncOptionsValidator(IConfiguration? configuration = n
 			failures.Add($"ActiveSync:Log:Mode '{options.Log.Mode}' is unknown (use Simple, Standard or Extended).");
 		if (options.Log.Format.ToLowerInvariant() is not ("text" or "json"))
 			failures.Add($"ActiveSync:Log:Format '{options.Log.Format}' is unknown (use Text or Json).");
-		// B12: shares LogQueryService's alias table (info/warn/critical) rather than matching only
+		// Shares LogQueryService's alias table (info/warn/critical) rather than matching only
 		// the four exact names — `eas logs -l critical` already accepted the alias; a config file
 		// carrying the same value must not brick startup here just because this check didn't know it.
 		if (LogQueryService.NormalizeLevelName(options.Log.DbMinimumLevel) is null)
@@ -154,7 +154,7 @@ public sealed class ActiveSyncOptionsValidator(IConfiguration? configuration = n
 	}
 
 	/// <summary>
-	///   E8: `eas config set` accepted a Tls:Port/Metrics:Port that collides with another listener,
+	///   `eas config set` accepted a Tls:Port/Metrics:Port that collides with another listener,
 	///   and the NEXT start died on bind (Kestrel's ListenAnyIP calls in
 	///   Program.ConfigureHosting) — nothing compared the two dedicated ports against EACH OTHER or
 	///   against the base HTTP endpoint every deployment already has. Tls:Port is only a real

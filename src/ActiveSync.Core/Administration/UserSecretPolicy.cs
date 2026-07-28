@@ -16,7 +16,7 @@ internal static class UserSecretPolicy
 	/// <summary>
 	///   Minimum length for a plaintext gateway password, enforced by every write surface (CLI,
 	///   admin API, self-service portal) through <see cref="PrepareGatewayPassword" /> so none can
-	///   set a trivially weak value (C6). Already-hashed/sealed values are validated by shape.
+	///   set a trivially weak value. Already-hashed/sealed values are validated by shape.
 	/// </summary>
 	internal const int MinGatewayPasswordLength = 8;
 
@@ -38,7 +38,7 @@ internal static class UserSecretPolicy
 
 	internal static SecretResult PrepareGatewayPassword(string raw)
 	{
-		// B19: an empty/whitespace plaintext must never be hashed. Hash("") is a valid pbkdf2$
+		// An empty/whitespace plaintext must never be hashed. Hash("") is a valid pbkdf2$
 		// credential and Verify(Hash(""), "") is true, so an empty gateway Password would let an
 		// empty Basic-auth password authenticate locally and bypass the backend entirely. An
 		// already-hashed/sealed value is handled below (its shape is validated, not its length).
@@ -46,7 +46,7 @@ internal static class UserSecretPolicy
 		    string.IsNullOrWhiteSpace(raw))
 			return new SecretResult(null,
 				"The gateway Password cannot be empty (clear it instead to fall through to the backend).");
-		// C6: a strength floor on the one shared policy, so the portal (which used to hash
+		// A strength floor on the one shared policy, so the portal (which used to hash
 		// directly), the admin API and the CLI all reject a weak plaintext identically.
 		if (!GatewayPasswordHasher.IsHashed(raw) && !SecretValue.IsSealed(raw) &&
 		    raw.Length < MinGatewayPasswordLength)
@@ -67,7 +67,7 @@ internal static class UserSecretPolicy
 	///   password) for storage: an already-sealed value passes through, a plaintext is sealed
 	///   (enc:v1:) when the master key exists, refused when a key is configured but cannot be
 	///   loaded, and stored verbatim only when no key is configured at all. Shared by
-	///   <c>eas config set</c> and the web settings editor so both seal identically (B5).
+	///   <c>eas config set</c> and the web settings editor so both seal identically.
 	/// </summary>
 	internal static SecretResult PrepareCatalogueSecret(string raw, EncryptionOptions encryption, string key)
 	{
@@ -101,7 +101,7 @@ internal static class UserSecretPolicy
 		byte[]? key = EncryptionKeyLoader.TryLoadKey(encryption, out string? keyError);
 		if (key is null)
 		{
-			// B4: null-with-error means a key IS configured but could not be loaded (e.g. Key and
+			// Null-with-error means a key IS configured but could not be loaded (e.g. Key and
 			// KeyFile both set, or an unreadable KeyFile). Discarding that error and storing the
 			// backend password in plaintext hides a misconfiguration behind a silent downgrade —
 			// refuse. Null-with-no-error is the legitimate "no key configured" case.

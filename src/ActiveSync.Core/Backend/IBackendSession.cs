@@ -2,7 +2,7 @@ using ActiveSync.Contracts;
 
 namespace ActiveSync.Core.Backend;
 
-// K57: these are HOST-ONLY types — the composite backend session the host builds over an account's
+// These are HOST-ONLY types — the composite backend session the host builds over an account's
 // provider connections, its factory/cache, and the dashboard projection of that cache. A plugin
 // never implements or receives them (it implements IBackendProvider / IBackendConnection / the
 // store + side-op interfaces in ActiveSync.Contracts), so they do not belong on the published

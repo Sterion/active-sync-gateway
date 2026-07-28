@@ -35,7 +35,7 @@ public static class BackendConfigValidation
 		// Configuration keys are case-insensitive, but this dictionary's comparer depends on the
 		// caller (the web endpoint builds it from a request body). A scalar lookup below used the
 		// caller's comparer while the list check compared ordinal-ignore-case, so "host=" against a
-		// field "Host" was treated as unset and rejected as missing (A14). Normalize once here so
+		// field "Host" was treated as unset and rejected as missing. Normalize once here so
 		// both paths agree on ordinal-ignore-case.
 		Dictionary<string, string?> lookup = new(StringComparer.OrdinalIgnoreCase);
 		foreach ((string key, string? value) in values)

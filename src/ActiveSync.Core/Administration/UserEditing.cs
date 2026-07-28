@@ -36,7 +36,7 @@ internal static class UserEditing
 	///   Case-insensitive config-user lookup. <see cref="ActiveSyncOptions.Users" /> is bound by
 	///   ConfigurationBinder with the default ORDINAL comparer, while logins are case-insensitive
 	///   everywhere else — a differently-cased edit missed the config entry, started from an empty
-	///   overlay and (a DB row replacing the whole config entry) discarded every override (B8).
+	///   overlay and (a DB row replacing the whole config entry) discarded every override.
 	/// </summary>
 	internal static UserOptions? FindConfigUser(ActiveSyncOptions options, string login)
 	{
@@ -60,7 +60,7 @@ internal static class UserEditing
 	}
 
 	/// <summary>
-	///   C2: an incoming scalar value that exactly matches what configuration alone already
+	///   An incoming scalar value that exactly matches what configuration alone already
 	///   supplies for the same field is elided (returned as null — "no database override") rather
 	///   than written back. A full-replacement PUT is populated from the MERGED (config ⊕ database)
 	///   view, so an untouched field submits the config value verbatim; storing it as-is would

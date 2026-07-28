@@ -10,7 +10,7 @@ namespace ActiveSync.Core.State;
 ///     context (via <see cref="ISyncDbContextFactory" />) rather than the request-scoped one it is
 ///     composed with. An id allocation happens mid-Sync while the handler holds a half-mutated
 ///     <see cref="CollectionState" />; committing it on the shared context flushed that state and
-///     bumped its ConcurrencyToken before the round was known good (A10). Isolating it also keeps
+///     bumped its ConcurrencyToken before the round was known good. Isolating it also keeps
 ///     the unique-violation-and-re-read (a self-contained race) from poisoning a larger unit of
 ///     work. It falls back to the shared context only when no factory is supplied (unit tests).
 ///   </para>
@@ -45,7 +45,7 @@ internal sealed class DavItemMap(SyncDbContext db, ISyncDbContextFactory? factor
 			catch (DbUpdateException ex) when (DbExceptions.IsUniqueViolation(ex))
 			{
 				// A concurrent request mapped the same href first — re-read the winner. Only a
-				// unique violation takes this path; any other failure keeps its diagnostic (A9).
+				// unique violation takes this path; any other failure keeps its diagnostic.
 				ctx.Entry(item).State = EntityState.Detached;
 				item = await ctx.DavItems
 					.FirstAsync(i => i.UserFolderKey == folderId && i.Href == href, ct).ConfigureAwait(false);
@@ -59,7 +59,7 @@ internal sealed class DavItemMap(SyncDbContext db, ISyncDbContextFactory? factor
 	///   Batch counterpart of <see cref="GetOrAddDavItemIdAsync" />: maps every distinct href to
 	///   its short id in ONE query and ONE flush, however many are new. The per-item form runs a
 	///   SELECT + a full SaveChanges each, so a 100-item Sync window was 100 round trips / 100
-	///   transactions (A3); the render path pre-resolves its whole window through this instead.
+	///   transactions; the render path pre-resolves its whole window through this instead.
 	/// </summary>
 	public async Task<IReadOnlyDictionary<string, string>> GetOrAddDavItemIdsAsync(
 		UserFolder folder, IReadOnlyCollection<string> hrefs, CancellationToken ct)
@@ -75,7 +75,7 @@ internal sealed class DavItemMap(SyncDbContext db, ISyncDbContextFactory? factor
 
 	/// <summary>
 	///   Bounded so a persistently contended folder fails loudly rather than retrying forever;
-	///   in practice a batch converges in one or two passes (A2).
+	///   in practice a batch converges in one or two passes.
 	/// </summary>
 	private const int MaxBatchAttempts = 5;
 
@@ -88,7 +88,7 @@ internal sealed class DavItemMap(SyncDbContext db, ISyncDbContextFactory? factor
 		// SaveChangesAsync is atomic: one href's unique violation rolls back the WHOLE staged
 		// batch. A single re-read after that only recovers ids the racer itself created — any
 		// href new to THIS request, and not created by the racer, is genuinely absent from that
-		// re-read and would otherwise silently drop out of the returned map (A2). Re-stage
+		// re-read and would otherwise silently drop out of the returned map. Re-stage
 		// whatever is still missing after each re-read and retry, bounded.
 		for (int attempt = 1; attempt <= MaxBatchAttempts; attempt++)
 		{
@@ -119,7 +119,7 @@ internal sealed class DavItemMap(SyncDbContext db, ISyncDbContextFactory? factor
 				// A concurrent request mapped one or more of the same hrefs first — detach our
 				// staged inserts and re-read the winners in one query, then loop to re-stage
 				// anything still missing. Only a unique violation takes this path; any other
-				// failure keeps its diagnostic (A9), same as the single-item form. Exhausting the
+				// failure keeps its diagnostic, same as the single-item form. Exhausting the
 				// bound lets the last attempt's exception propagate instead of being swallowed.
 				foreach (DavItem item in added)
 					ctx.Entry(item).State = EntityState.Detached;
@@ -145,8 +145,8 @@ internal sealed class DavItemMap(SyncDbContext db, ISyncDbContextFactory? factor
 	public async Task<string?> ResolveDavHrefAsync(UserFolder folder, string shortId, CancellationToken ct)
 	{
 		// A pure read flushes nothing, so it stays on the shared context — only the writer above
-		// needs isolation (A10). AsNoTracking: this is a read, never a mutation, so tracking the
-		// entity is pure overhead (A3/A19).
+		// needs isolation. AsNoTracking: this is a read, never a mutation, so tracking the
+		// entity is pure overhead.
 		if (!int.TryParse(shortId, out int id))
 			return null;
 		DavItem? item = await db.DavItems.AsNoTracking()

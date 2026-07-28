@@ -35,19 +35,19 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 #pragma warning restore VSTHRD103
 			}
 
-			// A11/A1/A4: the destructive key-0 reset (wipe both snapshots + ledgers) is DEFERRED to
+			// The destructive key-0 reset (wipe both snapshots + ledgers) is DEFERRED to
 			// this collection's own commit (CommitCollectionStateAsync, Initial mode). This method
 			// used to apply the wipe AND SaveChanges it immediately, which (a) destroyed a live
 			// committed generation the instant a spurious/duplicated key 0 arrived, with no undo if
 			// the round then never committed, and (b) flushed the shared request-scoped tracker,
 			// persisting a sibling collection's pending Replay rollback with no replay generation
-			// (the F12 re-delivery bug, reachable across collections). An existing state is returned
+			// (a re-delivery bug, reachable across collections). An existing state is returned
 			// UNTOUCHED and reset only at commit time.
 			return (SyncKeyValidation.Initial, state);
 		}
 
 		// Invalid returns a null state — never a detached, never-added synthesized entity a
-		// caller might mistake for real state (A17).
+		// caller might mistake for real state.
 		if (state is null || !int.TryParse(clientSyncKey, out int key))
 			return (SyncKeyValidation.Invalid, null);
 
@@ -56,7 +56,7 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 
 		if (key == state.SyncKey - 1 && state.PreviousSnapshotCompressed is not null)
 			// Client never saw our last response — this is a one-generation Replay.
-			// A1/A4/F12: the rollback is NOT applied to the tracked entity here. Doing so left the
+			// The rollback is NOT applied to the tracked entity here. Doing so left the
 			// shared request-scoped entity Modified, where a sibling collection's SaveChanges — or a
 			// key-0 reset — would flush the rolled-back-but-uncommitted state with no replay
 			// generation, so the client's next attempt with the same key validated as Current against
@@ -142,7 +142,7 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 		Dictionary<string, AppliedClientAdd>? appliedAdds = null,
 		Dictionary<string, AppliedClientChange>? appliedChanges = null)
 	{
-		// The deferred state transition (A1/A11): ValidateSyncKeyAsync no longer mutates the tracked
+		// The deferred state transition: ValidateSyncKeyAsync no longer mutates the tracked
 		// entity for a Replay or a key-0 reset, so a sibling collection's flush cannot persist a
 		// half-applied rollback. The mutation lands here, atomically with the new generation.
 		switch (validation)
@@ -187,7 +187,7 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 			// winner — fail the request and let the client retry; the SyncKey it holds is now
 			// one behind, which ValidateSyncKeyAsync recovers via the Replay path.
 			// Reload the entity first: left Modified with its failed values, a later
-			// SaveChangesAsync on the same request would retry the doomed UPDATE (A18).
+			// SaveChangesAsync on the same request would retry the doomed UPDATE.
 			await db.Entry(state).ReloadAsync(ct).ConfigureAwait(false);
 			throw new BackendException("Concurrent sync for this collection — please retry.", ex);
 		}

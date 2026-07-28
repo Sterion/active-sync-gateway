@@ -60,7 +60,7 @@ public static class DataChangeStamps
 	///   Bumps the area and saves, tolerating the first-use insert race: when a concurrent
 	///   replica created the row between our read and our insert, the primary-key conflict is
 	///   caught, the row re-read, and the bump applied as an update. Any other failure keeps its
-	///   own diagnostic (A9).
+	///   own diagnostic.
 	/// </summary>
 	public static async Task BumpAndSaveAsync(SyncDbContext db, string area, CancellationToken ct)
 	{

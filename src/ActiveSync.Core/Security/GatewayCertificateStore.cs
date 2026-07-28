@@ -14,7 +14,7 @@ namespace ActiveSync.Core.Security;
 ///   PKCS#12 blob lives as a single well-known row in the state database (base64, sealed with
 ///   the Encryption master key via <see cref="LocalContentProtector" />), so every restart and
 ///   every replica serves the same certificate and devices only have to trust it once. Validity
-///   is capped under Apple's server-certificate lifetime rule (K4), so <see cref="GetOrCreateAsync" />
+///   is capped under Apple's server-certificate lifetime rule, so <see cref="GetOrCreateAsync" />
 ///   renews the certificate on its own ahead of expiry — deleting the row remains a manual
 ///   regeneration lever, but is no longer required for the certificate to keep working.
 /// </summary>
@@ -75,7 +75,7 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 			{
 				if (stored.NotAfter.ToUniversalTime() > DateTime.UtcNow + RenewalWindow)
 					return stored;
-				// K4: validity is now capped well under a year, so — unlike the historical 20-year
+				// Validity is now capped well under a year, so — unlike the historical 20-year
 				// certificate — this one WILL approach expiry during a deployment's lifetime with no
 				// operator action. Renew ahead of time rather than let it lapse.
 				logger.LogInformation(
@@ -111,13 +111,13 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 		catch (DbUpdateException dbEx)
 		{
 			// Another replica winning the race — either the first-boot INSERT (unique PK conflict)
-			// or, since ServerCertificate.ConcurrencyToken is a concurrency token (K6), the UPDATE
+			// or, since ServerCertificate.ConcurrencyToken is a concurrency token, the UPDATE
 			// that replaces an unreadable/expiring row (DbUpdateConcurrencyException, a
 			// DbUpdateException subtype: the WHERE clause's stale token no longer matches, so a
 			// losing replica's replace can no longer silently overwrite the winner's) — is only ONE
 			// cause of DbUpdateException, the base type. A full disk, a permission failure, a
 			// truncated column, or a provider-level constraint violation all throw the same type and
-			// leave no row behind (K18). Use FirstOrDefaultAsync rather than assuming a winner row
+			// leave no row behind. Use FirstOrDefaultAsync rather than assuming a winner row
 			// exists, and — when it genuinely doesn't — rethrow the real failure with context instead
 			// of letting FirstAsync's "Sequence contains no elements" discard its diagnosis.
 			certificate.Dispose();
@@ -145,7 +145,7 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 		try
 		{
 			byte[] pfx = Convert.FromBase64String(protector.Unprotect(pfxProtected, AadUser, AadCollection));
-			// K9: the decoded PKCS#12 carries the unencrypted private key. Zero it once LoadPkcs12
+			// The decoded PKCS#12 carries the unencrypted private key. Zero it once LoadPkcs12
 			// has parsed it — the finally runs after the return value is materialized.
 			try
 			{
@@ -166,16 +166,16 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 	}
 
 	/// <summary>
-	///   Builds the SAN for <paramref name="host" /> (K5: IP literal vs DNS name). Returns false
+	///   Builds the SAN for <paramref name="host" /> (IP literal vs DNS name). Returns false
 	///   without mutating <paramref name="san" /> further when the host isn't usable in either
-	///   form (K19) — e.g. not a valid IDN name — so the caller can fall back instead of the
+	///   form — e.g. not a valid IDN name — so the caller can fall back instead of the
 	///   whole certificate generation throwing.
 	/// </summary>
 	private static bool TryAddHostName(SubjectAlternativeNameBuilder san, string host)
 	{
 		try
 		{
-			// K5: an IP-addressed client (Docker/k8s NodePort, or a phone pointed at a bare IP)
+			// An IP-addressed client (Docker/k8s NodePort, or a phone pointed at a bare IP)
 			// needs an IP SAN — a DNS name that happens to spell an IP address never satisfies an
 			// IP-based TLS name check.
 			if (IPAddress.TryParse(host, out IPAddress? hostIp))
@@ -195,7 +195,7 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 		SubjectAlternativeNameBuilder san = new();
 		if (!TryAddHostName(san, host))
 		{
-			// K19: an odd PublicUrl host (or any string Generate is handed) can be rejected by
+			// An odd PublicUrl host (or any string Generate is handed) can be rejected by
 			// the SAN builder — that used to throw and take HTTPS startup down with it, with no
 			// fallback. FallbackHost is always a valid DNS name, so this cannot recurse.
 			logger.LogWarning(
@@ -219,13 +219,13 @@ public sealed class GatewayCertificateStore(ISyncDbContextFactory contextFactory
 		request.CertificateExtensions.Add(san.Build());
 
 		// Backdated an hour so a device with mild clock skew accepts it immediately. Validity is
-		// capped at ValidityDays (K4) — Apple refuses a longer-lived leaf on iOS/macOS, the
+		// capped at ValidityDays — Apple refuses a longer-lived leaf on iOS/macOS, the
 		// primary EAS client; GetOrCreateAsync renews ahead of expiry (RenewalWindow) so the cap
 		// doesn't require operator action.
 		DateTimeOffset now = DateTimeOffset.UtcNow;
 		using X509Certificate2 generated = request.CreateSelfSigned(now.AddHours(-1), now.AddDays(ValidityDays));
 		byte[] pfx = generated.Export(X509ContentType.Pkcs12);
-		// K9: the exported PKCS#12 holds the unencrypted private key — zero it once it has been
+		// The exported PKCS#12 holds the unencrypted private key — zero it once it has been
 		// sealed and reloaded. (The base64 string handed to the protector is transient and out of
 		// reach to wipe; the byte buffer is the high-value copy we can clear.)
 		try

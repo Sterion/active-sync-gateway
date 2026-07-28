@@ -41,7 +41,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 				.OnDelete(DeleteBehavior.Cascade);
 			e.HasMany(d => d.Collections).WithOne(c => c.Device).HasForeignKey(c => c.DeviceKey)
 				.OnDelete(DeleteBehavior.Cascade);
-			// Guards FolderSyncKey against pipelined FolderSyncs losing a bump (A6).
+			// Guards FolderSyncKey against pipelined FolderSyncs losing a bump.
 			e.Property(d => d.ConcurrencyToken).IsConcurrencyToken();
 		});
 
@@ -65,7 +65,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 			e.Property(c => c.ConcurrencyToken).IsConcurrencyToken();
 		});
 
-		// F2: one claim per (device, collection, attempt, key); the unique index is what makes a
+		// One claim per (device, collection, attempt, key); the unique index is what makes a
 		// concurrent double-claim race safe (the loser's insert fails and re-reads the winner).
 		// This table KEEPS its surrogate key (see SentCommandToken) but gains the FK it lacked, so
 		// deleting a device no longer orphans its claims.
@@ -127,7 +127,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 
 		// Single well-known row (Id=1) — same explicit-key idiom as DataChange (above), and the
 		// primary-key conflict is what serializes concurrent first-boot generation races.
-		// ConcurrencyToken (K6) additionally serializes the *replace an unreadable/expiring row*
+		// ConcurrencyToken additionally serializes the *replace an unreadable/expiring row*
 		// race, which the primary-key conflict alone doesn't cover (that path is an UPDATE).
 		modelBuilder.Entity<ServerCertificate>(e =>
 		{
@@ -168,7 +168,7 @@ public abstract class SyncDbContext(DbContextOptions options) : DbContext(option
 	// overwriting — the token EF compares in the UPDATE's WHERE is the value originally read.
 	// Overridden on the two-argument forms: those are EF's real interception point, through
 	// which the parameterless overloads and every execution-strategy retry funnel, so stamping
-	// here can never be bypassed (A5).
+	// here can never be bypassed.
 	public override int SaveChanges(bool acceptAllChangesOnSuccess)
 	{
 		StampConcurrencyTokens();

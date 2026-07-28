@@ -6,7 +6,7 @@ namespace ActiveSync.Core.Administration;
 ///   Registers the shared admin services (<see cref="DeviceAdminService" />,
 ///   <see cref="ShareAdminService" />, <see cref="LogQueryService" />) — the single validated
 ///   read/write path over the device, share and log tables that both the web admin API and the
-///   `eas` CLI consume (S3/C18). Each depends only on <c>ISyncDbContextFactory</c>, so it is a
+///   `eas` CLI consume. Each depends only on <c>ISyncDbContextFactory</c>, so it is a
 ///   singleton that opens short-lived contexts, exactly like <c>UserStore</c>.
 /// </summary>
 public static class AdministrationServiceCollectionExtensions

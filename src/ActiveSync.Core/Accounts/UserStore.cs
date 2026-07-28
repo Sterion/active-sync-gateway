@@ -34,10 +34,10 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 	/// <summary>
 	///   Canonical (case-folded, trimmed) form of a login. Logins are case-insensitive everywhere in
 	///   memory (the <see cref="LoadAllAsync" /> map uses <see cref="StringComparer.OrdinalIgnoreCase" />),
-	///   so <see cref="User.Login" /> is STORED in this form (B1/B8): the raw unique index
+	///   so <see cref="User.Login" /> is STORED in this form: the raw unique index
 	///   then enforces case-folded uniqueness on its own — two BINARY-distinct rows like `Phone1` and
 	///   `phone1` can no longer both exist — and every lookup is an exact index seek rather than a
-	///   non-sargable `LOWER()` scan. B13: also trimmed — Basic auth delivers leading/trailing
+	///   non-sargable `LOWER()` scan. Also trimmed — Basic auth delivers leading/trailing
 	///   whitespace verbatim, and an untrimmed lookup (`" bob"` vs `"bob"`) would otherwise mint a
 	///   second, permanent identity that <see cref="UserResolver.ValidateLogin" /> now refuses at the
 	///   config-declared write surface but which pass-through auto-provisioning could still reach.
@@ -70,7 +70,7 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
 		string normalized = NormalizeLogin(login);
-		// B8: no Include here — UserProvisioner.EnsureUserAsync calls this on EVERY authenticated
+		// No Include here — UserProvisioner.EnsureUserAsync calls this on EVERY authenticated
 		// request (the Ping/Sync hot path), but BackendRoles is only needed in the branches below
 		// that actually WRITE a declaration (essentially never after first sign-in). Re-load with
 		// the Include only when a write is about to happen.
@@ -96,7 +96,7 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 #pragma warning restore VSTHRD103
 		try
 		{
-			// A8: BumpStampAsync now bumps AND saves (DataChangeStamps.BumpAndSaveAsync), tolerating
+			// BumpStampAsync now bumps AND saves (DataChangeStamps.BumpAndSaveAsync), tolerating
 			// a concurrent replica's first-ever bump of this area; when there is no declaration to
 			// bump, save directly — either way this is the ONE SaveChangesAsync for this branch.
 			if (declarationIfMissing is not null)
@@ -108,7 +108,7 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 		catch (DbUpdateException ex) when (DbExceptions.IsUniqueViolation(ex))
 		{
 			// A concurrent first-auth (another device, another replica) won the insert race.
-			// A9: only the LOGIN index means that — the row is now there, so re-read the winner.
+			// Only the LOGIN index means that — the row is now there, so re-read the winner.
 			// Any OTHER unique violation (OidcSubject) finds nothing and must surface with its
 			// own diagnostic rather than as "Sequence contains no elements".
 			db.Entry(created).State = EntityState.Detached;
@@ -202,7 +202,7 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 	public async Task<Dictionary<string, UserOptions>> LoadAllAsync(ILogger? logger, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
-		// B20: ordered by UserId so "keeping the last" (below) is a DEFINED rule — the highest
+		// Ordered by UserId so "keeping the last" (below) is a DEFINED rule — the highest
 		// UserId always wins — rather than depending on storage/enumeration order, which can differ
 		// between providers and between replicas of the same database.
 		List<User> entries = await db.Users.AsNoTracking().Include(u => u.BackendRoles)
@@ -213,7 +213,7 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 		Dictionary<string, UserOptions> result = new(StringComparer.OrdinalIgnoreCase);
 		foreach (User entry in entries)
 		{
-			// B1: the store writes Login case-folded so this can't happen through the app, but a
+			// The store writes Login case-folded so this can't happen through the app, but a
 			// pre-fix pair, a restored dump or an out-of-band write can still leave two BINARY-distinct
 			// rows that collapse here last-write-wins. Surface it — never silently drop a user's overrides.
 			if (result.ContainsKey(entry.Login))
@@ -231,7 +231,7 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 	public async Task<UserOptions?> GetAsync(string login, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
-		// B8: Login is stored case-folded (see NormalizeLogin), so an exact match on the normalized
+		// Login is stored case-folded (see NormalizeLogin), so an exact match on the normalized
 		// login is an index seek AND sees every casing.
 		string normalized = NormalizeLogin(login);
 		User? entry = await db.Users.AsNoTracking().Include(u => u.BackendRoles)
@@ -249,7 +249,7 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 		List<(string, UserOptions, DateTime, bool)> result = [];
 		foreach (User entry in entries)
 		{
-			// B15: surface a row with an unparseable settings blob FLAGGED rather than omitting it
+			// Surface a row with an unparseable settings blob FLAGGED rather than omitting it
 			// or throwing — `eas users` and the admin list must still render, marking the row to fix.
 			UserOptions options = FromEntity(entry, null, out bool valid);
 			result.Add((entry.Login, options, entry.UpdatedUtc, valid));
@@ -261,14 +261,14 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 	public async Task UpsertAsync(string login, UserOptions options, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
-		// B8: match on the case-folded login so `eas user set Phone1` updates the existing `phone1`
+		// Match on the case-folded login so `eas user set Phone1` updates the existing `phone1`
 		// row instead of inserting a second, colliding one (index seek, sees every casing).
 		string normalized = NormalizeLogin(login);
 		User? entry = await db.Users.Include(u => u.BackendRoles)
 			.FirstOrDefaultAsync(u => u.Login == normalized, ct).ConfigureAwait(false);
 		if (entry is null)
 		{
-			// B1: store the case-folded login so the raw unique index enforces case-folded uniqueness.
+			// Store the case-folded login so the raw unique index enforces case-folded uniqueness.
 			// DbSet.Add is synchronous and local (no I/O) — AddAsync exists only to support
 			// async value generators (e.g. HiLo/Cosmos), which this project doesn't use.
 			entry = new User { Login = normalized, UpdatedUtc = DateTime.UtcNow };
@@ -284,7 +284,7 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 			catch (DbUpdateException ex) when (DbExceptions.IsUniqueViolation(ex))
 			{
 				// A concurrent identity insert (first-auth race) landed between our read and this
-				// insert — re-read the winner and apply the declaration as an update. A9: that is
+				// insert — re-read the winner and apply the declaration as an update. That is
 				// only what the LOGIN index means; any other unique violation (OidcSubject —
 				// two users may not bind to one identity-provider subject) finds no winner and
 				// must surface with its own diagnostic intact.
@@ -307,12 +307,13 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 	///   (or to plain pass-through), exactly as `eas user remove` always meant. The IDENTITY
 	///   row and its <c>UserId</c> survive: sync state, encrypted local items and blocks all
 	///   hang off the id, and removing a declaration must not destroy data. Deleting the user
-	///   outright (cascade) is a separate, guarded operation (db-restructure item 6b).
+	///   outright (cascade) is a separate, guarded operation requiring a confirmed round trip
+	///   before the CLI or admin UI will issue it.
 	/// </summary>
 	public async Task<bool> DeleteAsync(string login, CancellationToken ct)
 	{
 		await using SyncDbContext db = contextFactory.CreateDbContext();
-		// B8: exact match on the case-folded login (index seek, sees every casing).
+		// Exact match on the case-folded login (index seek, sees every casing).
 		string normalized = NormalizeLogin(login);
 		User? entry = await db.Users.Include(u => u.BackendRoles)
 			.FirstOrDefaultAsync(u => u.Login == normalized, ct).ConfigureAwait(false);
@@ -376,7 +377,7 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 	///   Rebuilds the in-memory declaration from its columns. <paramref name="valid" /> is false
 	///   when a per-role settings blob did not parse — the row is still returned (typed columns
 	///   intact, that role's settings dropped) so one corrupt blob cannot take a surface down or
-	///   break authentication (B15).
+	///   break authentication.
 	/// </summary>
 	private static UserOptions FromEntity(User entity, ILogger? logger, out bool valid)
 	{
@@ -446,7 +447,7 @@ public sealed class UserStore(ISyncDbContextFactory contextFactory)
 	///   Bumps the "users" area AND saves — the one SaveChangesAsync for whichever mutation the
 	///   caller staged. A UserBackendRoles write bumps this SAME area rather than getting its own:
 	///   a stamp belongs to a consumer's aggregate, and the resolver rebuilds the whole user
-	///   snapshot on any bump. A8: uses <see cref="DataChangeStamps.BumpAndSaveAsync" /> rather than
+	///   snapshot on any bump. Uses <see cref="DataChangeStamps.BumpAndSaveAsync" /> rather than
 	///   the racing <see cref="DataChangeStamps.BumpAsync" /> + a bare save, so two replicas' very
 	///   first bump of this area resolves as an update instead of a raw PK violation.
 	/// </summary>

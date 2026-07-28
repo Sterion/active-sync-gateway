@@ -19,7 +19,7 @@ internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>
 	public async Task<List<UserFolder>> RefreshFolderRegistryAsync(
 		int userId, IReadOnlyList<BackendFolder> backendFolders, CancellationToken ct)
 	{
-		// A9: a duplicate BackendKey from any store (a plugin, or a store bug) would otherwise
+		// A duplicate BackendKey from any store (a plugin, or a store bug) would otherwise
 		// take the insert branch twice below and trip the unique index on every attempt — the
 		// retry loop re-reads but the rolled-back insert is still absent, so all four attempts
 		// fail identically and every FolderSync for this user 500s until the backend stops
@@ -55,7 +55,7 @@ internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>
 					row.Type = bf.EasType;
 					row.EasClass = bf.EasClass;
 					row.Deleted = false;
-					row.DeletedUtc = null; // reappeared: restart the retention clock (A35)
+					row.DeletedUtc = null; // reappeared: restart the retention clock
 				}
 				else
 				{
@@ -78,7 +78,7 @@ internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>
 				if (!seen.Contains(row.BackendKey))
 				{
 					row.Deleted = true;
-					row.DeletedUtc ??= DateTime.UtcNow; // stamp once; keep the original delete time (A35)
+					row.DeletedUtc ??= DateTime.UtcNow; // stamp once; keep the original delete time
 				}
 
 			try
@@ -90,11 +90,11 @@ internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>
 			{
 				// Only a unique violation is the concurrent-insert race worth re-reading and
 				// retrying; retrying a disk-full/NOT NULL failure four times just delays the same
-				// error (A9). Discard ONLY the folder rows this method staged, so they are re-read
+				// error. Discard ONLY the folder rows this method staged, so they are re-read
 				// on the next attempt. Detaching the whole change tracker (the old behaviour) also
 				// dropped unrelated tracked mutations sharing this request-scoped context — most
 				// damagingly Device.FolderSyncKey++, leaving the client acked at N+1 while the DB
-				// held N and forcing a full resync (A1).
+				// held N and forcing a full resync.
 				foreach (EntityEntry<UserFolder> entry in db.ChangeTracker.Entries<UserFolder>().ToList())
 					entry.State = EntityState.Detached;
 			}
@@ -148,7 +148,7 @@ internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>
 			if (!knownById.TryGetValue(f.ServerId, out DeviceFolder? k))
 				adds.Add(change);
 			else if (k.DisplayName != f.DisplayName || (k.ParentServerId ?? "0") != change.ParentServerId ||
-			         k.Type != f.Type) // a class change (e.g. 12 -> 5) must re-render the folder (A8)
+			         k.Type != f.Type) // a class change (e.g. 12 -> 5) must re-render the folder
 				updates.Add(change);
 		}
 
@@ -178,7 +178,7 @@ internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>
 		}
 
 		// Reconcile in place rather than delete-all + reinsert: one renamed folder used to churn
-		// every row's primary key (N DELETE + N INSERT) and bloat the autoincrement (A7).
+		// every row's primary key (N DELETE + N INSERT) and bloat the autoincrement.
 		HashSet<string> desired = new(StringComparer.Ordinal);
 		foreach (UserFolder f in registry)
 		{
@@ -223,12 +223,12 @@ internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>
 			// A pipelined FolderSync already advanced this device's FolderSyncKey off the same
 			// generation. This commit diffed against a now-stale hierarchy, so it must not
 			// overwrite the winner — surface it so the handler answers FolderSync Status 9 and
-			// the client restarts the hierarchy from key 0 (A6).
+			// the client restarts the hierarchy from key 0.
 			// Reload the device first and detach the staged DeviceFolder mutations: left Modified
 			// with their failed values (device.FolderSyncKey++ and its stale ConcurrencyToken, plus
 			// any staged DeviceFolder insert/removal), a later unrelated SaveChangesAsync on this
-			// same request-scoped context would retry the doomed UPDATE (A5) — mirrors
-			// CollectionStateStore.CommitCollectionStateAsync (A18).
+			// same request-scoped context would retry the doomed UPDATE — mirrors
+			// CollectionStateStore.CommitCollectionStateAsync's same fix.
 			await db.Entry(device).ReloadAsync(ct).ConfigureAwait(false);
 			foreach (EntityEntry<DeviceFolder> entry in db.ChangeTracker.Entries<DeviceFolder>().ToList())
 				entry.State = EntityState.Detached;

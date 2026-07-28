@@ -53,7 +53,7 @@ public sealed record FolderHierarchyDiff(
 ///   share the one request-scoped <see cref="SyncDbContext" />, the change tracker is unified and
 ///   <see cref="PersistAsync" /> flushes mutations made through any of them.
 ///   <para>
-///     TRANSACTION POLICY (A10): each EAS command commits its collaborators' mutations through the
+///     TRANSACTION POLICY: each EAS command commits its collaborators' mutations through the
 ///     shared context, and each collection commits independently — no single transaction spans a
 ///     multi-collection Sync. That is deliberate and safe: the SyncKey design already makes
 ///     per-collection commits atomic units — a collection whose commit does not land keeps its old
@@ -64,7 +64,7 @@ public sealed record FolderHierarchyDiff(
 ///     poisons — a half-mutated <see cref="CollectionState" />.
 ///   </para>
 ///   <para>
-///     COROLLARY (A1/A4/A11): because <see cref="PersistAsync" /> and every sibling collection's
+///     COROLLARY: because <see cref="PersistAsync" /> and every sibling collection's
 ///     commit flush the WHOLE shared change tracker, no VOLATILE per-round mutation may be left
 ///     pending on a tracked entity between the point it is decided and the point its own round
 ///     commits — a sibling flush would persist it half-applied. The two such mutations are the
@@ -154,7 +154,7 @@ public sealed class SyncStateService(
 		string collectionId = state.CollectionId;
 		int newKey = await _collections.CommitCollectionStateAsync(
 			state, newSnapshot, filterType, validation, ct, appliedAdds, appliedChanges).ConfigureAwait(false);
-		// F2: the round landed — every send-dedup claim older than the new generation is now
+		// The round landed — every send-dedup claim older than the new generation is now
 		// either superseded (covered by the generation's own applied-command ledger and its N-1
 		// replay window) or abandoned, so it can never be matched again. Best-effort: a failure to
 		// prune only means a few rows linger, never a correctness problem.
@@ -171,7 +171,7 @@ public sealed class SyncStateService(
 	}
 
 	/// <summary>
-	///   F2: durably claims one attempt at an irreversible action (16.x draft submit, occurrence-
+	///   Durably claims one attempt at an irreversible action (16.x draft submit, occurrence-
 	///   CANCEL iTIP) BEFORE it happens. Returns <see cref="SendClaimOutcome.PerformSend" /> when the
 	///   caller must (re)perform the action — this exact attempt (device, collection, the client's
 	///   CURRENT unadvanced SyncKey, key) was never claimed, or was claimed but never confirmed
@@ -184,7 +184,7 @@ public sealed class SyncStateService(
 		=> _sendDedup.TryClaimAsync(device.Id, collectionId, clientSyncKey, key, ct);
 
 	/// <summary>
-	///   F2: durably records that the attempt claimed by <see cref="TryClaimSendAsync" /> actually
+	///   Durably records that the attempt claimed by <see cref="TryClaimSendAsync" /> actually
 	///   SUCCEEDED. Call this immediately after the guarded irreversible action returns — before any
 	///   further (best-effort) work — so the window between the action succeeding and this call
 	///   landing is as small as possible: a single durable write, not the rest of the round.
@@ -247,7 +247,7 @@ public sealed class SyncStateService(
 
 	/// <summary>
 	///   Upserts the out-of-office row (tracked update or insert). <see cref="OofSetting" /> carries
-	///   no concurrency token, so this only guards the INSERT race (A3): two concurrent first-time
+	///   no concurrency token, so this only guards the INSERT race: two concurrent first-time
 	///   writers (e.g. the phone's Settings→Oof racing an `eas` CLI edit) can both read no row and
 	///   both insert, tripping the unique index on <see cref="OofSetting.UserId" />. Mirrors the
 	///   same catch-and-re-read-as-update idiom <c>DeviceStore.GetOrCreateDeviceAsync</c> already

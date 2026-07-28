@@ -24,7 +24,7 @@ public sealed class BackendRolesProvider : IDisposable
 	private readonly IDisposable? _reloadSubscription;
 	private volatile BackendRolesConfig _current;
 	// Both are read/written from the config-reload callback; keep _signature volatile to match the
-	// already-volatile _current so the pair cannot be observed half-updated (B23).
+	// already-volatile _current so the pair cannot be observed half-updated.
 	private volatile string _signature;
 
 	public BackendRolesProvider(
@@ -68,7 +68,8 @@ public sealed class BackendRolesProvider : IDisposable
 		// Shape is not enough: the startup path also runs each provider's own ValidateConfiguration,
 		// but the live rebuild skipped it — so a live edit blanking Host, or switching Provider to one
 		// the stored settings don't satisfy, became the running config and only failed at next restart
-		// (the same delayed brick B1 fixes for host options). Run it here too and keep the last-good
+		// (the same class of delayed-brick defect fixed for host options: a value valid enough to
+		// persist but rejected only on the next boot). Run it here too and keep the last-good
 		// configuration on any failure, honouring the doc's "a bad edit can't take the gateway down".
 		if (failures.Count == 0 && _registry is not null)
 			ValidateProviders(rebuilt, failures);

@@ -6,7 +6,7 @@ namespace ActiveSync.Core.Options;
 /// <summary>Shared checks for provider ValidateConfiguration implementations.</summary>
 public static class BackendSettingsValidation
 {
-	// B7 (item 37): a CA file is read and PEM-parsed by ValidateConfiguration for EVERY user × role on
+	// A CA file is read and PEM-parsed by ValidateConfiguration for EVERY user × role on
 	// every snapshot rebuild — with AutoProvisionUsers on that is O(N²) File.Exists + ImportFromPemFile
 	// on the auth request thread. Memoize the exists+parse verdict keyed on the file's content stamp
 	// (last-write-time + length) so a shared CaCertificatePath is read once until it actually changes.

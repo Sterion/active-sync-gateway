@@ -23,7 +23,7 @@ namespace ActiveSync.Core.Backend;
 /// </summary>
 public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDisposable
 {
-	// A8: each entry carries the UserResolver snapshot version it was computed under, so a
+	// Each entry carries the UserResolver snapshot version it was computed under, so a
 	// verdict written back after a rebuild already cleared these caches (the TOCTOU) is tagged
 	// stale and ignored on read rather than trusted.
 	private readonly ConcurrentDictionary<string, (string PasswordHash, DateTime ExpiresUtc, long SnapshotVersion)> _authCache = new();
@@ -35,15 +35,15 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	private readonly BackendProviderRegistry _registry;
 	private readonly UserResolver _resolver;
 	private readonly BackendRolesProvider _rolesProvider;
-	// K61: CompositeBackendSession is now built asynchronously (providers open their transport in
+	// CompositeBackendSession is built asynchronously (providers open their transport in
 	// CreateConnectionAsync), so the per-(user, device) cache holds a Lazy<Task<...>> — concurrent
 	// callers await the one shared build instead of racing to construct duplicate sessions.
 	private readonly ConcurrentDictionary<string, Lazy<Task<CompositeBackendSession>>> _sessions = new();
-	// A28: held in fields so DisposeAsync can detach them — the resolver/roles-provider are
+	// Held in fields so DisposeAsync can detach them — the resolver/roles-provider are
 	// singletons that outlive this factory (notably across test fixtures), and a leaked handler
 	// keeps a disposed factory reachable and fires on its cleared state.
 	private readonly Action _onSnapshotChanged;
-	// A10: same reasoning as _onSnapshotChanged above, but for the static GatewayMetrics sessions
+	// Same reasoning as _onSnapshotChanged above, but for the static GatewayMetrics sessions
 	// gauge — DisposeAsync must be able to name the EXACT delegate it installed so it can clear it
 	// without clobbering a later factory's observer.
 	private readonly Func<IEnumerable<Measurement<long>>> _sessionsObserve;
@@ -87,10 +87,10 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 
 	public async ValueTask DisposeAsync()
 	{
-		// A28: detach the event handlers first — the resolver/roles-provider outlive this factory.
+		// Detach the event handlers first — the resolver/roles-provider outlive this factory.
 		_resolver.SnapshotChanged -= _onSnapshotChanged;
 		_rolesProvider.Changed -= RecycleAll;
-		// A10: same leak, but into the static GatewayMetrics sessions gauge — a disposed factory's
+		// Same leak, but into the static GatewayMetrics sessions gauge — a disposed factory's
 		// closure over its own (now torn down) _sessions dictionary must not stay installed.
 		GatewayMetrics.ClearSessionsObserver(_sessionsObserve);
 		await _evictionTimer.DisposeAsync().ConfigureAwait(false);
@@ -104,7 +104,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		await _resolver.EnsureFreshAsync(false, ct).ConfigureAwait(false);
 		string cacheKey = credentials.UserName;
 		string passwordHash = Hash(credentials.Password);
-		// A8: the version live right now — a hit stamped with an older version was computed
+		// The version live right now — a hit stamped with an older version was computed
 		// against an account snapshot that has since been rebuilt (and its caches cleared), so it
 		// must not be trusted even if it landed in the dictionary after the clear.
 		long snapshotVersion = _resolver.SnapshotVersion;
@@ -192,19 +192,19 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		// Cache keys stay on the GATEWAY login (+device) deliberately: a rename lands on a NEW
 		// key, so the renamed user's next request builds a fresh session with fresh backend
 		// credentials while the stale one idles out — sessions embed login-derived pass-through
-		// credentials, so surviving a rename would be wrong. A4: the UserId is included too — a
+		// credentials, so surviving a rename would be wrong. The UserId is included too — a
 		// login FREED by a rename and then reissued to a different person is a structurally
 		// different slot even though the login string is reused, so the new person can never be
 		// served the previous holder's session (DB scoping, AAD) just because both presented the
 		// same password.
 		string key = $"{userId}\n{credentials.UserName}\n{deviceId}";
 
-		// A10: bounds the faulted-build retry below to exactly one extra attempt, so a backend
+		// Bounds the faulted-build retry below to exactly one extra attempt, so a backend
 		// that is genuinely down fails this call once (with its real exception) rather than
 		// retrying it synchronously without limit.
 		bool retriedFault = false;
 
-		// A2: rebuild loop. The cached session may need recycling (password rotation) or may have
+		// Rebuild loop. The cached session may need recycling (password rotation) or may have
 		// been evicted and torn down between our read of the cache and our lease acquisition; either
 		// way we drop the stale entry and go round again. The common path runs exactly once.
 		while (true)
@@ -213,8 +213,8 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 
 			// The build is SHARED across every concurrent caller for this (user, device), so it runs
 			// uncancellable (CancellationToken.None): one request cancelling must not fault the session
-			// the others are awaiting. This matches the pre-K61 synchronous, uncancellable build.
-			// A11: the shared-calendar grants are read HERE, inside the build, so a cache hit never
+			// the others are awaiting. This matches the previous synchronous, uncancellable build.
+			// The shared-calendar grants are read HERE, inside the build, so a cache hit never
 			// opens a DbContext — a session carries the grants from its build time (`eas share`
 			// changes apply when the session is next rebuilt), and the calendar provider merges them
 			// with its own configured SharedCollections.
@@ -237,7 +237,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			}
 			catch (Exception) when (!retriedFault)
 			{
-				// A10: the build faulted (e.g. a transient backend outage) — an unswept faulted
+				// The build faulted (e.g. a transient backend outage) — an unswept faulted
 				// Lazy stays in the cache forever, and every later call for this same
 				// (user, device) would re-await the SAME faulted Task and rethrow the SAME
 				// exception, wedging it until restart. Drop the faulted slot (value-compared, so
@@ -325,7 +325,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		_authCache.Clear();
 		_authNegativeCache.Clear();
 		// With no live sessions left, every provider's per-user resources (IDLE watchers) are
-		// trimmed. A7: unlike EvictIdleSessionsCore's periodic sweep (which gets another chance a
+		// trimmed. Unlike EvictIdleSessionsCore's periodic sweep (which gets another chance a
 		// minute later), RecycleAll runs once per settings edit — so one throwing provider must not
 		// skip the rest; each is guarded individually rather than the whole loop.
 		foreach (IBackendProvider provider in _registry.All)
@@ -343,7 +343,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 
 	private void EvictIdleSessions()
 	{
-		// A13: this runs on a System.Threading.Timer thread — an escaping exception terminates the
+		// This runs on a System.Threading.Timer thread — an escaping exception terminates the
 		// process. Reading _options.CurrentValue can throw (live-editable settings) and the trim
 		// runs plugin code, so the whole body is guarded.
 		try
@@ -360,7 +360,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	{
 		DateTime cutoff = DateTime.UtcNow.AddMinutes(-_options.CurrentValue.Eas.SessionIdleMinutes);
 		foreach ((string key, Lazy<Task<CompositeBackendSession>> lazy) in _sessions)
-			// A6: value-compared removal, like every other TryRemove in this file — a concurrent
+			// Value-compared removal, like every other TryRemove in this file — a concurrent
 			// replacement installed under the same key (password rotation, or a rebuild after a
 			// failed TryAcquireLease) between this enumeration and the removal must be left alone,
 			// not evicted just because it currently occupies the slot the sweep judged idle.
@@ -373,7 +373,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			else if (IsFaulted(lazy) &&
 			         _sessions.TryRemove(new KeyValuePair<string, Lazy<Task<CompositeBackendSession>>>(key, lazy)))
 			{
-				// A10: a faulted slot is never IsBuilt, so the branch above can never sweep it —
+				// A faulted slot is never IsBuilt, so the branch above can never sweep it —
 				// GetSessionAsync already self-heals a build it hits again, but a (user, device)
 				// that's never retried would otherwise leak here until restart.
 				_logger.LogDebug("Sweeping faulted backend session build {Key}", key.Replace('\n', '/'));
@@ -389,9 +389,9 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			if (pair.Value.ExpiresUtc <= nowUtc)
 				_authNegativeCache.TryRemove(pair);
 
-		// Providers with per-user caches (IDLE watchers) trim users without live sessions. A9:
-		// only a BUILT slot is a live session — a still-building, never-realized, or faulted
-		// (A10) Lazy owns no connection, so counting its user here would pin that user's watchers
+		// Providers with per-user caches (IDLE watchers) trim users without live sessions.
+		// Only a BUILT slot is a live session — a still-building, never-realized, or faulted
+		// Lazy owns no connection, so counting its user here would pin that user's watchers
 		// even though nothing is actually holding a session for them.
 		HashSet<string> activeUsers = _sessions
 			.Where(pair => IsBuilt(pair.Value))
@@ -403,7 +403,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	}
 
 	/// <summary>
-	///   Awaits a lazily-built session (K61) and disposes it. A never-materialized slot owns
+	///   Awaits a lazily-built session and disposes it. A never-materialized slot owns
 	///   nothing; a build that faulted left no session to dispose.
 	/// </summary>
 	private async Task DisposeLazyAsync(Lazy<Task<CompositeBackendSession>> lazy)
@@ -423,7 +423,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 		await DisposeSessionAsync(session).ConfigureAwait(false);
 	}
 
-	// K61: the per-(user, device) cache holds a Lazy<Task<CompositeBackendSession>> — the standard
+	// The per-(user, device) cache holds a Lazy<Task<CompositeBackendSession>> — the standard
 	// async-lazy idiom (Stephen Toub's). The value factory returns the hot Task from
 	// CompositeBackendSession.CreateAsync, which yields at its first await, so `.Value` returns that
 	// Task WITHOUT ever blocking a thread — the VSTHRD011 "blocking value factory" deadlock case does
@@ -442,7 +442,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 	private static bool IsBuilt(Lazy<Task<CompositeBackendSession>> lazy) =>
 		lazy.IsValueCreated && lazy.Value.IsCompletedSuccessfully;
 
-	// A10: a build that threw (e.g. a transient backend outage during CreateConnectionAsync)
+	// A build that threw (e.g. a transient backend outage during CreateConnectionAsync)
 	// leaves the Lazy permanently in this state — IsBuilt is (correctly) false for it forever,
 	// so it needs its own check to be found and swept.
 	private static bool IsFaulted(Lazy<Task<CompositeBackendSession>> lazy) =>
@@ -465,7 +465,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 
 	/// <summary>
 	///   The gateway login from a "user\ndevice" cache key — the whole key when there is no
-	///   separator (A13: the eviction sweep used an unguarded <c>IndexOf</c> that threw on -1,
+	///   separator (the eviction sweep used to use an unguarded <c>IndexOf</c> that threw on -1,
 	///   while <see cref="SnapshotSessions" /> guarded it; both now share this).
 	/// </summary>
 	private static string UserFromKey(string key)

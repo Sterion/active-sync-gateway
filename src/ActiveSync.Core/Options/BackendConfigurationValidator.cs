@@ -30,7 +30,7 @@ public sealed class BackendConfigurationValidator(
 			{
 				IBackendProvider provider = registry.GetFor(assignment.ProviderName, role);
 				provider.ValidateConfiguration(role, assignment.Settings, failures);
-				// B12: a global Password/UserName is refused by the write surfaces
+				// A global Password/UserName is refused by the write surfaces
 				// (BackendKeyValidator.InertCredentialLeaf), but a value placed directly in a
 				// config file never goes through either — check the role's CURRENT settings too.
 				failures.AddRange(BackendKeyValidator.InertCredentialLeaves(provider, role, assignment.Settings));

@@ -19,7 +19,7 @@ public enum UserFieldSource
 }
 
 /// <summary>
-///   THE RESOLUTION RULE, user half (docs/design/db-restructure.md § *THE RESOLUTION RULE*):
+///   THE RESOLUTION RULE, user half — one order, every setting, per field:
 ///   <c>user (DB) → user (config) → global (DB) → global (config) → code default</c>, resolved
 ///   PER FIELD — never per entry.
 ///   <para>
@@ -194,7 +194,7 @@ public static class UserMerge
 		if (roles is null)
 			return null;
 		// Config binds Users with the ORDINAL comparer, so a case-differing role name would miss
-		// (the same B8 shape the login lookups had).
+		// (the same shape the login lookups had).
 		if (roles.TryGetValue(role, out BackendRoleOverride? exact))
 			return exact;
 		foreach ((string name, BackendRoleOverride value) in roles)

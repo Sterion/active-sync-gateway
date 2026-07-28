@@ -244,7 +244,7 @@ internal static class SettingKeys
 				$"Backend setting for the {parts[2]} role (validated by its provider).",
 				Secret: SecretRedaction.IsSecretName(parts[^1]));
 
-		// B6: AuthOptions.TrustedProxies is a List<string> — every other Auth member is a scalar
+		// AuthOptions.TrustedProxies is a List<string> — every other Auth member is a scalar
 		// catalogue entry, but a list binds from indexed keys (":0", ":1", ...), so neither the bare
 		// key nor an element ever matched. Match the indexed family the same dynamic way the
 		// Backends:<Role>:* leaves above are matched, rather than trying to catalogue it as a single
@@ -262,7 +262,7 @@ internal static class SettingKeys
 	}
 
 	/// <summary>
-	///   Cross-field / startup validation of a pending catalogue write (B1). The catalogue's own
+	///   Cross-field / startup validation of a pending catalogue write. The catalogue's own
 	///   per-key <see cref="Validate(SettingKey, string)" /> only knows type + single-key bounds; the
 	///   real gate a value must survive is <see cref="ActiveSyncOptionsValidator" />, which startup
 	///   runs against the whole effective configuration and which THROWS on failure — so a value the
@@ -280,7 +280,7 @@ internal static class SettingKeys
 	///   still-unset keys; that is the operator's next step, not a reason to reject this one. The
 	///   remaining incompleteness is still caught at startup, which is where it becomes a real fault.
 	///
-	///   B3: this simulates <see cref="ActiveSyncOptionsValidator" /> ONLY — it does not (and, by
+	///   This simulates <see cref="ActiveSyncOptionsValidator" /> ONLY — it does not (and, by
 	///   construction, cannot usefully) simulate <see cref="BackendConfigurationValidator" />, the
 	///   other startup gate, which needs the provider registry to validate the
 	///   <c>ActiveSync:Backends:*</c> role sections and <c>ActiveSync:Users</c>. Every catalogue key
@@ -296,7 +296,7 @@ internal static class SettingKeys
 	/// </summary>
 	internal static string? ValidateStartupImpact(IConfiguration effective, string key, string? value)
 	{
-		// E8: pass `effective` through so the cross-listener port check (Tls:Port/Metrics:Port vs.
+		// Pass `effective` through so the cross-listener port check (Tls:Port/Metrics:Port vs.
 		// the base Kestrel HTTP endpoint) can actually see Kestrel:Endpoints:Http:Url/ASPNETCORE_URLS
 		// — both live in the SAME file/env layer this method already has.
 		ActiveSyncOptionsValidator validator = new(effective);
@@ -315,7 +315,7 @@ internal static class SettingKeys
 
 	/// <summary>
 	///   Whether <paramref name="failure" /> names <paramref name="key" /> itself, as opposed to a
-	///   DIFFERENT key that merely shares <paramref name="key" /> as a textual prefix (B2:
+	///   DIFFERENT key that merely shares <paramref name="key" /> as a textual prefix (e.g.
 	///   "...AdminClaim" is a prefix of "...AdminClaimValue", so a plain substring test wrongly
 	///   attributed a failure about AdminClaimValue to a write of AdminClaim alone). A match only
 	///   counts when the character immediately following it is not part of the same identifier
@@ -340,7 +340,7 @@ internal static class SettingKeys
 	}
 
 	/// <summary>
-	///   Cross-field / startup validation of a pending REMOVAL (B4) — the sibling of
+	///   Cross-field / startup validation of a pending REMOVAL — the sibling of
 	///   <see cref="ValidateStartupImpact" />, which covers only the write direction. `eas config
 	///   unset` and the web settings DELETE deleted the database row unconditionally: a section the
 	///   RUNNING gateway tolerates (<c>BackendRolesProvider.OnConfigReload</c> keeps the last-good
@@ -420,7 +420,7 @@ internal static class SettingKeys
 			case ValueType.Bool:
 				return bool.TryParse(value, out _) ? null : $"'{value}' is not a boolean (true/false).";
 			case ValueType.Enum:
-				// B12: DbMinimumLevel shares LogQueryService's alias table (info/warn/critical) rather
+				// DbMinimumLevel shares LogQueryService's alias table (info/warn/critical) rather
 				// than the exact-match-only check every other enum key uses — `eas logs -l critical`
 				// already accepted the alias, so a write of the same value must not be rejected here
 				// (ActiveSyncOptionsValidator's DbMinimumLevel check accepts the same aliases now, so
@@ -438,7 +438,7 @@ internal static class SettingKeys
 					return $"'{value}' is not a number.";
 				// NumberStyles.Float accepts "NaN"/"Infinity"; both slip past every downstream guard
 				// (Math.Max(NaN,0)=NaN, (long)NaN=0, NaN<0=false) and degrade the refreshers to a
-				// point-read on every request (B10).
+				// point-read on every request.
 				if (!double.IsFinite(number))
 					return $"'{value}' is not a finite number.";
 				if (key.Min is { } nmin && number < nmin)

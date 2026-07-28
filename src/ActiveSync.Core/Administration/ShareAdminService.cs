@@ -7,7 +7,7 @@ namespace ActiveSync.Core.Administration;
 /// <summary>
 ///   The single write path over <see cref="SharedCalendarGrant" /> rows (`eas share` and the web
 ///   Shares page). Both surfaces used to hand-roll the same find-then-add/re-mode EF against the
-///   same table — the S3/C18 defect. The public surface speaks LOGINS (what the operator types);
+///   same table, duplicating the same bugs in two places. The public surface speaks LOGINS (what the operator types);
 ///   rows are keyed by the immutable <c>UserId</c>, translated through the <see cref="User" />
 ///   table. Identifier shape checks belong to the caller (<see cref="AdminIdentifiers" />) which
 ///   surfaces the error its own way; this service does the DB work and reports which branch it

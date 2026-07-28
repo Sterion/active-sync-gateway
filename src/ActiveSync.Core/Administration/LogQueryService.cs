@@ -6,8 +6,8 @@ namespace ActiveSync.Core.Administration;
 /// <summary>
 ///   The single read path over the shared <see cref="LogEntry" /> table, consumed by both the web
 ///   logs view (<c>GET /admin/api/logs</c>) and <c>eas logs</c>. It exists so those two surfaces do
-///   not each hand-roll the same EF query with drifting notions of how filters combine (the S3/C18
-///   "two paths to one table" split). The C15 substring rule lives here: the free-text filter is a
+///   not each hand-roll the same EF query with drifting notions of how filters combine. The
+///   substring rule lives here: the free-text filter is a
 ///   literal <see cref="string.Contains(string)" />, which EF translates to <c>instr</c>/<c>strpos</c>,
 ///   so a '%' or '_' the operator types matches itself and never steers a LIKE pattern.
 /// </summary>
@@ -28,7 +28,7 @@ public sealed class LogQueryService(ISyncDbContextFactory contextFactory)
 
 	/// <summary>
 	///   Canonicalizes a level name or alias (info/warn/critical, any casing) to one of
-	///   <see cref="LevelOrder" />, or null when unrecognized. B12: shared with
+	///   <see cref="LevelOrder" />, or null when unrecognized. Shared with
 	///   <see cref="ActiveSyncOptionsValidator" /> and <see cref="SettingKeys" /> so `eas logs -l
 	///   critical` and a write of <c>ActiveSync:Log:DbMinimumLevel</c> (CLI or web) agree on what a
 	///   "level name" is — they used to disagree (the CLI/read side tolerated aliases, the write/
@@ -75,7 +75,7 @@ public sealed class LogQueryService(ISyncDbContextFactory contextFactory)
 			rows = rows.Where(e => accepted.Contains(e.Level));
 		}
 
-		// B15: logins are case-insensitive everywhere else (UserStore.NormalizeLogin); a device
+		// Logins are case-insensitive everywhere else (UserStore.NormalizeLogin); a device
 		// presenting "Bob@x.com" must still be found by `eas logs -u bob@x.com`. ToLower() on both
 		// sides translates to LOWER() (Sqlite/Npgsql), which is a scan rather than an index seek —
 		// accepted here, same trade-off the class comment already documents for the text filter.
@@ -90,13 +90,13 @@ public sealed class LogQueryService(ISyncDbContextFactory contextFactory)
 			rows = rows.Where(e => e.SourceContext != null && e.SourceContext.Contains(query.Source));
 		// string.Contains, NOT EF.Functions.Like: EF translates it to a literal substring search
 		// (instr on Sqlite, strpos on Npgsql), so a '%' or '_' the operator types is matched as
-		// itself and never steers a pattern (C15).
+		// itself and never steers a pattern.
 		if (!string.IsNullOrWhiteSpace(query.Text))
 			rows = rows.Where(e => e.Message.Contains(query.Text) ||
 				(e.Exception != null && e.Exception.Contains(query.Text)));
 
 		// The time window bounds BOTH modes: an unfloored tail walks the table from the row the
-		// cursor names, however old, on a poll that repeats every 2 s (C15's tail half).
+		// cursor names, however old, on a poll that repeats every 2 s.
 		rows = rows.Where(e => e.TimestampUtc >= query.Since);
 
 		List<LogEntry> entries;

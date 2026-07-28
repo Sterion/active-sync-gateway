@@ -107,7 +107,7 @@ public sealed class AuthOptions
 	///   How often (at most) the gateway checks the database accounts change-stamp so
 	///   `eas user ...` edits apply to running instances. One primary-key point-read per
 	///   interval, performed lazily on the next request. 0 checks on every request
-	///   (test-friendly). B2/B11: a negative or non-finite value does NOT disable live pickup —
+	///   (test-friendly). A negative or non-finite value does NOT disable live pickup —
 	///   it is clamped to 0 (poll on every request) by
 	///   <see cref="ActiveSync.Core.Settings.ChangeStampRefreshGate" />, so a negative value can
 	///   never permanently lock refresh off, including its own repair.

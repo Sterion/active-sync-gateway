@@ -64,7 +64,7 @@ public sealed class TlsCertificateResolver(
 		TlsOptions tls = options.CurrentValue.Tls;
 		if (!string.IsNullOrWhiteSpace(tls.CertificatePath))
 		{
-			// K14: load the master key into a local we can zero, and surface (don't discard) a
+			// Load the master key into a local we can zero, and surface (don't discard) a
 			// loader error — a sealed CertificatePassword will otherwise fail with a misleading
 			// "cannot be unsealed" message when the real cause is a misconfigured key.
 			byte[]? masterKey = LoadMasterKey(logger);
@@ -128,7 +128,7 @@ public sealed class TlsCertificateResolver(
 	/// <summary>
 	///   Loads the encryption master key, logging (rather than discarding) a loader error so a
 	///   misconfigured key surfaces in diagnostics instead of hiding behind a downstream
-	///   "cannot be unsealed" message (K14). The caller owns zeroing the returned buffer.
+	///   "cannot be unsealed" message. The caller owns zeroing the returned buffer.
 	/// </summary>
 	private byte[]? LoadMasterKey(ILogger logger)
 	{
@@ -155,7 +155,7 @@ public sealed class TlsCertificateResolver(
 			using X509Certificate2 pem = string.IsNullOrEmpty(password)
 				? X509Certificate2.CreateFromPemFile(certPath, tls.CertificateKeyPath)
 				: X509Certificate2.CreateFromEncryptedPemFile(certPath, password, tls.CertificateKeyPath);
-			// K13: the exported PKCS#12 carries the unencrypted private key — hoist it into a named
+			// The exported PKCS#12 carries the unencrypted private key — hoist it into a named
 			// local and zero it once LoadPkcs12 has parsed it, matching the discipline
 			// GatewayCertificateStore.Generate already applies to the identical export. Left as an
 			// anonymous temporary it survives until GC and can land in a core dump or a swapped page.
@@ -175,7 +175,7 @@ public sealed class TlsCertificateResolver(
 			certificate = X509CertificateLoader.LoadPkcs12FromFile(certPath, password);
 		}
 
-		// K17: a keyless or already-expired cert loaded "successfully" here and Kestrel then
+		// A keyless or already-expired cert loaded "successfully" here and Kestrel then
 		// failed opaquely at handshake time — defeating README's documented "fails startup with a
 		// clear error". Fail fast at the point that actually knows what's wrong.
 		if (!certificate.HasPrivateKey)
@@ -191,10 +191,10 @@ public sealed class TlsCertificateResolver(
 			throw new InvalidOperationException(
 				$"Certificate at '{certPath}' expired on {notAfter:u}.");
 		}
-		// K11: the mirror-image case of the NotAfter check above — a certificate whose NotBefore is
+		// The mirror-image case of the NotAfter check above — a certificate whose NotBefore is
 		// in the future (a raced cert-manager/ACME issuance, a pre-staged rotation mount, clock skew
 		// across replicas) otherwise loads "successfully" and every phone then fails the handshake
-		// with no server-side explanation. Fail fast here too, same reasoning as K17.
+		// with no server-side explanation. Fail fast here too, same reasoning as above.
 		if (certificate.NotBefore.ToUniversalTime() > DateTime.UtcNow)
 		{
 			DateTime notBefore = certificate.NotBefore.ToUniversalTime();
@@ -240,7 +240,7 @@ public sealed class TlsCertificateResolver(
 			}
 		}
 
-		// K18: Get{RSA,ECDsa,DSA}PublicKey() each return a fresh AsymmetricAlgorithm backed by a
+		// Get{RSA,ECDsa,DSA}PublicKey() each return a fresh AsymmetricAlgorithm backed by a
 		// native key handle — reading KeySize without disposing it leaks that handle on every
 		// call (DescribeAsync is reachable from the admin TLS panel / `eas tls`, both pollable).
 		int? keySize = KeySizeOf(cert.GetRSAPublicKey())
@@ -257,7 +257,7 @@ public sealed class TlsCertificateResolver(
 	}
 
 	/// <summary>
-	///   Reads <c>KeySize</c> off a public-key handle and disposes it (K18) — the
+	///   Reads <c>KeySize</c> off a public-key handle and disposes it — the
 	///   <c>Get{RSA,ECDsa,DSA}PublicKey()</c> family each allocate a fresh <see cref="AsymmetricAlgorithm" />
 	///   backed by a native key handle that the caller owns.
 	/// </summary>

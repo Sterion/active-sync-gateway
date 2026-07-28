@@ -8,7 +8,7 @@ namespace ActiveSync.Core.Administration;
 ///   grant. Neither is dereferenced at write time — the block is compared against the login a
 ///   phone presents and the href is resolved by the DAV server much later — so an unchecked value
 ///   does not fail, it persists as a row that can never match. Living in Core lets `eas` and the
-///   web admin run the SAME rules (C16); every other write path already runs them.
+///   web admin run the SAME rules; every other write path already runs them.
 /// </summary>
 public static class AdminIdentifiers
 {

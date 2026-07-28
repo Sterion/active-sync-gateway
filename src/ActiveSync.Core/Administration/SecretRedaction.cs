@@ -4,10 +4,10 @@ using ActiveSync.Core.Options;
 namespace ActiveSync.Core.Administration;
 
 /// <summary>
-///   The single home for deciding what counts as a secret and how it is masked. It replaces the
-///   four independent, drifting implementations the review found (S7): the CLI's
+///   The single home for deciding what counts as a secret and how it is masked. It replaces four
+///   independent, drifting implementations: the CLI's
 ///   <c>ConfigCommands.Mask</c>, the startup banner's connection-string <c>Redact</c>, the web
-///   backends editor's <c>SecretMask</c>, and every ad-hoc caller that reinvented masking (K37).
+///   backends editor's <c>SecretMask</c>, and every ad-hoc caller that reinvented masking.
 ///   One notion of "secret" (a name heuristic covering passwords, tokens, API keys and client
 ///   secrets), one mask token, and one connection-string redactor used everywhere a secret can
 ///   leak into a log line, a banner, a CLI echo or an API response.
@@ -53,7 +53,7 @@ public static partial class SecretRedaction
 	///   query parameter, and the keyword form (<c>…;Password=…</c>) — for every provider, SQLite
 	///   included: SQLCipher and encrypted-SQLite connection strings accept a <c>Password=</c>
 	///   keyword, so a bare file path is returned verbatim while an embedded password is masked
-	///   (E23 — the old code short-circuited SQLite as "just a file path, nothing to hide").
+	///   (an earlier version short-circuited SQLite as "just a file path, nothing to hide").
 	/// </summary>
 	public static string RedactConnectionString(string? connectionString)
 	{

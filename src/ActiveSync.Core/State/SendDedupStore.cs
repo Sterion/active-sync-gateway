@@ -23,7 +23,7 @@ public enum SendClaimOutcome
 }
 
 /// <summary>
-///   F2: durable send-dedup claims (<see cref="SentCommandToken" />), so an irreversible send
+///   Durable send-dedup claims (<see cref="SentCommandToken" />), so an irreversible send
 ///   (16.x draft submit over SMTP, occurrence-CANCEL iTIP mail) is never repeated when a crash
 ///   lands between the send SUCCEEDING and the collection's own <c>CommitCollectionStateAsync</c>
 ///   — the applied-command ledger cannot cover that window because it is persisted atomically WITH
@@ -35,7 +35,7 @@ public enum SendClaimOutcome
 ///     durably BEFORE the action, mark-complete durably AFTER it succeeds) is what lets a resend tell
 ///     apart "this exact attempt already succeeded — do not repeat it" from "this exact attempt was
 ///     claimed but never confirmed done (still in flight, crashed, or genuinely failed) — retry it".
-///     A single-phase "claim = done" design (the original F2 shape) cannot make that distinction: a
+///     A single-phase "claim = done" design (the original shape) cannot make that distinction: a
 ///     transient failure (SMTP backend down, network blip) claims the send and then throws, and the
 ///     resend would find the claim and skip the retry entirely — reporting success to the client
 ///     while the mail was never sent. See the commit that introduced this file for the fuller

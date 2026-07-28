@@ -7,7 +7,7 @@ namespace ActiveSync.Core.Settings;
 ///   inlined the same logic with subtly different rules (one guarded a negative cadence with a
 ///   "have I loaded yet" flag, the other did not), and a negative cadence PERMANENTLY disabled live
 ///   refresh — including the pickup of an operator setting it back to positive, so recovery needed a
-///   restart (B11).
+///   restart.
 ///
 ///   Unified here: the cadence is always clamped to a finite, non-negative number of seconds, so a
 ///   negative or non-finite value degrades to "check on the next request" rather than "never check

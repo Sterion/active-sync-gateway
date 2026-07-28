@@ -85,7 +85,7 @@ public class UserFolder
 	/// <summary>
 	///   When the folder was first soft-deleted (stamped once, on the Deleted false→true
 	///   transition; cleared if it reappears). Drives the retention sweep that eventually
-	///   reclaims the row and its dependent DAV/collection state so the tables stop growing (A35).
+	///   reclaims the row and its dependent DAV/collection state so the tables stop growing.
 	/// </summary>
 	public DateTime? DeletedUtc { get; set; }
 
@@ -120,7 +120,7 @@ public class CollectionState
 	/// <summary>
 	///   Gzipped JSON of {item ServerId → revision}, as of SyncKey. Stored compressed because it
 	///   holds every item ever sent (2–3 MB uncompressed on a large mailbox); read and written only
-	///   through <see cref="SnapshotCodec" /> (A4).
+	///   through <see cref="SnapshotCodec" />.
 	/// </summary>
 	public byte[]? SnapshotCompressed { get; set; }
 
@@ -154,7 +154,7 @@ public class CollectionState
 }
 
 /// <summary>
-///   F2: a durable claim that one irreversible send (16.x draft submit, occurrence-CANCEL iTIP)
+///   A durable claim that one irreversible send (16.x draft submit, occurrence-CANCEL iTIP)
 ///   has already been carried out for one client command. Written with its OWN immediate
 ///   SaveChangesAsync BEFORE the send runs (<see cref="SendDedupStore" />), independently of the
 ///   round's SyncKey/ledger commit — so it survives a crash between the send and
@@ -491,7 +491,7 @@ public class ServerCertificate
 	public DateTime CreatedUtc { get; set; }
 
 	/// <summary>
-	///   EF concurrency token (K6): two replicas racing to replace an unreadable row must not
+	///   EF concurrency token: two replicas racing to replace an unreadable row must not
 	///   both silently succeed — the loser gets a <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException" />
 	///   (already handled in <see cref="Security.GatewayCertificateStore.GetOrCreateAsync" />
 	///   the same way the first-boot insert race is) instead of flip-flopping the served

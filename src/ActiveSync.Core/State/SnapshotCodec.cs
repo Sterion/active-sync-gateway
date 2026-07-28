@@ -7,7 +7,7 @@ namespace ActiveSync.Core.State;
 ///   Gzip codec for collection snapshots. A snapshot is {ServerId → revision} for every item ever
 ///   sent to a device; on a 50k-item mailbox its JSON runs 2–3 MB, and the row keeps it twice
 ///   (current + previous). Persisting it gzipped keeps that bulk off disk and out of every
-///   request's read/write path — the dominant steady-state sync cost (A4). The in-memory shape
+///   request's read/write path — the dominant steady-state sync cost. The in-memory shape
 ///   stays a plain <see cref="Dictionary{TKey,TValue}" />; only the stored column bytes are
 ///   compressed, and this is the one place that (de)serializes them.
 /// </summary>
@@ -40,7 +40,7 @@ internal static class SnapshotCodec
 		gzip.CopyTo(output);
 		// JsonSerializer.Deserialize builds the dictionary with the default (non-explicit) string
 		// comparer; re-wrap it with StringComparer.Ordinal so every snapshot map in the diff engine
-		// (FolderRegistry/DavItemMap already build theirs this way) uses the SAME comparer (A7).
+		// (FolderRegistry/DavItemMap already build theirs this way) uses the SAME comparer.
 		Dictionary<string, string>? deserialized =
 			JsonSerializer.Deserialize<Dictionary<string, string>>(output.ToArray(), JsonOpts);
 		return deserialized is null

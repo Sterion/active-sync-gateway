@@ -24,7 +24,7 @@ public static class DbSettingsLoader
 		// Debug. Anything else (Postgres down for 20 s at boot, a wrong connection string) silently
 		// reverts restart-tier settings that live ONLY in the database — TLS/metrics enable, listener
 		// ports — to their POCO defaults, which the old catch-all hid at Debug. Distinguish them, and
-		// retry a couple of times so a brief connect blip at boot isn't fatal to those settings (B9).
+		// retry a couple of times so a brief connect blip at boot isn't fatal to those settings.
 		const int attempts = 3;
 		for (int attempt = 1; ; attempt++)
 		{

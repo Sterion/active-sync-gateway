@@ -63,7 +63,7 @@ public sealed class UserResolver
 	private readonly BackendProviderRegistry _registry;
 	private readonly UserStore? _store;
 	private readonly ILogger<UserResolver>? _logger;
-	// B17: optional — only the host's real DI graph supplies IConfiguration; most tests construct
+	// Optional — only the host's real DI graph supplies IConfiguration; most tests construct
 	// this class directly and never touch ActiveSync:Users through a reloadable file, so the live
 	// re-check below is simply inert (never subscribed) when null.
 	private readonly IConfiguration? _config;
@@ -74,7 +74,7 @@ public sealed class UserResolver
 	private string? _usersSignature;
 	private readonly SemaphoreSlim _refreshGate = new(1, 1);
 	private readonly Settings.ChangeStampRefreshGate _gate = new();
-	// B4: serializes the BUILD-AND-SWAP of _snapshot between the two independent writers —
+	// Serializes the BUILD-AND-SWAP of _snapshot between the two independent writers —
 	// EnsureFreshAsync (account refresh, request path) and OnRolesChanged (a live "Backends" edit,
 	// config-reload thread). _refreshGate only keeps concurrent EnsureFreshAsync calls from
 	// overlapping each other; it says nothing about OnRolesChanged, which used to swap with no
@@ -85,7 +85,7 @@ public sealed class UserResolver
 	// with one computed from stale roles.
 	private readonly object _snapshotSwapLock = new();
 	private volatile Snapshot _snapshot;
-	// A8: monotonic — bumped every time _snapshot is swapped (both rebuild paths below), NEVER on
+	// Monotonic — bumped every time _snapshot is swapped (both rebuild paths below), NEVER on
 	// the constructor's initial build. BackendSessionFactory stamps each cached auth verdict with
 	// the version live when it was computed and rejects a hit whose stamp doesn't match the
 	// CURRENT version, closing the TOCTOU where SnapshotChanged clears the caches but an
@@ -96,7 +96,7 @@ public sealed class UserResolver
 	// _lastStamp is a Guid? (cannot be `volatile`) but is only ever touched inside _refreshGate,
 	// whose SemaphoreSlim Wait/Release are full memory barriers. _lastDbUsers is the one field read
 	// OUTSIDE that gate — OnRolesChanged runs on the config-reload thread — so it must be volatile to
-	// avoid compiling a rebuild against a stale reference (B23).
+	// avoid compiling a rebuild against a stale reference.
 	private Guid? _lastStamp;
 	private volatile Dictionary<string, UserOptions>? _lastDbUsers;
 	private volatile bool _refreshErrorLogged;
@@ -126,7 +126,7 @@ public sealed class UserResolver
 		// A live backend-settings change (eas config set Backends:...) rebuilds the snapshot so
 		// declared users pick up the new global role settings; pass-through reads Current directly.
 		_rolesProvider.Changed += OnRolesChanged;
-		// B17: ActiveSync:Users can be declared in a RELOADABLE file (appsettings.json — reload is on
+		// ActiveSync:Users can be declared in a RELOADABLE file (appsettings.json — reload is on
 		// by default) even though UsersFile itself loads with reloadOnChange:false. Without this, an
 		// edit there mutated _options.CurrentValue.Users immediately but the compiled snapshot kept
 		// resolving against the OLD one until some UNRELATED trigger (a "users" DB-stamp poll, a
@@ -144,7 +144,7 @@ public sealed class UserResolver
 	public BackendRolesConfig Roles => _rolesProvider.Current;
 
 	/// <summary>
-	///   Monotonic snapshot generation, bumped on every rebuild (A8). Callers that cache a
+	///   Monotonic snapshot generation, bumped on every rebuild. Callers that cache a
 	///   verdict computed against the current snapshot should stamp it with this value and
 	///   distrust a cached hit whose stamp no longer matches.
 	/// </summary>
@@ -188,14 +188,14 @@ public sealed class UserResolver
 					? null
 					: await _store.LoadAllAsync(_logger, ct).ConfigureAwait(false);
 				Snapshot built;
-				// B4: build AND swap under the same lock OnRolesChanged uses. A role change landing
+				// Build AND swap under the same lock OnRolesChanged uses. A role change landing
 				// on the config-reload thread while THIS build is still running (captured against
 				// the roles in force when it started) must not have its own, newer snapshot clobbered
 				// by this one finishing last with stale role settings baked in.
 				lock (_snapshotSwapLock)
 				{
 					_lastDbUsers = dbUsers;
-					// B1: non-strict — a config user invalidated since startup (typically by a live
+					// Non-strict — a config user invalidated since startup (typically by a live
 					// Backends edit removing a role it inherited from) must not throw here and abort
 					// this and every later database-user rebuild. See BuildSnapshot's `strict` doc.
 					built = BuildSnapshot(
@@ -232,7 +232,7 @@ public sealed class UserResolver
 	///   Rebuilds the snapshot when the global backend role configuration changed (a live
 	///   settings edit), so declared users inherit the new role settings. Uses the last-loaded
 	///   database users; pass-through resolution already reads the current roles directly.
-	///   B4: builds AND swaps under the same lock <see cref="EnsureFreshAsync" /> uses — see
+	///   Builds AND swaps under the same lock <see cref="EnsureFreshAsync" /> uses — see
 	///   <see cref="_snapshotSwapLock" /> for why a bare atomic swap is not enough.
 	/// </summary>
 	private void OnRolesChanged()
@@ -242,7 +242,7 @@ public sealed class UserResolver
 		{
 			try
 			{
-				// B1/B6: non-strict — a live backend edit can newly invalidate a config user's merge
+				// Non-strict — a live backend edit can newly invalidate a config user's merge
 				// (a role it inherited from just disappeared); BuildSnapshot now marks that entry
 				// Invalid instead of throwing (see its `strict` doc), so this rebuild — and every
 				// following EnsureFreshAsync rebuild — keeps working for every OTHER user. The
@@ -265,12 +265,12 @@ public sealed class UserResolver
 			Interlocked.Increment(ref _snapshotVersion);
 		}
 
-		// B11: same isolation as EnsureFreshAsync's rebuild — see RaiseSnapshotChanged.
+		// Same isolation as EnsureFreshAsync's rebuild — see RaiseSnapshotChanged.
 		RaiseSnapshotChanged();
 	}
 
 	/// <summary>
-	///   B17: reacts to a live <see cref="IOptionsMonitor{TOptions}" /> recompute — most commonly
+	///   Reacts to a live <see cref="IOptionsMonitor{TOptions}" /> recompute — most commonly
 	///   an appsettings.json reload wholly unrelated to <c>ActiveSync:Users</c> — and rebuilds the
 	///   snapshot ONLY when the Users subtree itself moved (the <see cref="UsersSignature" />
 	///   idiom, mirroring <see cref="BackendRolesProvider" />'s <c>Signature</c>), so a live edit
@@ -295,7 +295,7 @@ public sealed class UserResolver
 
 			try
 			{
-				// B1: non-strict for the same reason as EnsureFreshAsync/OnRolesChanged — a config
+				// Non-strict for the same reason as EnsureFreshAsync/OnRolesChanged — a config
 				// user THIS very edit invalidates must be refused (Invalid), not fatal to everyone
 				// else's rebuild.
 				rebuilt = BuildSnapshot(
@@ -323,7 +323,7 @@ public sealed class UserResolver
 	}
 
 	/// <summary>
-	///   B11: invokes each <see cref="SnapshotChanged" /> subscriber independently rather than a
+	///   Invokes each <see cref="SnapshotChanged" /> subscriber independently rather than a
 	///   bare <c>SnapshotChanged?.Invoke()</c>. A multicast <see cref="Delegate.Invoke" /> stops at
 	///   the first throwing handler — silently skipping every subscriber registered after it (e.g.
 	///   <c>BackendSessionFactory</c>'s auth-cache clear) — and, called from inside
@@ -378,7 +378,7 @@ public sealed class UserResolver
 		UserTemplate? template = _snapshot.Templates?.GetValueOrDefault(login);
 		if (template is null)
 			return _options.CurrentValue.AutoProvisionUsers ? null : false;
-		// B3: an invalid stored row fails closed — it never authenticates and never falls through to
+		// An invalid stored row fails closed — it never authenticates and never falls through to
 		// the backend probe (which would admit it as pass-through with the presented credentials).
 		// This is also what catches a user whose stored MailStore secret has no gateway password:
 		// the combination is refused at validation, so it lands here as a definitive false rather
@@ -405,7 +405,7 @@ public sealed class UserResolver
 				login, login.Contains('@') ? login : null, false, passThrough);
 		}
 
-		// B3: an invalid stored row refuses resolution rather than degrading to pass-through. In
+		// An invalid stored row refuses resolution rather than degrading to pass-through. In
 		// practice VerifyLocally already refused the login (false) before any session is built, so
 		// this is defence in depth against a caller that resolves without authenticating first.
 		if (template.Invalid)
@@ -480,7 +480,7 @@ public sealed class UserResolver
 		if (keyError is not null)
 			failures.Add(keyError);
 		ValidateLogin(login, failures);
-		// B8: the case-insensitive lookup — ActiveSyncOptions.Users binds with the ordinal comparer
+		// The case-insensitive lookup — ActiveSyncOptions.Users binds with the ordinal comparer
 		// while logins are case-insensitive everywhere else, so an indexer miss here would validate
 		// a differently-cased edit against no config at all.
 		UserOptions effective = UserMerge.Merge(UserEditing.FindConfigUser(options, login), entry).Options;
@@ -502,11 +502,11 @@ public sealed class UserResolver
 	///     (<see cref="EnsureFreshAsync" />, <see cref="OnRolesChanged" />) passes false: a config
 	///     entry that validated at startup can be invalidated later by nothing the operator touched
 	///     in <c>ActiveSync:Users</c> itself — a LIVE <c>ActiveSync:Backends</c> edit removing a role
-	///     it inherited from (B1) — and a config user is otherwise ordinary input at that point, not
+	///     it inherited from — and a config user is otherwise ordinary input at that point, not
 	///     a startup precondition. Strict would make ONE stale config entry throw out of every
 	///     later rebuild, including ones with nothing to do with it — freezing database user pickup
 	///     (disables, new accounts, everything) until restart. Non-strict instead marks it Invalid,
-	///     exactly like a bad database row (B3): visible, refused, and no longer fatal to anyone else's
+	///     exactly like a bad database row: visible, refused, and no longer fatal to anyone else's
 	///     refresh.
 	///   </para>
 	/// </summary>
@@ -527,7 +527,7 @@ public sealed class UserResolver
 
 		// One memo across the whole build: declared users overwhelmingly inherit the SAME global role
 		// ProviderSettings objects, so provider validation (CA reads, host probes) runs once per
-		// distinct settings object rather than once per user (B7).
+		// distinct settings object rather than once per user.
 		ValidationMemo memo = new();
 		try
 		{
@@ -573,7 +573,7 @@ public sealed class UserResolver
 					continue;
 				}
 
-				// B1/B3: fail closed rather than fatal. Skipping the entry left NO template, so
+				// Fail closed rather than fatal. Skipping the entry left NO template, so
 				// Resolve degraded to pass-through (presented credentials forwarded verbatim, the
 				// overrides discarded) and — with no merged entry — IsLoginDisabled UN-disabled an
 				// Enabled=false user. Register an invalid sentinel that refuses resolution and keep
@@ -581,7 +581,7 @@ public sealed class UserResolver
 				// honours Enabled==false (evaluated on the merged values, before validation), while
 				// the login is refused until the declaration is corrected. A non-strict rebuild
 				// treats a config-only failure exactly the same way a database one always was — the
-				// bad entry no longer aborts every OTHER user's rebuild (B1: a config user invalidated
+				// bad entry no longer aborts every OTHER user's rebuild (a config user invalidated
 				// by a later live Backends edit must not freeze database user pickup).
 				logger?.LogWarning(
 					"Refusing invalid {Source} account entry for {User} (fail-closed) until corrected: {Failures}",
@@ -613,7 +613,7 @@ public sealed class UserResolver
 		    GatewayPasswordHasher.IsHashed(account.Password) &&
 		    !GatewayPasswordHasher.TryParse(account.Password, out string? parseError))
 			failures.Add($"ActiveSync:Users:{login}: Password is not a valid pbkdf2$ value: {parseError}.");
-		// B18: a sealed enc:v1: value in the gateway Password position never authenticates —
+		// A sealed enc:v1: value in the gateway Password position never authenticates —
 		// VerifyLocally treats a non-pbkdf2$ value as plaintext and compares digests, so the real
 		// password never matches and the account is silently locked out. Flag it instead of
 		// letting it through unreported (the gateway Password wants pbkdf2$ or plaintext).
@@ -664,7 +664,7 @@ public sealed class UserResolver
 				continue;
 			}
 
-			// B17: the global Provider is trimmed at load; normalize the per-user override the same
+			// The global Provider is trimmed at load; normalize the per-user override the same
 			// way so " imap" (or "") doesn't fail the inheritance equality check, drop the inherited
 			// settings, and then throw an unrelated "unknown provider" from registry.GetFor.
 			string? overrideProvider = string.IsNullOrWhiteSpace(user.Provider) ? null : user.Provider.Trim();
@@ -676,7 +676,7 @@ public sealed class UserResolver
 				continue;
 			}
 
-			// B21: an unconfigured gateway (no global mail role) must still construct — the invariant
+			// An unconfigured gateway (no global mail role) must still construct — the invariant
 			// is "start unconfigured so the UI can configure it". A user mail override with no global
 			// and no explicit provider used to fall through to providerName "local", whose
 			// registry.GetFor(MailStore) throws — crashing the resolver ctor for a config user and
@@ -702,7 +702,7 @@ public sealed class UserResolver
 		}
 
 		// Provider-delegated validation of every effective role — memoized per (provider, role,
-		// settings-identity) so shared global settings are validated once, not once per user (B7).
+		// settings-identity) so shared global settings are validated once, not once per user.
 		foreach ((BackendRole role, RoleTemplate template) in templates)
 		{
 			ValidationMemo.Outcome outcome = memo.Validate(registry, template.ProviderName, role, template.Settings);
@@ -712,9 +712,9 @@ public sealed class UserResolver
 				failures.Add($"ActiveSync:Users:{login}:Backends:{role}: {outcome.GetForError}");
 		}
 
-		// The user-default backend secret is unsealed exactly like a per-role one (B5 residency
-		// note applies equally); the gateway Password deliberately is NOT — it is a local
-		// verifier, and B18 flags a sealed value there as a configuration error.
+		// The user-default backend secret is unsealed exactly like a per-role one (the same
+		// residency trade-off applies equally); the gateway Password deliberately is NOT — it is a
+		// local verifier, and a sealed value there is flagged above as a configuration error.
 		string? defaultBackendPassword = ResolveSecret(
 			account.DefaultBackendPassword, encryptionKey, $"{login}:DefaultBackendPassword", failures);
 
@@ -836,7 +836,7 @@ public sealed class UserResolver
 		if (login.Contains(':') || login.Any(char.IsControl))
 			failures.Add($"ActiveSync:Users:{login}: login must not contain ':' or control characters.");
 
-		// B13: Basic auth delivers leading/trailing whitespace verbatim. UserStore.NormalizeLogin does
+		// Basic auth delivers leading/trailing whitespace verbatim. UserStore.NormalizeLogin does
 		// not trim, so an untrimmed login like " bob" misses MergedUsers (" bob" != "bob"), degrades
 		// to pass-through, and — with AutoProvisionUsers on — mints a second, PERMANENT identity
 		// (UserId is never reused) the real "bob" can never see. Refuse it outright rather than
@@ -846,14 +846,14 @@ public sealed class UserResolver
 	}
 
 	/// <summary>
-	///   Unseals one <c>enc:v1:</c> backend secret at snapshot-build time. B5: the returned plaintext
+	///   Unseals one <c>enc:v1:</c> backend secret at snapshot-build time. The returned plaintext
 	///   is stored in the compiled <see cref="RoleTemplate" /> and stays resident in GC-managed memory
 	///   for the whole lifetime of the immutable <see cref="Snapshot" /> (bounded by
 	///   <see cref="AuthOptions.UsersRefreshSeconds" /> — the snapshot is replaced, and the old one
 	///   becomes collectible, on the next rebuild) rather than being re-derived per <see cref="Resolve" />
 	///   call. This is a deliberate, ACCEPTED residency, not an oversight: unsealing lazily at
 	///   `Resolve` time would need the master key loaded (and potentially PBKDF2-stretched from a
-	///   passphrase — K3) on every request that resolves an account with a sealed backend secret,
+	///   passphrase) on every request that resolves an account with a sealed backend secret,
 	///   trading a memory-residency window (already gated behind reading process memory with the
 	///   master key available) for a real per-request cost, for a Low-severity finding. Unlike the
 	///   master key itself (zeroed after use, see the `finally` in <see cref="BuildSnapshot" />), the
@@ -886,7 +886,7 @@ public sealed class UserResolver
 	}
 
 	/// <summary>
-	///   B7: memoizes provider <c>ValidateConfiguration</c> output within one snapshot build. Almost
+	///   Memoizes provider <c>ValidateConfiguration</c> output within one snapshot build. Almost
 	///   every declared user inherits the SAME global role <see cref="ProviderSettings" /> object (an
 	///   unset role, or a role whose Settings are not overridden, reuses the assignment's Settings
 	///   reference), so keying on settings identity collapses O(users × roles) provider validations —

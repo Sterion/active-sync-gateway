@@ -17,7 +17,7 @@ public static class MergedFreeBusy
 	public static string Build(DateTime startUtc, DateTime endUtc, IReadOnlyList<BusyPeriod> periods)
 	{
 		// An inverted window (end before start) is a caller bug; clamping it to a single all-free
-		// digit silently answers "completely free" for nonsense input (A16).
+		// digit silently answers "completely free" for nonsense input.
 		ArgumentOutOfRangeException.ThrowIfLessThan(endUtc, startUtc);
 
 		int intervals = (int)Math.Ceiling((endUtc - startUtc).TotalMinutes / Interval.TotalMinutes);
@@ -30,7 +30,7 @@ public static class MergedFreeBusy
 			if (period.EndUtc <= startUtc || period.StartUtc >= endUtc)
 				continue;
 			// A malformed Kind ('\0', 'B', …) must never be copied verbatim into the digit
-			// string — it would ride straight into WBXML — so skip the period entirely (A16).
+			// string — it would ride straight into WBXML — so skip the period entirely.
 			int kindRank = Rank(period.Kind);
 			if (kindRank < 0)
 				continue;
@@ -38,7 +38,7 @@ public static class MergedFreeBusy
 			int last = Math.Min(intervals - 1, (int)Math.Ceiling((period.EndUtc - startUtc) / Interval) - 1);
 			for (int i = first; i <= last; i++)
 				// Higher STATUS wins, by rank — not by ASCII value: '4' (no data) is the highest
-				// digit but the weakest signal, so a known busy/tentative/OOF must beat it (A15).
+				// digit but the weakest signal, so a known busy/tentative/OOF must beat it.
 				if (kindRank > Rank(digits[i]))
 					digits[i] = period.Kind;
 		}

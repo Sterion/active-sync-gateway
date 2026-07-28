@@ -22,7 +22,7 @@ public sealed class SettingsRefresher(
 	private readonly SemaphoreSlim _refreshGate = new(1, 1);
 	private readonly ChangeStampRefreshGate _gate = new();
 	// _lastStamp (Guid?) cannot be `volatile`; it is only touched inside _refreshGate (a full
-	// barrier). The bool flags are volatile so a reader outside the gate cannot see a stale value (B23).
+	// barrier). The bool flags are volatile so a reader outside the gate cannot see a stale value.
 	private Guid? _lastStamp;
 	private volatile bool _hasLoaded;
 	private volatile bool _refreshErrorLogged;
@@ -53,7 +53,7 @@ public sealed class SettingsRefresher(
 					? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
 					: await store.LoadAllAsync(ct).ConfigureAwait(false);
 
-				// B6: record progress BEFORE firing the reload token. SetData swaps the snapshot and
+				// Record progress BEFORE firing the reload token. SetData swaps the snapshot and
 				// then fires the token; a downstream subscriber that throws (e.g. the account-snapshot
 				// rebuild) used to escape here — so _lastStamp/_hasLoaded were never set, the same stamp
 				// was retried forever, and the failure was mislogged as a settings-refresh error. The
@@ -73,7 +73,7 @@ public sealed class SettingsRefresher(
 
 				logger?.LogInformation(
 					"Global settings snapshot rebuilt: {Count} database override(s)", data.Count);
-				// B11: invoke each subscriber independently rather than `Changed?.Invoke()`. A bare
+				// Invoke each subscriber independently rather than `Changed?.Invoke()`. A bare
 				// multicast Invoke stops at the first throwing handler (silently skipping every
 				// subscriber registered after it) and — because this call sits inside the outer
 				// try/catch below — a throw here escaped to the generic failure branch, which (1)

@@ -78,7 +78,7 @@ public sealed class BackendRolesConfig
 
 	/// <summary>
 	///   Snapshots a role section's leaf values into a materialized <see cref="ProviderSettings" />
-	///   rather than wrapping the LIVE <see cref="IConfigurationSection" /> (B14). A live section keeps
+	///   rather than wrapping the LIVE <see cref="IConfigurationSection" />. A live section keeps
 	///   reflecting later edits, so a REJECTED rebuild's settings would still read through the
 	///   last-good assignment; a snapshot means only an ACCEPTED rebuild changes what a provider sees.
 	/// </summary>
