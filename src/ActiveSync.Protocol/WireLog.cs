@@ -61,6 +61,12 @@ public static class WireLog
 	{
 		if (allowLineStructure && c is '\r' or '\n' or '\t')
 			return false;
-		return char.IsControl(c) || c is (>= '‪' and <= '‮') or (>= '⁦' and <= '⁩');
+		// W9: written as escapes, never as raw literals — an unterminated LRE/RLO sitting in this
+		// source line would itself be the Trojan Source hazard (CVE-2021-42574) this check exists
+		// to defend against: a bidi-aware viewer (GitHub, most editors, a modern terminal's git
+		// diff) would render the remainder of the line reordered, showing a reviewer something
+		// different from what the compiler sees. U+202A-202E are the bidi override/embedding
+		// controls (LRE/RLE/PDF/LRO/RLO); U+2066-2069 are the bidi isolates (LRI/RLI/FSI/PDI).
+		return char.IsControl(c) || c is (>= '\u202A' and <= '\u202E') or (>= '\u2066' and <= '\u2069');
 	}
 }

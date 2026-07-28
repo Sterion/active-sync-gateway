@@ -57,11 +57,44 @@ public sealed class WireLogTests
 	[Fact]
 	public void Payload_BidiOverrideCharacters_AreNeutralized()
 	{
-		// Right-to-Left Override (U+202E) and Pop Directional Isolate (U+2069):
-		Assert.DoesNotContain('‮', WireLog.Payload("Subject: admin‮evil"));
-		Assert.DoesNotContain('⁩', WireLog.Payload("a⁩b"));
-		Assert.DoesNotContain('‪', WireLog.Payload("a‪b"));
-		Assert.DoesNotContain('⁦', WireLog.Payload("a⁦b"));
-		Assert.Equal("admin?evil", WireLog.Payload("admin‮evil"));
+		// Right-to-Left Override (U+202E) and Pop Directional Isolate (U+2069) — written as escapes
+		// (W9), never as raw literals: a raw override sitting unterminated in this source line would
+		// itself be the Trojan Source hazard the classifier exists to defend against.
+		Assert.DoesNotContain('\u202E', WireLog.Payload("Subject: admin\u202Eevil"));
+		Assert.DoesNotContain('\u2069', WireLog.Payload("a\u2069b"));
+		Assert.DoesNotContain('\u202A', WireLog.Payload("a\u202Ab"));
+		Assert.DoesNotContain('\u2066', WireLog.Payload("a\u2066b"));
+		Assert.Equal("admin?evil", WireLog.Payload("admin\u202Eevil"));
+	}
+
+	// W9: IsUnsafe's own classifier embedded the bidi-override code points it defends against as RAW
+	// literal characters in its source line — exactly the Trojan Source hazard (CVE-2021-42574) the
+	// check exists to prevent. An unterminated LRE/RLO sitting in the file reorders how the rest of
+	// that line renders in any bidi-aware viewer (GitHub, most editors, a modern terminal's git
+	// diff), so a reviewer can be shown text different from what the compiler sees. This scans the
+	// UTF-8 bytes of the source file directly (not the compiled behavior, which is identical either
+	// way) for the bidi-override code points as raw bytes.
+	[Fact]
+	public void WireLogSource_DoesNotEmbedRawBidiOverrideCharacters()
+	{
+		string source = File.ReadAllText(
+			Path.Combine(FindRepoRoot(), "src", "ActiveSync.Protocol", "WireLog.cs"));
+
+		// Ordinal is load-bearing here, not cosmetic: xUnit's culture-aware Assert.DoesNotContain
+		// treats these very format characters as linguistically ignorable, so it can report a
+		// "match" at position 0 of a string that does not contain the character at all — the
+		// bidi-override defense hiding a false positive in the test that guards it.
+		int[] bidiOverrideCodePoints = [0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069];
+		foreach (int codePoint in bidiOverrideCodePoints)
+			Assert.DoesNotContain(char.ConvertFromUtf32(codePoint), source, StringComparison.Ordinal);
+	}
+
+	private static string FindRepoRoot()
+	{
+		DirectoryInfo? dir = new(AppContext.BaseDirectory);
+		while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "ActiveSync.slnx")))
+			dir = dir.Parent;
+		return dir?.FullName
+			?? throw new InvalidOperationException("Could not locate repo root (ActiveSync.slnx) above the test binary.");
 	}
 }
