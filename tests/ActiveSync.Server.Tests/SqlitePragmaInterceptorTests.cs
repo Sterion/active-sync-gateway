@@ -1,5 +1,11 @@
+using ActiveSync.Core.Options;
+using ActiveSync.Core.State;
 using ActiveSync.Server.Setup;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ActiveSync.Server.Tests;
 
@@ -50,5 +56,45 @@ public sealed class SqlitePragmaInterceptorTests : IDisposable
 		await using SqliteCommand check = connection.CreateCommand();
 		check.CommandText = "PRAGMA journal_mode;";
 		Assert.Equal("wal", ((string?)await check.ExecuteScalarAsync())?.ToLowerInvariant());
+	}
+
+	// E22: AddSyncDatabase passes the SAME `configure` delegate to both AddDbContextFactory and
+	// AddDbContext, but the delegate itself does `new SqlitePragmaInterceptor()` — so EF Core invokes
+	// it once per registration and mints TWO instances, each with its own `_walApplied` guard. The
+	// WAL pragma is idempotent so nothing breaks, but the "one interceptor instance per database"
+	// invariant the class's own doc comment asserts (and the WalPragmaExecutions seam measures)
+	// does not actually hold at the DI level the two tests above never build.
+	[Fact]
+	public void AddSyncDatabase_Sqlite_SharesOneInterceptorInstance_BetweenTheFactoryAndTheScopedContext()
+	{
+		ServiceCollection services = new();
+		services.AddLogging();
+		services.AddOptions<ActiveSyncOptions>().Configure(o => o.Database.ConnectionString = $"Data Source={_dbPath}");
+		services.AddSyncDatabase("Sqlite");
+		using ServiceProvider provider = services.BuildServiceProvider();
+
+		IDbContextFactory<SqliteSyncDbContext> factory =
+			provider.GetRequiredService<IDbContextFactory<SqliteSyncDbContext>>();
+		using SqliteSyncDbContext factoryContext = factory.CreateDbContext();
+
+		using IServiceScope scope = provider.CreateScope();
+		SyncDbContext scopedContext = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
+
+		// Every SqlitePragmaInterceptor reachable from either context must be the SAME reference —
+		// the class's own doc comment ("one interceptor instance per database") and its
+		// `_walApplied` guard only mean anything if that actually holds.
+		HashSet<SqlitePragmaInterceptor> distinctInstances = new(
+			InterceptorsOf(factoryContext).Concat(InterceptorsOf(scopedContext)),
+			ReferenceEqualityComparer.Instance);
+
+		Assert.Single(distinctInstances);
+	}
+
+	private static IEnumerable<SqlitePragmaInterceptor> InterceptorsOf(DbContext context)
+	{
+		return context.GetService<IDbContextOptions>().Extensions
+			.OfType<CoreOptionsExtension>()
+			.SelectMany(extension => extension.Interceptors ?? [])
+			.OfType<SqlitePragmaInterceptor>();
 	}
 }

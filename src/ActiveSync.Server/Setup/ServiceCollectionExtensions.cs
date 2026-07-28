@@ -67,8 +67,16 @@ public static class ServiceCollectionExtensions
 						npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory")));
 				break;
 			case "sqlite":
+				// E22: the SAME `configure` delegate below is passed to both AddDbContextFactory and
+				// AddDbContext, but a `new SqlitePragmaInterceptor()` INSIDE the delegate body still
+				// mints a fresh instance on every invocation, so the two registrations (and, in
+				// practice, more invocations than that) each get their OWN instance — silently
+				// breaking the class's own "one interceptor instance per database" invariant, which
+				// its `_walApplied` guard depends on to apply WAL exactly once. Hoisted here and
+				// captured by reference so every invocation of `configure` shares the one instance.
+				SqlitePragmaInterceptor sqliteInterceptor = new();
 				AddProvider<SqliteSyncDbContext>(services, (sp, db) =>
-					db.UseSqlite(ConnectionString(sp)).AddInterceptors(new SqlitePragmaInterceptor()));
+					db.UseSqlite(ConnectionString(sp)).AddInterceptors(sqliteInterceptor));
 				break;
 			default:
 				throw new InvalidOperationException(
