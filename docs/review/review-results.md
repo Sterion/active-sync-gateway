@@ -1774,3 +1774,47 @@ parameter exists.
 - **`N7` (mine, from item 29) is still open and also lives in AGENTS.md** — the "a share grant NEVER claims
   the default slot" absolute that `H23` deliberately made false. Whoever sweeps `N8` should take `N7` in
   the same pass.
+
+## Item 33 — Handler & WebUi polish
+**Findings:** `C20` `C21` `C22` `C23` `F19` `F20` `F21` `F22` `F24` `F25` `F26` `F28` `F29`
+**Commits:** `3a22379` (C20) · `45fd200` (C21) · `bb70c22` (C22) · `29ddcda` (C23) · `66ea51f` (F19) ·
+`a4087fb` (F20) · `a4913ff` (F21) · `80f630c` (F22) · `42c36f6` (F24) · `b66aabb` (F25) · `954033f` (F26) ·
+`15025f7` (F28) · `ed9b9bf` (F29)
+**Verification:** integrity items=37 live=14 assigned=245 unique=245 dupes=0 encoding=0 ✓ ·
+cursor → item 34 ✓ · one commit per finding, strike shipped with every one ✓ · build 0 warnings ✓ ·
+unit **1523 passed, 0 failed** (Cli 16 · Protocol 108 · Core 927 · WebUi 123 · Server 349) ✓ ·
+live **150 passed, 0 skipped** ✓
+
+**Red-first re-proved independently for all ten behavioural findings** — reversal gave 14 failures
+(`C22` ×3, `F19` ×2, `F20`, `F22` ×2, `F24`, `F25` ×2, `F26`, `F28`, `F29`), plus `F21` by mutation
+(deleting the `deviceId.Length == 0` guard → `EmptyDeviceId_IsRejected` fails).
+
+**The three untestable findings were verified against the code they reference**, since the repo has no JS
+test harness and "N/A" would otherwise mean "unchecked":
+- `C20` — `.notice.error` really exists (`app.css:315`) and `tls.js:47` now emits `notice error`.
+- `C21` — `--accent-2` is defined in all three palette blocks of `theme.css` and consumed by `app.css:69`.
+- `C23` — `admin/app.js:72` toggles `nav-portal` on `mode.userPortalEnabled`, and the server really sends
+  it (`AuthEndpoints.cs:37`, an anonymous-type member on `auth/mode`). I initially could not find the field
+  and suspected the link would be hidden unconditionally; it was a capitalisation miss in my own grep, not
+  a defect.
+
+**The live suite was run although the item is unmarked**, because `F21` (empty DeviceId now 400),
+`F22` (attachment FileReferences gated on the folder registry) and `F26` (12.x raw-form errors become HTTP
+statuses) all change behaviour on the request path. 150 passed, 0 skipped.
+
+**Notes:**
+- **`F21` is the one with real deployment risk**, and it is the right fix: a POST with no DeviceId is now
+  rejected with 400 instead of sharing a single `""`-keyed `Device` row — SyncKeys, snapshots and PolicyKey
+  all collapsed together for every such client. Anything in the wild that omitted DeviceId stops working,
+  loudly, which is the point. OPTIONS is mapped separately and never reaches the check.
+- **`F21`'s red-first needed a two-step and the worker disclosed it**: `IsValidDeviceId` was `private`, so
+  it changed visibility to `internal` FIRST, confirmed genuine red on the accept-empty behaviour, then
+  applied the logic fix. The accessibility change touches no logic, so the red is honest — and my own
+  mutation of the shipped guard reproduces it independently.
+- **`F22` closes a real reachability hole**: `ItemOperations` Fetch and `GetAttachment` previously served
+  attachments from folders outside the user's registry. Both refusal paths are now tested.
+- **`F26` changes the 12.x wire contract deliberately** — raw-form ComposeMail failures answer an HTTP
+  status with no body instead of a WBXML ComposeMail response the 12.x form never expects.
+- **`F19` renumbers ComposeMail statuses** (empty/undecodable MIME 103 → 107) and **`F28` adds
+  `airsync:Class`** to 12.1 GetItemEstimate responses; three pre-existing 14.1 tests confirm the 14.1 wire
+  form is byte-identical, which is the AGENTS.md invariant that matters here.
