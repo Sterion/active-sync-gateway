@@ -28,6 +28,18 @@ public sealed class JmapCalendarStoreUnitTests
 	}
 	""";
 
+	// H21: JmapCalendarStore declared IReadOnlyCollectionSource with IsReadOnlyCollection hard-
+	// coded to `false` — indistinguishable from not implementing the interface at all, but it made
+	// the store LOOK share-aware to IBackendSession.IsReadOnlyFolder's OR and to anyone reading the
+	// type list. docs/backends.md already flags this as unenforced; the honest fix is to drop the
+	// declaration until it is real rather than assert a capability that never reverts a write.
+	[Fact]
+	public void JmapCalendarStore_DoesNotDeclareAnUnenforcedReadOnlyCollectionCapability()
+	{
+		Assert.False(typeof(IReadOnlyCollectionSource).IsAssignableFrom(typeof(JmapCalendarStore)),
+			"JmapCalendarStore must not claim IReadOnlyCollectionSource while IsReadOnlyCollection always returns false");
+	}
+
 	[Fact]
 	public async Task GetItemRevisions_AppliesTheCalendarFilterWindow()
 	{

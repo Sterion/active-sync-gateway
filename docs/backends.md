@@ -88,7 +88,7 @@ Both are feature-complete for mail; the differences are mechanism, not coverage.
 | Reminders / alarms | ✅ | ❌ | ✅ | |
 | Timezones | ✅ | ✅ | ✅ | |
 | Inline event attachments (16.x) | ✅ | ❌ | ✅ | |
-| Shared read-only calendars | ✅ | ❌ | ❌ | JMAP declares the capability but doesn't enforce it (writes not reverted) |
+| Shared read-only calendars | ✅ | ❌ | ❌ | JMAP has no share-aware read-only enforcement (writes are not reverted) |
 | Multiple calendars | ✅ | ✅ | ❌ | `local` is one fixed calendar |
 | Push for Ping/Sync | ⚠️ poll | ⚠️ poll | ✅ instant | |
 

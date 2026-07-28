@@ -19,7 +19,7 @@ namespace ActiveSync.Backends.Jmap;
 ///   also mail iMIP (<see cref="ShouldSendInvitationsAsync" /> is false).
 /// </summary>
 public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, int pollSeconds)
-	: IContentStore, ICalendarOperations, IReadOnlyCollectionSource, IItemMoveOperations
+	: IContentStore, ICalendarOperations, IItemMoveOperations
 {
 	public const string KeyPrefix = "jmap-cal:";
 
@@ -32,7 +32,11 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 
 	public bool OwnsBackendKey(string backendKey) => backendKey.StartsWith(KeyPrefix, StringComparison.Ordinal);
 
-	public bool IsReadOnlyCollection(string folderBackendKey) => false;
+	// H21: this store used to declare IReadOnlyCollectionSource with IsReadOnlyCollection hard-
+	// coded to `false` — behaviourally identical to not implementing the interface (shared JMAP
+	// calendars are never reverted here), but it made the store LOOK share-aware to
+	// IBackendSession.IsReadOnlyFolder's OR and to anyone reading the type list. Dropped rather
+	// than left as a capability that was never real; see docs/backends.md.
 
 	public async Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 	{
