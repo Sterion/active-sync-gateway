@@ -43,10 +43,12 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		_logger = loggerFactory.CreateLogger<ImapBackendProvider>();
 		// Verbose wire logging gets a per-backend category so one backend can be traced alone.
 		_wireLogger = loggerFactory.CreateLogger("ActiveSync.Backends.Imap");
-		// Per-user live-count gauge. Keys are "user\nfolder"; only materialized Lazy
-		// values count (an unrealized slot is not a live connection).
+		// Per-user live-count gauge. Keys are "user\nfolder"; G27: a materialized Lazy is not
+		// enough — GetOrCreateWatcher dereferences .Value on every call just to compare
+		// credentials/options, so the watcher object always exists well before any connection is
+		// attempted. Only a STARTED watcher (WaitForChangeAsync ran at least once) is a live count.
 		GatewayMetrics.SetIdleWatchersObserver(() => _watchers
-			.Where(pair => pair.Value.IsValueCreated)
+			.Where(pair => pair.Value.IsValueCreated && pair.Value.Value.IsStarted)
 			.GroupBy(pair => pair.Key.Split('\n')[0], StringComparer.OrdinalIgnoreCase)
 			.Select(g => new Measurement<long>(g.Count(),
 				new KeyValuePair<string, object?>("user", GatewayMetrics.PerUserLabels ? g.Key : "-"))));
@@ -134,13 +136,13 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		return true;
 	}
 
-	/// <summary>Live (materialized) IDLE watchers for the admin dashboard.</summary>
+	/// <summary>Live (started, not just materialized — G27) IDLE watchers for the admin dashboard.</summary>
 	public IReadOnlyList<WatcherInfo> SnapshotWatchers()
 	{
 		List<WatcherInfo> watchers = new();
 		foreach ((string key, Lazy<ImapIdleWatcher> lazy) in _watchers)
 		{
-			if (!lazy.IsValueCreated)
+			if (!lazy.IsValueCreated || !lazy.Value.IsStarted)
 				continue;
 			int separator = key.IndexOf('\n');
 			watchers.Add(new WatcherInfo(

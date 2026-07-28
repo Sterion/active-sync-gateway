@@ -118,4 +118,29 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 
 		Assert.NotSame(before, after);
 	}
+
+	/// <summary>
+	///   G27: <see cref="ImapBackendProvider.SnapshotWatchers" /> (feeding the admin dashboard) and
+	///   the constructor's <c>activesync_idle_watchers</c> gauge callback filtered on
+	///   <c>Lazy.IsValueCreated</c> only — but <see cref="ImapBackendProvider.GetOrCreateWatcher" />
+	///   dereferences <c>current.Value</c> on EVERY call just to compare Credentials/Options, so the
+	///   <c>Lazy&lt;ImapIdleWatcher&gt;</c> is always materialized. <see cref="ImapIdleWatcher" /> only
+	///   opens its connection when <c>EnsureStarted</c> runs, from the first
+	///   <see cref="ImapIdleWatcher.WaitForChangeAsync" /> — so a user who Syncs (which resolves a
+	///   watcher via <c>GetOrCreateWatcher</c>) but never Pings (which is the only thing that calls
+	///   <c>WaitForChangeAsync</c>) inflated the count of a connection that was never actually opened.
+	/// </summary>
+	[Fact]
+	public void SnapshotWatchers_ExcludesAMaterializedButNeverStartedWatcher()
+	{
+		BackendCredentials credentials = new("bob@example.com", "pw");
+		ImapOptions options = new() { Host = "imap.example.com", Port = 143 };
+
+		// Materializes the Lazy<ImapIdleWatcher> (GetOrCreateWatcher dereferences .Value) without
+		// ever calling WaitForChangeAsync -- exactly a Sync with no matching Ping yet.
+		ImapIdleWatcher? watcher = _provider.GetOrCreateWatcher("bob@example.com", options, credentials, "INBOX");
+		Assert.NotNull(watcher);
+
+		Assert.Empty(_provider.SnapshotWatchers());
+	}
 }

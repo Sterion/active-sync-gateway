@@ -58,6 +58,16 @@ public sealed class ImapIdleWatcher(
 	/// <summary>UTC time of the most recent folder event (the latch); MinValue when none yet.</summary>
 	public DateTime LastChangeUtc => new(Interlocked.Read(ref _lastChangeTicks), DateTimeKind.Utc);
 
+	/// <summary>
+	///   G27: whether the background IDLE loop has actually been started (a connection either is or
+	///   is being established) — as opposed to merely CONSTRUCTED. <see cref="ImapBackendProvider" />
+	///   dereferences its cached <c>Lazy&lt;ImapIdleWatcher&gt;</c> on every
+	///   <c>GetOrCreateWatcher</c> call just to compare credentials/options, so the watcher object
+	///   always exists well before the first real wait; only <see cref="EnsureStarted" /> (called
+	///   from <see cref="WaitForChangeAsync" />) means a connection was ever attempted.
+	/// </summary>
+	internal bool IsStarted => _loop is not null;
+
 	public async ValueTask DisposeAsync()
 	{
 		await _stopCts.CancelAsync().ConfigureAwait(false);
