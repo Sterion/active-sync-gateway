@@ -192,7 +192,18 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 			List<XElement> entry = GalEntry(card);
 			bool matches = entry.Any(e => e.Value.Contains(query, StringComparison.OrdinalIgnoreCase));
 			if (matches)
+			{
+				// H19: every other GAL implementation routes through
+				// ContactConverter.AppendGalPicture, which emits the MS-ASCMD photo status (173 no
+				// photo / 174 over MaxSize / 175 count limit) even when it grants no data. This
+				// bridge never reads a JSContact "media" member into a picture at all (H25), so a
+				// requested photo is always "no photo" — but the client asked and must get an
+				// explicit status element, not silence.
+				if (photos is not null)
+					entry.Add(new XElement(Gal + "Picture", new XElement(Gal + "Status", "173")));
 				results.Add(entry);
+			}
+
 			if (results.Count >= maxResults)
 				break;
 		}

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Xml.Linq;
 using ActiveSync.Backends.Jmap;
 using ActiveSync.Contracts;
 
@@ -73,6 +74,34 @@ public sealed class JmapContactStoreTests
 		string second = await RevisionOfSingleCard(reordered);
 
 		Assert.Equal(first, second);
+	}
+
+	// H19: SearchGalAsync silently ignored the GalPhotoRequest parameter — a client that asked for
+	// photos got neither photo data nor the MS-ASCMD "no photo" (173) status element, unlike every
+	// other GAL implementation (which routes through ContactConverter.AppendGalPicture).
+	[Fact]
+	public async Task SearchGal_WithPhotoRequest_EmitsNoPhotoStatus()
+	{
+		StubHandler stub = new(request =>
+		{
+			if (request.RequestUri!.AbsolutePath != "/jmap/")
+				return Json(SessionJson);
+			return Json("""
+			{"methodResponses":[["ContactCard/get",{"accountId":"c","state":"s","list":[
+			  {"id":"K1","addressBookIds":{"B1":true},"name":{"full":"Jane Doe"}}
+			]},"0"]],"sessionState":"x"}
+			""");
+		});
+		JmapClient client = new(Base, new HttpClient(stub));
+		JmapContactStore store = new(client, pollSeconds: 1);
+
+		IReadOnlyList<IReadOnlyList<XElement>> results = await store.SearchGalAsync(
+			"Jane", maxResults: 10, new GalPhotoRequest(null, null), CancellationToken.None);
+
+		Assert.Single(results);
+		XElement? picture = results[0].FirstOrDefault(e => e.Name.LocalName == "Picture");
+		Assert.NotNull(picture);
+		Assert.Equal("173", picture!.Elements().FirstOrDefault(e => e.Name.LocalName == "Status")?.Value);
 	}
 
 	private static async Task<string> RevisionOfSingleCard(string cardJson)
