@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
@@ -33,6 +34,15 @@ public sealed partial class ImapMailBackend(
 	private static readonly string[] TrashNames = ["Trash", "Deleted Items", "Deleted Messages", "INBOX.Trash"];
 	private static readonly string[] DraftsNames = ["Drafts", "INBOX.Drafts"];
 	private static readonly string[] JunkNames = ["Junk", "Spam", "Junk E-mail", "INBOX.Junk"];
+
+	/// <summary>
+	///   G15: <see cref="FindSpecialFolderAsync" /> result, memoized per resolved <see cref="ImapClient" />
+	///   instance — stable for the connection's lifetime, invalidated by comparing against the
+	///   CURRENT client (a fresh instance after <see cref="ImapSession" /> reconnects, so the cache
+	///   entry for the old, disposed client is simply never matched again rather than needing an
+	///   explicit invalidation hook into the session).
+	/// </summary>
+	private readonly ConcurrentDictionary<SpecialFolder, (ImapClient Client, IMailFolder? Folder)> _specialFolderCache = new();
 
 	public string EasClass => Protocol.EasClass.Email;
 
@@ -728,7 +738,24 @@ public sealed partial class ImapMailBackend(
 			: throw new BackendItemNotFoundException($"'{itemKey}' is not a valid mail item key.");
 	}
 
-	private static async Task<IMailFolder?> FindSpecialFolderAsync(
+	private async Task<IMailFolder?> FindSpecialFolderAsync(
+		ImapClient client, SpecialFolder special, string[] fallbackNames, CancellationToken ct)
+	{
+		// G15: the result is stable for the connection's lifetime (SPECIAL-USE flags/folder names
+		// don't change mid-session) — on a server without SPECIAL-USE, resolving it used to cost a
+		// full namespace LIST on EVERY delete/save-to-Sent (50 messages == 50 extra LISTs, all under
+		// the session gate). Reusing an entry from a PRIOR client instance would be wrong (a
+		// reconnect could point at a different mailbox state), so the cache key includes the client.
+		if (_specialFolderCache.TryGetValue(special, out (ImapClient Client, IMailFolder? Folder) cached) &&
+		    ReferenceEquals(cached.Client, client))
+			return cached.Folder;
+
+		IMailFolder? resolved = await ResolveSpecialFolderAsync(client, special, fallbackNames, ct).ConfigureAwait(false);
+		_specialFolderCache[special] = (client, resolved);
+		return resolved;
+	}
+
+	private static async Task<IMailFolder?> ResolveSpecialFolderAsync(
 		ImapClient client, SpecialFolder special, string[] fallbackNames, CancellationToken ct)
 	{
 		try

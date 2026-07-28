@@ -6,6 +6,7 @@ using MailKit.Net.Imap;
 using MailKit.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using MimeKit;
 
 namespace ActiveSync.Integration.Tests.Scenarios;
 
@@ -73,6 +74,91 @@ public class ImapFolderListingEfficiencyTests
 		{
 			await session.DisposeAsync();
 		}
+	}
+
+	/// <summary>
+	///   G15: <c>FindSpecialFolderAsync</c> re-enumerated the personal namespace (a LIST round trip)
+	///   on every single delete/save-to-Sent, on servers WITHOUT SPECIAL-USE (<c>client.GetFolder
+	///   (special)</c> returns null/throws, falling back to <c>personal.GetSubfoldersAsync</c> +
+	///   name matching). Stalwart — the only live backend available where this item was worked —
+	///   DOES advertise SPECIAL-USE, so <c>client.GetFolder(SpecialFolder.Trash)</c> resolves without
+	///   ever reaching the expensive fallback branch this finding is about, on both the unmodified
+	///   and the fixed code: the LIST-command count below is identical before and after the fix
+	///   (COVERAGE, not a red-first reproduction of the symptom — the fix is applied on the strength
+	///   of the code reading and the finding's own description of the no-SPECIAL-USE case). What this
+	///   test DOES prove, on either code: two deletes in a row on the same session resolve Trash
+	///   consistently and both messages actually land there.
+	/// </summary>
+	[BackendFact]
+	public async Task DeleteItemAsync_TrashLookup_IsMemoizedPerSession_NotReEnumeratedEveryDelete()
+	{
+		string user = TestBackend.User1;
+		string folderName = $"ItemG15-{Guid.NewGuid():N}";
+		CancellationToken ct = CancellationToken.None;
+
+		uint uidValidity, uid1, uid2;
+		using (ImapClient raw = new())
+		{
+			await raw.ConnectAsync(TestBackend.ImapHost, TestBackend.ImapPort, SecureSocketOptions.None, ct);
+			await raw.AuthenticateAsync(user, TestBackend.Password, ct);
+			IMailFolder personal = raw.GetFolder(raw.PersonalNamespaces[0]);
+			IMailFolder folder = await personal.CreateAsync(folderName, true, ct)
+			                      ?? throw new InvalidOperationException("IMAP server did not return the created folder.");
+			await folder.OpenAsync(FolderAccess.ReadWrite, ct);
+			uidValidity = folder.UidValidity;
+
+			MimeMessage Message(string subject) => new()
+			{
+				Subject = subject,
+				Body = new TextPart("plain") { Text = subject }
+			};
+			MimeMessage m1 = Message("G15-1");
+			m1.From.Add(MailboxAddress.Parse(user));
+			m1.To.Add(MailboxAddress.Parse(user));
+			MimeMessage m2 = Message("G15-2");
+			m2.From.Add(MailboxAddress.Parse(user));
+			m2.To.Add(MailboxAddress.Parse(user));
+
+			uid1 = (await folder.AppendAsync(m1, MessageFlags.None, ct))!.Value.Id;
+			uid2 = (await folder.AppendAsync(m2, MessageFlags.None, ct))!.Value.Id;
+			await raw.DisconnectAsync(true, ct);
+		}
+
+		ListCommandCountingLogger wire = new();
+		ImapSession session = new(Options, new BackendCredentials(user, TestBackend.Password), NullLogger.Instance, wire);
+		try
+		{
+			ImapMailBackend backend = new(session, user, _ => null, NullLogger.Instance);
+			string folderKey = ImapSession.ToBackendKey(folderName);
+
+			await backend.DeleteItemAsync(folderKey, $"{uidValidity}:{uid1}", false, ct);
+			int afterFirstDelete = wire.ListCommands;
+
+			await backend.DeleteItemAsync(folderKey, $"{uidValidity}:{uid2}", false, ct);
+			int afterSecondDelete = wire.ListCommands;
+
+			// Coverage on this backend (see the doc comment above): both counts are the same
+			// because Stalwart's SPECIAL-USE support means neither delete ever reaches the
+			// expensive fallback branch, not because the memoization added here proved anything.
+			Assert.Equal(afterFirstDelete, afterSecondDelete);
+		}
+		finally
+		{
+			await session.DisposeAsync();
+		}
+
+		// Functional regression guard: both deletes must actually have routed to Trash, not just
+		// left the count assertion above satisfied by coincidence.
+		using ImapClient verify = new();
+		await verify.ConnectAsync(TestBackend.ImapHost, TestBackend.ImapPort, SecureSocketOptions.None, ct);
+		await verify.AuthenticateAsync(user, TestBackend.Password, ct);
+		IMailFolder trash = verify.GetFolder(SpecialFolder.Trash)
+		                     ?? throw new InvalidOperationException("IMAP server has no Trash special-use folder.");
+		await trash.OpenAsync(FolderAccess.ReadOnly, ct);
+		IList<UniqueId> trashed = await trash.SearchAsync(
+			MailKit.Search.SearchQuery.HeaderContains("Subject", "G15-"), ct);
+		Assert.True(trashed.Count >= 2, $"expected both G15 messages in Trash, found {trashed.Count}");
+		await verify.DisconnectAsync(true, ct);
 	}
 
 	/// <summary>
