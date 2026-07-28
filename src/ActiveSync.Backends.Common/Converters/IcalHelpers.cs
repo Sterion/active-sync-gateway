@@ -7,10 +7,23 @@ namespace ActiveSync.Backends.Common.Converters;
 /// <summary>Ical.Net load/serialize boilerplate shared by the calendar, task and note converters.</summary>
 internal static class IcalHelpers
 {
-	/// <summary>Loads an iCalendar document, falling back to a fresh empty one if unparsable.</summary>
+	/// <summary>
+	///   Loads an iCalendar document. Empty/null content produces a fresh empty calendar (the
+	///   merge then starts from nothing, same as a create); genuinely unparsable content throws
+	///   <see cref="BackendException" /> rather than escaping as a raw Ical.Net exception — D22:
+	///   <c>Calendar.Load</c> THROWS (does not return null) on unparsable text, so the historical
+	///   `?? new Calendar()` here only ever caught the null-return (truly empty) case.
+	/// </summary>
 	public static Calendar Load(string ics)
 	{
-		return Calendar.Load(ics) ?? new Calendar();
+		try
+		{
+			return Calendar.Load(ics) ?? new Calendar();
+		}
+		catch (Exception ex)
+		{
+			throw new BackendException("The stored iCalendar item could not be parsed.", ex);
+		}
 	}
 
 	/// <summary>

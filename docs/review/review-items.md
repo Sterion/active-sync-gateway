@@ -386,7 +386,7 @@ work. Every finding ID appears in exactly one item.
 > `D19` MeetingResponse can stamp PARTSTAT on an override instead of the master. `D21` recurrence day
 > derived from the UTC instant.
 
-**27. Mail & draft converter correctness** [LIVE] — ~~`D11`~~ ~~`D12`~~ ~~`D13`~~ ~~`D14`~~ ~~`D15`~~ ~~`D16`~~ ~~`D20`~~ `D22` `D25`
+**27. Mail & draft converter correctness** [LIVE] — ~~`D11`~~ ~~`D12`~~ ~~`D13`~~ ~~`D14`~~ ~~`D15`~~ ~~`D16`~~ ~~`D20`~~ ~~`D22`~~ `D25`
 > `D20` a draft edit discards `In-Reply-To`/`References`, so a reply started elsewhere is sent as a new
 > thread. `D15` a Type-4 body is decoded as UTF-8 and NUL-stripped, corrupting non-UTF-8 and binary parts.
 > `D14` `DateReceived` comes from the sender-supplied header and defaults to year 0001. `D16` every
