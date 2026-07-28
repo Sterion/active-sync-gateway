@@ -27,7 +27,8 @@ public static class CalendarConverter
 		return calendar?.Events.FirstOrDefault()?.Uid;
 	}
 
-	public static List<XElement>? ToApplicationData(string ics, BodyPreference bodyPreference)
+	public static List<XElement>? ToApplicationData(
+		string ics, BodyPreference bodyPreference, string? actingUserMailAddress = null)
 	{
 		Calendar? calendar = Calendar.Load(ics);
 		IUniqueComponentList<CalendarEvent>? events = calendar?.Events;
@@ -71,11 +72,11 @@ public static class CalendarConverter
 			"CONFIDENTIAL" => "3",
 			_ => "0"
 		}));
-		data.Add(new XElement(Cal + "BusyStatus",
-			string.Equals(master.Transparency, "TRANSPARENT", StringComparison.OrdinalIgnoreCase) ? "0" : "2"));
+		data.Add(new XElement(Cal + "BusyStatus", ReadBusyStatus(master)));
 
 		bool hasAttendees = master.Attendees is { Count: > 0 };
-		data.Add(new XElement(Cal + "MeetingStatus", hasAttendees ? "1" : "0"));
+		data.Add(new XElement(Cal + "MeetingStatus",
+			MeetingStatusValue(hasAttendees, master.Organizer, actingUserMailAddress)));
 
 		if (master.Organizer is not null)
 		{
@@ -116,17 +117,34 @@ public static class CalendarConverter
 				data.Add(attendees);
 		}
 
-		Alarm? alarm = master.Alarms?.FirstOrDefault(a => a.Trigger?.Duration is not null);
+		// D6: the read must agree with the write on which alarm is EAS-managed. The write
+		// (below, in FromApplicationData) only ever touches DISPLAY alarms, so reading ANY
+		// alarm action here — as this used to — could echo an EMAIL/AUDIO alarm's minutes as
+		// Reminder even though a client's Reminder edit can never reach that alarm.
+		Alarm? alarm = master.Alarms?.FirstOrDefault(a =>
+			a.Trigger?.Duration is not null &&
+			(a.Action is null || string.Equals(a.Action, "DISPLAY", StringComparison.OrdinalIgnoreCase)));
 		if (alarm?.Trigger?.Duration is { } duration)
 		{
-			int minutes = (int)Math.Abs(duration.ToTimeSpanUnspecified().TotalMinutes);
-			data.Add(new XElement(Cal + "Reminder", minutes.ToString()));
+			// Reminder is minutes-BEFORE-start; a negative TRIGGER duration is "before" (the
+			// common case, and the only shape the write below ever produces), so negate it. A
+			// positive duration fires AFTER start, which Reminder cannot express — Math.Abs used
+			// to report that as if it were a minutes-before value instead of recognising it can't
+			// be represented, so such an alarm is simply not surfaced as a Reminder.
+			double minutesBefore = -duration.ToTimeSpanUnspecified().TotalMinutes;
+			if (minutesBefore >= 0)
+				data.Add(new XElement(Cal + "Reminder", ((int)minutesBefore).ToString()));
 		}
 
 		RecurrencePattern? recurrence = master.RecurrenceRules?.FirstOrDefault();
 		if (recurrence is not null)
 		{
-			XElement? recurrenceElement = RecurrenceMapper.Build(Cal, recurrence, start.Value);
+			// D21: the DayOfWeek/DayOfMonth/MonthOfYear fallbacks (when the RRULE carries no
+			// explicit BYDAY/BYMONTHDAY) must derive from DTSTART's weekday/day/month IN ITS OWN
+			// ZONE (RFC 5545), not from the UTC instant — a wall-clock-local Monday can be a
+			// Sunday in UTC, which shifted the emitted day/month across the boundary.
+			DateTime recurrenceAnchor = master.Start?.Value ?? start.Value;
+			XElement? recurrenceElement = RecurrenceMapper.Build(Cal, recurrence, recurrenceAnchor);
 			if (recurrenceElement is not null)
 				data.Add(recurrenceElement);
 
@@ -176,6 +194,47 @@ public static class CalendarConverter
 		if (bodyPreference.Eas16)
 			AppendAttachments(data, master);
 		return data;
+	}
+
+	private const string CdoBusyStatusProperty = "X-MICROSOFT-CDO-BUSYSTATUS";
+
+	/// <summary>
+	///   D8: TRANSP alone can only express free (TRANSPARENT) vs busy (OPAQUE), so Tentative (1)
+	///   and Out-of-Office (3) both collapsed to Busy (2) on read. X-MICROSOFT-CDO-BUSYSTATUS is
+	///   the de-facto property (Outlook and every major CalDAV server round-trip it) that carries
+	///   the extra states; prefer it when present and fall back to the TRANSP mapping for events
+	///   that never had it (e.g. written by another client that only sets TRANSP).
+	/// </summary>
+	private static string ReadBusyStatus(CalendarEvent master)
+	{
+		string? cdoStatus = master.Properties.ContainsKey(CdoBusyStatusProperty)
+			? master.Properties.Get<string>(CdoBusyStatusProperty)
+			: null;
+		string? fromCdo = cdoStatus?.ToUpperInvariant() switch
+		{
+			"FREE" => "0",
+			"TENTATIVE" => "1",
+			"BUSY" => "2",
+			"OOF" => "3",
+			_ => null
+		};
+		return fromCdo ??
+			(string.Equals(master.Transparency, "TRANSPARENT", StringComparison.OrdinalIgnoreCase) ? "0" : "2");
+	}
+
+	/// <summary>
+	///   D7: MeetingStatus 1 means "meeting, and the syncing user is the organizer"; 3 means
+	///   "meeting, and the syncing user is not". Without a known acting identity (a caller that
+	///   has not threaded one through) this keeps the historical "assume organizer" behavior —
+	///   correct only for the organizer's own copy, but the previous universal default.
+	/// </summary>
+	private static string MeetingStatusValue(bool hasAttendees, Organizer? organizer, string? actingUserMailAddress)
+	{
+		if (!hasAttendees)
+			return "0";
+		if (actingUserMailAddress is null || organizer?.Value is null)
+			return "1";
+		return MailboxEquals(organizer.Value.ToString(), actingUserMailAddress) ? "1" : "3";
 	}
 
 	/// <summary>
@@ -271,7 +330,19 @@ public static class CalendarConverter
 				_ => "PUBLIC"
 			};
 		if (V("BusyStatus") is { } busyStatus)
+		{
 			evt.Transparency = busyStatus == "0" ? "TRANSPARENT" : "OPAQUE";
+			// D8: TRANSP alone cannot distinguish Tentative/OOF from Busy on the way back in —
+			// write the CDO property alongside it so ReadBusyStatus can recover all four states.
+			string cdoStatus = busyStatus switch
+			{
+				"0" => "FREE",
+				"1" => "TENTATIVE",
+				"3" => "OOF",
+				_ => "BUSY"
+			};
+			evt.Properties.Set(CdoBusyStatusProperty, cdoStatus);
+		}
 
 		string? bodyData = applicationData.Element(AirSyncBase + "Body")?.Element(AirSyncBase + "Data")?.Value;
 		if (bodyData is not null)
@@ -313,7 +384,13 @@ public static class CalendarConverter
 				if (whenRaw is null || !EasDateTime.TryParse(whenRaw, out DateTime when))
 					continue;
 				if (existing.Add(when))
-					evt.ExceptionDates.Add(new CalDateTime(when, "UTC"));
+					// D18: RFC 5545 §3.8.5.1 requires EXDATE's value type to match DTSTART's — an
+					// all-day (DATE-valued) DTSTART needs a DATE-valued EXDATE, not a UTC DATE-TIME;
+					// Ical.Net tolerates the mismatch on its own read-back, but another CalDAV
+					// server/client is not required to, and the "deleted" day can reappear there.
+					evt.ExceptionDates.Add(evt.Start is { HasTime: false }
+						? new CalDateTime(DateOnly.FromDateTime(when))
+						: new CalDateTime(when, "UTC"));
 			}
 		}
 
@@ -678,7 +755,12 @@ public static class CalendarConverter
 	public static string? SetPartStat(string ics, int userResponse, string userEmail)
 	{
 		Calendar? calendar = Calendar.Load(ics);
-		CalendarEvent? evt = calendar?.Events.FirstOrDefault();
+		// D19: master-first, matching every other entry point in this file (:37, :213, :397-398,
+		// :423-424, :644-645) — an ICS that lists a modified-occurrence override before the
+		// master VEVENT must still update the master's attendee, or the acceptance is lost for
+		// the series the next time anything reads the stored (master) PARTSTAT.
+		CalendarEvent? evt = calendar?.Events.FirstOrDefault(e => e.RecurrenceId is null)
+			?? calendar?.Events.FirstOrDefault();
 		if (calendar is null || evt is null)
 			return null;
 

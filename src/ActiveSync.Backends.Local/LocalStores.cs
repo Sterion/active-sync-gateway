@@ -161,7 +161,9 @@ public sealed class LocalCalendarStore(
 
 	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
 	{
-		return CalendarConverter.ToApplicationData(content, bodyPreference);
+		// D7: partStatIdentity is the acting user's mail address, so MeetingStatus can tell
+		// "I am the organizer" apart from "I am an invitee".
+		return CalendarConverter.ToApplicationData(content, bodyPreference, partStatIdentity);
 	}
 
 	protected override string BuildContent(XElement applicationData, string uid, string? existingContent)

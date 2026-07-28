@@ -80,7 +80,9 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		if (jsEvent is not { } value)
 			return null;
 		string ics = JsCalendarConverter.ToICalendar(value);
-		List<XElement>? data = CalendarConverter.ToApplicationData(ics, bodyPreference);
+		// D7: mailAddress is the acting user's mail address, so MeetingStatus can tell
+		// "I am the organizer" apart from "I am an invitee".
+		List<XElement>? data = CalendarConverter.ToApplicationData(ics, bodyPreference, mailAddress);
 		return data is null ? null : new BackendItem(data);
 	}
 
