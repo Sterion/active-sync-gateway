@@ -10,6 +10,12 @@ public sealed class LocalChangeNotifier
 	private readonly Lock _lock = new();
 	private readonly Dictionary<string, List<TaskCompletionSource>> _waiters = new(StringComparer.Ordinal);
 
+	// G21: the last time each key changed, updated on EVERY NotifyChanged call — including when
+	// nobody is currently waiting. Mirrors ImapIdleWatcher.LastChangeUtc: a write that lands
+	// between a caller's entry check and this wait's registration must still be visible to that
+	// wait instead of being silently dropped for lack of a registered listener.
+	private readonly Dictionary<string, DateTime> _lastChangeUtc = new(StringComparer.Ordinal);
+
 	private static string Key(int userId, string collection)
 	{
 		return $"{userId}\n{collection}";
@@ -17,10 +23,12 @@ public sealed class LocalChangeNotifier
 
 	public void NotifyChanged(int userId, string collection)
 	{
+		string key = Key(userId, collection);
 		List<TaskCompletionSource>? waiters;
 		lock (_lock)
 		{
-			if (!_waiters.Remove(Key(userId, collection), out waiters))
+			_lastChangeUtc[key] = DateTime.UtcNow;
+			if (!_waiters.Remove(key, out waiters))
 				return;
 		}
 
@@ -28,14 +36,23 @@ public sealed class LocalChangeNotifier
 			waiter.TrySetResult();
 	}
 
-	/// <summary>Waits for a change signal; returns false on timeout.</summary>
+	/// <summary>
+	///   Waits for a change signal, returning immediately (true, no listener registered) when the
+	///   latch already shows a change strictly after <paramref name="sinceUtc" /> — the caller's
+	///   own "as of" reference, captured as early as possible (e.g. right after an entry check
+	///   found nothing pending). Otherwise behaves like the timeout-only overload. Returns false
+	///   on timeout.
+	/// </summary>
 	public async Task<bool> WaitAsync(
-		int userId, string collection, TimeSpan timeout, CancellationToken ct)
+		int userId, string collection, TimeSpan timeout, DateTime sinceUtc, CancellationToken ct)
 	{
-		TaskCompletionSource tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		string key = Key(userId, collection);
+		TaskCompletionSource tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		lock (_lock)
 		{
+			if (_lastChangeUtc.TryGetValue(key, out DateTime last) && last > sinceUtc)
+				return true; // latched: the change landed before this wait registered
+
 			if (!_waiters.TryGetValue(key, out List<TaskCompletionSource>? list))
 				_waiters[key] = list = [];
 			list.Add(tcs);

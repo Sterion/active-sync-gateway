@@ -166,7 +166,11 @@ public abstract class LocalStoreBase(
 	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
 		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
 	{
-		return await notifier.WaitAsync(userId, Collection, timeout, ct).ConfigureAwait(false)
+		// G21: captured as early as possible — mirrors ImapMailBackend.WaitForChangesAsync's own
+		// watchStartUtc — so a write that latched between the caller's entry check (e.g.
+		// PingHandler.CheckPendingAsync) and this wait's registration is still observed.
+		DateTime watchStartUtc = DateTime.UtcNow;
+		return await notifier.WaitAsync(userId, Collection, timeout, watchStartUtc, ct).ConfigureAwait(false)
 			? [FolderBackendKey]
 			: [];
 	}
