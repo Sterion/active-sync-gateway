@@ -42,7 +42,13 @@ public sealed class ImapSession(
 		{
 			if (acquired)
 				_gate.Release();
-			_gate.Dispose();
+			// G11: never dispose the gate itself. RunAsync's disposed-flag check (top of the
+			// method) and its own WaitAsync/Release calls are separate steps from this one, so a
+			// caller that passed the flag check just before it flipped — or one still holding the
+			// gate when our bounded wait above times out — can reach the gate AFTER this method
+			// returns. Disposing it turned that into a raw ObjectDisposedException instead of the
+			// documented BackendException. A SemaphoreSlim with no AvailableWaitHandle access needs
+			// no disposal, so leaving it alive costs nothing and removes the race entirely.
 		}
 	}
 
