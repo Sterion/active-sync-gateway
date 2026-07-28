@@ -42,8 +42,11 @@ public class WbxmlEncoderHardeningTests
 	[InlineData("YWJj=")] // valid alphabet, invalid padding
 	public void OpaqueElementWithMalformedBase64_IsAWbxmlException(string text)
 	{
-		// Convert.FromBase64String throws FormatException, which escapes as an uncontrolled
-		// 500 — and it throws partway through encoding, with the response half written.
+		// Convert.TryFromBase64Chars would otherwise leave a raw FormatException uncaught, which
+		// escapes as an uncontrolled 500 instead of the WbxmlException every other codec error
+		// maps to (→ 400). W20: earlier wording here additionally claimed this throws with "the
+		// response half written" — Encode() writes into a private MemoryStream, so nothing is
+		// ever half-written to a response; that part was never the actual reason.
 		XElement mime = new(EasNamespaces.ComposeMail + "Mime", text);
 		mime.SetAttributeValue(EasNamespaces.OpaqueAttribute, "1");
 		XDocument doc = new(new XElement(EasNamespaces.ComposeMail + "SendMail", mime));

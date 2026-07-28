@@ -158,9 +158,13 @@ public static class WbxmlEncoder
 		byte[] scratch = ArrayPool<byte>.Shared.Rent((base64.Length / 4 + 1) * 3);
 		try
 		{
-			// Malformed base64 has to surface as WbxmlException. Convert throws FormatException,
-			// which escapes as an uncontrolled 500 — and it does so from the middle of encoding,
-			// with part of the response already written.
+			// Malformed base64 has to surface as WbxmlException, not as a raw FormatException —
+			// W20: the fix is right, but the reason used to be stated wrong here. Encode() writes
+			// into a private MemoryStream and only EncodeAsync touches the destination, after
+			// Encode() has already returned successfully, so nothing is ever half-written to a
+			// response; the actual problem is narrower — a codec is expected to map every input
+			// error to its own exception type (WbxmlException, → 400), and an uncaught
+			// FormatException from a BCL helper would instead surface as an uncontrolled 500.
 			if (!Convert.TryFromBase64Chars(base64, scratch, out int written))
 				throw new WbxmlException("Element marked opaque does not hold valid base64.");
 
