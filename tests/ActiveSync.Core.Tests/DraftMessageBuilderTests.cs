@@ -256,6 +256,25 @@ public class DraftMessageBuilderTests
 		Assert.Contains(result.To.Mailboxes, m => m.Address == "bob@example.com");
 	}
 
+	// D20 — a fresh `MimeMessage message = new()` is constructed and only
+	// From/To/Cc/Bcc/Subject/Importance/Body/Date are copied from `existing`. In-Reply-To,
+	// References and any custom headers on the stored draft were dropped, so a reply draft
+	// started elsewhere and merely touched on the phone (e.g. a subject rename) is sent as a
+	// new thread instead of a reply.
+	[Fact]
+	public void Change_ToAnUnrelatedField_PreservesInReplyToAndReferences()
+	{
+		MimeMessage existing = Existing(new TextPart(TextFormat.Plain) { Text = "original" });
+		existing.Headers.Add(HeaderId.InReplyTo, "<original@example.org>");
+		existing.Headers.Add(HeaderId.References, "<thread-root@example.org> <original@example.org>");
+
+		MimeMessage result = DraftMessageBuilder.Build(
+			AppData(new XElement(EasNamespaces.Email + "Subject", "renamed")), existing, "me@example.org");
+
+		Assert.Equal("<original@example.org>", result.Headers[HeaderId.InReplyTo]);
+		Assert.Equal("<thread-root@example.org> <original@example.org>", result.Headers[HeaderId.References]);
+	}
+
 	// A payload <Body> still replaces the stored one outright.
 	[Fact]
 	public void Change_WithBody_ReplacesTheStoredBody()

@@ -69,7 +69,33 @@ public static class DraftMessageBuilder
 		}
 
 		message.Date = DateTimeOffset.UtcNow;
+
+		if (existing is not null)
+			CarryOverHeaders(message, existing);
+
 		return message;
+	}
+
+	/// <summary>
+	///   D20 — a fresh <see cref="MimeMessage" /> starts with an empty header list; only
+	///   From/To/Cc/Bcc/Subject/Importance/Date are rebuilt above from the payload/existing draft.
+	///   Everything else on the stored draft — In-Reply-To, References, Message-Id, any custom
+	///   header — must survive a Change or a reply thread started elsewhere (webmail) and merely
+	///   touched on the phone gets sent as a brand-new thread. Skip the headers the properties
+	///   above already write, so this never produces a duplicate.
+	/// </summary>
+	private static readonly HashSet<HeaderId> ManagedHeaders = new()
+	{
+		HeaderId.From, HeaderId.To, HeaderId.Cc, HeaderId.Bcc, HeaderId.Subject,
+		HeaderId.Date, HeaderId.Importance, HeaderId.MimeVersion,
+		HeaderId.ContentType, HeaderId.ContentTransferEncoding, HeaderId.ContentDisposition
+	};
+
+	private static void CarryOverHeaders(MimeMessage message, MimeMessage existing)
+	{
+		foreach (Header header in existing.Headers)
+			if (!ManagedHeaders.Contains(header.Id))
+				message.Headers.Add(header.Field, header.Value);
 	}
 
 	private static void FillAddresses(InternetAddressList target, string? payload, InternetAddressList? fallback)
