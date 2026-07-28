@@ -130,7 +130,12 @@ public static class WbxmlCodePages
 				(0x0E, "InstanceId"),
 				(0x10, "ProposedStartTime"), (0x11, "ProposedEndTime"), (0x12, "SendResponse"))), // 16.x
 
-			// Page 9: Tasks
+			// Page 9: Tasks. W8: 0x05-0x07 are real MS-ASWBXML tokens retired from this page —
+			// Body/BodySize/BodyTruncated, WBXML 2.5 only; the AirSyncBase Body (page 17) is used
+			// instead from 12.0 on (spec note, section 2.1.2.1.10) — deliberately omitted, not a
+			// transcription gap. 0x21 has no entry at all in the published spec (verified against
+			// revision 24.0, 2025-05-20): it is genuinely unassigned, not a retired token whose
+			// name was lost.
 			new(9, EasNamespaces.Tasks, T(
 				(0x08, "Categories"), (0x09, "Category"), (0x0A, "Complete"), (0x0B, "DateCompleted"),
 				(0x0C, "DueDate"), (0x0D, "UtcDueDate"), (0x0E, "Importance"), (0x0F, "Recurrence"),
@@ -167,7 +172,9 @@ public static class WbxmlCodePages
 				(0x05, "Ping"), (0x06, "AutdState"), (0x07, "Status"), (0x08, "HeartbeatInterval"),
 				(0x09, "Folders"), (0x0A, "Folder"), (0x0B, "Id"), (0x0C, "Class"), (0x0D, "MaxFolders"))),
 
-			// Page 14: Provision
+			// Page 14: Provision. W8: 0x12 has no entry in the published spec (verified against
+			// revision 24.0, 2025-05-20) — genuinely unassigned between PasswordRecoveryEnabled
+			// and AttachmentsEnabled, not a transcription gap or a retired token with a lost name.
 			new(14, EasNamespaces.Provision, T(
 				(0x05, "Provision"), (0x06, "Policies"), (0x07, "Policy"), (0x08, "PolicyType"),
 				(0x09, "PolicyKey"), (0x0A, "Data"), (0x0B, "Status"), (0x0C, "RemoteWipe"),
@@ -193,7 +200,9 @@ public static class WbxmlCodePages
 				(0x39, "ApprovedApplicationList"), (0x3A, "Hash"),
 				(0x3B, "AccountOnlyRemoteWipe"))), // 16.1
 
-			// Page 15: Search
+			// Page 15: Search. W8: 0x06 has no entry in the published spec (verified against
+			// revision 24.0, 2025-05-20) — genuinely unassigned between Search and Store, not a
+			// transcription gap or a retired token with a lost name.
 			new(15, EasNamespaces.Search, T(
 				(0x05, "Search"), (0x07, "Store"), (0x08, "Name"), (0x09, "Query"), (0x0A, "Options"),
 				(0x0B, "Range"), (0x0C, "Status"), (0x0D, "Response"), (0x0E, "Result"),

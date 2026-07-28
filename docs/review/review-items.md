@@ -456,7 +456,7 @@ work. Every finding ID appears in exactly one item.
 > publicly mutable static array any plugin can retune process-wide. `K8` the `enc:v1:` scheme has no domain
 > separation between its three message types. `K10` the documented plugin declaration names the wrong version.
 
-**37. Protocol & WireLog nits** — ~~`W7`~~ `W8` `W9` `W10` `W11` `W14` `W15` `W16` `W20` `W21`
+**37. Protocol & WireLog nits** — ~~`W7`~~ ~~`W8`~~ `W9` `W10` `W11` `W14` `W15` `W16` `W20` `W21`
 > **Protocol layer — read the hard gate.** `W7` **needs a human with MS-ASWBXML**: Find page 25 orders
 > `MaxPictures`/`MaxSize`/`Picture` as the reverse of every sibling page, which — if wrong — means GAL photos
 > over Find silently never work. `W9` the bidi-defence classifier embeds raw bidi overrides in its own source
