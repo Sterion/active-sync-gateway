@@ -3,6 +3,9 @@ obj/
 # Personal local-run configuration (launchSettings runs with ASPNETCORE_ENVIRONMENT=Local).
 appsettings.Local.json
 artifacts/
+# Dev plugins directory: build output of tests/ActiveSync.Plugin.Local, kept OUTSIDE every
+# application's own bin/publish tree so no image or release step can pick it up.
+/plugins/
 *.user
 *.db
 *.db-shm

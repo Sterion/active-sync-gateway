@@ -26,6 +26,18 @@
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
 	</ItemGroup>
 
+	<!-- DEV CONVENIENCE, Debug only: drop the built plugin into a plugins directory at the REPO
+	     ROOT (gitignored), never anywhere under an application's own output. Nothing in
+	     ActiveSync.Server references this project, and the folder is outside every project's
+	     bin/publish tree, so no Dockerfile or release-zip step can pick it up by accident — the
+	     dev gateway reaches it only because appsettings.Development.json names the path
+	     explicitly. -->
+	<Target Name="StageIntoDevPluginsDir" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
+		<Copy SourceFiles="$(TargetPath)"
+		      DestinationFolder="$(MSBuildThisFileDirectory)..\..\plugins\$(AssemblyName)"
+		      SkipUnchangedFiles="true" />
+	</Target>
+
 	<!-- Every plugin entry assembly must declare the contract it supports. An out-of-repo plugin
 	     writes `[assembly: SupportedGatewayContract(2, 0)]` in source; this in-repo plugin takes
 	     the value from the same property the host is built from, so it can never go stale when the
