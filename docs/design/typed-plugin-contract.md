@@ -1170,7 +1170,8 @@ tags still each record their own bump; only the tag publishes.
 **Execution model (owner's choice, 2026-07-29).** All five phases land on one long-lived
 branch, **`plugin-restructure`** (created from `main` if absent), as **one commit per phase —
 except Phase 3, which is two** (the 3a checkpoint and the 3b completion; see the phase's own
-orchestration below). Six commits total. Each *phase* ends with the tree green per its
+orchestration below). Six phase commits total (small operator process edits to this document
+may add their own commits between phases; they are not phase work). Each *phase* ends with the tree green per its
 verification line; the 3a checkpoint is the plan's ONE deliberately-red intermediate commit
 and is never pushed on its own. Phases are sequential: Phase N assumes the prior phases'
 commits are already on the branch.
@@ -1200,7 +1201,7 @@ the phase number:**
 
 **Phase 3 has its own prompt — run it in a Fable session:**
 
-> Read `AGENTS.md` (coding conventions, invariants, testing expectations) and `docs/design/typed-plugin-contract.md` in full and follow the design document's authority rules, then execute Phase 3 of its § 9 plan per that phase's 3a/3b orchestration: implement Phase 3a yourself and make the 3a checkpoint commit on the `plugin-restructure` branch, spawn exactly one Opus subagent to implement Phase 3b per its work list, adversarially review the worker's complete diff against § 5, § 7.1 and your 3a exemplars and fix what the review finds, make the 3b commit, then push the branch and confirm the GitHub Actions run for that push completes green (fix failures by amending the 3b commit and force-pushing) — do not touch `ContractVersionMajor`, and do not start any other phase.
+> Read `AGENTS.md` (coding conventions, invariants, testing expectations) and `docs/design/typed-plugin-contract.md` in full and follow the design document's authority rules, then execute Phase 3 of its § 9 plan per that phase's 3a/3b orchestration: implement Phase 3a yourself, make the 3a checkpoint commit on the `plugin-restructure` branch, then STOP and report what landed — do not begin 3b until I tell you to continue. When I say continue: spawn exactly one Opus subagent to implement Phase 3b per its work list, adversarially review the worker's complete diff against § 5, § 7.1 and your 3a exemplars and fix what the review finds, make the 3b commit, then push the branch and confirm the GitHub Actions run for that push completes green (fix failures by amending the 3b commit and force-pushing) — do not touch `ContractVersionMajor`, and do not start any other phase.
 
 ### Phase 1 — typed primitives, and sever Protocol
 
@@ -1270,12 +1271,16 @@ the phase number:**
 
 ### Phase 3 — item currency (the substantial one)
 
-**Orchestration (owner's choice, 2026-07-29): one Fable session runs this phase end-to-end.**
-Fable implements 3a (the judgment-dense core) and makes the checkpoint commit, spawns **exactly
-one Opus subagent** to implement 3b (the token-heavy bulk, following 3a's exemplars),
-adversarially reviews the worker's complete diff, fixes what the review finds, makes the 3b
-commit, pushes, and gates on the CI matrix. The split exists because the expensive part and the
-hard part of this phase are different code: the semantics concentrate in 3a, the tokens in 3b.
+**Orchestration (owner's choice, 2026-07-29): one Fable session runs this phase, with a
+mandatory pause after 3a.** Fable implements 3a (the judgment-dense core), makes the checkpoint
+commit, then **STOPS and reports — it does not proceed to 3b until the operator explicitly says
+to continue** (the pause is a deliberate operator checkpoint: it lets the owner review the 3a
+surface and it is the clean place to absorb a usage-limit break, since the checkpoint commit is
+the designed handoff state). On the operator's go-ahead, the same session spawns **exactly one
+Opus subagent** to implement 3b (the token-heavy bulk, following 3a's exemplars), adversarially
+reviews the worker's complete diff, fixes what the review finds, makes the 3b commit, pushes,
+and gates on the CI matrix. The split exists because the expensive part and the hard part of
+this phase are different code: the semantics concentrate in 3a, the tokens in 3b.
 
 **Phase 3a — the orchestrator (Fable) implements:**
 
