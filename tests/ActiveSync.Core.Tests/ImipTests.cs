@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using MimeKit;
@@ -55,7 +56,7 @@ public class ImipTests
 		string ics = CalendarConverter.FromApplicationData(
 			Meeting("Standup", start, "bob@example.com"), uid, null, null, "alice@example.com");
 		// The attendee accepted out-of-band (iTIP REPLY applied by SetPartStat).
-		string accepted = CalendarConverter.SetPartStat(ics, 1, "bob@example.com")!;
+		string accepted = CalendarPayload.SetPartStat(ics, 1, "bob@example.com")!;
 
 		// The client re-sends the full attendee list plus a newcomer: Bob's ACCEPTED must
 		// survive, Carol starts NEEDS-ACTION.

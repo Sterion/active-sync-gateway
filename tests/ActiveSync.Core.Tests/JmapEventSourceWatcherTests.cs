@@ -45,7 +45,7 @@ public sealed class JmapEventSourceWatcherTests
 		// stamps _lastChangeTicks strictly after this, so WaitForChangeAsync(start) genuinely waits
 		// on the latch instead of short-circuiting on the constructor's own initial timestamp.
 		await using JmapEventSourceWatcher watcher = new(
-			new JmapClient(Base, new HttpClient(stub)), new BackendCredentials("u", "p"), NullLogger.Instance);
+			new JmapClient(Base, new HttpClient(stub)), new BackendCredentials { UserName = "u", Password = "p" }, NullLogger.Instance);
 		DateTime start = DateTime.UtcNow;
 
 		Task wait = watcher.WaitForChangeAsync(start, CancellationToken.None);
@@ -67,7 +67,7 @@ public sealed class JmapEventSourceWatcherTests
 			: Json(SessionJson));
 
 		await using JmapEventSourceWatcher watcher = new(
-			new JmapClient(Base, new HttpClient(stub)), new BackendCredentials("u", "p"), NullLogger.Instance);
+			new JmapClient(Base, new HttpClient(stub)), new BackendCredentials { UserName = "u", Password = "p" }, NullLogger.Instance);
 		DateTime start = DateTime.UtcNow;
 
 		Task wait = watcher.WaitForChangeAsync(start, CancellationToken.None);
@@ -99,7 +99,7 @@ public sealed class JmapEventSourceWatcherTests
 			: Json(SessionJson));
 
 		await using JmapEventSourceWatcher watcher = new(
-			new JmapClient(Base, new HttpClient(stub)), new BackendCredentials("u", "p"), NullLogger.Instance);
+			new JmapClient(Base, new HttpClient(stub)), new BackendCredentials { UserName = "u", Password = "p" }, NullLogger.Instance);
 		MethodInfo signal = typeof(JmapEventSourceWatcher).GetMethod(
 			"Signal", BindingFlags.NonPublic | BindingFlags.Instance)!;
 		DateTime beforeSignal = DateTime.UtcNow;
@@ -131,7 +131,7 @@ public sealed class JmapEventSourceWatcherTests
 			: Json(SessionJson));
 
 		await using JmapEventSourceWatcher watcher = new(
-			new JmapClient(Base, new HttpClient(stub)), new BackendCredentials("u", "p"), NullLogger.Instance);
+			new JmapClient(Base, new HttpClient(stub)), new BackendCredentials { UserName = "u", Password = "p" }, NullLogger.Instance);
 
 		// Give the background loop a generous window to read as much as it will. Real network I/O
 		// would throttle this; here the stream is fully in-memory, so the only thing that can bound

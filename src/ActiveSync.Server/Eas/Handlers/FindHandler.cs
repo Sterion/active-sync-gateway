@@ -1,9 +1,12 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Server.Eas.Content;
+using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Server.Eas.Handlers;
 
@@ -13,7 +16,9 @@ namespace ActiveSync.Server.Eas.Handlers;
 ///   (SearchId echo, Result with Preview/HasAttachments for mail, GAL properties incl.
 ///   photos for people).
 /// </summary>
-public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logger) : IEasCommandHandler
+public sealed class FindHandler(
+	FolderService folders, IOptionsSnapshot<ActiveSyncOptions> options, ILogger<FindHandler> logger)
+	: IEasCommandHandler
 {
 	private const int MaxFetch = 500;
 	private static readonly XNamespace F = EasNamespaces.Find;
@@ -84,8 +89,7 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 		EasContext context, XElement criterion, string freeText, int start, int pageSize, int fetch,
 		CancellationToken ct)
 	{
-		string? folderBackendKey = null;
-		UserFolder? searchFolder = null;
+		FolderKey? folderBackendKey = null;
 		string? collectionId = criterion.Element(F + "Query")?
 			.Descendants(AS + "CollectionId").FirstOrDefault()?.Value;
 		// DeepTraversal means "whole mailbox" — which is also the default when no
@@ -93,35 +97,35 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 		bool deepTraversal = criterion.Element(F + "Options")?.Element(F + "DeepTraversal") is not null;
 		if (collectionId is not null && !deepTraversal)
 		{
-			(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
+			(UserFolder Folder, ContentAdapter Store)? resolved = await folders.ResolveCollectionAsync(
 				context.Session, context.UserId, collectionId, ct);
 			if (resolved is not null)
-			{
-				searchFolder = resolved.Value.Folder;
-				folderBackendKey = resolved.Value.Folder.BackendKey;
-			}
+				folderBackendKey = new FolderKey(resolved.Value.Folder.BackendKey);
 		}
 
-		IContentStore mailStore = context.Session.GetStoreForClass(EasClass.Email)!;
-		IReadOnlyList<(string FolderBackendKey, string ItemKey)> hits =
-			await context.Session.MailStore.SearchAsync(folderBackendKey, freeText, null, fetch, ct);
+		ContentAdapter adapter = ContentAdapter.For(context.Session, context.Session.Mail, options.Value.Eas);
+		IReadOnlyList<SearchHit> hits =
+			await context.Session.Mailbox.SearchAsync(folderBackendKey, freeText, null, fetch, ct);
 
 		// Fetch the page's bodies in ONE batched call per folder rather than a sequential
 		// GetItemAsync per hit.
-		BodyPreference bodyPreference = new(1, 1024, false, true);
-		List<(string FolderKey, string ItemKey)> page = hits.Skip(start).Take(pageSize).ToList();
-		Dictionary<(string, string), BackendItem?> fetched = new();
-		foreach (IGrouping<string, (string FolderKey, string ItemKey)> group in page.GroupBy(h => h.FolderKey))
+		BodyPreference bodyPreference = new()
 		{
-			IReadOnlyList<string> keys = group.Select(h => h.ItemKey).ToList();
-			IReadOnlyDictionary<string, BackendItem?> items =
-				await mailStore.GetItemsAsync(group.Key, keys, bodyPreference, ct);
-			foreach ((string folderKey, string itemKey) in group)
-				fetched[(folderKey, itemKey)] = items.GetValueOrDefault(itemKey);
+			Type = BodyType.PlainText, TruncationSize = 1024, Eas16 = true
+		};
+		List<SearchHit> page = hits.Skip(start).Take(pageSize).ToList();
+		Dictionary<(string, string), object?> fetched = new();
+		foreach (IGrouping<FolderKey, SearchHit> group in page.GroupBy(h => h.Folder))
+		{
+			IReadOnlyList<string> keys = group.Select(h => h.Item.Value).ToList();
+			IReadOnlyDictionary<string, object?> items =
+				await adapter.GetItemsAsync(group.Key.Value, keys, ct);
+			foreach (SearchHit hit in group)
+				fetched[(hit.Folder.Value, hit.Item.Value)] = items.GetValueOrDefault(hit.Item.Value);
 		}
 
 		// Resolve every hit's OWN folder rather than the single optional CollectionId-scoped
-		// `searchFolder` — a mailbox-wide Find (the common case, no CollectionId/DeepTraversal
+		// search folder — a mailbox-wide Find (the common case, no CollectionId/DeepTraversal
 		// narrowing) previously left this null for every result, so nothing came back with a
 		// ServerId/CollectionId to open. One registry read serves the whole page, however
 		// many distinct folders its hits span, rather than a lookup per hit.
@@ -129,22 +133,25 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 			await folders.GetFolderMapAsync(context.UserId, ct);
 
 		List<XElement> results = new();
-		foreach ((string hitFolderKey, string itemKey) in page)
+		foreach (SearchHit hit in page)
 		{
-			BackendItem? item = fetched.GetValueOrDefault((hitFolderKey, itemKey));
-			if (item is null)
+			object? item = fetched.GetValueOrDefault((hit.Folder.Value, hit.Item.Value));
+			List<XElement>? rendered = item is null
+				? null
+				: adapter.Render(item, bodyPreference, hit.Folder.Value, hit.Item.Value);
+			if (rendered is null)
 				continue;
 
-			UserFolder? hitFolder = folderMap.GetValueOrDefault(hitFolderKey);
+			UserFolder? hitFolder = folderMap.GetValueOrDefault(hit.Folder.Value);
 
 			// Preview and HasAttachments live in the Find namespace; the rest of the item
 			// rides along as its regular ApplicationData elements.
-			string preview = item.ApplicationData
+			string preview = rendered
 				.FirstOrDefault(e => e.Name == ASB + "Body")?
 				.Element(ASB + "Data")?.Value ?? "";
-			bool hasAttachments = item.ApplicationData.Any(e => e.Name == ASB + "Attachments");
+			bool hasAttachments = rendered.Any(e => e.Name == ASB + "Attachments");
 
-			XElement properties = new(F + "Properties", item.ApplicationData);
+			XElement properties = new(F + "Properties", rendered);
 			if (preview.Length > 0)
 				properties.Add(new XElement(F + "Preview",
 					preview.Length > 255 ? preview[..255] : preview));
@@ -156,7 +163,7 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 			if (hitFolder is not null)
 			{
 				children.Add(new XElement(AS + "ServerId",
-					await folders.ComposeServerIdAsync(hitFolder, mailStore, itemKey, ct)));
+					await folders.ComposeServerIdAsync(hitFolder, hit.Item.Value, ct)));
 				children.Add(new XElement(AS + "CollectionId", hitFolder.ServerId));
 			}
 
@@ -173,18 +180,24 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 	{
 		GalPhotoRequest? photos = null;
 		if (criterion.Element(F + "Options")?.Element(F + "Picture") is XElement picture)
-			photos = new GalPhotoRequest(
-				int.TryParse(picture.Element(F + "MaxSize")?.Value, out int maxSize) ? maxSize : null,
-				int.TryParse(picture.Element(F + "MaxPictures")?.Value, out int maxCount) ? maxCount : null);
+			photos = new GalPhotoRequest
+			{
+				MaxSizeBytes = int.TryParse(picture.Element(F + "MaxSize")?.Value, out int maxSize)
+					? maxSize
+					: null,
+				MaxCount = int.TryParse(picture.Element(F + "MaxPictures")?.Value, out int maxCount)
+					? maxCount
+					: null
+			};
 
-		IContactOperations? contacts = context.Session.Contacts;
-		IReadOnlyList<IReadOnlyList<XElement>> hits = contacts is null
+		IDirectoryOperations? contacts = context.Session.Contacts;
+		IReadOnlyList<GalEntry> hits = contacts is null
 			? []
 			: await contacts.SearchGalAsync(freeText, fetch, photos, ct);
 
 		List<XElement> results = hits.Skip(start).Take(pageSize)
-			.Select(properties => new XElement(F + "Result",
-				new XElement(F + "Properties", properties)))
+			.Select(entry => new XElement(F + "Result",
+				new XElement(F + "Properties", GalXml.ToGalProperties(entry))))
 			.ToList();
 		return (results, hits.Count);
 	}

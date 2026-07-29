@@ -288,7 +288,7 @@ public sealed class BackendSessionFactory : IBackendSessionFactory, IAsyncDispos
 			.Where(g => g.UserId == userId)
 			.ToListAsync(ct).ConfigureAwait(false);
 		return grants
-			.Select(g => new SharedCollection(g.CollectionHref, g.ReadOnly))
+			.Select(g => new SharedCollection { Href = g.CollectionHref, ReadOnly = g.ReadOnly })
 			.ToList();
 	}
 

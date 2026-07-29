@@ -34,8 +34,8 @@ public class ImapMailBackendCorrectnessTests
 
 	private static (ImapSession Session, ImapMailBackend Backend) CreateBackend(string user)
 	{
-		ImapSession session = new(Options, new BackendCredentials(user, TestBackend.Password), NullLogger.Instance);
-		ImapMailBackend backend = new(session, user, _ => null, NullLogger.Instance);
+		ImapSession session = new(Options, new BackendCredentials { UserName = user, Password = TestBackend.Password }, NullLogger.Instance);
+		ImapMailBackend backend = new(session, _ => null, NullLogger.Instance);
 		return (session, backend);
 	}
 
@@ -83,7 +83,7 @@ public class ImapMailBackendCorrectnessTests
 			// hand-crafted shape described above. Correct behavior: refused as not-found, never
 			// silently resolved against the folder's current UidValidity.
 			await Assert.ThrowsAsync<BackendItemNotFoundException>(
-				() => backend.DeleteItemAsync(folderKey, uid.ToString(), true, ct));
+				() => backend.DeleteItemAsync(new FolderKey(folderKey), new ItemKey(uid.ToString()), true, ct));
 		}
 		finally
 		{
@@ -138,22 +138,24 @@ public class ImapMailBackendCorrectnessTests
 		try
 		{
 			IReadOnlyList<BackendFolder> folders = await backend.ListFoldersAsync(ct);
-			BackendFolder nested = Assert.Single(folders, f => f.BackendKey == ImapSession.ToBackendKey(draftsFullName));
+			BackendFolder nested = Assert.Single(folders, f => f.Key.Value == ImapSession.ToBackendKey(draftsFullName));
 
 			// The write path (draft create) already treats this folder as Drafts (IsDraftsFolder
 			// matches on the leaf Name) — FolderSync's classification must agree, or the phone
-			// never shows a Drafts folder it can actually compose into.
-			(string ItemKey, string Revision) created = await backend.CreateItemAsync(
-				nested.BackendKey,
-				new XElement("ApplicationData",
-					new XElement(EasNamespaces.Email + "Subject", "G12 draft"),
-					new XElement(EasNamespaces.AirSyncBase + "Body",
-						new XElement(EasNamespaces.AirSyncBase + "Type", "1"),
-						new XElement(EasNamespaces.AirSyncBase + "Data", "g12-body"))),
+			// never shows a Drafts folder it can actually compose into. The host builds the draft
+			// MIME now, so the store is handed a finished message.
+			(ItemKey Key, ItemRevision Revision) created = await backend.CreateDraftAsync(
+				nested.Key,
+				new MailItem
+				{
+					Rfc822 = System.Text.Encoding.ASCII.GetBytes(
+						$"From: {user}\r\nTo: {user}\r\nSubject: G12 draft\r\n\r\ng12-body\r\n"),
+					Flags = new MailFlags { Draft = true }
+				},
 				ct);
-			Assert.NotNull(created.ItemKey);
+			Assert.False(string.IsNullOrEmpty(created.Key.Value));
 
-			Assert.Equal(EasFolderType.Drafts, nested.EasType);
+			Assert.Equal(FolderType.Drafts, nested.Type);
 		}
 		finally
 		{
@@ -164,14 +166,13 @@ public class ImapMailBackendCorrectnessTests
 	// Content change outside Drafts ----------------------------------------------------------
 
 	/// <summary>
-	///   A content-bearing Change to a mail item OUTSIDE the Drafts folder falls through the
-	///   Drafts-only rewrite branch straight into the Read/Flag/Categories handling, which ignores
-	///   the content elements and returns a fresh revision — the client is told Status 1 (applied)
-	///   while the edit was silently discarded. <c>CreateItemAsync</c> already refuses the
-	///   analogous case explicitly; this proves <c>UpdateItemAsync</c> does not.
+	///   A content-bearing Change to a mail item OUTSIDE the Drafts folder must be refused, not
+	///   silently discarded while the client is told Status 1 (applied). Under the typed seam the
+	///   host routes a content-bearing Change to <c>ReplaceDraftAsync</c>, and the store re-refuses
+	///   any folder but Drafts — the same explicit refusal <c>CreateDraftAsync</c> carries.
 	/// </summary>
 	[BackendFact]
-	public async Task UpdateItemAsync_ContentChangeOutsideDrafts_IsRejected_NotSilentlyDiscarded()
+	public async Task ReplaceDraftAsync_OutsideDrafts_IsRejected_NotSilentlyDiscarded()
 	{
 		string user = TestBackend.User1;
 		string folderName = $"ItemG16-{Guid.NewGuid():N}";
@@ -202,14 +203,18 @@ public class ImapMailBackendCorrectnessTests
 		try
 		{
 			string folderKey = ImapSession.ToBackendKey(folderName);
-			XElement contentChange = new("ApplicationData",
-				new XElement(EasNamespaces.Email + "Subject", "g16-hijacked-subject"));
+			MailItem replacement = new()
+			{
+				Rfc822 = System.Text.Encoding.ASCII.GetBytes(
+					$"From: {user}\r\nTo: {user}\r\nSubject: g16-hijacked-subject\r\n\r\ng16-body\r\n"),
+				Flags = new MailFlags { Draft = true }
+			};
 
-			// This is NOT the Drafts folder, so a content-bearing Change (a Subject edit) must be
-			// refused — mirroring CreateItemAsync's explicit refusal of the analogous case — not
-			// silently accepted with the content dropped.
+			// This is NOT the Drafts folder, so a content rewrite must be refused — mirroring
+			// CreateDraftAsync's explicit refusal of the analogous case — not silently accepted
+			// with the content dropped.
 			await Assert.ThrowsAsync<BackendException>(
-				() => backend.UpdateItemAsync(folderKey, itemKey, contentChange, ct));
+				() => backend.ReplaceDraftAsync(new FolderKey(folderKey), new ItemKey(itemKey), replacement, ct));
 		}
 		finally
 		{
@@ -278,13 +283,12 @@ public class ImapMailBackendCorrectnessTests
 		(ImapSession session, ImapMailBackend backend) = CreateBackend(user);
 		try
 		{
-			string folderKey = ImapSession.ToBackendKey(folderName);
-			IReadOnlyList<(string FolderBackendKey, string ItemKey)> results =
-				await backend.SearchAsync(folderKey, subject, since, 10, ct);
+			FolderKey folderKey = new(ImapSession.ToBackendKey(folderName));
+			IReadOnlyList<SearchHit> results = await backend.SearchAsync(folderKey, subject, since, 10, ct);
 
 			// GetItemRevisionsAsync (the sync-filter path) already applies SearchFloor and would
 			// keep this message; Search must not be a narrower view of the same folder.
-			Assert.Contains(results, r => r.FolderBackendKey == folderKey);
+			Assert.Contains(results, r => r.Folder == folderKey);
 		}
 		finally
 		{
@@ -317,10 +321,10 @@ public class ImapMailBackendCorrectnessTests
 		string user = TestBackend.User1;
 		CancellationToken ct = CancellationToken.None;
 		ConnectionCountingLogger wire = new();
-		BackendCredentials credentials = new(user, TestBackend.Password);
+		BackendCredentials credentials = new() { UserName = user, Password = TestBackend.Password };
 		ImapSession session = new(Options, credentials, NullLogger.Instance, wire);
 		ImapStatusPoller poller = new(Options, credentials, NullLogger.Instance, wire);
-		ImapMailBackend backend = new(session, user, _ => null, NullLogger.Instance, () => poller);
+		ImapMailBackend backend = new(session, _ => null, NullLogger.Instance, () => poller);
 		try
 		{
 			string folderKey = ImapSession.ToBackendKey("INBOX");
@@ -340,7 +344,7 @@ public class ImapMailBackendCorrectnessTests
 
 			System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
 			for (int i = 0; i < 4; i++)
-				await backend.WaitForChangesAsync([folderKey], TimeSpan.FromMilliseconds(300), ct);
+				await backend.WaitForChangesAsync([new FolderKey(folderKey)], TimeSpan.FromMilliseconds(300), ct);
 			stopwatch.Stop();
 
 			await slowHold;

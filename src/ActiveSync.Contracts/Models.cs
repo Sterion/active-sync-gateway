@@ -1,23 +1,24 @@
 // Copyright (c) 2026 Ruben Andersen
 // SPDX-License-Identifier: MIT
 
-using System.Xml.Linq;
-using ActiveSync.Protocol;
-
 namespace ActiveSync.Contracts;
 
 /// <summary>A username/password pair as presented to (or resolved for) a backend connection.</summary>
-/// <param name="UserName">The backend-facing username. Never assumed to be an identity — a per-backend user name can be renamed freely.</param>
-/// <param name="Password">The backend-facing password, in plaintext. Masked as "***" in the record's generated <c>ToString()</c> — never logged in the clear.</param>
-public sealed record BackendCredentials(string UserName, string Password)
+public sealed record BackendCredentials
 {
+	/// <summary>The backend-facing username. Never assumed to be an identity — a per-backend user name can be renamed freely.</summary>
+	public required string UserName { get; init; }
+
+	/// <summary>The backend-facing password, in plaintext. Masked as "***" in the record's <c>ToString()</c> — never logged in the clear.</summary>
+	public required string Password { get; init; }
+
 	// The compiler-synthesized record ToString() would print Password in plaintext — and this
 	// type is published plugin contract that lands in logs, exception messages and debugger views,
 	// both directly and nested inside ResolvedRole / BackendConnectionContext (whose own ToString()
 	// calls this one). Mask the secret by overriding PrintMembers so the record shape is preserved
 	// and every enclosing record inherits the redaction.
 	//
-	// The mask token is a local literal on purpose: Contracts depends only on Protocol + the
+	// The mask token is a local literal on purpose: Contracts depends only on the
 	// Microsoft.Extensions abstractions and CANNOT reference ActiveSync.Core.Administration
 	// .SecretRedaction across the dependency boundary. It is kept identical to SecretRedaction.Mask
 	// ("***") by convention.
@@ -29,86 +30,50 @@ public sealed record BackendCredentials(string UserName, string Password)
 }
 
 /// <summary>A folder/collection as reported by a backend store.</summary>
-public sealed record BackendFolder(
-	string BackendKey, // stable backend identifier, e.g. "imap:INBOX/Sub" or "caldav:/user/cal1/"
-	string DisplayName,
-	string? ParentBackendKey,
-	int EasType, // EasFolderType value
-	string EasClass); // EasClass value
+/// <remarks>
+///   No content-class member: a store serves exactly one class (it implements exactly one class
+///   alias interface), so every folder it lists is that class — a per-folder class field could
+///   only agree with the owning store or be a bug. The host tags folders with the store's class
+///   itself.
+/// </remarks>
+public sealed record BackendFolder
+{
+	/// <summary>Stable store-defined key, e.g. "imap:INBOX/Sub" or "caldav:/user/cal1/".</summary>
+	public required FolderKey Key { get; init; }
 
-/// <summary>Client body preference from Sync/ItemOperations options (AirSyncBase BodyPreference).</summary>
+	/// <summary>The folder's name as shown to the client.</summary>
+	public required string DisplayName { get; init; }
+
+	/// <summary>The parent folder's key, or <c>null</c> for a root-level folder.</summary>
+	public FolderKey? ParentKey { get; init; }
+
+	/// <summary>What kind of folder this is (Inbox, Calendar, a user-created mail folder, …).</summary>
+	public required FolderType Type { get; init; }
+}
+
 /// <summary>
-///   The client's body preference plus the negotiated-protocol flag converters need:
-///   <see cref="Eas16" /> selects the 16.x shapes (airsyncbase:Location instead of
-///   calendar:Location, draft/attachment metadata) without threading a version type
-///   through every store signature.
+///   Server-side filter for a collection: items older than <see cref="Since" /> need not be
+///   reported. The mapping from the client's wire FilterType to a date window is HOST-side —
+///   a store only ever sees the resulting instant.
 /// </summary>
-public sealed record BodyPreference(int Type, long? TruncationSize, bool AllOrNone, bool Eas16 = false)
+public sealed record ContentFilter
 {
-	/// <summary>Convenience default: plain text (Type 1), truncated at 32 KB, AllOrNone false, pre-16.x shapes.</summary>
-	public static readonly BodyPreference PlainText = new(1, 32 * 1024, false);
+	/// <summary>Items older than this instant may be omitted; <c>null</c> means no date filtering.</summary>
+	public DateTimeOffset? Since { get; init; }
+
+	/// <summary>No date filtering — every item matches.</summary>
+	public static readonly ContentFilter All = new();
 }
-
-/// <summary>Server-side filter for a collection (from AirSync FilterType).</summary>
-public sealed record ContentFilter(DateTime? SinceUtc)
-{
-	/// <summary>No date filtering — every item matches. Used for classes that are never date-filtered (contacts, tasks, notes) and as the fallback for an unrecognized FilterType.</summary>
-	public static readonly ContentFilter All = new((DateTime?)null);
-
-	/// <summary>Maps an AirSync FilterType value for the Email class to a date window (1 = 1 day back … 7 = 6 months back); any other value returns <see cref="All" />.</summary>
-	/// <param name="filterType">The client-supplied AirSync FilterType.</param>
-	/// <returns>A filter matching items no older than the mapped window, or <see cref="All" /> for an unrecognized value.</returns>
-	public static ContentFilter FromMailFilterType(int filterType)
-	{
-		return filterType switch
-		{
-			1 => new ContentFilter(DateTime.UtcNow.AddDays(-1)),
-			2 => new ContentFilter(DateTime.UtcNow.AddDays(-3)),
-			3 => new ContentFilter(DateTime.UtcNow.AddDays(-7)),
-			4 => new ContentFilter(DateTime.UtcNow.AddDays(-14)),
-			5 => new ContentFilter(DateTime.UtcNow.AddMonths(-1)),
-			6 => new ContentFilter(DateTime.UtcNow.AddMonths(-3)),
-			7 => new ContentFilter(DateTime.UtcNow.AddMonths(-6)),
-			_ => All
-		};
-	}
-
-	/// <summary>Maps an AirSync FilterType value for the Calendar class to a date window (4 = 2 weeks back … 7 = 6 months back); any other value (including the mail-only 1-3) returns <see cref="All" />.</summary>
-	/// <param name="filterType">The client-supplied AirSync FilterType.</param>
-	/// <returns>A filter matching items no older than the mapped window, or <see cref="All" /> for an unrecognized value.</returns>
-	public static ContentFilter FromCalendarFilterType(int filterType)
-	{
-		return filterType switch
-		{
-			4 => new ContentFilter(DateTime.UtcNow.AddDays(-14)),
-			5 => new ContentFilter(DateTime.UtcNow.AddMonths(-1)),
-			6 => new ContentFilter(DateTime.UtcNow.AddMonths(-3)),
-			7 => new ContentFilter(DateTime.UtcNow.AddMonths(-6)),
-			_ => All
-		};
-	}
-
-	/// <summary>
-	///   Picks the filter window appropriate to a store's content class: mail and calendar
-	///   have their own FilterType→date-window mappings; everything else (contacts, tasks,
-	///   notes) is never date-filtered.
-	/// </summary>
-	public static ContentFilter ForClass(string easClass, int filterType)
-	{
-		return easClass switch
-		{
-			EasClass.Email => FromMailFilterType(filterType),
-			EasClass.Calendar => FromCalendarFilterType(filterType),
-			_ => All
-		};
-	}
-}
-
-/// <summary>Content of a fetched item, as EAS ApplicationData child elements.</summary>
-public sealed record BackendItem(IReadOnlyList<XElement> ApplicationData);
 
 /// <summary>An attachment payload fetched from a backend.</summary>
-public sealed record BackendAttachment(string ContentType, byte[] Content);
+public sealed record BackendAttachment
+{
+	/// <summary>The attachment's MIME content type.</summary>
+	public required string ContentType { get; init; }
+
+	/// <summary>The attachment's bytes (ownership rule: a dedicated, never-mutated buffer).</summary>
+	public required ReadOnlyMemory<byte> Content { get; init; }
+}
 
 /// <summary>
 ///   Thrown by a backend store or operation for any failure the host should treat as a backend
@@ -138,3 +103,15 @@ public class BackendException : Exception
 ///   <see cref="Exception" /> and item-gone errors slipped past every backend-error handler.
 /// </summary>
 public sealed class BackendItemNotFoundException(string message) : BackendException(message);
+
+/// <summary>
+///   Thrown by a store that CAN check an update's <c>expected</c> revision precondition
+///   (DAV If-Match, JMAP ifInState, a local row version) when the item's current revision
+///   differs — a typed signal, so the host can distinguish "the item moved underneath the
+///   merge" from any other backend error. The host's response: drop its cached payload,
+///   re-fetch, re-merge the client's partial data onto the fresh payload, and retry ONCE with
+///   the new revision; a second failure surfaces as the ordinary per-item conflict status.
+///   A store that cannot check the precondition never throws this — it ignores
+///   <c>expected</c> and applies the write, which is conforming.
+/// </summary>
+public sealed class BackendPreconditionFailedException(string message) : BackendException(message);

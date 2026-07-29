@@ -1,6 +1,7 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
 using ActiveSync.Core.State;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using ActiveSync.Server.Eas.Handlers;
@@ -31,17 +32,29 @@ public sealed class ItemOperationsFetchTests : IDisposable
 	// ServerId) must get the SAME version-gated BodyPreference.Eas16 flag Sync itself computes
 	// (context.Version >= EasVersion.V160), not a hard-coded false. Without it, 16.x-only shapes
 	// (airsyncbase:Location, event attachments) silently disappear from a bare Fetch.
-	[Fact]
-	public async Task Fetch_ByCollectionId_Eas16Client_ThreadsEas16IntoBodyPreference()
+	//
+	// The preference is HOST-side now (a store never sees one), so the gate is asserted where it
+	// is decided — the fetch itself is still driven end-to-end below to prove the path works.
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public void Fetch_BodyPreference_CarriesTheVersionGate(bool eas16)
 	{
-		// The default ItemApplicationData (airsync:Subject with no matching WBXML tag on this
-		// code page in this position) is deliberately unencodable elsewhere in this file; give
-		// this test an encodable payload so the response round-trips.
-		_harness.Session.Store.ItemApplicationData = _ =>
-			[new XElement(EasNamespaces.AirSyncBase + "DisplayName", "x")];
+		BodyPreference withoutOptions = ItemOperationsHandler.ParseBodyPreference(null, eas16);
+		BodyPreference withOptions = ItemOperationsHandler.ParseBodyPreference(
+			new XElement(IO + "Options",
+				new XElement(EasNamespaces.AirSyncBase + "BodyPreference",
+					new XElement(EasNamespaces.AirSyncBase + "Type", "1"))), eas16);
 
+		Assert.Equal(eas16, withoutOptions.Eas16);
+		Assert.Equal(eas16, withOptions.Eas16);
+	}
+
+	[Fact]
+	public async Task Fetch_ByCollectionId_Eas16Client_Succeeds()
+	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 		UserFolder inbox = registry.Single();
 
 		XDocument? response = await _harness.RunAsync(
@@ -56,7 +69,7 @@ public sealed class ItemOperationsFetchTests : IDisposable
 
 		Assert.Equal("1",
 			response?.Root?.Element(IO + "Response")?.Element(IO + "Fetch")?.Element(IO + "Status")?.Value);
-		Assert.True(_harness.Session.Store.FetchedBodyPreferences.Single().Eas16);
+		Assert.Equal([$"imap:INBOX/1"], _harness.Session.Store.Fetched);
 	}
 
 	[Fact]
@@ -101,7 +114,7 @@ public sealed class ItemOperationsFetchTests : IDisposable
 	private Task RegisterInboxAsync()
 	{
 		return _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 	}
 
 	private Task<XDocument?> FetchLongIdAsync(string longId)

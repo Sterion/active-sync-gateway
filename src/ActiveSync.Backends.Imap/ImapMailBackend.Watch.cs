@@ -1,3 +1,4 @@
+using ActiveSync.Contracts;
 using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Backends.Imap;
@@ -6,11 +7,14 @@ namespace ActiveSync.Backends.Imap;
 // detect backend changes during a Ping/Sync long-poll (see WaitForChangesAsync).
 public sealed partial class ImapMailBackend
 {
-	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
-		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
+	public async Task<IReadOnlyList<FolderKey>> WaitForChangesAsync(
+		IReadOnlyList<FolderKey> folders, TimeSpan timeout, CancellationToken ct)
 	{
 		DateTime watchStartUtc = DateTime.UtcNow;
 		DateTime deadline = watchStartUtc + timeout;
+		// The poller/status plumbing below trades in the raw key strings; wrap back into
+		// FolderKey only at the contract boundary.
+		List<string> folderBackendKeys = folders.Select(f => f.Value).ToList();
 		Dictionary<string, string> baseline = await SnapshotStatusAsync(folderBackendKeys, ct).ConfigureAwait(false);
 
 		// Sub-second push: a shared per-(user, folder) IDLE watcher covers the priority
@@ -31,7 +35,7 @@ public sealed partial class ImapMailBackend
 			watcher is null ? "(none, STATUS polling only)" : ImapSession.FromBackendKey(idleKey!));
 
 		if (watcher is null)
-			return await PollForChangesAsync(folderBackendKeys, baseline, deadline, ct).ConfigureAwait(false);
+			return ToFolderKeys(await PollForChangesAsync(folderBackendKeys, baseline, deadline, ct).ConfigureAwait(false));
 
 		using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 		Task<bool?> idleTask = watcher.WaitForChangeAsync(watchStartUtc, timeout, cts.Token);
@@ -40,9 +44,9 @@ public sealed partial class ImapMailBackend
 		{
 			Task finished = await Task.WhenAny(idleTask, pollTask).ConfigureAwait(false);
 			if (finished == idleTask && await idleTask.ConfigureAwait(false) == true)
-				return [idleKey!]; // non-null whenever a watcher was resolved
+				return [new FolderKey(idleKey!)]; // non-null whenever a watcher was resolved
 			// IDLE timed out or is unavailable — let polling run out the clock.
-			return await pollTask.ConfigureAwait(false);
+			return ToFolderKeys(await pollTask.ConfigureAwait(false));
 		}
 		finally
 		{
@@ -50,6 +54,11 @@ public sealed partial class ImapMailBackend
 			await ObserveAsync(idleTask).ConfigureAwait(false);
 			await ObserveAsync(pollTask).ConfigureAwait(false);
 		}
+	}
+
+	private static IReadOnlyList<FolderKey> ToFolderKeys(IReadOnlyList<string> keys)
+	{
+		return keys.Select(k => new FolderKey(k)).ToList();
 	}
 
 	private static async Task ObserveAsync(Task task)

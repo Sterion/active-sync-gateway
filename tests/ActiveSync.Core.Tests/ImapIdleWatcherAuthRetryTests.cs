@@ -21,7 +21,7 @@ public sealed class ImapIdleWatcherAuthRetryTests
 {
 	private static ImapOptions Options(int port) => new() { Host = "127.0.0.1", Port = port, UseSsl = false, Security = "None" };
 
-	private static readonly BackendCredentials Credentials = new("user@example.test", "pw");
+	private static readonly BackendCredentials Credentials = new() { UserName = "user@example.test", Password = "pw" };
 
 	[Fact]
 	public async Task WaitForChangeAsync_TransientAuthFailureThenSuccess_DoesNotLatchUnavailable()

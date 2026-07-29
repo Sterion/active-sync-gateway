@@ -1,10 +1,21 @@
-This MIT licence applies ONLY to the backend plugin contract:
+This MIT licence applies ONLY to the backend plugin contract and the two optional
+packages published beside it:
 
-  src/ActiveSync.Contracts/   (NuGet: ActiveSync.Contracts)
-  src/ActiveSync.Protocol/    (NuGet: ActiveSync.Protocol)
+  src/ActiveSync.Contracts/             (NuGet: ActiveSync.Contracts)
+  src/ActiveSync.Contracts.Interop/     (NuGet: ActiveSync.Contracts.Interop)
+  src/ActiveSync.Contracts.Conformance/ (NuGet: ActiveSync.Contracts.Conformance)
 
 The rest of this repository is licensed under the PolyForm Noncommercial
 License 1.0.0 — see LICENSE.
+
+src/ActiveSync.Protocol/ was also covered by this licence, and was published to
+NuGet as ActiveSync.Protocol, up to and including contract version 1.7. It is a
+host-only assembly now — no plugin references it — so it is no longer published
+and new work in it is PolyForm Noncommercial like the rest of the gateway. That
+change is NOT retroactive: every ActiveSync.Protocol package version that was
+published remains MIT-licensed under these terms, permanently. An MIT grant on
+released bytes cannot be withdrawn, which is the whole reason moving a type into
+a published assembly is a licensing decision and not merely a structural one.
 
 --------------------------------------------------------------------------------
 

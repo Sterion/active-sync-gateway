@@ -43,13 +43,13 @@ public sealed class JmapPagingAndCapabilityTests
 	{
 		PagingHandler handler = new(SessionJson(), ["E0", "E1", "E2", "E3"], capPerQuery: 2);
 		JmapClient client = new(Base, new HttpClient(handler));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		JmapMailStore store = new(client, pollSeconds: 1);
 
-		IReadOnlyDictionary<string, string> map = await store.GetItemRevisionsAsync(
-			JmapMailStore.ToKey("INBOXID"), ContentFilter.All, CancellationToken.None);
+		IReadOnlyDictionary<ItemKey, ItemRevision> map = await store.GetItemRevisionsAsync(
+			new FolderKey(JmapMailStore.ToKey("INBOXID")), ContentFilter.All, CancellationToken.None);
 
 		Assert.Equal(4, map.Count);
-		Assert.Equal(new[] { "E0", "E1", "E2", "E3" }, map.Keys.OrderBy(k => k));
+		Assert.Equal(new[] { "E0", "E1", "E2", "E3" }, map.Keys.Select(k => k.Value).OrderBy(k => k));
 	}
 
 	// The server advertises maxObjectsInGet=2 and answers requestTooLarge to any Email/get
@@ -62,10 +62,10 @@ public sealed class JmapPagingAndCapabilityTests
 		PagingHandler handler = new(
 			SessionJson(maxObjectsInGet: 2), ["E0", "E1", "E2"], maxObjectsInGet: 2);
 		JmapClient client = new(Base, new HttpClient(handler));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		JmapMailStore store = new(client, pollSeconds: 1);
 
-		IReadOnlyDictionary<string, string> map = await store.GetItemRevisionsAsync(
-			JmapMailStore.ToKey("INBOXID"), ContentFilter.All, CancellationToken.None);
+		IReadOnlyDictionary<ItemKey, ItemRevision> map = await store.GetItemRevisionsAsync(
+			new FolderKey(JmapMailStore.ToKey("INBOXID")), ContentFilter.All, CancellationToken.None);
 
 		Assert.Equal(3, map.Count);
 		Assert.True(handler.MaxGetIdsSeen <= 2,

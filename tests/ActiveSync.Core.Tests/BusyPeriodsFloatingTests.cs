@@ -25,7 +25,7 @@ public class BusyPeriodsFloatingTests
 		DateTime start = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 		DateTime end = new(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc);
 
-		var periods = CalendarConverter.BusyPeriodsFromEvents([ics], start, end);
+		var periods = CalendarPayload.BusyPeriodsFromEvents([ics], start, end);
 
 		// Four Tuesdays in Jan 2026 (6, 13, 20, 27) — none dropped by early termination.
 		Assert.Equal(4, periods.Count);

@@ -25,7 +25,7 @@ public class DavCreatePutReplayTests
 		CancellationToken ct = CancellationToken.None;
 		using WebDavClient dav = new(
 			new Uri(TestBackend.DavUrl!), // DavBackendFact guarantees a DAV backend
-			new BackendCredentials(TestBackend.User1, TestBackend.Password),
+			new BackendCredentials { UserName = TestBackend.User1, Password = TestBackend.Password },
 			allowInvalidCertificates: true);
 
 		// Locate a writable calendar collection (RFC 6764 discovery, or the stack's home-set template).

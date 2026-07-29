@@ -789,17 +789,24 @@ documented in **[docs/testing.md](docs/testing.md)**.
 ```
 src/
   ActiveSync.Protocol/   WBXML codec (all MS-ASWBXML code pages), MS-ASHTTP base64 query
-                         parser, EAS constants. No ASP.NET dependencies.
+                         parser, EAS constants, the diff engine. Host-only, not published.
+                         No ASP.NET dependencies.
   ActiveSync.Contracts/  The backend plugin contract — the interfaces/records a provider
-                         implements (IBackendProvider, IContentStore, IGatewayPlugin, roles,
-                         provider settings, config schema). Tiny; the one package a plugin
-                         references. Depends only on Protocol + MS config/DI abstractions.
+                         implements (IBackendProvider, the content stores, IGatewayPlugin,
+                         the typed item payloads, roles, provider settings, config schema).
+                         Tiny; THE one package a plugin references. Depends on no other
+                         project — only the MS config/DI abstractions.
+  ActiveSync.Contracts.{Interop,Conformance}/   Optional published packages beside the
+                         contract: payload ⇄ MimeKit/Ical.Net/vCard helpers, and a
+                         store-conformance test kit. Neither is needed to write a plugin.
   ActiveSync.Core/       The provider engine (registry, composite session, session factory),
                          EF Core state store (devices, folder registry, sync keys +
-                         snapshots, DAV href map), differential sync engine (CollectionDiff),
-                         options/account model. References Contracts.
-  ActiveSync.Backends.Common/   MIME/iCalendar/vCard ↔ EAS converters, MS-ASTZ timezone
-                         blob, TLS/wire-logging helpers — shared by the providers.
+                         snapshots, DAV href map), options/account model. References
+                         Contracts + Protocol.
+  ActiveSync.Eas.Conversion/    The payload ↔ EAS-XML converters and the MS-ASTZ timezone
+                         blob — host-side, so no store ever sees EAS XML.
+  ActiveSync.Backends.Common/   Payload helpers a store needs from data it owns, TLS/
+                         wire-logging and HTTP helpers — shared by the providers.
   ActiveSync.Backends.{Imap,Smtp,Dav,Sieve,Jmap,Local}/   one assembly per provider (Dav
                          serves both caldav + carddav); Local is the gateway-DB fallback.
                          New backends drop in as another such assembly.
@@ -810,9 +817,11 @@ src/
 **Backend plugins.** Backends are named *providers* that fill *roles*; a new backend (e.g.
 a Microsoft Graph bridge, or your own) is just another provider assembly. Out-of-repo plugins
 drop into `/app/plugins` and register themselves — no fork required. A plugin references the
-one small **`ActiveSync.Contracts`** package (published to NuGet per release; it pulls in
-`ActiveSync.Protocol` and nothing else). See
-**[docs/plugins.md](docs/plugins.md)**.
+one small **`ActiveSync.Contracts`** package and nothing else: no EAS XML crosses the store
+boundary, so a store trades in RFC822 / iCalendar / vCard payloads and typed records while the
+gateway does every conversion. Two optional packages sit beside it — format ergonomics
+(`ActiveSync.Contracts.Interop`) and a conformance test kit
+(`ActiveSync.Contracts.Conformance`). See **[docs/plugins.md](docs/plugins.md)**.
 
 ## Licence
 
@@ -820,8 +829,12 @@ This project is **source-available, not open source**. It is licensed in two par
 
 | Part | Licence | Why |
 |------|---------|-----|
-| `src/ActiveSync.Contracts/` + `src/ActiveSync.Protocol/` — the plugin contract, published to NuGet | **[MIT](LICENSE-MIT)** | so backend plugins, including commercial and closed-source ones, can be built against it freely |
+| `src/ActiveSync.Contracts/` + `src/ActiveSync.Contracts.Interop/` + `src/ActiveSync.Contracts.Conformance/` — the plugin contract and the two optional packages beside it, published to NuGet | **[MIT](LICENSE-MIT)** | so backend plugins, including commercial and closed-source ones, can be built against them freely |
 | Everything else — the gateway itself | **[PolyForm Noncommercial 1.0.0](LICENSE)** | free for any noncommercial purpose; commercial use is not permitted |
+
+`src/ActiveSync.Protocol/` was MIT and published as far as contract version 1.7. It is host-only
+now, so it is PolyForm going forward — but the package versions already on NuGet stay MIT
+permanently; a published permissive grant cannot be withdrawn.
 
 The PolyForm licence permits personal use, hobby projects, study and research, and use by
 charities, educational institutions, public research bodies, public safety and health

@@ -1,13 +1,17 @@
-using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
-using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Contracts;
 
 namespace ActiveSync.Core.Tests;
 
-/// <summary>The MS-ASCMD GAL photo rules implemented by ContactConverter.AppendGalPicture.</summary>
+/// <summary>
+///   The GAL photo rules as the STORE now reports them: a typed
+///   <see cref="GalPictureResult" /> whose <see cref="GalPictureStatus" /> distinguishes "has
+///   none" from "over a limit" (a bare nullable photo could not). The MS-ASCMD wire statuses the
+///   host maps these onto — 1 / 173 / 174 / 175 — are asserted host-side in
+///   <c>GalXmlStatusTests</c>.
+/// </summary>
 public sealed class GalPictureTests
 {
-	private static readonly XNamespace Gal = EasNamespaces.Gal;
 	private static readonly byte[] PhotoBytes = [0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4];
 
 	private static readonly string VcardWithPhoto =
@@ -17,42 +21,67 @@ public sealed class GalPictureTests
 	private const string VcardWithoutPhoto =
 		"BEGIN:VCARD\r\nVERSION:3.0\r\nUID:p2\r\nFN:Plain Person\r\nEND:VCARD\r\n";
 
-	[Fact]
-	public void PhotoPresent_YieldsStatus1AndData()
+	private static (GalPictureResult Picture, bool Granted) Build(
+		string vcf, int? maxPhotoBytes, bool limitReached)
 	{
-		List<XElement> entry = new();
-		bool granted = ContactConverter.AppendGalPicture(entry, VcardWithPhoto, null, false);
+		GalEntry? entry = ContactPayload.BuildGalEntry(
+			vcf, "Person", wantPhoto: true, maxPhotoBytes, limitReached, out bool granted);
+		Assert.NotNull(entry);
+		Assert.NotNull(entry!.Picture);
+		return (entry.Picture!, granted);
+	}
+
+	[Fact]
+	public void PhotoPresent_YieldsAvailableWithData()
+	{
+		(GalPictureResult picture, bool granted) = Build(VcardWithPhoto, null, false);
+
 		Assert.True(granted);
-		XElement picture = Assert.Single(entry);
-		Assert.Equal("1", picture.Element(Gal + "Status")?.Value);
-		Assert.Equal(PhotoBytes, Convert.FromBase64String(picture.Element(Gal + "Data")!.Value));
+		Assert.Equal(GalPictureStatus.Available, picture.Status);
+		Assert.Equal(PhotoBytes, picture.Picture!.Data.ToArray());
+		Assert.Equal("image/jpeg", picture.Picture.ContentType);
 	}
 
 	[Fact]
-	public void NoPhoto_YieldsStatus173()
+	public void NoPhoto_YieldsNone()
 	{
-		List<XElement> entry = new();
-		Assert.False(ContactConverter.AppendGalPicture(entry, VcardWithoutPhoto, null, false));
-		Assert.Equal("173", Assert.Single(entry).Element(Gal + "Status")?.Value);
+		(GalPictureResult picture, bool granted) = Build(VcardWithoutPhoto, null, false);
+
+		Assert.False(granted);
+		Assert.Equal(GalPictureStatus.None, picture.Status);
+		Assert.Null(picture.Picture);
 	}
 
 	[Fact]
-	public void PhotoOverMaxSize_YieldsStatus174_WithoutData()
+	public void PhotoOverMaxSize_YieldsOverSizeLimit_WithoutData()
 	{
-		List<XElement> entry = new();
-		Assert.False(ContactConverter.AppendGalPicture(entry, VcardWithPhoto, PhotoBytes.Length - 1, false));
-		XElement picture = Assert.Single(entry);
-		Assert.Equal("174", picture.Element(Gal + "Status")?.Value);
-		Assert.Null(picture.Element(Gal + "Data"));
+		(GalPictureResult picture, bool granted) = Build(VcardWithPhoto, PhotoBytes.Length - 1, false);
+
+		Assert.False(granted);
+		Assert.Equal(GalPictureStatus.OverSizeLimit, picture.Status);
+		Assert.Null(picture.Picture);
 	}
 
 	[Fact]
-	public void LimitReached_YieldsStatus175_EvenWhenAPhotoExists()
+	public void LimitReached_YieldsOverCountLimit_EvenWhenAPhotoExists()
 	{
-		List<XElement> entry = new();
-		Assert.False(ContactConverter.AppendGalPicture(entry, VcardWithPhoto, null, true));
-		XElement picture = Assert.Single(entry);
-		Assert.Equal("175", picture.Element(Gal + "Status")?.Value);
-		Assert.Null(picture.Element(Gal + "Data"));
+		(GalPictureResult picture, bool granted) = Build(VcardWithPhoto, null, true);
+
+		Assert.False(granted);
+		Assert.Equal(GalPictureStatus.OverCountLimit, picture.Status);
+		Assert.Null(picture.Picture);
+	}
+
+	[Fact]
+	public void PhotosNotRequested_LeavesThePictureUnset()
+	{
+		// A null Picture means "the client did not ask", which is distinct from every status
+		// above — the host then emits no gal:Picture element at all.
+		GalEntry? entry = ContactPayload.BuildGalEntry(
+			VcardWithPhoto, "Person", wantPhoto: false, null, false, out bool granted);
+
+		Assert.NotNull(entry);
+		Assert.False(granted);
+		Assert.Null(entry!.Picture);
 	}
 }

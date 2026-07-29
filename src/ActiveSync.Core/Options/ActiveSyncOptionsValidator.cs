@@ -62,6 +62,10 @@ public sealed class ActiveSyncOptionsValidator(IConfiguration? configuration = n
 			failures.Add("ActiveSync:Eas:DefaultWindowSize must not exceed ActiveSync:Eas:MaxWindowSize.");
 		if (options.Eas.SessionIdleMinutes is < 1 or > 1440)
 			failures.Add("ActiveSync:Eas:SessionIdleMinutes must be between 1 and 1440.");
+		if (!string.Equals(options.Eas.CalendarAttachments, "Auto", StringComparison.OrdinalIgnoreCase) &&
+		    !string.Equals(options.Eas.CalendarAttachments, "On", StringComparison.OrdinalIgnoreCase) &&
+		    !string.Equals(options.Eas.CalendarAttachments, "Off", StringComparison.OrdinalIgnoreCase))
+			failures.Add("ActiveSync:Eas:CalendarAttachments must be Auto, On or Off.");
 
 		if (options.Auth.MaxFailures is < 0 or > 1000000)
 			failures.Add("ActiveSync:Auth:MaxFailures must be between 0 (disabled) and 1000000.");

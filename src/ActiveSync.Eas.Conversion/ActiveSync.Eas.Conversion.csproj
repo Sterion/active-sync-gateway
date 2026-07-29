@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+	  The format -> EAS-XML conversion layer, HOST-ONLY and never published: iCalendar / vCard /
+	  RFC822 <-> ApplicationData, plus the EAS 16.x ghosting merge. Under the typed item currency
+	  a store trades in payloads and knows no EAS XML, so every converter lives above the store
+	  boundary — here — and Server is its only consumer.
+
+	  It MUST NOT reference ActiveSync.Core: Core carries no domain library and ActiveSync.WebUi
+	  references Core ONLY, so a Core reference here would hand MimeKit/Ical.Net/FolkerKinzel to
+	  the admin UI and the slim CLI's graph. DependencyRuleTests pins that.
+	-->
+	<PropertyGroup>
+		<RootNamespace>ActiveSync.Eas.Conversion</RootNamespace>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Contracts\ActiveSync.Contracts.csproj" />
+		<!-- The EAS namespaces, the compact/long date formats and the wire-log payload cap: this
+		     assembly inherits Backends.Common's former role as Protocol's heaviest consumer. -->
+		<ProjectReference Include="..\ActiveSync.Protocol\ActiveSync.Protocol.csproj" />
+		<!-- The iCalendar load/serialize quirk handling, shared with the backend side. -->
+		<ProjectReference Include="..\ActiveSync.Contracts.Interop\ActiveSync.Contracts.Interop.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- Same grant pattern the Backends csprojs use: the converter unit tests live in
+		     Core.Tests (there is no per-assembly test project) and drive internals directly —
+		     TimeZoneBlob.WriteName with a real surrogate pair, RecurrenceMapper, and the
+		     contact converter's photo-cap overload. -->
+		<InternalsVisibleTo Include="ActiveSync.Core.Tests" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="FolkerKinzel.VCards" />
+		<PackageReference Include="Ical.Net" />
+		<PackageReference Include="MimeKit" />
+	</ItemGroup>
+
+</Project>

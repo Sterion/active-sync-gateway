@@ -1,6 +1,6 @@
 using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol.Wbxml;
 using MimeKit;
 
@@ -31,9 +31,9 @@ public class MailConverterConversationIndexTests
 	[Fact]
 	public void ConversationIndex_IsNeverEmitted()
 	{
-		MailConverter.MessageFlags flags = new(false, false, false, false);
+		MailFlags flags = new();
 		List<XElement> data = MailConverter.ToApplicationData(
-			MessageWithReferences(), flags, BodyPreference.PlainText, _ => "ref");
+			MessageWithReferences(), flags, [], BodyPreference.PlainText, _ => "ref");
 
 		Assert.DoesNotContain(data, e => e.Name == Email2 + "ConversationIndex");
 		// ConversationId alone is sufficient for threading and must still be present.

@@ -53,10 +53,13 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 	{
 		return
 		[
-			new BackendConfigField("BaseUrl", "Base URL", BackendFieldType.Url, Required: true,
-				Help: "Absolute http(s) URL of the JMAP server, e.g. https://mail.example.com. " +
-				      "The session is fetched from /.well-known/jmap. " +
-				      "One server serving several roles repeats the same URL in each."),
+			new BackendConfigField
+			{
+				Name = "BaseUrl", Label = "Base URL", Type = BackendFieldType.Url, Required = true,
+				Help = "Absolute http(s) URL of the JMAP server, e.g. https://mail.example.com. " +
+				       "The session is fetched from /.well-known/jmap. " +
+				       "One server serving several roles repeats the same URL in each."
+			},
 			.. BackendSchemaFields.Network()
 		];
 	}
@@ -95,7 +98,8 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 			switch (role.Role)
 			{
 				case BackendRole.MailStore:
-					stores.Add(new JmapMailStore(client, context.MailAddress, _options.CurrentValue.Eas.DavPollSeconds, waitForPush));
+					// No mail address: draft composition (its only consumer) is host-side now.
+					stores.Add(new JmapMailStore(client, _options.CurrentValue.Eas.DavPollSeconds, waitForPush));
 					break;
 				case BackendRole.MailSubmit:
 					submit = new JmapMailSubmit(client, context.MailAddress, _logger);
@@ -111,7 +115,7 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 					break;
 			}
 
-		return Task.FromResult<IBackendConnection>(new BackendConnection(stores, submit, oof, ownedResources: [client]));
+		return Task.FromResult<IBackendConnection>(new BackendConnection(stores, submit, oof, ownedResources: [OwnedResource.OfSync(client)]));
 	}
 
 	public async Task<bool> VerifyCredentialsAsync(ResolvedRole role, CancellationToken ct)

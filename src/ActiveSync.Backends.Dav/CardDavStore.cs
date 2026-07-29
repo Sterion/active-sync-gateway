@@ -2,24 +2,25 @@ using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
-using ActiveSync.Protocol;
 using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Backends.Dav;
 
-/// <summary>Contacts content store over CardDAV. Item keys are server hrefs; revisions are ETags.</summary>
+/// <summary>
+///   Contacts content store over CardDAV. Item keys are server hrefs; revisions are ETags; the
+///   payload is the stored vCard verbatim.
+/// </summary>
 public sealed class CardDavStore(
 	WebDavClient dav,
 	DavServerOptions options,
 	BackendCredentials credentials,
 	ILogger logger,
 	int pollSeconds)
-	: DavStoreBase(dav, options, credentials, logger, pollSeconds), IContactOperations
+	: DavStoreBase<ContactItem>(dav, options, credentials, logger, pollSeconds), IContactStore, IDirectoryOperations
 {
 	public const string KeyPrefix = "carddav:";
 
 	protected override string Prefix => KeyPrefix;
-	public override string EasClass => Protocol.EasClass.Contacts;
 	protected override string MediaType => "text/vcard";
 	protected override string FileExtension => ".vcf";
 	protected override string WellKnownPath => "/.well-known/carddav";
@@ -31,12 +32,22 @@ public sealed class CardDavStore(
 	protected override string CollectionKindPlural => "address books";
 	protected override string CtagLabel => "CardDAV";
 
-	// ---------- IContactOperations (GAL search) ----------
+	// ---------- IDirectoryOperations (GAL search) ----------
 
-	public async Task<IReadOnlyList<IReadOnlyList<XElement>>> SearchGalAsync(
+	/// <summary>
+	///   Searches every address book and returns typed GAL entries. The photo limits are enforced
+	///   HERE (the store holds the request and counts granted photos across the whole result set);
+	///   the host maps <see cref="GalPictureStatus" /> onto the MS-ASCMD wire statuses.
+	/// </summary>
+	/// <param name="query">The free-text query to match entries against.</param>
+	/// <param name="maxResults">The most entries to return.</param>
+	/// <param name="photos">The photo request, or <c>null</c> when pictures were not requested.</param>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
+	/// <returns>The matching entries.</returns>
+	public async Task<IReadOnlyList<GalEntry>> SearchGalAsync(
 		string query, int maxResults, GalPhotoRequest? photos, CancellationToken ct)
 	{
-		List<IReadOnlyList<XElement>> results = new();
+		List<GalEntry> results = new();
 		int photosGranted = 0;
 		foreach (BackendFolder folder in await ListFoldersAsync(ct).ConfigureAwait(false))
 		{
@@ -44,22 +55,22 @@ public sealed class CardDavStore(
 			// instead of listing every href and then a serial GET per contact — the single largest
 			// DAV performance defect. A server that rejects the REPORT (throws) falls back to the
 			// per-contact GET path below; a server that ignores the filter and returns everything is
-			// still correct because ToGalEntry filters client-side.
-			IReadOnlyList<string>? cards = await QueryGalCardsAsync(folder.BackendKey, query, ct)
+			// still correct because BuildGalEntry filters client-side.
+			IReadOnlyList<string>? cards = await QueryGalCardsAsync(folder.Key, query, ct)
 				.ConfigureAwait(false);
-			IEnumerable<string> contents = cards ?? await GetCardsByEnumerationAsync(folder.BackendKey, ct)
+			IEnumerable<string> contents = cards ?? await GetCardsByEnumerationAsync(folder.Key, ct)
 				.ConfigureAwait(false);
 
 			foreach (string vcf in contents)
 			{
 				if (results.Count >= maxResults)
 					return results;
-				List<XElement>? gal = ContactConverter.ToGalEntry(vcf, query);
+				GalEntry? gal = ContactPayload.BuildGalEntry(
+					vcf, query, photos is not null, photos?.MaxSizeBytes,
+					photosGranted >= (photos?.MaxCount ?? int.MaxValue), out bool granted);
 				if (gal is null)
 					continue;
-				if (photos is not null &&
-				    ContactConverter.AppendGalPicture(gal, vcf, photos.MaxSizeBytes,
-					    photosGranted >= (photos.MaxCount ?? int.MaxValue)))
+				if (granted)
 					photosGranted++;
 				results.Add(gal);
 			}
@@ -74,9 +85,9 @@ public sealed class CardDavStore(
 	///   null when the server rejects the REPORT (so the caller falls back to per-contact GETs).
 	/// </summary>
 	private async Task<IReadOnlyList<string>?> QueryGalCardsAsync(
-		string folderBackendKey, string query, CancellationToken ct)
+		FolderKey folder, string query, CancellationToken ct)
 	{
-		string collection = FromBackendKey(folderBackendKey);
+		string collection = FromBackendKey(folder.Value);
 		XElement body = new(DavNs.CardDav + "addressbook-query",
 			new XAttribute(XNamespace.Xmlns + "D", DavNs.D.NamespaceName),
 			new XAttribute(XNamespace.Xmlns + "C", DavNs.CardDav.NamespaceName),
@@ -136,14 +147,14 @@ public sealed class CardDavStore(
 
 	/// <summary>The fallback when the server has no addressbook-query support: list every href, then a GET per contact.</summary>
 	private async Task<IReadOnlyList<string>> GetCardsByEnumerationAsync(
-		string folderBackendKey, CancellationToken ct)
+		FolderKey folder, CancellationToken ct)
 	{
-		IReadOnlyDictionary<string, string> revisions =
-			await GetItemRevisionsAsync(folderBackendKey, ContentFilter.All, ct).ConfigureAwait(false);
+		IReadOnlyDictionary<ItemKey, ItemRevision> revisions =
+			await GetItemRevisionsAsync(folder, ContentFilter.All, ct).ConfigureAwait(false);
 		List<string> cards = new();
-		foreach (string href in revisions.Keys)
+		foreach (ItemKey href in revisions.Keys)
 		{
-			(string Content, string? ETag)? item = await Dav.GetAsync(href, ct).ConfigureAwait(false);
+			(string Content, string? ETag)? item = await Dav.GetAsync(href.Value, ct).ConfigureAwait(false);
 			if (item is not null)
 				cards.Add(item.Value.Content);
 		}
@@ -151,19 +162,20 @@ public sealed class CardDavStore(
 		return cards;
 	}
 
-	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
+	// The stored document IS the payload — identity in both directions (round-trip fidelity).
+	protected override ContactItem ToItem(string content)
 	{
-		return ContactConverter.ToApplicationData(content, bodyPreference);
+		return new ContactItem { VCard = content };
 	}
 
-	protected override string FromApplicationData(XElement applicationData, string uid, string? existingContent)
+	protected override string PayloadOf(ContactItem item)
 	{
-		return ContactConverter.FromApplicationData(applicationData, uid, existingContent);
+		return item.VCard;
 	}
 
 	protected override string? ExtractUid(string content)
 	{
-		return ContactConverter.ExtractUid(content);
+		return ContactPayload.ExtractUid(content);
 	}
 
 	protected override XElement BuildUidQueryBody(string uid)
@@ -175,6 +187,7 @@ public sealed class CardDavStore(
 					new XElement(DavNs.CardDav + "text-match", uid))));
 	}
 
+	/// <inheritdoc />
 	public override async Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 	{
 		string home = await GetHomeSetAsync(ct).ConfigureAwait(false);
@@ -197,34 +210,35 @@ public sealed class CardDavStore(
 			string? name = resource.Propstat.Descendants(DavNs.D + "displayname").FirstOrDefault()?.Value;
 			if (string.IsNullOrWhiteSpace(name))
 				name = resource.Href.TrimEnd('/').Split('/').LastOrDefault() ?? "Contacts";
-			folders.Add(new BackendFolder(
-				ToBackendKey(resource.Href),
-				name,
-				null,
-				first ? EasFolderType.Contacts : EasFolderType.UserContacts,
-				Protocol.EasClass.Contacts));
+			folders.Add(new BackendFolder
+			{
+				Key = new FolderKey(ToBackendKey(resource.Href)),
+				DisplayName = name,
+				Type = first ? FolderType.Contacts : FolderType.UserContacts
+			});
 			first = false;
 		}
 
 		return folders;
 	}
 
-	public override async Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-		string folderBackendKey, ContentFilter filter, CancellationToken ct)
+	/// <inheritdoc />
+	public override async Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+		FolderKey folder, ContentFilter filter, CancellationToken ct)
 	{
-		string collection = FromBackendKey(folderBackendKey);
+		string collection = FromBackendKey(folder.Value);
 		XElement body = new(DavNs.D + "propfind",
 			new XElement(DavNs.D + "prop", new XElement(DavNs.D + "getetag")));
 		List<DavResource> resources = await Dav.PropfindAsync(collection, 1, body, ct).ConfigureAwait(false);
 
-		Dictionary<string, string> map = new(StringComparer.Ordinal);
+		Dictionary<ItemKey, ItemRevision> map = new();
 		foreach (DavResource resource in resources)
 		{
 			if (PathsEqual(resource.Href, collection))
 				continue;
 			string? etag = resource.Propstat.Descendants(DavNs.D + "getetag").FirstOrDefault()?.Value;
 			if (etag is not null)
-				map[resource.Href] = etag;
+				map[new ItemKey(resource.Href)] = new ItemRevision(etag);
 		}
 
 		return map;

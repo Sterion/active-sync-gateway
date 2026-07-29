@@ -1,10 +1,10 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Server.Eas.Content;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Server.Eas.Handlers;
@@ -254,10 +254,10 @@ public abstract class FolderModifyHandlerBase(
 	///   shared-collection grant) still throws <see cref="BackendException" /> → Status 3, the same
 	///   answer an unmodifiable system folder gets: the client must not retry either.
 	/// </summary>
-	protected async Task<(UserFolder Folder, IContentStore Store)> ResolveWritableAsync(
+	protected async Task<(UserFolder Folder, ContentAdapter Store)> ResolveWritableAsync(
 		EasContext context, string serverId, CancellationToken ct, string notFoundStatus = "4")
 	{
-		(UserFolder Folder, IContentStore Store) resolved =
+		(UserFolder Folder, ContentAdapter Store) resolved =
 			await Folders.ResolveCollectionAsync(context.Session, context.UserId, serverId, ct)
 			?? throw new FolderOperationException(notFoundStatus, $"Unknown folder \"{serverId}\"");
 		if (!WritePermission.IsBlocked(context, options.Value, resolved.Folder))
@@ -316,15 +316,15 @@ public sealed class FolderCreateHandler(
 		// same answer as an unmodifiable system folder.
 		IFolderOperations folderOps = store as IFolderOperations
 			?? throw new BackendException($"The {easClass} store does not support folder creation.");
-		string? parentBackendKey = null;
+		FolderKey? parentKey = null;
 		if (parentId != "0")
 			// A read-only grant on the parent covers its subtree: creating a child inside it
 			// is a write to the shared collection. A missing parent is Status 5, not "system folder".
-			parentBackendKey = (await ResolveWritableAsync(context, parentId, ct, "5")).Folder.BackendKey;
+			parentKey = new FolderKey((await ResolveWritableAsync(context, parentId, ct, "5")).Folder.BackendKey);
 
 		// Return the new folder's backend key; the base handler's single hierarchy refresh
 		// registers it and resolves the ServerId for the response.
-		return await folderOps.CreateFolderAsync(parentBackendKey, displayName, ct);
+		return (await folderOps.CreateFolderAsync(parentKey, displayName, ct)).Value;
 	}
 
 	/// <summary>
@@ -356,10 +356,10 @@ public sealed class FolderDeleteHandler(
 	{
 		string serverId = root.Element(FH + "ServerId")?.Value
 		                  ?? throw new FolderOperationException("10", "Missing ServerId");
-		(UserFolder Folder, IContentStore Store) resolved = await ResolveWritableAsync(context, serverId, ct);
-		IFolderOperations folderOps = resolved.Store as IFolderOperations
+		(UserFolder Folder, ContentAdapter Store) resolved = await ResolveWritableAsync(context, serverId, ct);
+		IFolderOperations folderOps = resolved.Store.Store as IFolderOperations
 			?? throw new BackendException("This folder's store does not support folder deletion.");
-		await folderOps.DeleteFolderAsync(resolved.Folder.BackendKey, ct);
+		await folderOps.DeleteFolderAsync(new FolderKey(resolved.Folder.BackendKey), ct);
 		return null;
 	}
 }
@@ -378,7 +378,7 @@ public sealed class FolderUpdateHandler(
 		                  ?? throw new FolderOperationException("10", "Missing ServerId");
 		string displayName = root.Element(FH + "DisplayName")?.Value
 		                     ?? throw new FolderOperationException("10", "Missing DisplayName");
-		(UserFolder Folder, IContentStore Store) resolved = await ResolveWritableAsync(context, serverId, ct);
+		(UserFolder Folder, ContentAdapter Store) resolved = await ResolveWritableAsync(context, serverId, ct);
 
 		// MS-ASCMD FolderUpdate carries a mandatory ParentId. Only DisplayName used to be
 		// honoured — a client asking to MOVE the folder (a different ParentId) got a silent rename
@@ -393,7 +393,7 @@ public sealed class FolderUpdateHandler(
 		}
 		else
 		{
-			(UserFolder Folder, IContentStore Store)? requestedParent =
+			(UserFolder Folder, ContentAdapter Store)? requestedParent =
 				await Folders.ResolveCollectionAsync(context.Session, context.UserId, requestedParentId, ct);
 			parentUnchanged = requestedParent is not null &&
 			                  requestedParent.Value.Folder.BackendKey == resolved.Folder.ParentBackendKey;
@@ -407,9 +407,9 @@ public sealed class FolderUpdateHandler(
 			throw new FolderOperationException("3", "Folder move (ParentId change) is not supported");
 		}
 
-		IFolderOperations folderOps = resolved.Store as IFolderOperations
+		IFolderOperations folderOps = resolved.Store.Store as IFolderOperations
 			?? throw new BackendException("This folder's store does not support folder rename.");
-		await folderOps.RenameFolderAsync(resolved.Folder.BackendKey, displayName, ct);
+		await folderOps.RenameFolderAsync(new FolderKey(resolved.Folder.BackendKey), displayName, ct);
 		return null;
 	}
 }

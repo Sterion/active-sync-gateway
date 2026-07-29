@@ -31,6 +31,17 @@ public sealed class SyncStateServiceTests : IDisposable
 		_connection.Dispose();
 	}
 
+	/// <summary>
+	///   One registry folder: the store's typed <see cref="BackendFolder" /> plus the EAS class
+	///   the HOST derives from the owning store's alias interface (the contract's folder record
+	///   carries no class of its own).
+	/// </summary>
+	private static RegistryFolder F(string key, string displayName, FolderType type, string easClass)
+	{
+		return new RegistryFolder(
+			new BackendFolder { Key = new FolderKey(key), DisplayName = displayName, Type = type }, easClass);
+	}
+
 	/// <summary>Get-or-create the identity row for a login (rows are keyed by UserId now).</summary>
 	private async Task<int> UserAsync(string login)
 	{
@@ -59,17 +70,17 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.Equal(SyncKeyValidation.Initial, validation);
 		Assert.NotNull(state);
 		int key1 = await _service.CommitCollectionStateAsync(
-			state, new Dictionary<string, string> { ["a"] = "1" }, 0, SyncKeyValidation.Initial, CancellationToken.None);
+			state, new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1") }, 0, SyncKeyValidation.Initial, CancellationToken.None);
 		Assert.Equal(1, key1);
 
 		// Current key accepted
 		(validation, state) = await _service.ValidateSyncKeyAsync(device, "5", "1", CancellationToken.None);
 		Assert.Equal(SyncKeyValidation.Current, validation);
 		Assert.NotNull(state);
-		Assert.Equal("1", SyncStateService.ReadSnapshot(state)["a"]);
+		Assert.Equal(new SnapshotEntry("1"), SyncStateService.ReadSnapshot(state)!["a"]);
 
 		int key2 = await _service.CommitCollectionStateAsync(
-			state, new Dictionary<string, string> { ["a"] = "1", ["b"] = "2" }, 0, SyncKeyValidation.Current,
+			state, new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1"), ["b"] = new SnapshotEntry("2") }, 0, SyncKeyValidation.Current,
 			CancellationToken.None);
 		Assert.Equal(2, key2);
 
@@ -79,7 +90,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		(validation, state) = await _service.ValidateSyncKeyAsync(device, "5", "1", CancellationToken.None);
 		Assert.Equal(SyncKeyValidation.Replay, validation);
 		Assert.NotNull(state);
-		Assert.False(SyncStateService.ReadPreviousSnapshot(state).ContainsKey("b"));
+		Assert.False(SyncStateService.ReadPreviousSnapshot(state)!.ContainsKey("b"));
 
 		// Unknown key → invalid
 		(validation, _) = await _service.ValidateSyncKeyAsync(device, "5", "42", CancellationToken.None);
@@ -102,8 +113,8 @@ public sealed class SyncStateServiceTests : IDisposable
 		await using (SqliteSyncDbContext seed = StateTestSupport.NewContext(_connection))
 		{
 			CollectionState a = new() { DeviceKey = device.Id, CollectionId = "A", SyncKey = 2 };
-			SyncStateService.WriteSnapshot(a, new Dictionary<string, string> { ["a"] = "1", ["b"] = "2" });
-			SyncStateService.WritePreviousSnapshot(a, new Dictionary<string, string> { ["a"] = "1" });
+			SyncStateService.WriteSnapshot(a, new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1"), ["b"] = new SnapshotEntry("2") });
+			SyncStateService.WritePreviousSnapshot(a, new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1") });
 			await seed.CollectionStates.AddAsync(a, CancellationToken.None);
 			await seed.SaveChangesAsync(CancellationToken.None);
 		}
@@ -137,8 +148,8 @@ public sealed class SyncStateServiceTests : IDisposable
 		await using (SqliteSyncDbContext seed = StateTestSupport.NewContext(_connection))
 		{
 			CollectionState c = new() { DeviceKey = device.Id, CollectionId = "C", SyncKey = 2 };
-			SyncStateService.WriteSnapshot(c, new Dictionary<string, string> { ["a"] = "1", ["b"] = "2" });
-			SyncStateService.WritePreviousSnapshot(c, new Dictionary<string, string> { ["a"] = "1" });
+			SyncStateService.WriteSnapshot(c, new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1"), ["b"] = new SnapshotEntry("2") });
+			SyncStateService.WritePreviousSnapshot(c, new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1") });
 			await seed.CollectionStates.AddAsync(c, CancellationToken.None);
 			await seed.SaveChangesAsync(CancellationToken.None);
 		}
@@ -154,7 +165,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		CollectionState persisted = await verify.CollectionStates.AsNoTracking()
 			.SingleAsync(c => c.DeviceKey == device.Id && c.CollectionId == "C");
 		Assert.Equal(2, persisted.SyncKey);
-		Assert.True(SyncStateService.ReadSnapshot(persisted).ContainsKey("b"));
+		Assert.True(SyncStateService.ReadSnapshot(persisted)!.ContainsKey("b"));
 	}
 
 	[Fact]
@@ -185,7 +196,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		(_, state) = await _service.ValidateSyncKeyAsync(device, "7", "1", CancellationToken.None);
 		Assert.NotNull(state);
 		await _service.CommitCollectionStateAsync(state,
-			new Dictionary<string, string> { ["item1"] = "r1" }, 0, SyncKeyValidation.Current, CancellationToken.None,
+			new Dictionary<string, SnapshotEntry> { ["item1"] = new SnapshotEntry("r1") }, 0, SyncKeyValidation.Current, CancellationToken.None,
 			new Dictionary<string, AppliedClientAdd> { ["c1"] = new AppliedClientAdd("item1", "r1") });
 
 		// Lost response: the client retries with key 1 — the rollback keeps the applied-Add
@@ -201,7 +212,7 @@ public sealed class SyncStateServiceTests : IDisposable
 
 		// A commit without client Adds clears the map — it described the discarded generation.
 		await _service.CommitCollectionStateAsync(rolledBack,
-			new Dictionary<string, string> { ["item1"] = "r1" }, 0, SyncKeyValidation.Replay, CancellationToken.None);
+			new Dictionary<string, SnapshotEntry> { ["item1"] = new SnapshotEntry("r1") }, 0, SyncKeyValidation.Replay, CancellationToken.None);
 		(_, CollectionState? after) = await _service.ValidateSyncKeyAsync(device, "7", "2", CancellationToken.None);
 		Assert.NotNull(after);
 		Assert.Empty(SyncStateService.ReadAppliedAdds(after));
@@ -214,13 +225,13 @@ public sealed class SyncStateServiceTests : IDisposable
 		(_, CollectionState? state) = await _service.ValidateSyncKeyAsync(device, "9", "0", CancellationToken.None);
 		Assert.NotNull(state);
 		await _service.CommitCollectionStateAsync(state,
-			new Dictionary<string, string> { ["item1"] = "r1" }, 0, SyncKeyValidation.Initial, CancellationToken.None);
+			new Dictionary<string, SnapshotEntry> { ["item1"] = new SnapshotEntry("r1") }, 0, SyncKeyValidation.Initial, CancellationToken.None);
 
 		// The request that produces key 2 applied one client Change.
 		(_, state) = await _service.ValidateSyncKeyAsync(device, "9", "1", CancellationToken.None);
 		Assert.NotNull(state);
 		await _service.CommitCollectionStateAsync(state,
-			new Dictionary<string, string> { ["item1"] = "r2" }, 0, SyncKeyValidation.Current, CancellationToken.None,
+			new Dictionary<string, SnapshotEntry> { ["item1"] = new SnapshotEntry("r2") }, 0, SyncKeyValidation.Current, CancellationToken.None,
 			appliedChanges: new Dictionary<string, AppliedClientChange>
 			{
 				["41:7"] = new AppliedClientChange("item1", "r2")
@@ -238,7 +249,7 @@ public sealed class SyncStateServiceTests : IDisposable
 
 		// A commit without client Changes clears the map — it described the discarded generation.
 		await _service.CommitCollectionStateAsync(rolledBack,
-			new Dictionary<string, string> { ["item1"] = "r2" }, 0, SyncKeyValidation.Replay, CancellationToken.None);
+			new Dictionary<string, SnapshotEntry> { ["item1"] = new SnapshotEntry("r2") }, 0, SyncKeyValidation.Replay, CancellationToken.None);
 		(_, CollectionState? after) = await _service.ValidateSyncKeyAsync(device, "9", "2", CancellationToken.None);
 		Assert.NotNull(after);
 		Assert.Empty(SyncStateService.ReadAppliedChanges(after));
@@ -255,7 +266,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.NotNull(state);
 		Guid before = state.ConcurrencyToken;
 
-		SyncStateService.WriteSnapshot(state, new Dictionary<string, string> { ["x"] = "1" });
+		SyncStateService.WriteSnapshot(state, new Dictionary<string, SnapshotEntry> { ["x"] = new SnapshotEntry("1") });
 		await _db.SaveChangesAsync(acceptAllChangesOnSuccess: true, CancellationToken.None);
 
 		Assert.NotEqual(before, state.ConcurrencyToken);
@@ -264,10 +275,10 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task FolderRegistry_AssignsStableServerIds_AndSoftDeletes()
 	{
-		List<BackendFolder> folders = new()
+		List<RegistryFolder> folders = new()
 		{
-			new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
-			new BackendFolder("imap:Sent", "Sent", null, 5, "Email")
+			F("imap:INBOX", "Inbox", FolderType.Inbox, "Email"),
+			F("imap:Sent", "Sent", FolderType.SentItems, "Email")
 		};
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"), folders, CancellationToken.None);
 		Assert.Equal(2, registry.Count);
@@ -299,7 +310,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		faults.ThrowOnNextSave(new DbUpdateException("dup",
 			new SqliteException("UNIQUE constraint failed", 19, 2067)));
 		await service.RefreshFolderRegistryAsync(await UserAsync("u@a1"),
-			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email")], CancellationToken.None);
+			[F("imap:INBOX", "Inbox", FolderType.Inbox, "Email")], CancellationToken.None);
 
 		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
 		Device saved = await verify.Devices.FirstAsync(d => d.DeviceId == "DEV1");
@@ -311,10 +322,10 @@ public sealed class SyncStateServiceTests : IDisposable
 	{
 		// The retention sweep can only reclaim a folder whose DeletedUtc is set, and the clock must
 		// start when it first vanished, not reset every sync; a reappearance clears it.
-		List<BackendFolder> both =
+		List<RegistryFolder> both =
 		[
-			new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
-			new BackendFolder("imap:Old", "Old", null, 12, "Email")
+			F("imap:INBOX", "Inbox", FolderType.Inbox, "Email"),
+			F("imap:Old", "Old", FolderType.UserMail, "Email")
 		];
 		await _service.RefreshFolderRegistryAsync(await UserAsync("u@a35s"), both, CancellationToken.None);
 
@@ -347,10 +358,10 @@ public sealed class SyncStateServiceTests : IDisposable
 		// must make this a no-op instead.
 		Device device = await _service.GetOrCreateDeviceAsync(
 			await UserAsync("u@a9dup"), "DEV1", "Phone", CancellationToken.None);
-		List<BackendFolder> folders =
+		List<RegistryFolder> folders =
 		[
-			new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
-			new BackendFolder("imap:INBOX", "Inbox (duplicate)", null, 2, "Email"),
+			F("imap:INBOX", "Inbox", FolderType.Inbox, "Email"),
+			F("imap:INBOX", "Inbox (duplicate)", FolderType.Inbox, "Email"),
 		];
 
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(
@@ -364,7 +375,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	public async Task FolderDiff_ReportsAddsUpdatesDeletes()
 	{
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@x"), "DEV1", "Phone", CancellationToken.None);
-		List<BackendFolder> folders = new() { new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email") };
+		List<RegistryFolder> folders = new() { F("imap:INBOX", "Inbox", FolderType.Inbox, "Email") };
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"), folders, CancellationToken.None);
 
 		FolderHierarchyDiff diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
@@ -377,7 +388,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.Empty(diff.Deletes);
 
 		// Rename → update
-		folders = [new BackendFolder("imap:INBOX", "Postboks", null, 2, "Email")];
+		folders = [F("imap:INBOX", "Postboks", FolderType.Inbox, "Email")];
 		registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"), folders, CancellationToken.None);
 		diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
 		Assert.Single(diff.Updates);
@@ -392,7 +403,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// writer off the stale generation must be rejected, not silently applied.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a6"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a6"),
-			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email")], CancellationToken.None);
+			[F("imap:INBOX", "Inbox", FolderType.Inbox, "Email")], CancellationToken.None);
 
 		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
 		SyncStateService service2 = new(db2);
@@ -417,7 +428,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// CollectionStateStore.CommitCollectionStateAsync's reload-before-rethrow.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a5"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a5"),
-			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email")], CancellationToken.None);
+			[F("imap:INBOX", "Inbox", FolderType.Inbox, "Email")], CancellationToken.None);
 
 		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
 		SyncStateService service2 = new(db2);
@@ -443,8 +454,8 @@ public sealed class SyncStateServiceTests : IDisposable
 		// tracking them is pure overhead on the request-scoped context.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a19"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a19"),
-			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
-			 new BackendFolder("imap:Sent", "Sent", null, 5, "Email")], CancellationToken.None);
+			[F("imap:INBOX", "Inbox", FolderType.Inbox, "Email"),
+			 F("imap:Sent", "Sent", FolderType.SentItems, "Email")], CancellationToken.None);
 		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
 
 		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
@@ -465,11 +476,11 @@ public sealed class SyncStateServiceTests : IDisposable
 		// forever.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a8"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a8"),
-			[new BackendFolder("imap:Archive", "Archive", null, 12, "Email")], CancellationToken.None);
+			[F("imap:Archive", "Archive", FolderType.UserMail, "Email")], CancellationToken.None);
 		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
 
 		registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a8"),
-			[new BackendFolder("imap:Archive", "Archive", null, 5, "Email")], CancellationToken.None);
+			[F("imap:Archive", "Archive", FolderType.SentItems, "Email")], CancellationToken.None);
 		FolderHierarchyDiff diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
 
 		Assert.Empty(diff.Adds);
@@ -485,8 +496,8 @@ public sealed class SyncStateServiceTests : IDisposable
 		// leave the existing rows untouched.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a7"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a7"),
-			[new BackendFolder("imap:INBOX", "Inbox", null, 2, "Email"),
-			 new BackendFolder("imap:Sent", "Sent", null, 5, "Email")], CancellationToken.None);
+			[F("imap:INBOX", "Inbox", FolderType.Inbox, "Email"),
+			 F("imap:Sent", "Sent", FolderType.SentItems, "Email")], CancellationToken.None);
 		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
 
 		// DeviceFolder is keyed by (DeviceKey, ServerId) now, so "the same rows survived" is
@@ -513,7 +524,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@x"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? seed) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
 		Assert.NotNull(seed);
-		await _service.CommitCollectionStateAsync(seed, new Dictionary<string, string> { ["a"] = "1" }, 0,
+		await _service.CommitCollectionStateAsync(seed, new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1") }, 0,
 			SyncKeyValidation.Initial, CancellationToken.None);
 
 		// A second request (its own context, same DB) loads the same generation...
@@ -529,22 +540,22 @@ public sealed class SyncStateServiceTests : IDisposable
 
 		// A commits first and wins.
 		int keyA = await _service.CommitCollectionStateAsync(stateA,
-			new Dictionary<string, string> { ["a"] = "1", ["fromA"] = "2" }, 0, SyncKeyValidation.Current,
+			new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1"), ["fromA"] = new SnapshotEntry("2") }, 0, SyncKeyValidation.Current,
 			CancellationToken.None);
 		Assert.Equal(2, keyA);
 
 		// B committing off the now-stale generation is rejected, not silently applied.
 		BackendException ex = await Assert.ThrowsAsync<BackendException>(() =>
 			service2.CommitCollectionStateAsync(stateB,
-				new Dictionary<string, string> { ["a"] = "1", ["fromB"] = "3" }, 0, SyncKeyValidation.Current,
+				new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1"), ["fromB"] = new SnapshotEntry("3") }, 0, SyncKeyValidation.Current,
 				CancellationToken.None));
 		Assert.Contains("Concurrent sync", ex.Message);
 
 		// A's write survived intact — no lost update.
 		(_, CollectionState? after) = await _service.ValidateSyncKeyAsync(device, "c", "2", CancellationToken.None);
 		Assert.NotNull(after);
-		Assert.True(SyncStateService.ReadSnapshot(after).ContainsKey("fromA"));
-		Assert.False(SyncStateService.ReadSnapshot(after).ContainsKey("fromB"));
+		Assert.True(SyncStateService.ReadSnapshot(after)!.ContainsKey("fromA"));
+		Assert.False(SyncStateService.ReadSnapshot(after)!.ContainsKey("fromB"));
 	}
 
 	[Fact]
@@ -556,7 +567,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a18"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? seed) = await _service.ValidateSyncKeyAsync(device, "c", "0", CancellationToken.None);
 		Assert.NotNull(seed);
-		await _service.CommitCollectionStateAsync(seed, new Dictionary<string, string> { ["a"] = "1" }, 0,
+		await _service.CommitCollectionStateAsync(seed, new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1") }, 0,
 			SyncKeyValidation.Initial, CancellationToken.None);
 
 		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
@@ -568,12 +579,12 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.NotNull(stateB);
 
 		await _service.CommitCollectionStateAsync(stateA,
-			new Dictionary<string, string> { ["a"] = "1", ["fromA"] = "2" }, 0, SyncKeyValidation.Current,
+			new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1"), ["fromA"] = new SnapshotEntry("2") }, 0, SyncKeyValidation.Current,
 			CancellationToken.None);
 
 		await Assert.ThrowsAsync<BackendException>(() =>
 			service2.CommitCollectionStateAsync(stateB,
-				new Dictionary<string, string> { ["fromB"] = "3" }, 0, SyncKeyValidation.Current,
+				new Dictionary<string, SnapshotEntry> { ["fromB"] = new SnapshotEntry("3") }, 0, SyncKeyValidation.Current,
 				CancellationToken.None));
 
 		Assert.Equal(EntityState.Unchanged, db2.Entry(stateB).State);
@@ -656,7 +667,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		SyncStateService service = new(_db, factory);
 
 		List<UserFolder> registry = await service.RefreshFolderRegistryAsync(await UserAsync("u@a10"),
-			[new BackendFolder("carddav:/ab/", "Contacts", null, 9, "Contacts")], CancellationToken.None);
+			[F("carddav:/ab/", "Contacts", FolderType.Contacts, "Contacts")], CancellationToken.None);
 		UserFolder folder = registry[0];
 		Device device = await service.GetOrCreateDeviceAsync(await UserAsync("u@a10"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? state) =
@@ -665,13 +676,13 @@ public sealed class SyncStateServiceTests : IDisposable
 		await service.CommitCollectionStateAsync(state, [], 0, SyncKeyValidation.Initial, CancellationToken.None);
 
 		// Mutate the snapshot in memory but do NOT persist it.
-		SyncStateService.WriteSnapshot(state, new Dictionary<string, string> { ["dirty"] = "1" });
+		SyncStateService.WriteSnapshot(state, new Dictionary<string, SnapshotEntry> { ["dirty"] = new SnapshotEntry("1") });
 		await service.GetOrAddDavItemIdAsync(folder, "/ab/x.vcf", CancellationToken.None);
 
 		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
 		CollectionState persisted = await verify.CollectionStates.AsNoTracking()
 			.FirstAsync(c => c.DeviceKey == device.Id && c.CollectionId == folder.ServerId);
-		Assert.DoesNotContain("dirty", SyncStateService.ReadSnapshot(persisted).Keys);
+		Assert.DoesNotContain("dirty", SyncStateService.ReadSnapshot(persisted)!.Keys);
 	}
 
 	[Fact]
@@ -687,9 +698,9 @@ public sealed class SyncStateServiceTests : IDisposable
 		await _service.CommitCollectionStateAsync(state, [], 0, SyncKeyValidation.Initial, CancellationToken.None);
 
 		// A realistic, highly repetitive snapshot (the keys share a prefix — gzip's sweet spot).
-		Dictionary<string, string> big = new(StringComparer.Ordinal);
+		Dictionary<string, SnapshotEntry> big = new(StringComparer.Ordinal);
 		for (int i = 0; i < 2000; i++)
-			big[$"7:mailmessage-{i:D6}"] = i % 2 == 0 ? "100" : "101|work,personal";
+			big[$"7:mailmessage-{i:D6}"] = new SnapshotEntry(i % 2 == 0 ? "100" : "101|work,personal");
 		(_, state) = await _service.ValidateSyncKeyAsync(device, "c", "1", CancellationToken.None);
 		Assert.NotNull(state);
 		await _service.CommitCollectionStateAsync(state, big, 0, SyncKeyValidation.Current, CancellationToken.None);
@@ -699,7 +710,8 @@ public sealed class SyncStateServiceTests : IDisposable
 			.FirstAsync(c => c.DeviceKey == device.Id && c.CollectionId == "c");
 		Assert.NotNull(persisted.SnapshotCompressed);
 
-		int plaintextLength = System.Text.Json.JsonSerializer.Serialize(big).Length;
+		int plaintextLength = System.Text.Json.JsonSerializer.Serialize(
+			big.ToDictionary(p => p.Key, p => p.Value.Revision.Value)).Length;
 		// gzip magic 0x1f 0x8b, and a real reduction (this snapshot compresses well past 5x).
 		Assert.Equal(0x1f, persisted.SnapshotCompressed![0]);
 		Assert.Equal(0x8b, persisted.SnapshotCompressed![1]);
@@ -709,10 +721,10 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.DoesNotContain("mailmessage-000001", asText);
 
 		// Lossless: the round trip returns exactly what was written.
-		Dictionary<string, string> read = SyncStateService.ReadSnapshot(persisted);
+		Dictionary<string, SnapshotEntry> read = SyncStateService.ReadSnapshot(persisted)!;
 		Assert.Equal(big.Count, read.Count);
-		Assert.Equal("101|work,personal", read["7:mailmessage-000001"]);
-		Assert.Equal("100", read["7:mailmessage-000000"]);
+		Assert.Equal(new SnapshotEntry("101|work,personal"), read["7:mailmessage-000001"]);
+		Assert.Equal(new SnapshotEntry("100"), read["7:mailmessage-000000"]);
 	}
 
 	[Fact]
@@ -725,7 +737,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		CountingDbContextFactory factory = new(_connection, counter);
 		SyncStateService service = new(_db, factory);
 		List<UserFolder> registry = await service.RefreshFolderRegistryAsync(await UserAsync("u@a3"),
-			[new BackendFolder("carddav:/ab/", "Contacts", null, 9, "Contacts")], CancellationToken.None);
+			[F("carddav:/ab/", "Contacts", FolderType.Contacts, "Contacts")], CancellationToken.None);
 		UserFolder folder = registry[0];
 
 		// Baseline: the per-item path flushes once per new href — the N+1 the finding quantifies.
@@ -758,7 +770,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	public async Task DavItemMap_RoundTripsHrefs()
 	{
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"),
-			[new BackendFolder("carddav:/ab/", "Contacts", null, 9, "Contacts")], CancellationToken.None);
+			[F("carddav:/ab/", "Contacts", FolderType.Contacts, "Contacts")], CancellationToken.None);
 		UserFolder folder = registry[0];
 
 		string id1 = await _service.GetOrAddDavItemIdAsync(folder, "/ab/x.vcf", CancellationToken.None);
@@ -784,7 +796,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
 		SyncStateService service = new(db);
 		List<UserFolder> registry = await service.RefreshFolderRegistryAsync(await UserAsync("u@a2"),
-			[new BackendFolder("carddav:/ab/", "Contacts", null, 9, "Contacts")], CancellationToken.None);
+			[F("carddav:/ab/", "Contacts", FolderType.Contacts, "Contacts")], CancellationToken.None);
 		UserFolder folder = registry[0];
 
 		string[] hrefs = ["/ab/one.vcf", "/ab/two.vcf", "/ab/three.vcf"];
@@ -845,9 +857,9 @@ public sealed class SyncStateServiceTests : IDisposable
 		// (EqualityComparer<string>.Default) instead of the explicit Ordinal comparer its siblings
 		// use — assert the actual comparer object, not just lookup behaviour (which happens to
 		// coincide for ordinary strings today).
-		byte[] compressed = SnapshotCodec.Compress(new Dictionary<string, string> { ["a"] = "1" });
+		byte[] compressed = SnapshotCodec.Compress(new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1") });
 
-		Dictionary<string, string> result = SnapshotCodec.Decompress(compressed);
+		Dictionary<string, SnapshotEntry> result = SnapshotCodec.Decompress(compressed)!;
 
 		Assert.Same(StringComparer.Ordinal, result.Comparer);
 	}

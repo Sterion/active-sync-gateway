@@ -1,85 +1,105 @@
-using System.Xml.Linq;
 using ActiveSync.Backends.Jmap;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
 using ActiveSync.Integration.Tests.Infrastructure;
-using ActiveSync.Protocol.Wbxml;
 
 namespace ActiveSync.Integration.Tests.Scenarios;
 
 /// <summary>
 ///   JMAP calendar store against a live JMAP-groupware server (Stalwart 0.16): the
-///   JSCalendar ⇄ iCalendar ⇄ EAS bridge end-to-end at the store layer.
+///   JSCalendar ⇄ iCalendar bridge end-to-end at the store layer. The store's currency is
+///   iCalendar now — the EAS half is host-side — so these drive and assert iCalendar directly.
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed class JmapCalendarStoreTests
 {
-	private static readonly XNamespace Cal = EasNamespaces.Calendar;
-
 	private static JmapCalendarStore Store()
 	{
 		JmapClient client = new(
 			new Uri(TestBackend.JmapGroupwareUrl),
-			new BackendCredentials(TestBackend.JmapGroupwareUser, TestBackend.JmapGroupwarePassword),
+			new BackendCredentials { UserName = TestBackend.JmapGroupwareUser, Password = TestBackend.JmapGroupwarePassword },
 			allowInvalidCertificates: true);
 		return new JmapCalendarStore(client, "admin@example.com", 5);
 	}
+
+	/// <summary>A complete VEVENT — the shape the HOST hands the store after its own merge.</summary>
+	private static CalendarItem Event(string uid, string subject, params string[] extraLines)
+	{
+		string[] lines =
+		[
+			"BEGIN:VCALENDAR",
+			"VERSION:2.0",
+			"PRODID:-//ActiveSync Gateway//EN",
+			"BEGIN:VEVENT",
+			$"UID:{uid}",
+			$"SUMMARY:{subject}",
+			.. extraLines,
+			"END:VEVENT",
+			"END:VCALENDAR",
+			""
+		];
+		return new CalendarItem { ICalendar = string.Join("\r\n", lines) };
+	}
+
+	/// <summary>The unfolded iCalendar property lines, so an assertion can name one exactly.</summary>
+	private static IReadOnlyList<string> Lines(string ics) =>
+		ics.Replace("\r\n ", "").Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+
+	private static string? Line(string ics, string property) =>
+		Lines(ics).FirstOrDefault(l =>
+			l.StartsWith(property + ":", StringComparison.Ordinal) ||
+			l.StartsWith(property + ";", StringComparison.Ordinal));
 
 	[JmapGroupwareFact]
 	public async Task Event_CreateGetUpdateDelete_RoundTrips()
 	{
 		JmapCalendarStore store = Store();
-		string folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].BackendKey;
+		FolderKey folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].Key;
 
 		string subject = $"Sprint Review {Guid.NewGuid():N}"[..20];
-		XElement create = new("ApplicationData",
-			new XElement(Cal + "Subject", subject),
-			new XElement(Cal + "StartTime", "20260720T100000Z"),
-			new XElement(Cal + "EndTime", "20260720T110000Z"),
-			new XElement(Cal + "Location", "Room 1"),
-			new XElement(Cal + "BusyStatus", "2"));
+		string uid = Guid.NewGuid().ToString();
+		CalendarItem create = Event(uid, subject,
+			"DTSTART:20260720T100000Z",
+			"DTEND:20260720T110000Z",
+			"LOCATION:Room 1",
+			"TRANSP:OPAQUE");
 
-		(string itemKey, string revision) = await store.CreateItemAsync(folderKey, create, CancellationToken.None);
-		Assert.NotEmpty(itemKey);
-		Assert.NotEmpty(revision);
+		(ItemKey itemKey, ItemRevision revision) = await store.CreateItemAsync(folderKey, create, CancellationToken.None);
+		Assert.NotEmpty(itemKey.Value);
+		Assert.NotEmpty(revision.Value);
 
 		try
 		{
-			BackendItem? item = await store.GetItemAsync(folderKey, itemKey, BodyPreference.PlainText, CancellationToken.None);
+			CalendarItem? item = await store.GetItemAsync(folderKey, itemKey, CancellationToken.None);
 			Assert.NotNull(item);
-			string? V(BackendItem i, string local) => i.ApplicationData.FirstOrDefault(e => e.Name.LocalName == local)?.Value;
-			Assert.Equal(subject, V(item, "Subject"));
-			Assert.Equal("Room 1", V(item, "Location"));
-			Assert.Equal("20260720T100000Z", V(item, "StartTime"));
-			Assert.Equal("20260720T110000Z", V(item, "EndTime"));
+			Assert.Contains("BEGIN:VEVENT", item!.ICalendar);
+			Assert.Equal($"SUMMARY:{subject}", Line(item.ICalendar, "SUMMARY"));
+			Assert.Equal("LOCATION:Room 1", Line(item.ICalendar, "LOCATION"));
+			// The JSCalendar bridge round-trips the instant, not the literal form: a UTC "…Z" stamp
+			// comes back as TZID=Etc/UTC, which is the same moment.
+			Assert.Contains("20260720T100000", Line(item.ICalendar, "DTSTART"));
+			Assert.Contains("20260720T110000", Line(item.ICalendar, "DTEND"));
 
-			IReadOnlyDictionary<string, string> revs =
+			IReadOnlyDictionary<ItemKey, ItemRevision> revs =
 				await store.GetItemRevisionsAsync(folderKey, ContentFilter.All, CancellationToken.None);
 			Assert.Contains(itemKey, revs.Keys);
 
-			// GetRawEvent returns iCalendar (the invitation service reads it).
-			string? ics = await store.GetRawEventAsync(folderKey, itemKey, CancellationToken.None);
-			Assert.NotNull(ics);
-			Assert.Contains("BEGIN:VEVENT", ics);
+			CalendarItem update = Event(uid, subject + " (moved)",
+				"DTSTART:20260720T100000Z",
+				"DTEND:20260720T110000Z",
+				"LOCATION:Room 2",
+				"TRANSP:OPAQUE");
+			await store.UpdateItemAsync(folderKey, itemKey, update, null, CancellationToken.None);
 
-			XElement update = new("ApplicationData",
-				new XElement(Cal + "Subject", subject + " (moved)"),
-				new XElement(Cal + "StartTime", "20260720T100000Z"),
-				new XElement(Cal + "EndTime", "20260720T110000Z"),
-				new XElement(Cal + "Location", "Room 2"),
-				new XElement(Cal + "BusyStatus", "2"));
-			await store.UpdateItemAsync(folderKey, itemKey, update, CancellationToken.None);
-
-			BackendItem? updated = await store.GetItemAsync(folderKey, itemKey, BodyPreference.PlainText, CancellationToken.None);
-			Assert.Equal("Room 2", V(updated!, "Location"));
-			Assert.Equal(subject + " (moved)", V(updated!, "Subject"));
+			CalendarItem? updated = await store.GetItemAsync(folderKey, itemKey, CancellationToken.None);
+			Assert.Equal("LOCATION:Room 2", Line(updated!.ICalendar, "LOCATION"));
+			Assert.Equal($"SUMMARY:{subject} (moved)", Line(updated.ICalendar, "SUMMARY"));
 		}
 		finally
 		{
 			await store.DeleteItemAsync(folderKey, itemKey, false, CancellationToken.None);
 		}
 
-		IReadOnlyDictionary<string, string> after =
+		IReadOnlyDictionary<ItemKey, ItemRevision> after =
 			await store.GetItemRevisionsAsync(folderKey, ContentFilter.All, CancellationToken.None);
 		Assert.DoesNotContain(itemKey, after.Keys);
 	}
@@ -94,31 +114,27 @@ public sealed class JmapCalendarStoreTests
 	public async Task Event_Recurrence_RoundTripsThroughTheServer()
 	{
 		JmapCalendarStore store = Store();
-		string folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].BackendKey;
+		FolderKey folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].Key;
 
 		string subject = $"Standup {Guid.NewGuid():N}"[..16];
-		(string itemKey, _) = await store.CreateItemAsync(folderKey, new XElement("ApplicationData",
-			new XElement(Cal + "Subject", subject),
-			new XElement(Cal + "StartTime", "20260720T090000Z"),
-			new XElement(Cal + "EndTime", "20260720T091500Z"),
-			new XElement(Cal + "BusyStatus", "2"),
-			new XElement(Cal + "Recurrence",
-				new XElement(Cal + "Type", "1"),
-				new XElement(Cal + "Interval", "1"),
-				new XElement(Cal + "DayOfWeek", "2"),
-				new XElement(Cal + "Occurrences", "5"))), CancellationToken.None);
+		(ItemKey itemKey, ItemRevision _) = await store.CreateItemAsync(
+			folderKey,
+			Event(Guid.NewGuid().ToString(), subject,
+				"DTSTART:20260720T090000Z",
+				"DTEND:20260720T091500Z",
+				"TRANSP:OPAQUE",
+				"RRULE:FREQ=WEEKLY;COUNT=5;BYDAY=MO"),
+			CancellationToken.None);
 
 		try
 		{
-			BackendItem? item =
-				await store.GetItemAsync(folderKey, itemKey, BodyPreference.PlainText, CancellationToken.None);
+			CalendarItem? item = await store.GetItemAsync(folderKey, itemKey, CancellationToken.None);
 			Assert.NotNull(item);
-			XElement? recurrence = item.ApplicationData.FirstOrDefault(e => e.Name.LocalName == "Recurrence");
-			Assert.NotNull(recurrence);
-			string? R(string local) => recurrence.Elements().FirstOrDefault(e => e.Name.LocalName == local)?.Value;
-			Assert.Equal("1", R("Type"));          // weekly
-			Assert.Equal("2", R("DayOfWeek"));     // Monday
-			Assert.Equal("5", R("Occurrences"));
+			string? rrule = Line(item!.ICalendar, "RRULE");
+			Assert.NotNull(rrule);
+			Assert.Contains("FREQ=WEEKLY", rrule);
+			Assert.Contains("BYDAY=MO", rrule);
+			Assert.Contains("COUNT=5", rrule);
 		}
 		finally
 		{
@@ -135,29 +151,25 @@ public sealed class JmapCalendarStoreTests
 	public async Task Event_RecurrenceDayOrdinal_RoundTripsThroughTheServer()
 	{
 		JmapCalendarStore store = Store();
-		string folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].BackendKey;
+		FolderKey folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].Key;
 
 		string subject = $"Board {Guid.NewGuid():N}"[..14];
-		(string itemKey, _) = await store.CreateItemAsync(folderKey, new XElement("ApplicationData",
-			new XElement(Cal + "Subject", subject),
-			new XElement(Cal + "StartTime", "20260714T090000Z"),
-			new XElement(Cal + "EndTime", "20260714T100000Z"),
-			new XElement(Cal + "BusyStatus", "2"),
-			new XElement(Cal + "Recurrence",
-				new XElement(Cal + "Type", "3"),          // monthly, nth weekday
-				new XElement(Cal + "Interval", "1"),
-				new XElement(Cal + "WeekOfMonth", "2"),   // second
-				new XElement(Cal + "DayOfWeek", "4"))), CancellationToken.None); // Tuesday
+		(ItemKey itemKey, ItemRevision _) = await store.CreateItemAsync(
+			folderKey,
+			Event(Guid.NewGuid().ToString(), subject,
+				"DTSTART:20260714T090000Z",
+				"DTEND:20260714T100000Z",
+				"TRANSP:OPAQUE",
+				"RRULE:FREQ=MONTHLY;BYDAY=2TU"),
+			CancellationToken.None);
 
 		try
 		{
-			BackendItem? item =
-				await store.GetItemAsync(folderKey, itemKey, BodyPreference.PlainText, CancellationToken.None);
-			XElement recurrence = item!.ApplicationData.First(e => e.Name.LocalName == "Recurrence");
-			string? R(string local) => recurrence.Elements().FirstOrDefault(e => e.Name.LocalName == local)?.Value;
-			Assert.Equal("3", R("Type"));
-			Assert.Equal("2", R("WeekOfMonth"));
-			Assert.Equal("4", R("DayOfWeek"));
+			CalendarItem? item = await store.GetItemAsync(folderKey, itemKey, CancellationToken.None);
+			string? rrule = Line(item!.ICalendar, "RRULE");
+			Assert.NotNull(rrule);
+			Assert.Contains("FREQ=MONTHLY", rrule);
+			Assert.Contains("2TU", rrule); // the ordinal, not a bare TU
 		}
 		finally
 		{
@@ -167,41 +179,42 @@ public sealed class JmapCalendarStoreTests
 
 	/// <summary>
 	///   The calendar half of the PatchObject question. Free → busy is the case that reaches
-	///   the JSCalendar layer as a *cleared* member: BusyStatus 2 makes the iCalendar TRANSP
-	///   OPAQUE, which the bridge expresses by omitting <c>freeBusyStatus</c> entirely. Under patch
-	///   semantics the server then keeps the old "free" forever unless an explicit null is sent.
-	///   (Most other fields cannot show this at the store layer: <c>CalendarConverter</c> merges
-	///   the payload onto the stored iCalendar, so an absent Location is restored before the
-	///   JSCalendar bridge ever sees it.)
+	///   the JSCalendar layer as a *cleared* member: TRANSP:OPAQUE is expressed by omitting
+	///   <c>freeBusyStatus</c> entirely, so under patch semantics the server would keep the old
+	///   "free" forever unless an explicit null is sent.
 	/// </summary>
 	[JmapGroupwareFact]
 	public async Task Update_ClearingAManagedField_ReachesTheServer()
 	{
 		JmapCalendarStore store = Store();
-		string folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].BackendKey;
+		FolderKey folderKey = (await store.ListFoldersAsync(CancellationToken.None))[0].Key;
 
 		string subject = $"Clearing {Guid.NewGuid():N}"[..18];
-		(string itemKey, _) = await store.CreateItemAsync(folderKey, new XElement("ApplicationData",
-			new XElement(Cal + "Subject", subject),
-			new XElement(Cal + "StartTime", "20260722T100000Z"),
-			new XElement(Cal + "EndTime", "20260722T110000Z"),
-			new XElement(Cal + "BusyStatus", "0")), CancellationToken.None);
+		string uid = Guid.NewGuid().ToString();
+		(ItemKey itemKey, ItemRevision _) = await store.CreateItemAsync(
+			folderKey,
+			Event(uid, subject,
+				"DTSTART:20260722T100000Z",
+				"DTEND:20260722T110000Z",
+				"TRANSP:TRANSPARENT"),
+			CancellationToken.None);
 
 		try
 		{
-			BackendItem? free =
-				await store.GetItemAsync(folderKey, itemKey, BodyPreference.PlainText, CancellationToken.None);
-			Assert.Equal("0", free!.ApplicationData.First(e => e.Name.LocalName == "BusyStatus").Value);
+			CalendarItem? free = await store.GetItemAsync(folderKey, itemKey, CancellationToken.None);
+			Assert.Equal("TRANSP:TRANSPARENT", Line(free!.ICalendar, "TRANSP"));
 
-			await store.UpdateItemAsync(folderKey, itemKey, new XElement("ApplicationData",
-				new XElement(Cal + "Subject", subject),
-				new XElement(Cal + "StartTime", "20260722T100000Z"),
-				new XElement(Cal + "EndTime", "20260722T110000Z"),
-				new XElement(Cal + "BusyStatus", "2")), CancellationToken.None);
+			await store.UpdateItemAsync(folderKey, itemKey,
+				Event(uid, subject,
+					"DTSTART:20260722T100000Z",
+					"DTEND:20260722T110000Z",
+					"TRANSP:OPAQUE"),
+				null, CancellationToken.None);
 
-			BackendItem? busy =
-				await store.GetItemAsync(folderKey, itemKey, BodyPreference.PlainText, CancellationToken.None);
-			Assert.Equal("2", busy!.ApplicationData.First(e => e.Name.LocalName == "BusyStatus").Value);
+			CalendarItem? busy = await store.GetItemAsync(folderKey, itemKey, CancellationToken.None);
+			// OPAQUE is the iCalendar default, so the bridge may omit TRANSP entirely — what must
+			// NOT survive is the stale TRANSPARENT the patch semantics would otherwise keep.
+			Assert.NotEqual("TRANSP:TRANSPARENT", Line(busy!.ICalendar, "TRANSP"));
 		}
 		finally
 		{

@@ -12,8 +12,8 @@ public sealed class BackendConfigValidationTests
 {
 	private static readonly IReadOnlyList<BackendConfigField> Fields =
 	[
-		new BackendConfigField("Host", "Host", BackendFieldType.String, Required: true),
-		new BackendConfigField("Port", "Port", BackendFieldType.Int),
+		new BackendConfigField { Name = "Host", Label = "Host", Type = BackendFieldType.String, Required = true },
+		new BackendConfigField { Name = "Port", Label = "Port", Type = BackendFieldType.Int },
 	];
 
 	[Fact]

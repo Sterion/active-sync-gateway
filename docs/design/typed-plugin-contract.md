@@ -8,14 +8,29 @@
 > revision same day folding in an external design review — the mail store split in § 5.4, the
 > GAL photo statuses in § 5.8, the interop load-context hazard in § 5.6.1, the conformance-kit
 > scope in § 7, the per-unit converter-split specification in § 7.1, and a batch of signature
-> fixes.* Implementation has not started yet: as of approval, no code, packaging or other
-> documentation has been changed.
+> fixes.*
+>
+> **Implementation progress: ALL FIVE PHASES landed on `plugin-restructure` (contract version
+> 1.8).** What remains is the owner's own: reviewing the result, merging to `main`, and raising
+> the contract major to 2.0 by hand (decision 14 — no phase of this plan touched it).
+> Phase 3 is two commits per the § 9 execution model: the 3a checkpoint (exemplars + host seam +
+> the completed contract surface) and the 3b completion (every remaining provider converted —
+> `dav`, `jmap`, `smtp`; `sieve` needed nothing — plus the test-suite port). Recorded deviations:
+> `BodyPreference.Eas16` survived until Phase 3 (§ 5.1 — the whole record is now host-side); the
+> read-only revert marker reaches `CollectionDiff` as a `forceChanged` set rather than through
+> the snapshot entry type, because `ActiveSync.Protocol` cannot see a Contracts type (§ 5.2);
+> plus the Phase 3a/3b notes in § 5.5, § 6.3 and the Phase 3 section; Phase 4's own notes are in
+> its § 9 section (the class names on the backend side of the converter split, the interop
+> project's early birth, and the calendar-attachment knob decision), and Phase 5's in its own
+> (the pack-don't-assume verification, the framework-agnostic conformance kit, the per-file
+> relicensing of `ActiveSync.Protocol`).
 >
 > **Authority rules.** `AGENTS.md` and `docs/plugins.md` describe the contract **as it exists
 > today** — they are the authority on current behaviour only, and nothing more. The moment
-> implementation of this design begins, THIS document is the authority on the *target* design:
-> `docs/plugins.md` in particular describes the OLD contract and is stale until its Phase 5
-> rewrite — an implementer must never "correct" the new surface back toward what that page says.
+> implementation of this design begins, THIS document is the authority on the *target* design.
+> (That inversion has now run its course: Phase 5 rewrote `docs/plugins.md` around the
+> implemented surface, so the two describe the same contract again and the ordinary rule —
+> those pages document what exists, this one records why — applies from here.)
 > `AGENTS.md`'s *invariants* (sync model, licensing, the contract-bump procedure, the 14.1
 > byte-identical rule) remain binding throughout; where this document deliberately changes
 > something `AGENTS.md` states (e.g. `BodyPreference.Eas16`, the attachment FileReference
@@ -278,6 +293,19 @@ public enum BodyType { PlainText = 1, Html = 2, Rtf = 3, Mime = 4 }
 public enum BusyKind { Free, Tentative, Busy, OutOfOffice }
 ```
 
+> **Implementation deviation, recorded in Phase 1 (per this section's own rule).** Phase 1's
+> line item "drop `Eas16` from `BodyPreference`" was NOT carried out; the flag stays until
+> Phase 3 deletes the whole record. Reason, found in the code: while stores still perform the
+> EAS conversion (they do, until Phase 3/4 move it host-side), the store is handed nothing else
+> per request from which 16.x-ness could be derived — `CalendarConverter.ToApplicationData` is
+> the sole consumer and gates `airsyncbase:Location` and inline event attachments on it. Dropping
+> the flag in Phase 1 would therefore have silently regressed shipped 16.1 behaviour for two
+> phases and reddened Phase 2's own integration gate (`Eas16Tests` asserts both shapes), which
+> contradicts § 9's "each phase leaves the tree green" and makes 3a the plan's only red commit.
+> Everything else in the Phase 1 line landed as written, `BodyPreference.Type` included (now
+> `BodyType`). Consequence for the authority rules: `AGENTS.md`'s `BodyPreference.Eas16`
+> statement stays TRUE until Phase 3, and it is Phase 3 that must update it.
+
 `BodyPreference` **leaves the contract entirely** (an earlier draft merely dropped its `Eas16`
 flag). It is an AirSyncBase notion: under the payload currency no store can act on it — a
 calendar/contact/task/notes store returns the full payload and the host truncates during EAS
@@ -335,6 +363,42 @@ Encoding these onto the wire becomes host-owned, and two existing Contracts type
 host currently pokes the sentinel `"!ro"` into the revision *value space* for read-only silent
 revert (`AGENTS.md` § *Sync model*), which is exactly the kind of hidden coupling this design
 removes. Read-only poisoning should move to a host-side field beside the revision, never inside it.
+
+> **Implementation deviation, recorded in Phase 2 (per § 5's own rule).** The snapshot entry IS
+> `(ItemRevision Revision, bool PendingReadOnlyRevert)` as specified — `ActiveSync.Core.State
+> .SnapshotEntry`, a `readonly record struct` — but **`CollectionDiff` does not see that type**.
+> Reason, found in the code: the diff lives in `ActiveSync.Protocol`, which references no other
+> project (Protocol and Contracts are two INDEPENDENT roots; `DependencyRuleTests
+> .CollectionDiff_MovedFromCoreToProtocol` pins the location and its "nothing but BCL types"
+> rationale), so it cannot name `ItemRevision`. Giving Protocol a Contracts reference, or minting a
+> second entry type inside Protocol, both cost more than the seam is worth. Instead
+> `CollectionDiff.Compute` gained an optional **`IReadOnlySet<string>? forceChanged`** — ids to
+> report as Changes even when the revision matches — and `CollectionSnapshot.Diff` (Core) is the
+> single place the two shapes meet: it projects the typed snapshot to id → revision plus the
+> pending set, and re-marries the flags with the diff's result (the marker clears only for items
+> actually charged to the window). The property this phase was for is intact and is now stronger
+> than the design's own sketch: no sentinel exists in the revision value space at all, not even
+> transiently, and the diff states the host's intent as its own parameter instead of inferring it
+> from a magic value. Consequence for Phase 3: when `GetItemRevisionsAsync` starts returning
+> `IReadOnlyDictionary<ItemKey, ItemRevision>`, that projection is where the unwrapping belongs —
+> `CollectionDiff` stays BCL-only.
+>
+> Two smaller decisions the code forced, both recorded here rather than left implicit:
+>
+> - **The forced resync is made real, not left to chance.** The persisted snapshot is a VERSIONED
+>   gzipped document (`v`, the flat `items` map — the same bulk as before — and a `pendingReverts`
+>   sidecar written only when non-empty, so the typed entry costs nothing per item on disk). A blob
+>   in any other shape reads as `null`, and the caller answers Sync **Status 3** (GetItemEstimate
+>   Status 4), so the device restarts that collection from SyncKey 0. Deserializing an old blob
+>   into the new shape would otherwise have yielded an EMPTY snapshot — silently re-Adding every
+>   item the device already holds, which is a worse outcome than the announced resync.
+> - **`DelimitedKey` landed in `ActiveSync.Protocol`, not Core.** § 5.2 says only "out of Contracts
+>   into the host". Core is not reachable: `Backends.Common`'s `DraftMessageBuilder` decodes
+>   FileReferences and `Backends.Common` must not reference Core (test-enforced). Protocol is the
+>   assembly it already references explicitly, and FileReference/LongId are EAS wire values, so the
+>   encoder sits with the other wire encodings. Likewise `SharedCollection.Parse`/`Validate` became
+>   `ActiveSync.Backends.Dav.SharedCollectionEntry` — the "href|ro" string is a config syntax, and
+>   the caldav provider is the only thing that reads it.
 
 ### 5.3 Folders
 
@@ -503,6 +567,14 @@ public sealed record TextBody
 `CalendarItem`/`TaskItem`/`ContactItem` are single-property records rather than bare strings on
 purpose: they are the extension point if a class later needs metadata beside the payload (as mail
 already does), and they make the generic store aliases type-distinct.
+
+> **Implementation deviation, recorded in Phase 3a (per § 5's own rule).** `Optional<T>` gained a
+> named factory, `public static Optional<T> Of(T value)`, beside the sketched implicit operator.
+> Reason, found by the compiler: C# never applies a user-defined conversion whose operand type is
+> an interface, so for `Optional<IReadOnlyList<string>>` — the `MailFlagsPatch.Categories` shape
+> this section itself specifies — the implicit operator can never fire and there was no way to
+> mark the field as sent. The operator stays for the concrete-typed fields (`Optional<bool>`);
+> `Of` is the interface-typed escape hatch.
 
 Two fidelity notes, stated so nobody "fixes" them later: EAS's mail `Flag` is really a follow-up
 flag with `Status` 0/1/2, a type and dates — `bool Flagged` matches today's deliberately lossy
@@ -943,6 +1015,18 @@ folds into work already scheduled.
 partial data itself. It would push EAS ghosting semantics back into plugins, split the semantics
 across two code paths, and reintroduce exactly the untyped surface this design removes.
 
+> **Implementation deviation, recorded in Phase 3a (per § 5's own rule).** Mitigation 2's retry
+> runs with **no precondition** rather than "the new revision": the contract has no
+> revision-returning single-item fetch, so after a failed precondition the host re-fetches the
+> payload, re-merges, and writes unconditionally — merging onto the freshest payload IS the
+> conflict resolution, and the write is still bounded to one retry by construction. (A second
+> `BackendPreconditionFailedException` can therefore only come from a store that races again on
+> its own concurrency check — e.g. the local store's row-version guard — and the handler answers
+> it as the ordinary per-item conflict, Status 7 + pending revert, exactly as specified.) The
+> conditional first attempt fires only on a payload-cache hit, where the cached revision IS the
+> merge basis; a cache miss merges onto a fresh fetch, where an `expected` pin from an older
+> generation would only produce false conflicts.
+
 ---
 
 ## 7. What moves where
@@ -1108,15 +1192,22 @@ it "on completion" or for any other reason.
 Each phase is independently landable and leaves the tree green. Phases 1–2 are low-risk and can be
 reviewed before committing to the rest.
 
-**Every phase changes the published surface**, so every phase raises `ContractVersionMinor` and
-regenerates the approved snapshot — not just Phase 1. `ContractSurfaceApprovalTests` enforces
-this mechanically (and its history block is append-only), so phases landing between two release
-tags still each record their own bump; only the tag publishes.
+**A phase that changes the published surface raises `ContractVersionMinor` and regenerates the
+approved snapshot** — not just Phase 1. `ContractSurfaceApprovalTests` enforces that
+mechanically (and its history block is append-only), so phases landing between two release tags
+still each record their own bump; only the tag publishes. An earlier revision of this line
+asserted that *every* phase changes the surface, which Phase 4 disproved: it relocated code
+without moving a single public member of the published assemblies. Its bump to **1.7 stands as
+recorded** — a deliberate, vacuous version line rather than a retrofitted correction, because
+the approval history is append-only and rewriting a shipped line to "fix" it would defeat the
+guard it exists to be. Phase 5's bump to 1.8 is likewise not a C# surface change: the snapshot
+moved because `ActiveSync.Protocol` left it.
 
 **Execution model (owner's choice, 2026-07-29).** All five phases land on one long-lived
 branch, **`plugin-restructure`** (created from `main` if absent), as **one commit per phase —
 except Phase 3, which is two** (the 3a checkpoint and the 3b completion; see the phase's own
-orchestration below). Six commits total. Each *phase* ends with the tree green per its
+orchestration below). Six phase commits total (small operator process edits to this document
+may add their own commits between phases; they are not phase work). Each *phase* ends with the tree green per its
 verification line; the 3a checkpoint is the plan's ONE deliberately-red intermediate commit
 and is never pushed on its own. Phases are sequential: Phase N assumes the prior phases'
 commits are already on the branch.
@@ -1146,7 +1237,7 @@ the phase number:**
 
 **Phase 3 has its own prompt — run it in a Fable session:**
 
-> Read `AGENTS.md` (coding conventions, invariants, testing expectations) and `docs/design/typed-plugin-contract.md` in full and follow the design document's authority rules, then execute Phase 3 of its § 9 plan per that phase's 3a/3b orchestration: implement Phase 3a yourself and make the 3a checkpoint commit on the `plugin-restructure` branch, spawn exactly one Opus subagent to implement Phase 3b per its work list, adversarially review the worker's complete diff against § 5, § 7.1 and your 3a exemplars and fix what the review finds, make the 3b commit, then push the branch and confirm the GitHub Actions run for that push completes green (fix failures by amending the 3b commit and force-pushing) — do not touch `ContractVersionMajor`, and do not start any other phase.
+> Read `AGENTS.md` (coding conventions, invariants, testing expectations) and `docs/design/typed-plugin-contract.md` in full and follow the design document's authority rules, then execute Phase 3 of its § 9 plan per that phase's 3a/3b orchestration: implement Phase 3a yourself, make the 3a checkpoint commit on the `plugin-restructure` branch, then STOP and report what landed — do not begin 3b until I tell you to continue. When I say continue: spawn exactly one Opus subagent to implement Phase 3b per its work list, adversarially review the worker's complete diff against § 5, § 7.1 and your 3a exemplars and fix what the review finds, make the 3b commit, then push the branch and confirm the GitHub Actions run for that push completes green (fix failures by amending the 3b commit and force-pushing) — do not touch `ContractVersionMajor`, and do not start any other phase.
 
 ### Phase 1 — typed primitives, and sever Protocol
 
@@ -1154,12 +1245,20 @@ the phase number:**
   NOT among them — it ends up host-side, § 5.1).
 - Retype `BackendFolder` and `BusyPeriod`; drop `Eas16` from `BodyPreference` (the record itself
   is deleted in Phase 3 with the store retype — until then stores still take it, minus the leak).
+  **Landed with a deviation: `Eas16` was KEPT** — see the recorded note in § 5.1; dropping it
+  while stores still convert would have regressed 16.x shapes for two phases. `BodyPreference`
+  is otherwise retyped (`BodyType Type`) and init-only like every other model.
 - **Slim `ContentFilter`** — easy to miss, but it is the actual severance work: `Models.cs`'s
   `ForClass(string easClass, …)` is the ONLY use of Protocol in Contracts (`EasClass.Email` /
   `EasClass.Calendar` consts), so the ProjectReference cannot be deleted while it stands. The
   whole helper family — `ForClass` and the `FromMailFilterType`/`FromCalendarFilterType`
   EAS-wire-int mappings — moves host-side (principle 3: FilterType is wire encoding);
-  Contracts keeps only `ContentFilter(DateTimeOffset? Since)` + `All`.
+  Contracts keeps only `ContentFilter(DateTimeOffset? Since)` + `All`. *Landed as
+  `ActiveSync.Core.Backend.ContentFilters` — Core beside `MergedFreeBusy`, the existing
+  precedent for a host-side wire mapping over a contract value; the three call sites are all in
+  Server. The AirSyncBase body-Type wire integer gets the same treatment on the way in
+  (`Server/Eas/EasBodyTypes.FromWire`), so a client-supplied integer is never cast blindly onto
+  the `BodyType` enum.*
 - Standardise every instant on `DateTimeOffset` (principle 8): `BusyPeriod`, `OofReply`,
   `ContentFilter`, `SearchAsync` — one pass, so the surface never ships mixed.
 - Convert every Contracts model from positional to init-only property records (principle 7).
@@ -1175,12 +1274,23 @@ the phase number:**
 ### Phase 2 — structural cleanups
 
 - `FolderKey` / `ItemKey` / `ItemRevision`. (No `AttachmentReference` — the composite wire
-  references `FileReference`/`LongId` stay host-internal encodings, § 5.2/§ 5.8.)
+  references `FileReference`/`LongId` stay host-internal encodings, § 5.2/§ 5.8.) *Introduced as
+  the three positional newtypes; `ItemRevision` gets its first consumer here (the snapshot entry
+  below), `FolderKey`/`ItemKey` land with the store retype in Phase 3.*
 - Type `BackendConnection`'s `ownedResources` disposal list (§ 5.7). **Leave capability discovery
-  alone** — `is`-testing providers and stores is correct as it stands.
+  alone** — `is`-testing providers and stores is correct as it stands. *Landed as
+  `OwnedResource.OfAsync`/`OfSync`; the disposal-identity check compares the wrapped resource, so
+  a store listed as its own owned resource is still disposed exactly once.*
 - Move `DelimitedKey` out of Contracts; strip `Parse`/`Validate` from `SharedCollection` (§ 5.2).
+  *Landed in `ActiveSync.Protocol` and `ActiveSync.Backends.Dav.SharedCollectionEntry`
+  respectively — see the deviation note in § 5.2 for why neither could go to Core.*
 - Move the read-only `"!ro"` sentinel out of the revision value space: the snapshot entry becomes
   `(ItemRevision Revision, bool PendingReadOnlyRevert)`. Five call sites, all in `SyncHandler`.
+  *Landed as `ActiveSync.Core.State.SnapshotEntry` + `CollectionSnapshot`, with the marker
+  reaching the (BCL-only, Protocol-resident) diff as a `forceChanged` set — see the recorded
+  deviation in § 5.2. The conflict/read-only sites in `SyncHandler.ClientCommands`, the
+  render-failure restore in `SyncHandler.Collection`, `MoveItemsHandler` and
+  `PendingChangeDetector` all move with it.*
 - **A forced resync is a CHOICE here, not a consequence — make it deliberately.** Snapshots
   persist as JSON in `CollectionState`; a shape change invalidates every stored snapshot and each
   device restarts from SyncKey 0. But it is avoidable if wanted: `ItemRevision` can serialize
@@ -1188,17 +1298,25 @@ the phase number:**
   sidecar key-set serialized only when non-empty — old snapshots stay readable. Pre-production,
   the clean break is the simpler code and is precedented (the schema reinit that removed
   `LegacyAccountJson`); this phase takes the break, but as an announced decision line, with the
-  compatible-serialization alternative recorded so the choice is visible.
+  compatible-serialization alternative recorded so the choice is visible. *Taken as written, and
+  made explicit rather than incidental: the stored blob is version-stamped, and an older one is
+  refused (Sync Status 3) instead of read as empty — § 5.2's deviation note has the reasoning.
+  Note the sidecar idea was adopted for the ON-DISK shape anyway, purely so the snapshot's bulk
+  stays a flat id → revision map; it does not make the old blobs readable.*
 - **Verification:** unit suite; one integration stack (`stalwart`) via `scripts/test-fast`.
 
 ### Phase 3 — item currency (the substantial one)
 
-**Orchestration (owner's choice, 2026-07-29): one Fable session runs this phase end-to-end.**
-Fable implements 3a (the judgment-dense core) and makes the checkpoint commit, spawns **exactly
-one Opus subagent** to implement 3b (the token-heavy bulk, following 3a's exemplars),
-adversarially reviews the worker's complete diff, fixes what the review finds, makes the 3b
-commit, pushes, and gates on the CI matrix. The split exists because the expensive part and the
-hard part of this phase are different code: the semantics concentrate in 3a, the tokens in 3b.
+**Orchestration (owner's choice, 2026-07-29): one Fable session runs this phase, with a
+mandatory pause after 3a.** Fable implements 3a (the judgment-dense core), makes the checkpoint
+commit, then **STOPS and reports — it does not proceed to 3b until the operator explicitly says
+to continue** (the pause is a deliberate operator checkpoint: it lets the owner review the 3a
+surface and it is the clean place to absorb a usage-limit break, since the checkpoint commit is
+the designed handoff state). On the operator's go-ahead, the same session spawns **exactly one
+Opus subagent** to implement 3b (the token-heavy bulk, following 3a's exemplars), adversarially
+reviews the worker's complete diff, fixes what the review finds, makes the 3b commit, pushes,
+and gates on the CI matrix. The split exists because the expensive part and the hard part of
+this phase are different code: the semantics concentrate in 3a, the tokens in 3b.
 
 **Phase 3a — the orchestrator (Fable) implements:**
 
@@ -1234,6 +1352,79 @@ hard part of this phase are different code: the semantics concentrate in 3a, the
 - **The 3a checkpoint commit — the plan's one exception to the green rule.** The unconverted
   providers (`dav`, `jmap`, `sieve`, `smtp`) will not compile against the new seam; that is
   expected, and their compile errors ARE 3b's work list. This commit is never pushed alone.
+
+**Phase 3a implementation notes (recorded at the checkpoint; § 5's deviation rule):**
+
+- **The host conversion seam landed as `ActiveSync.Server/Eas/Content/`** — `ContentAdapter`
+  (typed fetch/render/merge/cache/precondition retry, wrapping the typed keys at the string-keyed
+  handler boundary), `NotesXml` (the XML half of the old notes converter), `GalXml` (typed
+  `GalEntry` → gal:-namespace shape + the wire photo statuses; ResolveRecipients projects the RR
+  shape from the same record), and `MailFileReference` (the "{folder}|{item}|{index}" encoding,
+  now entirely host-internal — ItemOperations/GetAttachment fetch the raw message and extract the
+  part with the host's MimeKit). This is the Phase-3 home; Phase 4 relocates the converters
+  themselves into `ActiveSync.Eas.Conversion` and this seam shrinks to calling them.
+- **`BodyPreference` (with `Eas16`) moved to `Backends.Common.Converters`,** where the converters
+  it parameterizes live until Phase 4 moves both together. Stores never see it.
+- **Two § 7.1 rows were pulled forward from Phase 4 because the seam change forced them:** the
+  notes converter split (`NoteItem` ⇄ VJOURNAL became `Backends.Local.NoteJournalMapper`, private;
+  the XML half became Server's `NotesXml`; `Backends.Common/Converters/NotesConverter.cs` is
+  deleted), and `MailConverter.MessageFlags` (deleted — `ToApplicationData` now takes the
+  contract's `MailFlags` plus the store-classified category list). `ContactConverter`'s GAL
+  projection likewise now returns the typed `GalEntry` (the § 7.1 split, host shaping separated).
+  `IcalHelpers` became `public` (its R3 destiny is the published interop surface; the local notes
+  mapper needs it today).
+- **`BackendAttachment.Content` is `ReadOnlyMemory<byte>`** (was `byte[]`) — the § 4.2 ownership
+  rule applied uniformly to every byte payload on the surface.
+- **The `Backends:Calendar:CalendarAttachments` knob is pinned to Auto semantics (1 MiB cap) for
+  every backend while conversion is host-side.** The knob is provider-owned config the host must
+  not read; § 9's Phase 4 knob inventory (which names this exact knob) restores operator control
+  as a host option.
+- **`ImapMailBackend` no longer takes `mailAddress`** — draft composition (its only consumer)
+  is host-side.
+- **Draft-rewrite echo suppression:** the host records the store's returned revision under the
+  OLD item key (never the returned key), preserving the Delete+Add re-identification exactly as
+  § 5.4's caution specifies.
+- **The 3a surface snapshot was regenerated by a standalone copy of the approval test's
+  generator** (byte-identical output), because `Core.Tests` references the deliberately-red
+  provider assemblies and cannot run at the checkpoint; the 3b run's own
+  `ContractSurfaceApprovalTests` execution verifies it.
+
+**Phase 3b implementation notes (recorded at completion; § 5's deviation rule):**
+
+- **DAV honours the `expected` precondition as `If-Match`** (§ 6.3's encouraged upgrade): a 412
+  surfaces as the typed `BackendPreconditionFailedException` from `WebDavClient`. The create-PUT
+  replay reinterpretation (If-None-Match:\*) runs BEFORE that mapping, so a replayed create is
+  still absorbed; a replayed update-PUT's 412 now takes the host's re-fetch → re-merge →
+  unconditional-retry path, which converges (an improvement over the old hard failure).
+- **DAV updates no longer GET before the PUT** — the pre-read existed only to feed the
+  converter's merge, which is host-side now. One fewer round trip per update; a vanished item
+  surfaces via the host's own pre-fetch or the 412.
+- **A new DAV resource's href is named from the payload's own UID** (host-embedded) rather than
+  a store-minted guid, keeping the resource name and document in agreement for the
+  canonical-href verification. `DavStoreBase` became generic (`DavStoreBase<TItem>`), with the
+  payload as the identity in both directions.
+- **JMAP calendar/contact honour `expected`** by comparing the revision of the card they already
+  fetch for member preservation — deliberately non-atomic (no per-item JMAP precondition
+  exists); it catches the common race and the host's retry covers the rest. **JMAP mail
+  ignores** `expected`: the only available state token is account-wide and would false-conflict
+  on any busy mailbox (conforming per § 6.3).
+- **`JmapMailStore.ReplaceDraftAsync` reports the real new email id** (the pre-contract code
+  discarded the import result); the host still keys the snapshot on the OLD id per § 5.4.
+- **`JsContactConverter` retargeted to JSContact ⇄ vCard** with the Managed/ClearedOnUpdate
+  patch semantics, anniversary preservation and photo non-touching intact; vCard is written by
+  hand (folded at 75 octets on code-point boundaries, control characters escaped) and read via
+  FolkerKinzel — the same split the shared contact converter keeps.
+- **JMAP GAL** reports the typed `GalPictureStatus.None` when photos are requested (the bridge
+  reads no `media` member), preserving the explicit wire status 173 the old projection emitted.
+- **Process correction: a bare branch push does NOT trigger the pipeline** — `build.yaml` fires
+  on `main` pushes, tags and pull requests only, so § 9's "the branch push's Actions run" was
+  executed as a `workflow_dispatch` of `build.yaml` against the `plugin-restructure` ref (the
+  same mechanism release.yaml uses). Run 30439195463: `test` + all SIX integration legs
+  (stalwart, mailserver, baikal, james, axigen, cyrus) green. Publish-safety caveat sharpened:
+  the NuGet pack and release steps skipped as designed, but the multi-arch image step pushes on
+  any non-PR event, so the run published a branch-tagged container
+  (`ghcr.io/…:plugin-restructure`) — a Phase 5 candidate if branch dispatches should stop doing
+  that.
 
 **Phase 3b — one Opus subagent (spawned by the session) implements, and does NOT commit:**
 
@@ -1291,6 +1482,56 @@ hard part of this phase are different code: the semantics concentrate in 3a, the
   relocates code along it); `DependencyRuleTests` extended with
   `EasConversion_DoesNotReferenceCore` and a check that Core still carries no domain library.
 
+**Phase 4 implementation notes (recorded at completion; § 5's deviation rule):**
+
+- **The backend side of each split converter was RENAMED, not left sharing its old name.**
+  `CalendarConverter`/`ContactConverter`/`TasksConverter` keep their names in
+  `ActiveSync.Eas.Conversion` (they are the converters); what stays in `Backends.Common` became
+  `CalendarPayload` (ExtractUid, SetPartStat, ExtractAttachment, ParseFreeBusy,
+  BusyPeriodsFromEvents), `ContactPayload` (ExtractUid, BuildGalEntry) and `TaskPayload`
+  (ExtractUid), with `MailConverter.CategoryKeywords` becoming `MailKeywords.CategoryKeywords`.
+  Reason, found in the code: `ContentAdapter` calls BOTH halves for calendar, tasks and contacts
+  (`…Payload.ExtractUid` to name the merge's UID, `…Converter.FromApplicationData` to build it),
+  so two same-named types in two namespaces would have forced alias usings at the one seam that
+  most needs to be readable. The names also stopped being true — nothing left on the backend side
+  converts to EAS. `DependencyRuleTests.ConverterTypes_UseTheCommonAssemblyRootNamespace` names a
+  payload type as its example now, and a new `EasConversion_OwnsTheEasHalfOfTheConverters` pins
+  the whole split by type name in both assemblies.
+- **`ActiveSync.Contracts.Interop` is created HERE, not in Phase 5**, because § 7.1's `IcalHelpers`
+  row targets it and both halves of the split need those helpers immediately (the host's
+  conversion, `CalendarPayload.SetPartStat`, and `Backends.Local`'s VJOURNAL mapper). It ships
+  nothing yet: no `IsPackable`, no version properties, no Contracts pin — Phase 5's line item is
+  unchanged and now means "publish it, and add the MimeKit/Ical.Net/FolkerKinzel extension
+  methods", not "create it".
+- **The knob inventory came out at exactly one knob.** Of the four settings the caldav provider
+  opts into, `CalendarAttachments` alone governs CONVERTER behaviour and moved to the host as
+  **`ActiveSync:Eas:CalendarAttachments`** (Auto/On/Off, live, validated in
+  `ActiveSyncOptionsValidator` and catalogued in `SettingKeys`); `SendInvitations` (a property of
+  the DAV server's own scheduling), `SharedCollections` and `TaskFolder` are store behaviour and
+  stay provider-owned. No other provider has one. Two consequences stated plainly: the config key
+  `Backends:Calendar:CalendarAttachments` is a **break** (it is gone, not aliased — pre-production,
+  and leaving a dead key that silently does nothing is worse), and the setting is now **global
+  where it used to be per-user overridable**, which is the price of the host not reading
+  provider-owned config. The `Eas16Tests` attachment round-trip covers the new path; the WebUi
+  portal tests that used this key as their example of a self-service provider field now use
+  `SendInvitations`, which has the same shape.
+- **`Backends.Common` shed the EAS half as predicted and kept the domain libraries.**
+  `EasNamespaces` usage went 18 → **0** and `EasDateTime` 37 → **1 call site**: the free-busy
+  parser, kept deliberately because an iCalendar UTC date-time is byte-identical to the EAS
+  compact form and swapping in a second parser during a relocation would risk a behaviour change
+  for no gain. The explicit Protocol reference therefore stays (and its test with it), now for
+  `WireLog` plus that one parse.
+- **The contract surface did NOT move this phase.** Nothing public in `ActiveSync.Contracts` or
+  `ActiveSync.Protocol` changed; the minor still went 1.6 → **1.7** because § 9's preamble makes
+  the bump a per-phase rule, and the approval snapshot simply records another version line (its
+  only textual delta is the assembly version embedded in one `Deconstruct` signature). Phase 5
+  bumps again as its own line item says.
+- **XML-doc cref guard:** the relocation orphaned **no** cref (`GenerateDocumentationFile=true`
+  over the solution reports zero new CS1574). One stale cref inside the moved
+  `ContactConverter` was fixed in passing. Thirteen pre-existing dangling crefs survive in
+  files this phase does not touch (Core, Crypto, Server, tests) — deliberately left, since
+  fixing them is a separate cleanup rather than phase work.
+
 ### Phase 5 — packaging, licensing, documentation
 
 - `IsPackable=false` on Protocol; relicense it PolyForm; rejoin the release-version flow.
@@ -1337,6 +1578,60 @@ hard part of this phase are different code: the semantics concentrate in 3a, the
   `Backends.Common` became load-bearing), and it gives the replaced fixture plugin something
   real to be validated against rather than merely compiling. Versioned with the release, like
   the interop package, with the same exact Contracts pin.
+- **Verification** (this phase had no line of its own; recorded here as executed): solution
+  builds at 0 warnings; the full unit suite green; the contract surface regenerated under the
+  new minor; and the packaging claims checked by actually packing rather than by reading the
+  workflow — see the notes below.
+
+**Phase 5 implementation notes (recorded at completion; § 5's deviation rule):**
+
+- **The packaging claims were verified by packing, not asserted.** `dotnet pack ActiveSync.slnx
+  -c Release -p:Version=9.9.9` produces exactly three packages — `ActiveSync.Contracts.1.8.0`
+  (its own contract version, the global `-p:Version` correctly unable to reach it),
+  `ActiveSync.Contracts.Interop.9.9.9` and `ActiveSync.Contracts.Conformance.9.9.9` (the release
+  tag) — and **no `ActiveSync.Protocol` package at all**. Both optional nuspecs carry
+  `<dependency id="ActiveSync.Contracts" version="[1.8.0]" />`, the exact range § 5.6 requires;
+  the mechanism is a target rewriting `ProjectVersion` on `_ProjectReferencesWithVersions`, since
+  a bare `ProjectReference` emits NuGet's default floor range. The interop nuspec also carries
+  MimeKit 4.17.0 / Ical.Net 5.2.3 / FolkerKinzel.VCards 8.2.0, which is decision 7's
+  self-documenting property made visible. The branch-build check confirmed what § 5.6 predicted:
+  the pack/push step (including the `dist/nupkg` directory itself) is entirely inside
+  `if: needs.test.outputs.version != ''`, and `version` is empty for any ref that is not
+  `X.Y.Z`/`vX.Y.Z` — so a branch build produces no package and no push, with no workflow change.
+- **`ActiveSync.Protocol` keeps `GenerateDocumentationFile=true` although it ships nothing.**
+  The property was package-scoped in intent, but its live effect is CS1591/CS1573 against a
+  0-warning baseline, and that discipline is worth more on a layer transcribed from the MS-AS*
+  specs than the packaging it was originally attached to.
+- **Relicensing is per-file and explicit.** Every `ActiveSync.Protocol` source file's
+  `SPDX-License-Identifier` went `MIT` → `PolyForm-Noncommercial-1.0.0` (the rest of the PolyForm
+  tree carries no SPDX header at all, but a file that WAS MIT deserves the statement rather than
+  its absence). `LICENSE`, `LICENSE-MIT` and the README table record the cut-off explicitly: the
+  published versions stay MIT permanently. **One file outside Protocol was corrected in passing**
+  — `Backends.Dav/SharedCollectionEntry.cs` still carried an MIT header from its Phase 2 move out
+  of Contracts, i.e. an MIT claim on a PolyForm file.
+- **The conformance kit is framework-agnostic, not an xunit base class.** `StoreConformance
+  .RunAsync` returns a `ConformanceReport` of named checks with `Passed`/`Failed`/**`Skipped`**
+  outcomes. Two reasons: a published MIT package must not force a test framework (or a domain
+  library — the sample payloads are hand-written text, so the kit's only reference is Contracts),
+  and `Skipped` is load-bearing. The contract has genuine "a store that cannot do this still
+  conforms" clauses — the `expected` precondition above all — and reporting those as passes would
+  be a lie about what was proved.
+- **The kit is proved able to fail.** `PluginConformanceTests` runs it three ways: against the
+  fixture plugin's store loaded through `PluginLoader` (the end-to-end "one package is enough"
+  proof), asserting the lifecycle and precondition checks actually RAN rather than skipped away,
+  and against a deliberately broken in-test store whose revisions move on every enumeration —
+  which must be reported as a failure. A conformance suite nobody has watched fail is vacuous.
+- **The fixture plugin honours `expected`.** `TestNotesStore` keeps a per-item version counter
+  and throws `BackendPreconditionFailedException`, so the kit's precondition check exercises the
+  throwing path in CI rather than reporting the "store ignores it" skip.
+- **`THIRD-PARTY-NOTICES.md` needed no regeneration.** The line item is conditional on package
+  references moving; `Directory.Packages.props` is untouched, and the interop package's new
+  MimeKit/FolkerKinzel references are packages the `ActiveSync.Server` publish closure — which is
+  what the notices file covers — already carried.
+- **The branch-tagged container image is deliberately left alone.** Phase 3b's note flagged it as
+  a Phase 5 *candidate* ("if branch dispatches should stop doing that"), not a line item: it is a
+  publishing-policy question for the owner, not part of packaging the contract. Nothing here
+  changes when the image step runs.
 
 ---
 

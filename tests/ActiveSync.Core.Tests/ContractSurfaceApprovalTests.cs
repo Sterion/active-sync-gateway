@@ -4,13 +4,12 @@ using System.Security.Cryptography;
 using System.Text;
 
 using ActiveSync.Contracts;
-using ActiveSync.Protocol;
 
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   A forcing function, not a description: the public surface of the two PUBLISHED contract
-///   assemblies is snapshotted here, keyed by the contract version it belongs to. Changing that
+///   A forcing function, not a description: the public surface of the PUBLISHED contract assembly
+///   is snapshotted here, keyed by the contract version it belongs to. Changing that
 ///   surface without raising <c>$(ContractVersionMinor)</c> in <c>Directory.Build.props</c> fails
 ///   this test, and the failure message says exactly what to do.
 ///   <para>
@@ -66,8 +65,8 @@ public sealed class ContractSurfaceApprovalTests
 			// whole file exists for.
 			Assert.Fail(
 				$"""
-				 The PUBLIC SURFACE of ActiveSync.Contracts / ActiveSync.Protocol changed, but the
-				 contract version is still {version}.
+				 The PUBLIC SURFACE of ActiveSync.Contracts changed, but the contract version is
+				 still {version}.
 
 				 Every out-of-repo plugin declares an exact contract major.minor and is refused by
 				 the loader if it does not match, so shipping a changed surface under an unchanged
@@ -85,8 +84,8 @@ public sealed class ContractSurfaceApprovalTests
 				      approved snapshot.
 
 				 If you did NOT mean to change the contract surface, revert the change instead —
-				 moving a type into ActiveSync.Contracts or ActiveSync.Protocol also makes it
-				 permanently MIT-licensed (see LICENSE).
+				 moving a type into ActiveSync.Contracts also makes it permanently MIT-licensed
+				 (see LICENSE).
 
 				 Approved hash for {version}: {approvedHash}
 				 Actual hash:                 {hash}
@@ -128,8 +127,8 @@ public sealed class ContractSurfaceApprovalTests
 		history[version] = hash;
 
 		StringBuilder file = new();
-		file.Append("# Public surface of the PUBLISHED contract assemblies (ActiveSync.Contracts,\n");
-		file.Append("# ActiveSync.Protocol). Generated — do not hand-edit.\n");
+		file.Append("# Public surface of the PUBLISHED contract assembly (ActiveSync.Contracts).\n");
+		file.Append("# Generated — do not hand-edit.\n");
 		file.Append("#\n");
 		file.Append("# Regenerate after a DELIBERATE contract change:\n");
 		file.Append($"#   {ApproveVariable}=1 dotnet test --filter FullyQualifiedName~ContractSurfaceApprovalTests\n");
@@ -169,14 +168,24 @@ public sealed class ContractSurfaceApprovalTests
 		Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
 
 	/// <summary>
-	///   Renders every public and protected member of both assemblies in a stable order. Deliberately
-	///   not a full IL signature: it catches added, removed, renamed and retyped members, which is
-	///   what a plugin author feels. Compiler-generated members and accessor methods are skipped —
-	///   they are noise, and the property or event they belong to is listed anyway.
+	///   Renders every public and protected member of the contract assembly in a stable order.
+	///   Deliberately not a full IL signature: it catches added, removed, renamed and retyped
+	///   members, which is what a plugin author feels. Compiler-generated members and accessor
+	///   methods are skipped — they are noise, and the property or event they belong to is listed
+	///   anyway.
+	///   <para>
+	///     ActiveSync.Protocol used to be snapshotted here too, because a plugin referenced it. It
+	///     is host-only now and no longer published, so its surface is not part of any plugin's ABI
+	///     and pinning it here would gate contract versions on changes no plugin can see. The
+	///     optional packages beside the contract (ActiveSync.Contracts.Interop,
+	///     ActiveSync.Contracts.Conformance) are excluded for the same reason from the other
+	///     direction: they are not loader ABI, so a domain-library bump must be free to move them
+	///     without moving the contract version.
+	///   </para>
 	/// </summary>
 	private static string BuildSurface()
 	{
-		Assembly[] assemblies = [typeof(IGatewayPlugin).Assembly, typeof(EasVersion).Assembly];
+		Assembly[] assemblies = [typeof(IGatewayPlugin).Assembly];
 		StringBuilder surface = new();
 
 		foreach (Assembly assembly in assemblies.OrderBy(a => a.GetName().Name, StringComparer.Ordinal))

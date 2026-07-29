@@ -68,6 +68,23 @@ public sealed class EasOptions
 	public bool UseImapIdle { get; set; } = true;
 
 	/// <summary>
+	///   Event attachments for EAS 16.x clients: "Auto" (enabled, 1 MiB per attachment), "On"
+	///   (enabled, 16 MiB) or "Off". Attachments are stored INLINE in the event (base64 ATTACH),
+	///   so they work against any calendar backend and the size cap is what keeps inline blobs
+	///   from bloating the stored items.
+	///   <para>
+	///     A HOST option, and it has to be: the cap governs what the EAS ghosting merge writes
+	///     into the iCalendar, and that merge is host-side under the typed item currency. It was
+	///     a caldav provider setting (<c>Backends:Calendar:CalendarAttachments</c>) while the
+	///     converters lived in the backend — the host reading a provider-owned setting would
+	///     violate the rule that it never knows a provider's option shape, so the key moved
+	///     rather than the reader. Consequence, deliberate: it is global, where the provider
+	///     setting was per-user overridable.
+	///   </para>
+	/// </summary>
+	public string CalendarAttachments { get; set; } = "Auto";
+
+	/// <summary>
 	///   Interval of the exact pending-change re-check that runs alongside the IDLE/STATUS
 	///   watchers during Ping/Sync waits. IDLE notifications are best-effort in practice
 	///   (some servers never broadcast flag changes), so the watchdog diffs the backend's

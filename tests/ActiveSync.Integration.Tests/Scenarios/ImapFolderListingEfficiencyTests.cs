@@ -63,10 +63,10 @@ public class ImapFolderListingEfficiencyTests
 	private static async Task<int> CountListCommandsAsync(string user, CancellationToken ct)
 	{
 		ListCommandCountingLogger wire = new();
-		ImapSession session = new(Options, new BackendCredentials(user, TestBackend.Password), NullLogger.Instance, wire);
+		ImapSession session = new(Options, new BackendCredentials { UserName = user, Password = TestBackend.Password }, NullLogger.Instance, wire);
 		try
 		{
-			ImapMailBackend backend = new(session, user, _ => null, NullLogger.Instance);
+			ImapMailBackend backend = new(session, _ => null, NullLogger.Instance);
 			await backend.ListFoldersAsync(ct);
 			return wire.ListCommands;
 		}
@@ -125,16 +125,16 @@ public class ImapFolderListingEfficiencyTests
 		}
 
 		ListCommandCountingLogger wire = new();
-		ImapSession session = new(Options, new BackendCredentials(user, TestBackend.Password), NullLogger.Instance, wire);
+		ImapSession session = new(Options, new BackendCredentials { UserName = user, Password = TestBackend.Password }, NullLogger.Instance, wire);
 		try
 		{
-			ImapMailBackend backend = new(session, user, _ => null, NullLogger.Instance);
+			ImapMailBackend backend = new(session, _ => null, NullLogger.Instance);
 			string folderKey = ImapSession.ToBackendKey(folderName);
 
-			await backend.DeleteItemAsync(folderKey, $"{uidValidity}:{uid1}", false, ct);
+			await backend.DeleteItemAsync(new FolderKey(folderKey), new ItemKey($"{uidValidity}:{uid1}"), false, ct);
 			int afterFirstDelete = wire.ListCommands;
 
-			await backend.DeleteItemAsync(folderKey, $"{uidValidity}:{uid2}", false, ct);
+			await backend.DeleteItemAsync(new FolderKey(folderKey), new ItemKey($"{uidValidity}:{uid2}"), false, ct);
 			int afterSecondDelete = wire.ListCommands;
 
 			// Coverage on this backend (see the doc comment above): both counts are the same

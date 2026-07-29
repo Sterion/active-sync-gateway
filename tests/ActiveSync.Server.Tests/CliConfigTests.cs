@@ -346,7 +346,7 @@ public sealed class CliConfigTests : IDisposable
 
 		public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role) =>
 		[
-			new BackendConfigField("AuthBlob", "Auth blob", BackendFieldType.Secret),
+			new BackendConfigField { Name = "AuthBlob", Label = "Auth blob", Type = BackendFieldType.Secret },
 		];
 
 		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures) { }

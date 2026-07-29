@@ -33,7 +33,7 @@ public class SmtpSubmitTeardownTests
 
 		SmtpSubmitBackend backend = new(
 			new SmtpOptions { Host = TestBackend.SmtpHost, Port = TestBackend.SmtpPort, Security = "None" },
-			new BackendCredentials(TestBackend.User1, TestBackend.Password),
+			new BackendCredentials { UserName = TestBackend.User1, Password = TestBackend.Password },
 			TestBackend.User1,
 			NullLogger.Instance);
 

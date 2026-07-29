@@ -1,7 +1,7 @@
 using System.Text;
 using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol.Wbxml;
 using MimeKit;
 
@@ -39,9 +39,9 @@ public class MailConverterDateReceivedTests
 		MimeMessage message = LoadMessageWithoutDateHeader();
 		Assert.Equal(default, message.Date); // confirms the MimeKit precondition this test relies on
 
-		MailConverter.MessageFlags flags = new(false, false, false, false);
+		MailFlags flags = new();
 		List<XElement> data = MailConverter.ToApplicationData(
-			message, flags, BodyPreference.PlainText, _ => "ref");
+			message, flags, [], BodyPreference.PlainText, _ => "ref");
 
 		string dateReceived = data.Single(e => e.Name == Email + "DateReceived").Value;
 		Assert.False(dateReceived.StartsWith("0001-"), $"DateReceived defaulted to year 1: {dateReceived}");
@@ -63,9 +63,9 @@ public class MailConverterDateReceivedTests
 		message.Body = new TextPart("plain") { Text = "body" };
 
 		DateTimeOffset delivered = new(2024, 6, 15, 12, 30, 0, TimeSpan.Zero);
-		MailConverter.MessageFlags flags = new(false, false, false, false);
+		MailFlags flags = new();
 		List<XElement> data = MailConverter.ToApplicationData(
-			message, flags, BodyPreference.PlainText, _ => "ref", delivered);
+			message, flags, [], BodyPreference.PlainText, _ => "ref", delivered);
 
 		string dateReceived = data.Single(e => e.Name == Email + "DateReceived").Value;
 		Assert.StartsWith("2024-06-15T12:30:00", dateReceived);

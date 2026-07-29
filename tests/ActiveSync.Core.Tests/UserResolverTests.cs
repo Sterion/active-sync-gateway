@@ -88,9 +88,9 @@ public class UserResolverTests
 			new Dictionary<BackendRole, ResolvedRole>
 			{
 				[BackendRole.MailSubmit] =
-					new(BackendRole.MailSubmit, "smtp", ProviderSettings.Empty, new BackendCredentials("u", "p")),
+					new() { Role = BackendRole.MailSubmit, ProviderName = "smtp", Settings = ProviderSettings.Empty, Credentials = new BackendCredentials { UserName = "u", Password = "p" } },
 				[BackendRole.MailStore] =
-					new(BackendRole.MailStore, "imap", ProviderSettings.Empty, new BackendCredentials("u", "p")),
+					new() { Role = BackendRole.MailStore, ProviderName = "imap", Settings = ProviderSettings.Empty, Credentials = new BackendCredentials { UserName = "u", Password = "p" } },
 			});
 
 		IReadOnlyList<ResolvedRole> first = account.OrderedRoles;
@@ -108,7 +108,7 @@ public class UserResolverTests
 		config["ActiveSync:Backends:Calendar:BaseUrl"] = "https://dav.global";
 		UserResolver resolver = Resolver(HostOptions(), config);
 
-		BackendCredentials presented = new("user1@example.com", "pass");
+		BackendCredentials presented = new() { UserName = "user1@example.com", Password = "pass" };
 		ResolvedUser account = resolver.Resolve(presented);
 		Assert.Equal("user1@example.com", account.GatewayLogin);
 		Assert.Equal("user1@example.com", account.MailAddress); // login contains '@'
@@ -123,7 +123,7 @@ public class UserResolverTests
 		Assert.Equal("local", account.Roles[BackendRole.Contacts].ProviderName); // fallback
 		Assert.Equal("local", account.Roles[BackendRole.Notes].ProviderName);
 		Assert.False(account.Roles.ContainsKey(BackendRole.Oof)); // absent = feature off
-		Assert.Null(resolver.Resolve(new BackendCredentials("justauser", "x")).MailAddress);
+		Assert.Null(resolver.Resolve(new BackendCredentials { UserName = "justauser", Password = "x" }).MailAddress);
 		// No local auth rule for undeclared logins → caller must probe the mail backend.
 		Assert.Null(resolver.VerifyLocally("user1@example.com", "pass"));
 	}
@@ -135,7 +135,7 @@ public class UserResolverTests
 		options.Users = new Dictionary<string, UserOptions> { ["user1@example.com"] = new() };
 		UserResolver resolver = Resolver(options, BaseConfig());
 
-		BackendCredentials presented = new("user1@example.com", "pass");
+		BackendCredentials presented = new() { UserName = "user1@example.com", Password = "pass" };
 		ResolvedUser account = resolver.Resolve(presented);
 		Assert.Equal(presented, account.Roles[BackendRole.MailStore].Credentials);
 		Assert.Equal(presented, account.Roles[BackendRole.MailSubmit].Credentials);
@@ -170,15 +170,15 @@ public class UserResolverTests
 		};
 
 		ResolvedUser account = Resolver(options, BaseConfig())
-			.Resolve(new BackendCredentials("u", "presented-pw"));
+			.Resolve(new BackendCredentials { UserName = "u", Password = "presented-pw" });
 		ImapOptions imap = account.Roles[BackendRole.MailStore].Settings.Bind<ImapOptions>();
 		Assert.Equal("imap.other", imap.Host);  // overridden
 		Assert.Equal(143, imap.Port);           // inherited
 		Assert.True(imap.UseSsl);               // overridden
 		Assert.Equal("StartTls", imap.Security); // overridden
-		Assert.Equal(new BackendCredentials("u", "presented-pw"),
+		Assert.Equal(new BackendCredentials { UserName = "u", Password = "presented-pw" },
 			account.Roles[BackendRole.MailStore].Credentials);
-		Assert.Equal(new BackendCredentials("relay-user", "relay-pw"),
+		Assert.Equal(new BackendCredentials { UserName = "relay-user", Password = "relay-pw" },
 			account.Roles[BackendRole.MailSubmit].Credentials);
 		SmtpOptions smtp = account.Roles[BackendRole.MailSubmit].Settings.Bind<SmtpOptions>();
 		Assert.Equal("smtp.global", smtp.Host); // inherited
@@ -203,13 +203,13 @@ public class UserResolverTests
 			}
 		};
 
-		ResolvedUser account = Resolver(options, config).Resolve(new BackendCredentials("phone", "P"));
+		ResolvedUser account = Resolver(options, config).Resolve(new BackendCredentials { UserName = "phone", Password = "P" });
 		BackendCredentials mail = account.Roles[BackendRole.MailStore].Credentials;
-		Assert.Equal(new BackendCredentials("mailbox@example.com", "P"), mail);
+		Assert.Equal(new BackendCredentials { UserName = "mailbox@example.com", Password = "P" }, mail);
 		// Item 5: MailStore is just another role — the other roles fall back to the user DEFAULTS
 		// (unset here, so pass-through), not to the effective MailStore pair.
-		Assert.Equal(new BackendCredentials("phone", "P"), account.Roles[BackendRole.MailSubmit].Credentials);
-		Assert.Equal(new BackendCredentials("phone", "P"), account.Roles[BackendRole.Calendar].Credentials);
+		Assert.Equal(new BackendCredentials { UserName = "phone", Password = "P" }, account.Roles[BackendRole.MailSubmit].Credentials);
+		Assert.Equal(new BackendCredentials { UserName = "phone", Password = "P" }, account.Roles[BackendRole.Calendar].Credentials);
 	}
 
 	[Fact]
@@ -231,7 +231,7 @@ public class UserResolverTests
 			}
 		};
 
-		ResolvedUser account = Resolver(options, config).Resolve(new BackendCredentials("phone", "phone-pw"));
+		ResolvedUser account = Resolver(options, config).Resolve(new BackendCredentials { UserName = "phone", Password = "phone-pw" });
 		foreach (BackendRole role in new[] { BackendRole.MailStore, BackendRole.MailSubmit, BackendRole.Calendar })
 		{
 			Assert.Equal("mailbox@example.com", account.Roles[role].Credentials.UserName);
@@ -263,7 +263,7 @@ public class UserResolverTests
 			}
 		};
 		UserResolver resolver = Resolver(options, config);
-		BackendCredentials presented = new("x", "P");
+		BackendCredentials presented = new() { UserName = "x", Password = "P" };
 
 		DavServerOptions inherited = resolver.Resolve(presented with { UserName = "inherits" })
 			.Roles[BackendRole.Calendar].Settings.Bind<DavServerOptions>();
@@ -306,7 +306,7 @@ public class UserResolverTests
 			}
 		};
 		UserResolver resolver = Resolver(options, config);
-		BackendCredentials presented = new("x", "P");
+		BackendCredentials presented = new() { UserName = "x", Password = "P" };
 
 		ResolvedRole inherits = resolver.Resolve(presented with { UserName = "inherits" })
 			.Roles[BackendRole.Calendar];
@@ -323,7 +323,7 @@ public class UserResolverTests
 			.Roles[BackendRole.Contacts];
 		Assert.Equal("carddav", contacts.ProviderName); // switched per user
 		Assert.Equal("https://cloud.example.com", contacts.Settings.Bind<DavServerOptions>().BaseUrl);
-		Assert.Equal(new BackendCredentials("nc-user", "nc-pw"), contacts.Credentials);
+		Assert.Equal(new BackendCredentials { UserName = "nc-user", Password = "nc-pw" }, contacts.Credentials);
 	}
 
 	[Fact]
@@ -351,7 +351,7 @@ public class UserResolverTests
 			},
 		};
 		UserResolver resolver = Resolver(options, config);
-		BackendCredentials presented = new("x", "P");
+		BackendCredentials presented = new() { UserName = "x", Password = "P" };
 
 		// The inheriting user keeps the global security setting; the clearing user drops it (back to
 		// the option-class default null) while STILL inheriting the untouched global Host.
@@ -374,7 +374,7 @@ public class UserResolverTests
 			["phone"] = new() { MailAddress = "real@example.com" }
 		};
 
-		ResolvedUser account = Resolver(options, BaseConfig()).Resolve(new BackendCredentials("phone", "P"));
+		ResolvedUser account = Resolver(options, BaseConfig()).Resolve(new BackendCredentials { UserName = "phone", Password = "P" });
 		Assert.Equal("real@example.com", account.MailAddress);
 		Assert.True(account.MailAddressIsExplicit);
 		// login, NOT the mail address
@@ -401,7 +401,7 @@ public class UserResolverTests
 		};
 		UserResolver resolver = Resolver(options, BaseConfig());
 
-		Assert.Equal("real-mail-pw", resolver.Resolve(new BackendCredentials("u", "ignored"))
+		Assert.Equal("real-mail-pw", resolver.Resolve(new BackendCredentials { UserName = "u", Password = "ignored" })
 			.Roles[BackendRole.MailStore].Credentials.Password);
 		Assert.True(resolver.VerifyLocally("u", "phone-pw"));
 		// The unsealed BACKEND secret is not a device credential, sealed or not.
@@ -572,7 +572,7 @@ public class UserResolverTests
 
 		options.Users = new Dictionary<string, UserOptions> { ["u"] = entry };
 		ResolvedRole mailStore = Resolver(options, BaseConfig())
-			.Resolve(new BackendCredentials("u", "P")).Roles[BackendRole.MailStore];
+			.Resolve(new BackendCredentials { UserName = "u", Password = "P" }).Roles[BackendRole.MailStore];
 		Assert.Equal("imap", mailStore.ProviderName);
 		Assert.Equal("imap.global", mailStore.Settings.Bind<ImapOptions>().Host); // inherited, not dropped
 	}

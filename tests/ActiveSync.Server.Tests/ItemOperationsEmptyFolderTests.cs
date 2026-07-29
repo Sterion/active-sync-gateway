@@ -46,7 +46,7 @@ public sealed class ItemOperationsEmptyFolderTests : IDisposable
 			EasClass = EasClass.Calendar, KeyPrefix = "caldav:"
 		};
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("caldav:Cal", "Calendar", null, EasFolderType.Calendar, EasClass.Calendar));
+			EasHandlerHarness.Folder("caldav:Cal", "Calendar", FolderType.Calendar, EasClass.Calendar));
 
 		XDocument? response = await RunAsync(registry.Single().ServerId);
 
@@ -62,7 +62,7 @@ public sealed class ItemOperationsEmptyFolderTests : IDisposable
 	public async Task ReadOnlyFolder_ReportsStatus2()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 		_harness.Session.ReadOnlyBackendKeys.Add("imap:INBOX");
 
 		XDocument? response = await RunAsync(registry.Single().ServerId);
@@ -78,7 +78,7 @@ public sealed class ItemOperationsEmptyFolderTests : IDisposable
 	public async Task BackendFailure_ReportsRetryableStatus_InsteadOfThrowing()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 		_harness.Session.Mail.EmptyFolderFailWith = () => new BackendException("backend blipped");
 
 		XDocument? response = await RunAsync(registry.Single().ServerId);
@@ -90,7 +90,7 @@ public sealed class ItemOperationsEmptyFolderTests : IDisposable
 	public async Task WritableMailFolder_IsEmptied()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 
 		XDocument? response = await RunAsync(registry.Single().ServerId);
 

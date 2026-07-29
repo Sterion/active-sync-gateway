@@ -1,6 +1,7 @@
 using System.Data.Common;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Server.Eas;
@@ -33,7 +34,7 @@ public sealed class FolderServiceFallbackTests : IDisposable
 			.Options;
 		SqliteSyncDbContext db = new(options);
 		db.Database.EnsureCreated();
-		return new FolderService(new SyncStateService(db), NullLogger<FolderService>.Instance);
+		return new FolderService(new SyncStateService(db), TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLogger<FolderService>.Instance);
 	}
 
 	// When several DAV stores are down at once (the common correlated case), the catch used to
@@ -91,55 +92,58 @@ public sealed class FolderServiceFallbackTests : IDisposable
 		}
 	}
 
-	/// <summary>A content store whose folder listing always fails.</summary>
-	private sealed class FailingStore(string keyPrefix) : IContentStore
+	/// <summary>
+	///   A calendar store whose folder listing always fails. It implements a class alias
+	///   (<see cref="ICalendarStore" />) because the host derives a store's class from which one it
+	///   implements — a store with none is a provider bug the session rejects.
+	/// </summary>
+	private sealed class FailingStore(string keyPrefix) : ICalendarStore
 	{
-		public string EasClass => keyPrefix;
-
-		public bool OwnsBackendKey(string backendKey) =>
-			backendKey.StartsWith(keyPrefix, StringComparison.Ordinal);
+		public bool OwnsKey(FolderKey key) =>
+			key.Value.StartsWith(keyPrefix, StringComparison.Ordinal);
 
 		public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct) =>
 			throw new InvalidOperationException("backend down");
 
-		public Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-			string folderBackendKey, ContentFilter filter, CancellationToken ct) => throw new NotSupportedException();
+		public Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+			FolderKey folder, ContentFilter filter, CancellationToken ct) => throw new NotSupportedException();
 
-		public Task<BackendItem?> GetItemAsync(
-			string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct) =>
+		public Task<CalendarItem?> GetItemAsync(FolderKey folder, ItemKey item, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<(string ItemKey, string Revision)> CreateItemAsync(
-			string folderBackendKey, System.Xml.Linq.XElement applicationData, CancellationToken ct) =>
+		public Task<(ItemKey Key, ItemRevision Revision)> CreateItemAsync(
+			FolderKey folder, CalendarItem item, CancellationToken ct) => throw new NotSupportedException();
+
+		public Task<ItemRevision> UpdateItemAsync(
+			FolderKey folder, ItemKey item, CalendarItem value, ItemRevision? expected, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<string> UpdateItemAsync(
-			string folderBackendKey, string itemKey, System.Xml.Linq.XElement applicationData, CancellationToken ct) =>
+		public Task DeleteItemAsync(FolderKey folder, ItemKey item, bool permanent, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct) =>
-			throw new NotSupportedException();
-
-		public Task<IReadOnlyList<string>> WaitForChangesAsync(
-			IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct) =>
+		public Task<IReadOnlyList<FolderKey>> WaitForChangesAsync(
+			IReadOnlyList<FolderKey> folders, TimeSpan timeout, CancellationToken ct) =>
 			throw new NotSupportedException();
 	}
 
 	/// <summary>A session that exposes only its store list — enough for FolderService.RefreshAsync.</summary>
 	private sealed class StoresOnlySession(IReadOnlyList<IContentStore> stores) : IBackendSession
 	{
-		public BackendCredentials Credentials => new("u@example.test", "pw");
+		public BackendCredentials Credentials => new() { UserName = "u@example.test", Password = "pw" };
 		public int UserId => 1;
 		public string? MailAddress => "u@example.test";
 		public IReadOnlyList<IContentStore> Stores => stores;
-		public IMailStoreOperations MailStore => null!;
+		public IMailStore Mail => null!;
+		public IMailboxOperations Mailbox => null!;
 		public IMailSubmitOperations MailSubmit => null!;
-		public IContactOperations? Contacts => null;
-		public ICalendarOperations? Calendar => null;
+		public IDirectoryOperations? Contacts => null;
+		public IMeetingOperations? Calendar => null;
 		public IOofBackend? Oof => null;
+		public SessionPayloadCache PayloadCache { get; } = new();
 		public IContentStore? GetStoreForClass(string easClass) => null;
-		public IContentStore? GetStoreForBackendKey(string backendKey) => null;
-		public bool IsReadOnlyFolder(string folderBackendKey) => false;
+		public IContentStore? GetStoreForKey(FolderKey key) => null;
+		public string EasClassOf(IContentStore store) => ContentStoreClasses.EasClassOf(store);
+		public bool IsReadOnlyFolder(FolderKey folder) => false;
 		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 	}
 }

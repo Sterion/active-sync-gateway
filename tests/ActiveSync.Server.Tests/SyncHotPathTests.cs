@@ -40,7 +40,7 @@ public sealed class SyncHotPathTests : IDisposable
 	private async Task<UserFolder> RegisterInboxAsync()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 		return folders.Single(f => f.BackendKey == "imap:INBOX");
 	}
 
@@ -59,8 +59,6 @@ public sealed class SyncHotPathTests : IDisposable
 	public async Task WindowIsFetchedInOneBatch_NotPerItem()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
-		_harness.Session.Store.ItemApplicationData = _ =>
-			[new XElement(ASB + "Body", new XElement(ASB + "Type", "1"), new XElement(ASB + "Data", "preview"))];
 		SyncHandler handler = NewSyncHandler();
 		// Prime: initial sync (key 0) creates the collection state at key 1 with an empty snapshot.
 		await _harness.RunAsync(handler, "Sync", SyncRequest(inbox.ServerId, "0"));
@@ -86,8 +84,6 @@ public sealed class SyncHotPathTests : IDisposable
 	public async Task VanishedItem_IsNotCountedAsSent()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
-		_harness.Session.Store.ItemApplicationData = _ =>
-			[new XElement(ASB + "Body", new XElement(ASB + "Type", "1"), new XElement(ASB + "Data", "preview"))];
 		SyncHandler handler = NewSyncHandler();
 		// Prime: initial sync (key 0) creates the collection state at key 1 with an empty snapshot.
 		await _harness.RunAsync(handler, "Sync", SyncRequest(inbox.ServerId, "0"));

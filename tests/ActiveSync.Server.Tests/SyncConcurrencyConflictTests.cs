@@ -44,8 +44,8 @@ public sealed class SyncConcurrencyConflictTests : IDisposable
 	public async Task Sync_ConcurrentCollectionCommitRace_ReturnsStatus5ForThatCollection_SiblingsUnaffected()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email),
-			new BackendFolder("imap:Sent", "Sent", null, EasFolderType.SentItems, EasClass.Email));
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email),
+			EasHandlerHarness.Folder("imap:Sent", "Sent", FolderType.SentItems, EasClass.Email));
 		UserFolder inbox = registry.Single(f => f.BackendKey == "imap:INBOX");
 		UserFolder sent = registry.Single(f => f.BackendKey == "imap:Sent");
 
@@ -70,8 +70,6 @@ public sealed class SyncConcurrencyConflictTests : IDisposable
 		// A genuine change on BOTH collections this round, so both attempt CommitCollectionStateAsync
 		// (a collection with nothing to report never reaches the commit at all). An encodable body,
 		// since the sibling collection's Add is expected to render and go out over WBXML this time.
-		_harness.Session.Store.ItemApplicationData = _ =>
-			[new XElement(ASB + "Body", new XElement(ASB + "Type", "1"), new XElement(ASB + "Data", "preview"))];
 		_harness.Session.Store.Revisions["10"] = "a";
 
 		XDocument? response = await _harness.RunAsync(handler, "Sync",

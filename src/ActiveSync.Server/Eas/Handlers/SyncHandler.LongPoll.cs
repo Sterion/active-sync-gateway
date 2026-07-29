@@ -1,6 +1,7 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
 using ActiveSync.Core.State;
+using ActiveSync.Server.Eas.Content;
 
 namespace ActiveSync.Server.Eas.Handlers;
 
@@ -47,11 +48,11 @@ public sealed partial class SyncHandler
 				if (remaining <= TimeSpan.Zero)
 					return false;
 				await Task.Delay(remaining < interval ? remaining : interval, cts.Token);
-				foreach ((XElement element, UserFolder folder, IContentStore store) in collections)
+				foreach ((XElement element, UserFolder folder, ContentAdapter store) in collections)
 				{
 					string collectionId = element.Element(AS + "CollectionId")?.Value ?? "";
 					if (await PendingChangeDetector.HasPendingChangesAsync(
-						    context, collectionId, folder, store, logger, cts.Token))
+						    context, collectionId, folder, store.Store, logger, cts.Token))
 						return true;
 				}
 			}
@@ -72,19 +73,19 @@ public sealed partial class SyncHandler
 	{
 		using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 		List<IGrouping<IContentStore, WaitableCollection>> byStore =
-			collections.GroupBy(c => c.Store).ToList();
-		List<Task<IReadOnlyList<string>>> waits = byStore
+			collections.GroupBy(c => c.Store.Store).ToList();
+		List<Task<IReadOnlyList<FolderKey>>> waits = byStore
 			.Select(g => g.Key.WaitForChangesAsync(
-				g.Select(c => c.Folder.BackendKey).Distinct().ToList(), timeout, cts.Token))
+				g.Select(c => new FolderKey(c.Folder.BackendKey)).Distinct().ToList(), timeout, cts.Token))
 			.ToList();
 		bool changed = false;
 		try
 		{
 			while (waits.Count > 0 && !changed)
 			{
-				Task<IReadOnlyList<string>> finished = await Task.WhenAny(waits);
+				Task<IReadOnlyList<FolderKey>> finished = await Task.WhenAny(waits);
 				waits.Remove(finished);
-				IReadOnlyList<string> result = await finished;
+				IReadOnlyList<FolderKey> result = await finished;
 				if (result.Count > 0)
 					changed = true;
 			}

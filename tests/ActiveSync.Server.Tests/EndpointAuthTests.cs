@@ -109,7 +109,7 @@ public class EndpointAuthTests
 		DefaultHttpContext http = new();
 		bool ok = await EndpointAuth.AuthenticateAsync(
 			http, new ThrowingSessionFactory(), Throttle(), "1.2.3.4",
-			new BackendCredentials("u", "p"), NullLogger.Instance, CancellationToken.None);
+			new BackendCredentials { UserName = "u", Password = "p" }, NullLogger.Instance, CancellationToken.None);
 
 		Assert.False(ok);
 		Assert.Equal(StatusCodes.Status503ServiceUnavailable, http.Response.StatusCode);
@@ -121,7 +121,7 @@ public class EndpointAuthTests
 		DefaultHttpContext http = new();
 		bool ok = await EndpointAuth.AuthenticateAsync(
 			http, new RejectingSessionFactory(), Throttle(), "1.2.3.4",
-			new BackendCredentials("u", "bad"), NullLogger.Instance, CancellationToken.None);
+			new BackendCredentials { UserName = "u", Password = "bad" }, NullLogger.Instance, CancellationToken.None);
 
 		Assert.False(ok);
 		Assert.Equal(StatusCodes.Status401Unauthorized, http.Response.StatusCode);

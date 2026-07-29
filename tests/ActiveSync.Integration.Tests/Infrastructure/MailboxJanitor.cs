@@ -51,7 +51,7 @@ public static class MailboxJanitor
 	{
 		if (TestBackend.DavUrl is not { } davUrl)
 			return;
-		BackendCredentials credentials = new(user, TestBackend.Password);
+		BackendCredentials credentials = new() { UserName = user, Password = TestBackend.Password };
 		DavServerOptions options = new() { BaseUrl = davUrl, HomeSetPath = TestBackend.DavHomeSetPath };
 
 		using WebDavClient calClient = new(new Uri(davUrl), credentials);
@@ -64,12 +64,12 @@ public static class MailboxJanitor
 			{
 				foreach (BackendFolder folder in await store.ListFoldersAsync(ct))
 				{
-					IReadOnlyDictionary<string, string> revisions =
-						await store.GetItemRevisionsAsync(folder.BackendKey, ContentFilter.All, ct);
-					foreach (string href in revisions.Keys)
+					IReadOnlyDictionary<ItemKey, ItemRevision> revisions =
+						await store.GetItemRevisionsAsync(folder.Key, ContentFilter.All, ct);
+					foreach (ItemKey href in revisions.Keys)
 						try
 						{
-							await store.DeleteItemAsync(folder.BackendKey, href, false, ct);
+							await store.DeleteItemAsync(folder.Key, href, false, ct);
 						}
 						catch
 						{

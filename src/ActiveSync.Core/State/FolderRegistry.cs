@@ -6,6 +6,16 @@ using Microsoft.Extensions.Logging;
 namespace ActiveSync.Core.State;
 
 /// <summary>
+///   One folder as the HOST registers it: the store's <see cref="BackendFolder" /> plus the EAS
+///   class the host derived from the owning store's alias interface. The contract's folder record
+///   deliberately carries no class (a store serves exactly one), so the host tags folders here,
+///   at the registry seam.
+/// </summary>
+/// <param name="Folder">The folder as the store reported it.</param>
+/// <param name="EasClass">The owning store's EAS class ("Email", "Calendar", …).</param>
+public sealed record RegistryFolder(BackendFolder Folder, string EasClass);
+
+/// <summary>
 ///   The per-user folder registry (backend key → EAS ServerId) and the FolderSync hierarchy
 ///   diff against each device's acknowledged view. One of the collaborators composed by
 ///   <see cref="SyncStateService" />, sharing its request-scoped <see cref="SyncDbContext" />.
@@ -17,18 +27,18 @@ internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>
 	///   backends and returns the live registry (excluding soft-deleted rows).
 	/// </summary>
 	public async Task<List<UserFolder>> RefreshFolderRegistryAsync(
-		int userId, IReadOnlyList<BackendFolder> backendFolders, CancellationToken ct)
+		int userId, IReadOnlyList<RegistryFolder> backendFolders, CancellationToken ct)
 	{
-		// A duplicate BackendKey from any store (a plugin, or a store bug) would otherwise
+		// A duplicate folder key from any store (a plugin, or a store bug) would otherwise
 		// take the insert branch twice below and trip the unique index on every attempt — the
 		// retry loop re-reads but the rolled-back insert is still absent, so all four attempts
 		// fail identically and every FolderSync for this user 500s until the backend stops
 		// emitting the duplicate. Dedupe first, keeping the first occurrence, and log so the
 		// offending store is diagnosable rather than silently dropping folders forever.
-		List<BackendFolder> deduped = backendFolders.DistinctBy(f => f.BackendKey, StringComparer.Ordinal).ToList();
+		List<RegistryFolder> deduped = backendFolders.DistinctBy(f => f.Folder.Key.Value, StringComparer.Ordinal).ToList();
 		if (deduped.Count != backendFolders.Count)
 			logger?.LogWarning(
-				"Backend folder listing for user {UserId} contained duplicate BackendKey values; " +
+				"Backend folder listing for user {UserId} contained duplicate folder key values; " +
 				"keeping the first occurrence of each and dropping the rest", userId);
 		backendFolders = deduped;
 
@@ -45,15 +55,16 @@ internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>
 			Dictionary<string, UserFolder> byKey = existing.ToDictionary(f => f.BackendKey, StringComparer.Ordinal);
 			HashSet<string> seen = new(StringComparer.Ordinal);
 
-			foreach (BackendFolder bf in backendFolders)
+			foreach (RegistryFolder rf in backendFolders)
 			{
-				seen.Add(bf.BackendKey);
-				if (byKey.TryGetValue(bf.BackendKey, out UserFolder? row))
+				BackendFolder bf = rf.Folder;
+				seen.Add(bf.Key.Value);
+				if (byKey.TryGetValue(bf.Key.Value, out UserFolder? row))
 				{
 					row.DisplayName = bf.DisplayName;
-					row.ParentBackendKey = bf.ParentBackendKey;
-					row.Type = bf.EasType;
-					row.EasClass = bf.EasClass;
+					row.ParentBackendKey = bf.ParentKey?.Value;
+					row.Type = (int)bf.Type;
+					row.EasClass = rf.EasClass;
 					row.Deleted = false;
 					row.DeletedUtc = null; // reappeared: restart the retention clock
 				}
@@ -64,11 +75,11 @@ internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>
 					db.UserFolders.Add(new UserFolder
 					{
 						UserId = userId,
-						BackendKey = bf.BackendKey,
+						BackendKey = bf.Key.Value,
 						DisplayName = bf.DisplayName,
-						ParentBackendKey = bf.ParentBackendKey,
-						Type = bf.EasType,
-						EasClass = bf.EasClass
+						ParentBackendKey = bf.ParentKey?.Value,
+						Type = (int)bf.Type,
+						EasClass = rf.EasClass
 					});
 #pragma warning restore VSTHRD103
 				}

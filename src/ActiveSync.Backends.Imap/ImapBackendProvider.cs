@@ -108,8 +108,8 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 			return GetOrCreatePoller(gatewayLogin, options, role.Credentials);
 		}
 
-		ImapMailBackend backend = new(session, context.MailAddress, WatcherProvider, _logger, PollerProvider);
-		return Task.FromResult<IBackendConnection>(new BackendConnection([backend], ownedResources: [session]));
+		ImapMailBackend backend = new(session, WatcherProvider, _logger, PollerProvider);
+		return Task.FromResult<IBackendConnection>(new BackendConnection([backend], ownedResources: [OwnedResource.OfAsync(session)]));
 	}
 
 	public async Task<bool> VerifyCredentialsAsync(ResolvedRole role, CancellationToken ct)
@@ -156,14 +156,16 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 			if (!lazy.IsValueCreated || !lazy.Value.IsStarted)
 				continue;
 			int separator = key.IndexOf('\n');
-			watchers.Add(new WatcherInfo(
-				separator < 0 ? key : key[..separator],
-				separator < 0 ? "" : key[(separator + 1)..]));
+			watchers.Add(new WatcherInfo
+			{
+				User = separator < 0 ? key : key[..separator],
+				Resource = separator < 0 ? "" : key[(separator + 1)..]
+			});
 		}
 
 		foreach ((string user, Lazy<ImapStatusPoller> lazy) in _pollers)
 			if (lazy.IsValueCreated && lazy.Value.IsStarted)
-				watchers.Add(new WatcherInfo(user, "(status poll)"));
+				watchers.Add(new WatcherInfo { User = user, Resource = "(status poll)" });
 
 		return watchers;
 	}

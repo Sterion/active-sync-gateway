@@ -50,12 +50,12 @@ public sealed class JmapMailStoreTests
 		});
 
 		JmapClient client = new(Base, new HttpClient(stub));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		JmapMailStore store = new(client, pollSeconds: 1);
 
-		IReadOnlyList<string> changed = await store.WaitForChangesAsync(
-			[JmapMailStore.ToKey("INBOXID")], TimeSpan.FromSeconds(4), CancellationToken.None);
+		IReadOnlyList<FolderKey> changed = await store.WaitForChangesAsync(
+			[new FolderKey(JmapMailStore.ToKey("INBOXID"))], TimeSpan.FromSeconds(4), CancellationToken.None);
 
-		Assert.Contains(JmapMailStore.ToKey("INBOXID"), changed);
+		Assert.Contains(new FolderKey(JmapMailStore.ToKey("INBOXID")), changed);
 	}
 
 	// A permanent delete whose Email/set returns the id in notDestroyed used to be ignored
@@ -74,10 +74,10 @@ public sealed class JmapMailStoreTests
 			""");
 		});
 		JmapClient client = new(Base, new HttpClient(stub));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		JmapMailStore store = new(client, pollSeconds: 1);
 
 		await Assert.ThrowsAsync<BackendException>(() =>
-			store.DeleteItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", permanent: true, CancellationToken.None));
+			store.DeleteItemAsync(new FolderKey(JmapMailStore.ToKey("INBOXID")), new ItemKey("E1"), permanent: true, CancellationToken.None));
 	}
 
 	// Updating a message the server has since deleted (Email/set returns it in notUpdated with
@@ -97,12 +97,11 @@ public sealed class JmapMailStoreTests
 			""");
 		});
 		JmapClient client = new(Base, new HttpClient(stub));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
-		XElement change = new("ApplicationData",
-			new XElement(XName.Get("Read", "Email"), "1"));
+		JmapMailStore store = new(client, pollSeconds: 1);
+		MailFlagsPatch patch = new() { Read = true };
 
-		await Assert.ThrowsAsync<BackendItemNotFoundException>(() =>
-			store.UpdateItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", change, CancellationToken.None));
+		await Assert.ThrowsAsync<BackendItemNotFoundException>(() => store.UpdateFlagsAsync(
+			new FolderKey(JmapMailStore.ToKey("INBOXID")), new ItemKey("E1"), patch, null, CancellationToken.None));
 	}
 
 	// A flag/read update issued Email/set then a SEPARATE Email/get — two sequential round
@@ -113,10 +112,11 @@ public sealed class JmapMailStoreTests
 	{
 		MethodStub stub = new();
 		JmapClient client = new(Base, new HttpClient(stub));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
-		XElement change = new("ApplicationData", new XElement(XName.Get("Read", "Email"), "1"));
+		JmapMailStore store = new(client, pollSeconds: 1);
+		MailFlagsPatch patch = new() { Read = true };
 
-		await store.UpdateItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", change, CancellationToken.None);
+		await store.UpdateFlagsAsync(
+			new FolderKey(JmapMailStore.ToKey("INBOXID")), new ItemKey("E1"), patch, null, CancellationToken.None);
 
 		Assert.Equal(1, stub.ApiCalls); // set + get in one request, not two
 	}
@@ -129,10 +129,10 @@ public sealed class JmapMailStoreTests
 	{
 		MethodStub stub = new();
 		JmapClient client = new(Base, new HttpClient(stub));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		JmapMailStore store = new(client, pollSeconds: 1);
 
-		await store.DeleteItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", permanent: false, CancellationToken.None);
-		await store.DeleteItemAsync(JmapMailStore.ToKey("INBOXID"), "E2", permanent: false, CancellationToken.None);
+		await store.DeleteItemAsync(new FolderKey(JmapMailStore.ToKey("INBOXID")), new ItemKey("E1"), permanent: false, CancellationToken.None);
+		await store.DeleteItemAsync(new FolderKey(JmapMailStore.ToKey("INBOXID")), new ItemKey("E2"), permanent: false, CancellationToken.None);
 
 		Assert.Equal(1, stub.FullMailboxListings); // one Mailbox/get ids:null for both deletes
 	}
@@ -145,9 +145,9 @@ public sealed class JmapMailStoreTests
 	{
 		PatchCapturingStub stub = new();
 		JmapClient client = new(Base, new HttpClient(stub));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		JmapMailStore store = new(client, pollSeconds: 1);
 
-		await store.DeleteItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", permanent: false, CancellationToken.None);
+		await store.DeleteItemAsync(new FolderKey(JmapMailStore.ToKey("INBOXID")), new ItemKey("E1"), permanent: false, CancellationToken.None);
 
 		Assert.NotNull(stub.CapturedUpdate);
 		JsonElement patch = stub.CapturedUpdate!.Value.GetProperty("E1");
@@ -163,10 +163,11 @@ public sealed class JmapMailStoreTests
 	{
 		PatchCapturingStub stub = new();
 		JmapClient client = new(Base, new HttpClient(stub));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		JmapMailStore store = new(client, pollSeconds: 1);
 
 		await store.MoveItemAsync(
-			JmapMailStore.ToKey("INBOXID"), "E1", JmapMailStore.ToKey("ARCHIVEID"), CancellationToken.None);
+			new FolderKey(JmapMailStore.ToKey("INBOXID")), new ItemKey("E1"),
+			new FolderKey(JmapMailStore.ToKey("ARCHIVEID")), CancellationToken.None);
 
 		Assert.NotNull(stub.CapturedUpdate);
 		JsonElement patch = stub.CapturedUpdate!.Value.GetProperty("E1");
@@ -184,17 +185,16 @@ public sealed class JmapMailStoreTests
 	{
 		PatchCapturingStub stub = new();
 		JmapClient client = new(Base, new HttpClient(stub));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
-		XElement change = new("ApplicationData",
-			new XElement(XName.Get("Categories", "Email"),
-				new XElement(XName.Get("Category", "Email"), "Work/Home")));
+		JmapMailStore store = new(client, pollSeconds: 1);
+		MailFlagsPatch patch = new() { Categories = Optional<IReadOnlyList<string>>.Of(["Work/Home"]) };
 
-		await store.UpdateItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", change, CancellationToken.None);
+		await store.UpdateFlagsAsync(
+			new FolderKey(JmapMailStore.ToKey("INBOXID")), new ItemKey("E1"), patch, null, CancellationToken.None);
 
 		Assert.NotNull(stub.CapturedUpdate);
-		JsonElement patch = stub.CapturedUpdate!.Value.GetProperty("E1");
-		Assert.True(patch.TryGetProperty("keywords/Work~1Home", out JsonElement v) && v.GetBoolean());
-		Assert.False(patch.TryGetProperty("keywords/Work/Home", out _));
+		JsonElement sent = stub.CapturedUpdate!.Value.GetProperty("E1");
+		Assert.True(sent.TryGetProperty("keywords/Work~1Home", out JsonElement v) && v.GetBoolean());
+		Assert.False(sent.TryGetProperty("keywords/Work/Home", out _));
 	}
 
 	// A category containing a character the JMAP keyword grammar forbids (RFC 8621 §4.1.1 —
@@ -205,12 +205,11 @@ public sealed class JmapMailStoreTests
 	{
 		PatchCapturingStub stub = new();
 		JmapClient client = new(Base, new HttpClient(stub));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
-		XElement change = new("ApplicationData",
-			new XElement(XName.Get("Categories", "Email"),
-				new XElement(XName.Get("Category", "Email"), "Bad(Cat)")));
+		JmapMailStore store = new(client, pollSeconds: 1);
+		MailFlagsPatch patch = new() { Categories = Optional<IReadOnlyList<string>>.Of(["Bad(Cat)"]) };
 
-		await store.UpdateItemAsync(JmapMailStore.ToKey("INBOXID"), "E1", change, CancellationToken.None);
+		await store.UpdateFlagsAsync(
+			new FolderKey(JmapMailStore.ToKey("INBOXID")), new ItemKey("E1"), patch, null, CancellationToken.None);
 
 		// No patch entry at all for the forbidden-character category — no keywords/* key present.
 		Assert.True(stub.CapturedUpdate is null ||
@@ -231,12 +230,12 @@ public sealed class JmapMailStoreTests
 	{
 		QueryStateShiftStub stub = new();
 		JmapClient client = new(Base, new HttpClient(stub));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		JmapMailStore store = new(client, pollSeconds: 1);
 
-		IReadOnlyDictionary<string, string> map = await store.GetItemRevisionsAsync(
-			JmapMailStore.ToKey("INBOXID"), new ContentFilter(null), CancellationToken.None);
+		IReadOnlyDictionary<ItemKey, ItemRevision> map = await store.GetItemRevisionsAsync(
+			new FolderKey(JmapMailStore.ToKey("INBOXID")), ContentFilter.All,CancellationToken.None);
 
-		Assert.True(map.ContainsKey("C"),
+		Assert.True(map.ContainsKey(new ItemKey("C")),
 			"an item that shifted position under a concurrent delete must not be dropped from the revision map");
 	}
 
@@ -250,11 +249,11 @@ public sealed class JmapMailStoreTests
 	{
 		StuckPositionStub stub = new();
 		JmapClient client = new(Base, new HttpClient(stub));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		JmapMailStore store = new(client, pollSeconds: 1);
 		using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
 
-		IReadOnlyDictionary<string, string> map = await store.GetItemRevisionsAsync(
-			JmapMailStore.ToKey("INBOXID"), new ContentFilter(null), cts.Token);
+		IReadOnlyDictionary<ItemKey, ItemRevision> map = await store.GetItemRevisionsAsync(
+			new FolderKey(JmapMailStore.ToKey("INBOXID")), ContentFilter.All,cts.Token);
 
 		Assert.True(stub.Calls < 100, $"the loop must terminate on its own; it made {stub.Calls} requests");
 		Assert.NotEmpty(map);
@@ -270,7 +269,7 @@ public sealed class JmapMailStoreTests
 	{
 		UsingRejectingStub stub = new();
 		JmapClient client = new(Base, new HttpClient(stub));
-		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
+		JmapMailStore store = new(client, pollSeconds: 1);
 		byte[] mime = Encoding.ASCII.GetBytes("From: a@example.test\r\nTo: b@example.test\r\nSubject: s\r\n\r\nbody\r\n");
 
 		await store.SaveToSentAsync(mime, CancellationToken.None);

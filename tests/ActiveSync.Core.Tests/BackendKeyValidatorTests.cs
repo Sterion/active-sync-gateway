@@ -250,8 +250,8 @@ public sealed class BackendKeyValidatorTests
 
 		public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role) =>
 		[
-			new BackendConfigField("AuthBlob", "Auth blob", BackendFieldType.Secret),
-			new BackendConfigField("Token", "Token", BackendFieldType.String),
+			new BackendConfigField { Name = "AuthBlob", Label = "Auth blob", Type = BackendFieldType.Secret },
+			new BackendConfigField { Name = "Token", Label = "Token", Type = BackendFieldType.String },
 		];
 
 		public void ValidateConfiguration(BackendRole role, ProviderSettings settings, IList<string> failures) { }

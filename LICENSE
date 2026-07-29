@@ -10,16 +10,23 @@ SCOPE — THIS REPOSITORY IS LICENSED IN TWO PARTS
 
 This section is a plain-language summary and is NOT part of the licence terms.
 
-  src/ActiveSync.Contracts/   -> MIT (see LICENSE-MIT)
-  src/ActiveSync.Protocol/    -> MIT (see LICENSE-MIT)
+  src/ActiveSync.Contracts/             -> MIT (see LICENSE-MIT)
+  src/ActiveSync.Contracts.Interop/     -> MIT (see LICENSE-MIT)
+  src/ActiveSync.Contracts.Conformance/ -> MIT (see LICENSE-MIT)
 
   Everything else in this repository -> PolyForm Noncommercial License 1.0.0,
   reproduced in full below.
 
-The two MIT-licensed projects are the backend plugin contract, published to
-NuGet as `ActiveSync.Contracts` and `ActiveSync.Protocol`. They are permissively
-licensed on purpose, so that third-party backend plugins — including commercial
-ones — can be written against them freely.
+The three MIT-licensed projects are the backend plugin contract and the two
+optional packages beside it, published to NuGet as `ActiveSync.Contracts`,
+`ActiveSync.Contracts.Interop` and `ActiveSync.Contracts.Conformance`. They are
+permissively licensed on purpose, so that third-party backend plugins —
+including commercial ones — can be written against them freely.
+
+`src/ActiveSync.Protocol/` was MIT and published under these same terms up to
+contract version 1.7. It is host-only now, so it is PolyForm Noncommercial going
+forward; the package versions already published stay MIT permanently. See
+LICENSE-MIT.
 
 The gateway itself is **source-available, not open source**: the PolyForm
 licence below permits any noncommercial use and does not permit commercial use.

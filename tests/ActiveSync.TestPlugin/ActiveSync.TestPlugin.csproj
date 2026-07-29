@@ -1,9 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-	<!-- A minimal out-of-repo-style plugin, compiled so PluginLoaderTests can load it from a
-	     temp plugins directory. References ActiveSync.Contracts ONLY — the published plugin
-	     contract — proving a backend plugin needs nothing else (no Core, Crypto or EF Core).
-	     Not packable and not a test project itself. -->
+	<!-- An out-of-repo-style plugin with a REAL store (TestNotesStore), compiled so PluginLoaderTests
+	     can load it from a temp plugins directory and so the conformance kit has something genuine
+	     to validate. Of the gateway's assemblies it references ActiveSync.Contracts ONLY — the
+	     published plugin contract — proving a backend plugin needs nothing else (no Core, Crypto,
+	     EF Core, and no MIME/iCalendar/vCard library, which is what makes Notes the right class to
+	     prove it with). PluginPrivateLib below is not a gateway assembly: it stands in for a
+	     plugin's own private dependency. Not packable and not a test project itself. -->
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>

@@ -1,9 +1,7 @@
-using System.Xml.Linq;
 using ActiveSync.Backends.Local;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
-using ActiveSync.Protocol.Wbxml;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -20,8 +18,6 @@ namespace ActiveSync.Core.Tests;
 /// </summary>
 public sealed class LocalStoreConcurrencyTests : IDisposable
 {
-	private static readonly XNamespace Contacts = EasNamespaces.Contacts;
-
 	private readonly SqliteConnection _connection;
 	private readonly int _userId;
 	private readonly string _uid = Guid.NewGuid().ToString();
@@ -60,11 +56,14 @@ public sealed class LocalStoreConcurrencyTests : IDisposable
 		LocalContactStore store = new(
 			factory, new LocalChangeNotifier(), _userId, LocalContentProtector.CreatePlaintext(), NullLogger.Instance);
 
-		string itemKey = await ItemKeyAsync();
-		XElement appData = new(Contacts + "FirstName", "Updated");
+		ItemKey itemKey = await ItemKeyAsync();
+		ContactItem updated = new()
+		{
+			VCard = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:1\r\nFN:Updated\r\nEND:VCARD\r\n"
+		};
 
 		await Assert.ThrowsAsync<BackendException>(() =>
-			store.UpdateItemAsync(store.FolderBackendKey, itemKey, appData, CancellationToken.None));
+			store.UpdateItemAsync(new FolderKey(store.FolderBackendKey), itemKey, updated, null, CancellationToken.None));
 	}
 
 	private void SeedContact()
@@ -82,11 +81,11 @@ public sealed class LocalStoreConcurrencyTests : IDisposable
 		db.SaveChanges();
 	}
 
-	private async Task<string> ItemKeyAsync()
+	private async Task<ItemKey> ItemKeyAsync()
 	{
 		using SyncDbContext db = StateTestSupport.NewContext(_connection);
 		LocalItem row = await db.LocalItems.FirstAsync(i => i.Uid == _uid);
-		return row.Id.ToString();
+		return new ItemKey(row.Id.ToString());
 	}
 
 	[Fact]
@@ -123,7 +122,8 @@ public sealed class LocalStoreConcurrencyTests : IDisposable
 			factory, new LocalChangeNotifier(), _userId, LocalContentProtector.CreatePlaintext(),
 			"me@example.com", "me@example.com", NullLogger.Instance);
 
-		string? id = await store.RespondToMeetingAsync(store.FolderBackendKey, "meet-1", 1, CancellationToken.None);
+		ItemKey? id = await store.RespondToMeetingAsync(
+			new FolderKey(store.FolderBackendKey), "meet-1", MeetingResponseKind.Accepted, CancellationToken.None);
 
 		Assert.NotNull(id); // must not throw DbUpdateConcurrencyException — the response must land
 

@@ -19,19 +19,29 @@ wipe and `eas block` are the levers), S/MIME (`ValidateCert`), the SMS class. (N
 **is** implemented — a local-only `LocalNotesStore` — see the Backend layer notes.)
 
 **EAS 16.1 is implemented** (see docs/eas16-checklist.md for the audited token diff and
-per-delta status). Invariants: version gating rides `BodyPreference.Eas16` (set from
-`context.Version >= EasVersion.V160`) so store signatures stay version-free; 14.1
+per-delta status). Invariants: version gating rides the HOST-side `BodyPreference.Eas16`
+(`ActiveSync.Eas.Conversion`, set from `context.Version >= EasVersion.V160`) — under the typed
+plugin contract stores hand over full payloads and all EAS conversion happens host-side
+(`Server/Eas/Content/ContentAdapter`), so store signatures carry no version or body
+preference at all; 14.1
 responses must stay byte-identical (a 14.1 observer device asserts this in Eas16Tests).
 calendar:Location is ≤14.1-only — 16.x emits/reads airsyncbase:Location(DisplayName);
 exception dates MERGE (never clear) because 16.x sends only the new exception; Sync
 Delete + airsyncbase:InstanceId becomes a synthesized deleted exception through the
 normal partial-merge path. Drafts: Sync Add/Change of Email is allowed ONLY in the
-Drafts folder (`DraftMessageBuilder` merges fields; a rewrite changes the IMAP UID and
-the snapshot diff re-identifies as Delete+Add); email2:Send submits instead of storing.
-Event attachments live INLINE in the iCal (base64 ATTACH; `Backends:Calendar:CalendarAttachments`
-Auto/On/Off caps them) with FileReferences "calatt::<serverId>::<index>" — the converter
+Drafts folder (the HOST merges fields via `DraftMessageBuilder` and hands the store a
+complete draft through `CreateDraftAsync`/`ReplaceDraftAsync`; a rewrite changes the IMAP
+UID and the snapshot diff re-identifies as Delete+Add — the store's returned key is never
+echo-suppressed into the snapshot); email2:Send submits instead of storing.
+Event attachments live INLINE in the iCal (base64 ATTACH; the per-attachment cap is the HOST
+option `ActiveSync:Eas:CalendarAttachments` — Auto 1 MiB / On 16 MiB / Off — because the cap
+governs what the host-side merge writes into the iCalendar; it was a caldav provider setting
+while the converters lived backend-side, and moving the reader instead of the key would have
+meant the host reading a provider-owned setting)
+with FileReferences "calatt::<serverId>::<index>" — the converter
 emits the index and SyncHandler stamps the ServerId; ItemOperations resolves them via
-`ICalendarAttachmentSource`. Account-only wipe: `Device.PendingAccountWipe` → 449 herds
+`ICalendarAttachmentSource.GetEventAttachmentAsync(FolderKey, ItemKey, index)`, where the
+index is normatively the Nth ATTACH property of the payload the store handed over. Account-only wipe: `Device.PendingAccountWipe` → 449 herds
 into Provision → directive → ack auto-blocks the partnership (`CompleteAccountWipeAsync`);
 MeetingResponse tolerates 16.x SendResponse/proposals but always sends the iTIP reply
 (pre-16 behavior).
@@ -66,17 +76,23 @@ as `ActiveSync.Backends.Sieve` with the AUTHENTICATE line always masked.
 `IFreeBusySource.GetBusyPeriodsAsync` — null means "no data for that target" (per-recipient
 Availability Status 163), an EMPTY list means "completely free"; keep that distinction.
 `MergedFreeBusy.Build` (Core) turns busy periods into the spec digit string (30-minute
-intervals, overlap marks, higher digit wins). CalDAV free/busy is a hand-parsed
+intervals, overlap marks, higher digit wins) — a store reports a typed `BusyKind`, and the
+digit mapping ('0' free … '3' OOF) lives ONLY there, which is why `BusyKind` pins no values
+and carries no "no data" member (that state is the null return above, not a digit). CalDAV
+free/busy is a hand-parsed
 free-busy-query — **Ical.Net 5.x cannot deserialize the FREEBUSY property** (comes back
-null), so `CalendarConverter.ParseFreeBusy` parses the unfolded lines itself; don't
+null), so `CalendarPayload.ParseFreeBusy` (Backends.Common) parses the unfolded lines itself; don't
 "simplify" it back to Ical.Net without checking that bug is fixed. A free/busy failure
 must never fail the whole ResolveRecipients.
 
-**GAL photos**: `SearchGalAsync` takes an optional `GalPhotoRequest(MaxSizeBytes, MaxCount)`;
-`ContactConverter.AppendGalPicture` implements the MS-ASCMD statuses (1+Data / 173 no
-photo / 174 over MaxSize / 175 count limit) and the stores count granted photos across
-the whole result set. ResolveRecipients translates the gal:Picture element into its own
-RR-namespace Picture shape — keep the two in sync.
+**GAL photos**: `IDirectoryOperations.SearchGalAsync` takes an optional
+`GalPhotoRequest(MaxSizeBytes, MaxCount)` and returns typed `GalEntry` records whose
+`GalPictureResult` carries a typed status — the STORES enforce the limits and count granted
+photos across the whole result set (`ContactPayload.BuildGalEntry` for vCard-backed stores);
+the HOST maps the statuses to the MS-ASCMD wire values (Available → 1+Data, None → 173,
+OverSizeLimit → 174, OverCountLimit → 175) in `Server/Eas/Content/GalXml`, and
+ResolveRecipients projects the same records into its own RR-namespace Picture shape — keep
+the two projections in sync.
 
 **Autodiscover** is implemented (`AutodiscoverEndpoint`): `POST /autodiscover/autodiscover.xml`
 (and `.json`) returns the EAS URL in the Outlook MobileSync schema. It shares Basic-auth
@@ -111,19 +127,79 @@ docker compose -f docker/docker-compose.ci.yml run --rm tests        # full suit
 ## Solution layout and dependency rule
 
 ```
-src/ActiveSync.Protocol/    WBXML codec, code pages, MS-ASHTTP query parser, EAS constants.
-                            Depends on NOTHING project-wise. No ASP.NET, no MailKit.
+src/ActiveSync.Protocol/    WBXML codec, code pages, MS-ASHTTP query parser, EAS constants, and the
+                            composite-key encoder the wire-facing FileReference/LongId values use
+                            (DelimitedKey — host-side, since no delimited key crosses the store
+                            boundary). Depends on NOTHING project-wise. No ASP.NET, no MailKit.
+                            HOST-ONLY: it was published beside Contracts up to contract 1.7, when
+                            the contract's own signatures still named EAS constants; nothing here is
+                            usable by a plugin now, so IsPackable=false, it takes the RELEASE version
+                            like every other host assembly (no $(ContractVersion) pin), and new work
+                            in it is PolyForm. Published package versions stay MIT forever.
 src/ActiveSync.Contracts/   The PLUGIN CONTRACT: the interfaces/records a backend provider
-                            implements + uses (IBackendProvider, IBackendConnection, IContentStore
-                            & the capability interfaces, IGatewayPlugin, BackendRole,
-                            ProviderSettings, BackendConfigField, SharedCollection, the Backend
-                            Models records, DelimitedKey). Namespace ActiveSync.Contracts.
-                            Depends only on Protocol + Microsoft.Extensions config/DI abstractions
+                            implements + uses (IBackendProvider, IBackendConnection, the split
+                            content stores — IContentStore + IContentStore<TItem> with the class
+                            aliases IMailStore/ICalendarStore/ITaskStore/IContactStore/INotesStore
+                            — the typed item records (MailItem/CalendarItem/TaskItem/ContactItem/
+                            NoteItem, MailFlagsPatch + Optional<T>), the side operations
+                            (IMailboxOperations, IMailSubmitOperations, IMeetingOperations,
+                            IDirectoryOperations + GalEntry, IOofBackend) & the capability
+                            interfaces, IGatewayPlugin, BackendRole, ProviderSettings,
+                            BackendConfigField, SharedCollection (the typed grant
+                            only — the "href|ro" entry syntax is the caldav provider's), the
+                            FolderKey/ItemKey/ItemRevision newtypes, OwnedResource, the Backend
+                            Models records). NO EAS XML crosses the store boundary: stores trade
+                            in raw RFC822 bytes / iCalendar / vCard payloads and typed records;
+                            the host owns all EAS conversion. Namespace ActiveSync.Contracts.
+                            Depends on NO other project (Protocol included — the EAS wire encodings
+                            that needed it, the FilterType→date-window maps, are host-side in
+                            Core/Backend/ContentFilters; DependencyRuleTests pins the csproj clean),
+                            only Microsoft.Extensions config/DI abstractions
                             — NOT Crypto, EF Core or Core. THE one package an out-of-repo plugin
                             references. Host-only types stay in Core: BackendProviderRegistry, and
                             the composite session + its cache (IBackendSession / CompositeBackendSession,
                             IBackendSessionFactory / BackendSessionFactory, BackendSessionInfo — a
                             plugin implements IBackendConnection, never the composite session).
+src/ActiveSync.Contracts.Interop/  OPTIONAL, PUBLISHED (MIT) ergonomics beside the contract: the ONE
+                            helper both sides of the store boundary need — IcalHelpers.Load/Serialize
+                            (the Ical.Net quirk handling — unparsable text throws BackendException,
+                            output is normalized to CRLF) — plus the payload <-> object-model
+                            extensions (MailItem <-> MimeMessage, Calendar/TaskItem <-> Ical.Net
+                            Calendar, ContactItem <-> VCard) and SampleItems test builders. It
+                            carries the domain libraries so Contracts itself never has to; a Notes
+                            plugin references Contracts alone and inherits nothing. Consumed in-repo
+                            by Eas.Conversion, Backends.Common and Backends.Local. NOT loader ABI and
+                            NOT part of the contract-surface snapshot (a domain-library major bump
+                            must move this assembly, never $(ContractVersion)) — so it takes the
+                            RELEASE version and pins Contracts as an EXACT [X.Y.Z] dependency, since
+                            contract minor is breaking and a floor range would be a false promise.
+                            A plugin using it MUST ship it in its own folder (the loader shares
+                            ActiveSync.Contracts by EXACT name, not by prefix, precisely so the
+                            plugin's copy wins and binds the plugin's own MimeKit/Ical.Net).
+src/ActiveSync.Contracts.Conformance/  OPTIONAL, PUBLISHED (MIT) test kit: StoreConformance.RunAsync
+                            exercises a store against the obligations the contract states in PROSE
+                            (revision stability, "null = not fetched", create-then-list visibility,
+                            delete semantics, the wait timeout, key-space disjointness, payload
+                            round-trip, the optional `expected` precondition) and returns a report;
+                            a check that cannot apply is Skipped, which is NOT a failure. STORE
+                            obligations only — engine behaviour (SyncKey replay, windowing, echo
+                            suppression) is not testable from a store and would mean shipping the
+                            PolyForm engine inside an MIT package. References Contracts ONLY: no test
+                            framework, no domain library, so it runs from any harness. Versioned and
+                            pinned like Contracts.Interop. Run in-repo against the fixture plugin
+                            (PluginConformanceTests), which is what keeps "one package is enough"
+                            tested rather than asserted.
+src/ActiveSync.Eas.Conversion/  HOST-ONLY, never published: the format -> EAS-XML conversion
+                            layer. MailConverter / CalendarConverter / ContactConverter /
+                            TasksConverter (ApplicationData both ways + the ghosting merge),
+                            DraftMessageBuilder, ImipMailBuilder, RecurrenceMapper, TimeZoneBlob
+                            (MS-ASTZ), BodyText/AirSyncBodyWriter, CalendarAttachmentPolicy and
+                            BodyPreference. References Contracts + Protocol + Contracts.Interop
+                            and MimeKit/Ical.Net/FolkerKinzel; Server is its only consumer. It
+                            MUST NOT reference Core — Core carries no domain library and WebUi
+                            references Core ONLY, so a Core reference here would hand MimeKit to
+                            the admin UI (DependencyRuleTests.EasConversion_DoesNotReferenceCore
+                            + Core_CarriesNoDomainLibrary pin both halves).
 src/ActiveSync.Crypto/      BCL-only master-key primitives: EncryptionKeyLoader (base64-or-
                             passphrase → 32-byte key), SecretValue (enc:v1: AES-GCM seal of
                             config secrets), LocalCliEnvelope (the sealed /cli request),
@@ -135,13 +211,25 @@ src/ActiveSync.Core/        Provider engine (BackendProviderRegistry, CompositeB
                             Depends on Contracts + Protocol + Crypto (+ EF Core / config-binder
                             packages). Provider-agnostic. (The plugin-facing INTERFACES live in
                             Contracts, not here.)
-src/ActiveSync.Backends.Common/  Shared building blocks: MIME/iCal/vCard ⇄ EAS converters
-                            + TLS/wire-logging helpers + the shared backend-options bases
-                            (NetworkBackendOptions = the TLS knobs; MailConnectionOptions =
-                            Host/Port/UseSsl/Security). Depends on Contracts ONLY (+ MailKit,
-                            Ical.Net, FolkerKinzel.VCards) so those deps stay OUT of Core — the
-                            absence of a Core reference is test-enforced
-                            (DependencyRuleTests.BackendsCommon_DoesNotReferenceCore).
+src/ActiveSync.Backends.Common/  Shared building blocks: TLS/wire-logging + HTTP helpers, the
+                            shared backend-options bases (NetworkBackendOptions = the TLS knobs;
+                            MailConnectionOptions = Host/Port/UseSsl/Security), the config schema
+                            fields, and the PAYLOAD helpers a store needs for data it already owns
+                            — CalendarPayload (ExtractUid / SetPartStat / ExtractAttachment /
+                            ParseFreeBusy / BusyPeriodsFromEvents), ContactPayload (ExtractUid +
+                            the vCard→typed-GalEntry projection CardDAV and local both serve),
+                            TaskPayload (ExtractUid) and MailKeywords (which keywords count as
+                            user categories — the imap and jmap stores must agree). It therefore
+                            KEEPS Ical.Net + FolkerKinzel.VCards (and MailKit for the wire logger);
+                            what it shed in the converter split is the EAS half, which now lives in
+                            ActiveSync.Eas.Conversion — EasNamespaces usage went to zero and
+                            EasDateTime to a single call (the free-busy parser, since an iCalendar
+                            UTC date-time is byte-identical to the EAS compact form). Depends on
+                            Contracts + Protocol (an EXPLICIT reference since Contracts severed its
+                            own) + Contracts.Interop, and NOT Core, so the domain libraries stay
+                            OUT of Core — test-enforced (DependencyRuleTests
+                            .BackendsCommon_DoesNotReferenceCore /
+                            BackendsCommon_HasExplicitProjectReferenceToProtocol).
                             OPTIONS CONVENTION: a provider's own options class lives in ITS
                             assembly (e.g. ImapOptions, JmapOptions), deriving from the Common
                             bases and adding only its specifics; bound via ProviderSettings.
@@ -151,8 +239,10 @@ src/ActiveSync.Backends.Imap/    "imap" provider (MailKit). Depends on Core + Co
 src/ActiveSync.Backends.Jmap/    "jmap" provider (Stalwart JMAP over HttpClient +
                             System.Text.Json). Serves MailStore + MailSubmit + Oof
                             (VacationResponse) + Contacts (JSContact) + Calendar (JSCalendar)
-                            over one HTTP session. JSContact maps direct to EAS; JSCalendar
-                            bridges via iCalendar and reuses CalendarConverter (iCal↔EAS).
+                            over one HTTP session. Under the typed item currency it produces
+                            PAYLOADS, never EAS XML: JsContactConverter maps JSContact ⇄ vCard,
+                            JsCalendarConverter stops at the iCalendar it already built, and the
+                            mail store hands over the raw RFC822 blob.
                             Listing uses */get ids:null, not the FTS-backed /query
                             (eventually-consistent). Calendar update strips read-only members
                             (isDraft/isOrigin/…) to avoid invalidProperties. Mail Ping/Sync
@@ -181,36 +271,53 @@ src/ActiveSync.Cli/         The slim `eas` forwarding client (AssemblyName eas).
                             Shipped only in the Docker image.
 tests/ActiveSync.Protocol.Tests/   WBXML round-trip + query parser tests
 tests/ActiveSync.Core.Tests/       diff engine, sync-key state machine, options validator,
-                                   provider engine + resolver, AND the backend unit tests
-                                   (converters, cert validator, WebDAV redirect safety) —
-                                   there is no per-provider test project, so Core.Tests
-                                   references the provider assemblies and hosts them.
+                                   provider engine + resolver, AND the backend/conversion unit
+                                   tests (the EAS converters, the payload helpers, cert validator,
+                                   WebDAV redirect safety) — there is no per-assembly test
+                                   project, so Core.Tests references the provider assemblies plus
+                                   ActiveSync.Eas.Conversion / .Contracts.Interop and hosts them.
+                                   It also references .Contracts.Conformance and runs it against the
+                                   fixture plugin (PluginConformanceTests), which is both the
+                                   "one package is enough" proof and the kit's own coverage.
+tests/ActiveSync.TestPlugin/       the fixture out-of-repo plugin: a working INotesStore over
+                                   ActiveSync.Contracts + BCL only, loaded from a temp plugins dir by
+                                   PluginLoaderTests. Beside it, tests/PluginPrivateLib stands in for
+                                   a plugin's PRIVATE dependency (the copy the plugin ships must win
+                                   over the host's).
 tests/ActiveSync.Server.Tests/     handler-level tests (has InternalsVisibleTo into Server)
 tests/ActiveSync.WebUi.Tests/      web UI unit tests (key repository, OIDC decision matrix)
 tests/ActiveSync.Integration.Tests/  real-backend E2E tests (see "Integration tests" below)
 ```
 
-Keep the dependency direction strict: `Protocol ← Contracts ← Core ← Backends ← Server`. Converters
-live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
+Keep the dependency direction strict: `{Protocol, Contracts} ← Core ← Backends ← Server` — Protocol
+and Contracts are two INDEPENDENT roots (neither references the other; a plugin takes Contracts
+alone), and everything above depends on both. The EAS converters
+live in `ActiveSync.Eas.Conversion` (they need MimeKit/Ical.Net/FolkerKinzel) — never in Protocol,
+never in Core, and no longer in Backends: a store trades in payloads and converts nothing.
 
 ## Licensing (read before moving code between assemblies)
 
 The repository is licensed in **two parts**, and the boundary is the same one `IsPackable`
 draws:
 
-- **`ActiveSync.Contracts` + `ActiveSync.Protocol` → MIT** (`LICENSE-MIT`). These are the two
-  published NuGet packages, permissive on purpose so third-party plugins — including
-  commercial ones — can build against them.
+- **`ActiveSync.Contracts` + `ActiveSync.Contracts.Interop` + `ActiveSync.Contracts.Conformance`
+  → MIT** (`LICENSE-MIT`). These are the three published NuGet packages, permissive on purpose
+  so third-party plugins — including commercial ones — can build against them.
 - **Everything else → PolyForm Noncommercial 1.0.0** (`LICENSE`). Source-available, not open
   source: any noncommercial use is permitted, commercial use is not (`COMMERCIAL.md`).
 
-**The invariant that matters: anything moved INTO Contracts or Protocol becomes permanently
+**The invariant that matters: anything moved INTO a published assembly becomes permanently
 permissive.** A published package version can never be un-published — the MIT grant on it is
-irrevocable. So a refactor that relocates gateway logic down into those two assemblies is a
-licensing decision, not just a structural one. Keep them to contract interfaces and protocol
-primitives; converters, the sync engine and anything with commercial value stay above the line.
-(Core, Crypto and Backends.Common were packed up to 1.1.2 and are now host-only — see the
-provider-engine notes.)
+irrevocable. So a refactor that relocates gateway logic down into those assemblies is a
+licensing decision, not just a structural one. Keep them to contract interfaces, format
+ergonomics and test scaffolding; converters, the sync engine and anything with commercial value
+stay above the line.
+
+`ActiveSync.Protocol` is the worked example of both halves of that rule. It was MIT and
+published up to contract 1.7; it is host-only now, so it is PolyForm going forward and no
+longer packed — but every version already on NuGet stays MIT permanently, and no later decision
+can change that. (Core, Crypto and Backends.Common were packed up to 1.1.2 and are host-only in
+the same way — see the provider-engine notes.)
 
 Two mechanical consequences:
 
@@ -335,7 +442,11 @@ licence is held.
   Sync Status 13 (client resends the full request).
 - **Read-only mode** (`ActiveSync.ReadOnly`) uses **silent revert** at the handler level
   (never inside backend stores — the revert needs snapshot access): a suppressed `Change`
-  poisons the snapshot revision with `"!ro"` so the next diff re-sends the server version;
+  marks the snapshot entry `PendingReadOnlyRevert` (`CollectionSnapshot.MarkPendingRevert`) so
+  the next diff re-sends the server version — the marker rides BESIDE the revision, never inside
+  it (a `"!ro"` sentinel revision was the old mechanism), and `CollectionSnapshot.Diff` feeds the
+  pending ids to `CollectionDiff.Compute` as its `forceChanged` set, clearing the marker only for
+  the items actually charged to the window. Server-wins conflict resolution uses the same marker;
   a suppressed `Delete` removes the item from the snapshot so it is re-Added; `Add` gets
   per-item Status 6; MoveItems reports Status 5 *and* drops the item from the source
   snapshot so the client converges; sends return ComposeMail Status 120; folder ops
@@ -438,8 +549,14 @@ read or write the column except through the local stores, which decrypt/encrypt 
 Gateway-global sealed rows (the TLS certificate) use the reserved sentinel
 `LocalContentProtector.GatewayUserId` (0), which no real user can ever hold.
 JSON blobs (snapshots, cached options, ping params, cached sync requests) use
-`System.Text.Json`. Use `SyncStateService.PersistAsync` to save mutations on tracked
-entities — do not repurpose `SaveDeviceInfoAsync` as a generic save.
+`System.Text.Json`. The collection snapshot columns are the one **versioned** blob
+(`SnapshotCodec`, gzipped): a document carrying `v`, the flat `items` map (id → revision, the
+same bulk as before) and a `pendingReverts` sidecar written only when non-empty. A blob in any
+other shape is deliberately NOT converted — it reads as `null` and the caller answers Sync
+Status 3 / GetItemEstimate Status 4, so that device restarts the collection from SyncKey 0
+rather than diffing against an empty snapshot and re-Adding everything it already holds. Use
+`SyncStateService.PersistAsync` to save mutations on tracked entities — do not repurpose
+`SaveDeviceInfoAsync` as a generic save.
 
 Design-time factories (`SqliteSyncDbContextFactory` / `NpgsqlSyncDbContextFactory`) exist
 only so `dotnet ef` can instantiate the contexts; their connection strings are placeholders.
@@ -622,22 +739,34 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   value never throws on read. Multi-pod: each replica polls its own stamp; no cross-process bus.
 - **Out-of-repo plugins**: `Core/Plugins/PluginLoader` loads assemblies from
   `ActiveSync:Plugins:Directory` (default `/app/plugins`, one subdir per plugin, entry dll
-  = dir name) in a per-plugin non-collectible `AssemblyLoadContext` that resolves the
-  contract (Contracts/Core/Protocol/Backends.*/framework) from the HOST — so a plugin's
-  `IBackendProvider` IS the host type the registry indexes. Each `IGatewayPlugin.Register`
+  = dir name) in a per-plugin non-collectible `AssemblyLoadContext`. Exactly ONE gateway assembly
+  resolves from the HOST — **`ActiveSync.Contracts`, matched by EXACT simple name** — plus the
+  framework and `Microsoft.Extensions.*` (their types are in the contract's own signatures), so a
+  plugin's `IBackendProvider` IS the host type the registry indexes. Everything else, Core /
+  Protocol / Backends.* included, is plugin-local when the plugin ships it. The exact match is
+  load-bearing, not tidiness: a `ActiveSync.` (or even `ActiveSync.Contracts`) PREFIX would also
+  capture `ActiveSync.Contracts.Interop`, which the gateway ships its own copy of, and host-resolve
+  the plugin's copy — binding the HOST's MimeKit/Ical.Net in the default context while the plugin's
+  code binds its private ones, i.e. a type-identity failure at the seam. A plugin using the interop
+  package therefore MUST ship it in its own folder (the inverse of the ship-nothing rule for the
+  contract), and `PluginLoaderTests` pins both halves. Each `IGatewayPlugin.Register`
   adds its providers. Fail-fast (corrupt/incompatible/no-entry aborts startup; empty dir =
   no-op), major-version-gated against **`ActiveSync.Contracts`** (the loader keys the gate off
   `typeof(IGatewayPlugin).Assembly`, which now IS Contracts). Wired in ProgramServer AND
-  CliServices before the container is built. ONLY Contracts + Protocol are packed to NuGet on
-  tagged CI — Core/Crypto/Backends.Common were unpublished and deleted from GitHub Packages
-  (2026-07-25), so a plugin references **ActiveSync.Contracts** alone. Package metadata lives in
+  CliServices before the container is built. Three packages are packed to NuGet on tagged CI —
+  Contracts plus the OPTIONAL Contracts.Interop / Contracts.Conformance; Protocol joined
+  Core/Crypto/Backends.Common as host-only (Protocol at contract 1.7, the others unpublished and
+  deleted from GitHub Packages 2026-07-25), so a plugin references **ActiveSync.Contracts** alone
+  and opts into the other two only if it wants them. Package metadata lives in
   `Directory.Build.targets` gated on `IsPackable` (a .props gate would evaluate too early), so a
-  host-only assembly carries no license/authors at all. See docs/plugins.md (contract NOT
-  ABI-stable pre-2.0).
+  host-only assembly carries no license/authors at all. `tests/ActiveSync.TestPlugin` is the in-repo
+  proof the one package suffices: a real `INotesStore` (Contracts + BCL only), loaded through the
+  loader and run against the published conformance kit in `PluginConformanceTests`. See
+  docs/plugins.md (contract NOT ABI-stable pre-2.0).
 - > ### ⛔ CHANGING THE CONTRACT SURFACE? RAISE `ContractVersionMinor` FIRST.
   >
-  > **If you add, remove, rename or retype ANY public member of `ActiveSync.Contracts` or
-  > `ActiveSync.Protocol`, you MUST raise `<ContractVersionMinor>` in `Directory.Build.props`
+  > **If you add, remove, rename or retype ANY public member of `ActiveSync.Contracts`, you MUST
+  > raise `<ContractVersionMinor>` in `Directory.Build.props`
   > in the same change.** Every out-of-repo plugin declares an exact contract `major.minor` and
   > is refused by the loader on a mismatch, so a changed surface shipped under an unchanged
   > version silently breaks plugins that still claim compatibility.
@@ -646,8 +775,8 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   > asked.** Minor absorbs every breaking change by policy; that is precisely why major stays
   > meaningful.
   >
-  > This is enforced, not merely documented: `ContractSurfaceApprovalTests` snapshots the public
-  > surface of both assemblies and pins its hash per contract version in
+  > This is enforced, not merely documented: `ContractSurfaceApprovalTests` snapshots that
+  > assembly's public surface and pins its hash per contract version in
   > `tests/ActiveSync.Core.Tests/ContractSurface.approved.txt`. Change the surface without a bump
   > and the build fails with instructions. The history block is **append-only** — editing an
   > existing line defeats the guard instead of satisfying it. After a deliberate change:
@@ -655,14 +784,20 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   > `ContractSurfaceTests.ContractVersion_IsTheExpectedSurfaceVersion` → regenerate with
   > `EAS_APPROVE_CONTRACT_SURFACE=1 dotnet test --filter FullyQualifiedName~ContractSurfaceApprovalTests`.
   >
-  > Think twice before moving a type INTO either assembly at all: it also becomes permanently
+  > Think twice before moving a type INTO that assembly at all: it also becomes permanently
   > MIT-licensed (see the Licensing section) and permanently part of the plugin ABI.
+  >
+  > The two OPTIONAL packages (`Contracts.Interop`, `Contracts.Conformance`) are deliberately
+  > OUTSIDE this gate: they are not loader ABI, so a domain-library bump must be free to move
+  > them without moving `$(ContractVersion)` and refusing every plugin for an unrelated reason.
+  > They are still permanently MIT once published.
 - **Contract version ≠ release version — do not conflate them.** `$(ContractVersion)` in
-  `Directory.Build.props` is the single definition, pinned onto Contracts' and Protocol's
+  `Directory.Build.props` is the single definition, pinned onto Contracts'
   `AssemblyVersion`/`FileVersion`/`PackageVersion` so the release tag (which CI passes as a global
-  `-p:Version`) can NEVER reach those two. That separation is load-bearing: if it leaked, tagging
-  the gateway 2.0.0 for a product reason would flip the contract major and refuse every existing
-  plugin without the contract having changed. `ContractVersion.Major/Minor` READ that assembly
+  `-p:Version`) can NEVER reach it. It used to cover Protocol as well; Protocol is host-only now
+  and takes the release version like everything else. That separation is load-bearing: if it
+  leaked, tagging the gateway 2.0.0 for a product reason would flip the contract major and refuse
+  every existing plugin without the contract having changed. `ContractVersion.Major/Minor` READ that assembly
   version (properties, not `const` — a `const` is inlined into the consumer and would report the
   plugin's build-time value while appearing to report the host's), so there is nothing to keep in
   sync by hand. Raise `$(ContractVersion)` ONLY for a real surface change; both major and minor are
@@ -683,13 +818,16 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   with idle eviction; auth verdicts are cached ~5 minutes. Content roles are optional —
   when a role has no configured provider it falls back to the **local store** (below), so
   `Session.Contacts` / `Session.Calendar` are always non-null.
-- **Local stores** (`Backends/Local/`): `IContentStore` over the `LocalItems` table when
+- **Local stores** (`Backends/Local/`): typed content stores over the `LocalItems` table when
   no DAV backend is configured, plus `LocalNotesStore` which is **always** present (no
   DAV backend carries notes) and `LocalTaskStore` when no CalDAV tasks collection is
-  configured. One fixed folder per class; content is vCard / iCalendar VEVENT / VTODO /
-  VJOURNAL text (same converters as the DAV stores — `NotesConverter` maps Notes to
-  VJOURNAL, `TasksConverter` maps Tasks to VTODO); item key = row id, revision = a
-  per-row version counter.
+  configured. One fixed folder per class; stored content is vCard / iCalendar VEVENT /
+  VTODO text — for the payload classes the stored text IS the contract payload, verbatim
+  (round-trip fidelity). Notes are the typed exception: the payload is `NoteItem` and the
+  VJOURNAL at-rest shape is the store's PRIVATE convention (`NoteJournalMapper` — kept so
+  existing sealed rows need no migration; no other backend ever sees it). Item key = row id,
+  revision = a per-row version counter — which is why the local stores can honour the
+  `expected` update precondition (`BackendPreconditionFailedException`).
   They cannot hold the request-scoped DbContext (sessions outlive requests) — they open
   short-lived contexts via `ISyncDbContextFactory`. `WaitForChangesAsync` awaits the
   in-process `LocalChangeNotifier` (instant cross-device push, single-instance only —
@@ -716,15 +854,22 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   per-user connection caps `ImapIdleWatcher`'s auth-retry budget exists to survive. Steady
   state is 3 connections per user: session + IDLE + poll); DAV collections poll
   ctag/sync-token every `DavPollSeconds`. `Eas.UseImapIdle=false` disables IDLE entirely.
-- Attachment `FileReference` format: `UrlEncode("{imapBackendKey}|{uid}|{attachmentIndex}")`
-  where index is the position in `MimeMessage.Attachments`. Search `LongId` format:
-  `UrlEncode("{folderBackendKey}|{itemKey}")`. Both round-trip through ItemOperations.
+- Attachment `FileReference` format: `UrlEncode("{folderBackendKey}|{itemKey}|{attachmentIndex}")`
+  where index is the position in `MimeMessage.Attachments` — ENTIRELY host-internal since the
+  typed contract (`Server/Eas/Content/MailFileReference`): the host emits it when rendering,
+  parses it back in ItemOperations/GetAttachment, fetches the raw message via
+  `IMailboxOperations.GetRawMessageAsync` and extracts the part with its own MimeKit. A store
+  never sees a FileReference. Search `LongId` format: `UrlEncode("{folderBackendKey}|{itemKey}")`
+  (host-internal likewise). Both round-trip through ItemOperations.
 - Folder backend keys are prefixed: `imap:`, `caldav:`, `caldav-tasks:`, `carddav:`,
-  `local:` — each store claims its keys via `IContentStore.OwnsBackendKey` and the
+  `local:` — each store claims its keys via `IContentStore.OwnsKey(FolderKey)` and the
   session dispatches on the first claimant, so key spaces must stay disjoint (the colon
   keeps `caldav:` from matching `caldav-tasks:` keys; local stores match their single
-  folder key exactly). Read-only folders route the same way: the owning store opts in
-  via `IReadOnlyCollectionSource`.
+  folder key exactly). A store's CONTENT CLASS is derived from which alias interface it
+  implements (`IMailStore`/`ICalendarStore`/`ITaskStore`/`IContactStore`/`INotesStore` —
+  exactly one; `Core/Backend/ContentStoreClasses` enforces it at session build) and stamped
+  onto the folder registry, so a resolved `UserFolder` carries its class. Read-only folders
+  route the same way: the owning store opts in via `IReadOnlyCollectionSource`.
 - **Tasks over CalDAV** (`CalDavTaskStore`, the `Tasks` role on the `caldav` provider):
   VTODOs in the home-set collection named by the Tasks role's `TaskFolder` setting
   (default "Tasks", Axigen's layout; the Tasks section inherits the Calendar section's
@@ -754,11 +899,11 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   - **Ical.Net 5.x**: `CalDateTime` (no `IDateTime`), `ExceptionDates.GetAllDates()/Add()`,
     `Duration.FromMinutes()`, `RecurrencePattern.Count` is `int?`. `RecurrenceRules`/
     `RecurrenceId` are obsolete-but-correct here (EAS carries one rule); the pragma in
-    `CalendarConverter.cs` explains why.
+    `CalendarConverter.cs` (Eas.Conversion) explains why.
   - **FolkerKinzel.VCards 8.x**: `Vcf.Parse`, `vCard.ContactID` (not `ID`),
     `Organization.Name/Units`, enum extensions like `PCl?.IsSet(...)` take the *nullable*
     receiver, `DataProperty.Value.Bytes`, `DateAndOrTime.DateOnly/DateTimeOffset`.
-- vCards are **written** by hand-rolled vCard 3.0 serialization (`ContactConverter
+- vCards are **written** by hand-rolled vCard 3.0 serialization (host-side, `ContactConverter
   .FromApplicationData`) and **read** via FolkerKinzel — keep that split; writing via the
   builder API was deemed riskier than emitting the simple format directly.
 - The MS-ASTZ timezone blob (`TimeZoneBlob`) is a 172-byte little-endian struct in base64.
@@ -1014,7 +1159,7 @@ banner. Rules:
 
 ## Testing expectations
 
-- **Public-surface changes to `ActiveSync.Contracts`/`ActiveSync.Protocol` → raise
+- **Public-surface changes to `ActiveSync.Contracts` → raise
   `<ContractVersionMinor>` in `Directory.Build.props` and regenerate the approved snapshot**
   (`EAS_APPROVE_CONTRACT_SURFACE=1`). `ContractSurfaceApprovalTests` fails the build otherwise.
   Never raise `<ContractVersionMajor>` unless a human asked — see the callout in the provider-engine

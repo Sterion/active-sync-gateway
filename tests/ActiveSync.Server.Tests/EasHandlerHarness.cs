@@ -44,7 +44,7 @@ public sealed class EasHandlerHarness : IDisposable
 		_db.SaveChanges();
 		UserId = user.UserId;
 		State = new SyncStateService(_db);
-		Folders = new FolderService(State, NullLogger<FolderService>.Instance);
+		Folders = new FolderService(State, TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLogger<FolderService>.Instance);
 	}
 
 	/// <summary>
@@ -86,9 +86,36 @@ public sealed class EasHandlerHarness : IDisposable
 	}
 
 	/// <summary>Registers folders and returns the live registry (ServerIds assigned by the store).</summary>
-	public Task<List<UserFolder>> RegisterFoldersAsync(params BackendFolder[] folders)
+	public Task<List<UserFolder>> RegisterFoldersAsync(params RegistryFolder[] folders)
 	{
 		return State.RefreshFolderRegistryAsync(UserId, folders, CancellationToken.None);
+	}
+
+	/// <summary>
+	///   The host-side adapter over the stub mail store — what a handler receives from
+	///   <c>FolderService.ResolveCollectionAsync</c> now that the EAS conversion lives host-side.
+	/// </summary>
+	public Eas.Content.ContentAdapter MailAdapter()
+	{
+		return Eas.Content.ContentAdapter.For(Session, Session.Store, new EasOptions());
+	}
+
+	/// <summary>
+	///   One registry folder: the store's typed <see cref="BackendFolder" /> plus the EAS class
+	///   the HOST derives from the owning store's alias interface (the contract's folder record
+	///   carries no class of its own).
+	/// </summary>
+	public static RegistryFolder Folder(
+		string key, string displayName, FolderType type, string easClass, string? parentKey = null)
+	{
+		return new RegistryFolder(
+			new BackendFolder
+			{
+				Key = new FolderKey(key),
+				DisplayName = displayName,
+				ParentKey = parentKey is null ? null : new FolderKey(parentKey),
+				Type = type
+			}, easClass);
 	}
 
 	/// <summary>
@@ -105,7 +132,7 @@ public sealed class EasHandlerHarness : IDisposable
 		{
 			Http = http,
 			Parameters = new EasRequestParameters { Command = command, DeviceId = device.DeviceId },
-			Credentials = new BackendCredentials(UserName, "pw"),
+			Credentials = new BackendCredentials { UserName = UserName, Password = "pw" },
 			Session = Session,
 			Device = device,
 			State = State,
@@ -144,7 +171,7 @@ public sealed class EasHandlerHarness : IDisposable
 			{
 				Command = command, DeviceId = device.DeviceId, ProtocolVersion = protocolVersion
 			},
-			Credentials = new BackendCredentials(credentialsUserName ?? UserName, "pw"),
+			Credentials = new BackendCredentials { UserName = credentialsUserName ?? UserName, Password = "pw" },
 			Session = Session,
 			Device = device,
 			State = State,
@@ -163,6 +190,12 @@ public sealed class EasHandlerHarness : IDisposable
 	{
 		public HashSet<string> ReadOnlyBackendKeys { get; } = new(StringComparer.Ordinal);
 		public RecordingStore Store { get; } = new();
+
+		/// <summary>
+		///   The mailbox side-operations (`IMailboxOperations`). Kept under the name `Mail` because
+		///   that is what every test calls it; the contract's own `Mail` (the mail STORE) is the
+		///   explicit interface implementation below.
+		/// </summary>
 		public RecordingMailOperations Mail { get; } = new();
 
 		public RecordingMailSubmit Submit { get; } = new();
@@ -171,24 +204,33 @@ public sealed class EasHandlerHarness : IDisposable
 		///   An optional second content store for a non-mail class (e.g. Calendar/Contacts/Tasks),
 		///   so a test can prove class-aware routing. Null unless a test wires one in.
 		/// </summary>
-		public RecordingStore? SecondaryStore { get; set; }
+		public RecordingStoreBase? SecondaryStore { get; set; }
 
-		public BackendCredentials Credentials => new(UserName, "pw");
+		public BackendCredentials Credentials => new() { UserName = UserName, Password = "pw" };
 		public int UserId => 1;
 		public string? MailAddress => UserName;
+
 		public IReadOnlyList<IContentStore> Stores =>
 			SecondaryStore is null ? [Store] : [Store, SecondaryStore];
-		public IMailStoreOperations MailStore => Mail;
+
+		// The mail STORE and the mailbox side-operations are two different objects now, so the
+		// contract's Mail/Mailbox are implemented explicitly and the class keeps its own names.
+		IMailStore IBackendSession.Mail => Store;
+		IMailboxOperations IBackendSession.Mailbox => Mail;
+
 		public IMailSubmitOperations MailSubmit => Submit;
 
 		/// <summary>Address-book operations (GAL search). Null unless a test wires one in.</summary>
-		public IContactOperations? Contacts { get; set; }
+		public IDirectoryOperations? Contacts { get; set; }
 
-		/// <summary>Calendar operations (meeting response). Null unless a test wires one in.</summary>
-		public ICalendarOperations? Calendar { get; set; }
+		/// <summary>Calendar/meeting operations (meeting response). Null unless a test wires one in.</summary>
+		public IMeetingOperations? Calendar { get; set; }
 
 		/// <summary>Out-of-office backend. Null unless a test wires one in (the accept-and-ignore stub).</summary>
 		public IOofBackend? Oof { get; set; }
+
+		/// <summary>The revision-keyed payload cache the host's merge path drives.</summary>
+		public SessionPayloadCache PayloadCache { get; } = new();
 
 		public IContentStore? GetStoreForClass(string easClass)
 		{
@@ -199,18 +241,28 @@ public sealed class EasHandlerHarness : IDisposable
 			return null;
 		}
 
-		public IContentStore? GetStoreForBackendKey(string backendKey)
+		public IContentStore? GetStoreForKey(FolderKey key)
 		{
-			if (Store.OwnsBackendKey(backendKey))
+			if (Store.OwnsKey(key))
 				return Store;
-			if (SecondaryStore is not null && SecondaryStore.OwnsBackendKey(backendKey))
+			if (SecondaryStore is not null && SecondaryStore.OwnsKey(key))
 				return SecondaryStore;
 			return null;
 		}
 
-		public bool IsReadOnlyFolder(string folderBackendKey)
+		/// <summary>
+		///   The stub declares each store's class rather than deriving it: the recording stores are
+		///   deliberately retargetable, and the derivation itself is asserted where it lives
+		///   (<c>ContentStoreClasses</c>).
+		/// </summary>
+		public string EasClassOf(IContentStore store)
 		{
-			return ReadOnlyBackendKeys.Contains(folderBackendKey);
+			return store is RecordingStoreBase recording ? recording.EasClass : Protocol.EasClass.Email;
+		}
+
+		public bool IsReadOnlyFolder(FolderKey folder)
+		{
+			return ReadOnlyBackendKeys.Contains(folder.Value);
 		}
 
 		public ValueTask DisposeAsync()
@@ -219,11 +271,15 @@ public sealed class EasHandlerHarness : IDisposable
 		}
 	}
 
-	/// <summary>Records the mutations a handler asked for, so a test can assert none happened.</summary>
-	public sealed class RecordingStore : IContentStore, IItemMoveOperations, IFolderOperations, ICalendarOperations
+	/// <summary>
+	///   The class-agnostic half of a recording store: folder listing, the revision map, deletes
+	///   and the long-poll wait. A store's content class is derived from WHICH class alias it
+	///   implements, so the per-class halves are separate subclasses below.
+	/// </summary>
+	public abstract class RecordingStoreBase : IContentStore
 	{
+		/// <summary>Folder/item keys a handler fetched, as "{folder}/{item}".</summary>
 		public List<string> Fetched { get; } = [];
-		public List<string> Moved { get; } = [];
 
 		/// <summary>Item keys a handler asked to update, so a conflict test can assert none happened.</summary>
 		public List<string> Updated { get; } = [];
@@ -234,9 +290,28 @@ public sealed class EasHandlerHarness : IDisposable
 		///   changes; populate it to drive Add/Change/Delete emission through the Sync collection loop.
 		/// </summary>
 		public Dictionary<string, string> Revisions { get; } = new(StringComparer.Ordinal);
-		public List<string> DeletedFolders { get; } = [];
-		public List<string> RenamedFolders { get; } = [];
-		public List<string> CreatedFolders { get; } = [];
+
+		/// <summary>
+		///   Item keys that a fetch reports as gone (returns null), standing in for an item that
+		///   vanished between the revision listing and the fetch.
+		/// </summary>
+		public HashSet<string> VanishedKeys { get; } = new(StringComparer.Ordinal);
+
+		/// <summary>
+		///   One entry per batched <c>GetItemsAsync</c> the Sync engine issued, each the ordered key
+		///   list of that call — lets a test assert the window is fetched in ONE batch rather than a
+		///   fetch per item.
+		/// </summary>
+		public List<IReadOnlyList<string>> BatchFetched { get; } = [];
+
+		/// <summary>Items a handler asked to delete, so a test can assert removal happened.</summary>
+		public List<string> Deleted { get; } = [];
+
+		/// <summary>
+		///   When set, <see cref="DeleteItemAsync" /> throws this instead of recording — a backend
+		///   hiccup on the post-send invite-mail cleanup that must NOT fail the command.
+		/// </summary>
+		public Func<Exception>? DeleteFailWith { get; set; }
 
 		/// <summary>
 		///   Long-poll wait behaviour for Ping/Sync tests: given the requested backend keys, return
@@ -250,25 +325,20 @@ public sealed class EasHandlerHarness : IDisposable
 		///   controllable delay (e.g. proving a losing per-store wait is drained rather than
 		///   abandoned). Checked before <see cref="WaitForChanges" />.
 		/// </summary>
-		public Func<IReadOnlyList<string>, CancellationToken, Task<IReadOnlyList<string>>>? WaitForChangesAsyncOverride { get; set; }
+		public Func<IReadOnlyList<string>, CancellationToken, Task<IReadOnlyList<string>>>? WaitForChangesAsyncOverride
+		{
+			get;
+			set;
+		}
 
 		/// <summary>
-		///   The EAS class and backend-key prefix this store claims. Default to the mail store
-		///   (Email / "imap:"); a test can retarget it to stand in for a calendar/contacts store.
+		///   The EAS class this store claims — the STUB SESSION's own answer for it (production
+		///   derives the class from the alias interface). Defaults per subclass.
 		/// </summary>
 		public string EasClass { get; set; } = Protocol.EasClass.Email;
+
+		/// <summary>The backend-key prefix this store owns.</summary>
 		public string KeyPrefix { get; set; } = "imap:";
-
-		/// <summary>
-		///   When set, the folder mutations (create/rename/delete) throw this instead of recording —
-		///   a backend/transport failure that is NOT a <see cref="BackendException" />.
-		/// </summary>
-		public Func<Exception>? FolderOpFailWith { get; set; }
-
-		public bool OwnsBackendKey(string backendKey)
-		{
-			return backendKey.StartsWith(KeyPrefix, StringComparison.Ordinal);
-		}
 
 		/// <summary>Number of hierarchy enumerations the handler drove (asserted to be exactly one).</summary>
 		public int ListFoldersCalls { get; private set; }
@@ -283,6 +353,17 @@ public sealed class EasHandlerHarness : IDisposable
 		/// </summary>
 		public IReadOnlyList<BackendFolder>? Listing { get; set; }
 
+		/// <summary>
+		///   When set, <see cref="GetItemRevisionsAsync" /> throws this instead of returning the
+		///   revision map — a flaky backend during a listing.
+		/// </summary>
+		public Func<Exception>? GetRevisionsFailWith { get; set; }
+
+		public bool OwnsKey(FolderKey key)
+		{
+			return key.Value.StartsWith(KeyPrefix, StringComparison.Ordinal);
+		}
+
 		public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 		{
 			ListFoldersCalls++;
@@ -291,163 +372,198 @@ public sealed class EasHandlerHarness : IDisposable
 			throw new NotSupportedException();
 		}
 
-		/// <summary>
-		///   When set, <see cref="GetItemRevisionsAsync" /> throws this instead of returning the
-		///   revision map — a flaky backend during a listing.
-		/// </summary>
-		public Func<Exception>? GetRevisionsFailWith { get; set; }
-
-		public Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-			string folderBackendKey, ContentFilter filter, CancellationToken ct)
+		public Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+			FolderKey folder, ContentFilter filter, CancellationToken ct)
 		{
 			if (GetRevisionsFailWith is { } fail)
 				throw fail();
-			return Task.FromResult<IReadOnlyDictionary<string, string>>(
-				new Dictionary<string, string>(Revisions, StringComparer.Ordinal));
+			return Task.FromResult<IReadOnlyDictionary<ItemKey, ItemRevision>>(
+				Revisions.ToDictionary(r => new ItemKey(r.Key), r => new ItemRevision(r.Value)));
 		}
 
-		/// <summary>
-		///   Overrides the ApplicationData a fetched item carries. The default (an
-		///   <c>airsync:Subject</c>, which has no WBXML token) is deliberately unencodable so
-		///   Fetch tests can assert the decision without a real body; a test that DOES round-trip
-		///   the response through WBXML (Search/Find) supplies an encodable payload here.
-		/// </summary>
-		public Func<string, IReadOnlyList<XElement>>? ItemApplicationData { get; set; }
-
-		/// <summary>
-		///   Item keys that <see cref="GetItemAsync" /> reports as gone (returns null), standing in
-		///   for an item that vanished between the revision listing and the fetch.
-		/// </summary>
-		public HashSet<string> VanishedKeys { get; } = new(StringComparer.Ordinal);
-
-		/// <summary>
-		///   One entry per batched <see cref="GetItemsAsync" /> the Sync engine issued, each the
-		///   ordered key list of that call — lets a test assert the window is fetched in ONE batch
-		///   rather than a fetch per item.
-		/// </summary>
-		public List<IReadOnlyList<string>> BatchFetched { get; } = [];
-
-		/// <summary>
-		///   The <see cref="BodyPreference" /> each <see cref="GetItemAsync" /> call actually received,
-		///   in call order — lets a test assert the version-gated <c>Eas16</c> flag reached the store
-		///   rather than being hard-coded false.
-		/// </summary>
-		public List<BodyPreference> FetchedBodyPreferences { get; } = [];
-
-		public Task<BackendItem?> GetItemAsync(
-			string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct)
+		public Task DeleteItemAsync(FolderKey folder, ItemKey item, bool permanent, CancellationToken ct)
 		{
-			Fetched.Add($"{folderBackendKey}/{itemKey}");
-			FetchedBodyPreferences.Add(bodyPreference);
-			if (VanishedKeys.Contains(itemKey))
-				return Task.FromResult<BackendItem?>(null);
-			IReadOnlyList<XElement> data = ItemApplicationData?.Invoke(itemKey)
-				?? [new XElement(EasNamespaces.AirSync + "Subject", itemKey)];
-			return Task.FromResult<BackendItem?>(new BackendItem(data));
+			if (DeleteFailWith is { } fail)
+				throw fail();
+			Deleted.Add($"{folder.Value}/{item.Value}");
+			return Task.CompletedTask;
+		}
+
+		public Task<IReadOnlyList<FolderKey>> WaitForChangesAsync(
+			IReadOnlyList<FolderKey> folders, TimeSpan timeout, CancellationToken ct)
+		{
+			List<string> keys = folders.Select(f => f.Value).ToList();
+			if (WaitForChangesAsyncOverride is { } asyncWait)
+				return Wrap(asyncWait(keys, ct));
+			if (WaitForChanges is { } wait)
+				return Task.FromResult<IReadOnlyList<FolderKey>>(
+					wait(keys).Select(k => new FolderKey(k)).ToList());
+			throw new NotSupportedException();
+
+			// The override's task is the TEST's own (it models a controllable backend wait); the
+			// wrapper only retypes its result at the contract boundary, exactly as the pre-typed
+			// harness returned it untouched.
+#pragma warning disable VSTHRD003
+			static async Task<IReadOnlyList<FolderKey>> Wrap(Task<IReadOnlyList<string>> changed)
+			{
+				return (await changed).Select(k => new FolderKey(k)).ToList();
+			}
+#pragma warning restore VSTHRD003
+		}
+	}
+
+	/// <summary>
+	///   The mail store: raw RFC822 items plus the move/folder capabilities. Records the mutations
+	///   a handler asked for, so a test can assert none happened.
+	/// </summary>
+	public sealed class RecordingStore : RecordingStoreBase, IMailStore, IItemMoveOperations, IFolderOperations
+	{
+		public List<string> Moved { get; } = [];
+		public List<string> DeletedFolders { get; } = [];
+		public List<string> RenamedFolders { get; } = [];
+		public List<string> CreatedFolders { get; } = [];
+
+		/// <summary>
+		///   When set, the folder mutations (create/rename/delete) throw this instead of recording —
+		///   a backend/transport failure that is NOT a <see cref="BackendException" />.
+		/// </summary>
+		public Func<Exception>? FolderOpFailWith { get; set; }
+
+		/// <summary>
+		///   Overrides the raw RFC822 a fetched message carries. The default is a minimal, valid
+		///   message whose host-side conversion round-trips through the WBXML codec — the store no
+		///   longer produces EAS XML at all, so a test that needs a specific rendered shape supplies
+		///   the MIME that produces it.
+		/// </summary>
+		public Func<string, byte[]>? ItemRfc822 { get; set; }
+
+		/// <summary>Drafts created via <c>CreateDraftAsync</c>, as their raw bytes.</summary>
+		public List<byte[]> CreatedDrafts { get; } = [];
+
+		/// <summary>Drafts rewritten via <c>ReplaceDraftAsync</c>, as "{item}" keys.</summary>
+		public List<string> ReplacedDrafts { get; } = [];
+
+		public Task<MailItem?> GetItemAsync(
+			FolderKey folder, ItemKey item, MailFetchOptions options, CancellationToken ct)
+		{
+			Fetched.Add($"{folder.Value}/{item.Value}");
+			if (VanishedKeys.Contains(item.Value))
+				return Task.FromResult<MailItem?>(null);
+			return Task.FromResult<MailItem?>(new MailItem
+			{
+				Rfc822 = ItemRfc822?.Invoke(item.Value) ?? DefaultMessage(item.Value),
+				Flags = new MailFlags()
+			});
 		}
 
 		/// <summary>
 		///   Records the batch and mirrors the interface default (loop + per-item null on failure),
 		///   so existing Sync tests are behaviourally unchanged while a test can assert the routing.
 		/// </summary>
-		public async Task<IReadOnlyDictionary<string, BackendItem?>> GetItemsAsync(
-			string folderBackendKey, IReadOnlyList<string> itemKeys, BodyPreference bodyPreference, CancellationToken ct)
+		public async Task<IReadOnlyDictionary<ItemKey, MailItem?>> GetItemsAsync(
+			FolderKey folder, IReadOnlyList<ItemKey> items, MailFetchOptions options, CancellationToken ct)
 		{
-			BatchFetched.Add(itemKeys.ToList());
-			Dictionary<string, BackendItem?> items = new(itemKeys.Count, StringComparer.Ordinal);
-			foreach (string itemKey in itemKeys)
+			BatchFetched.Add(items.Select(i => i.Value).ToList());
+			Dictionary<ItemKey, MailItem?> fetched = new(items.Count);
+			foreach (ItemKey item in items)
 			{
 				try
 				{
-					items[itemKey] = await GetItemAsync(folderBackendKey, itemKey, bodyPreference, ct);
+					fetched[item] = await GetItemAsync(folder, item, options, ct);
 				}
 				catch (Exception ex) when (ex is not OperationCanceledException)
 				{
-					items[itemKey] = null;
+					fetched[item] = null;
 				}
 			}
-			return items;
+
+			return fetched;
 		}
 
-		public Task<(string ItemKey, string Revision)> CreateItemAsync(
-			string folderBackendKey, XElement applicationData, CancellationToken ct)
+		/// <summary>A minimal, valid RFC822 message — enough for the host to render a real Email item.</summary>
+		internal static byte[] DefaultMessage(string itemKey)
 		{
-			throw new NotSupportedException();
+			return System.Text.Encoding.ASCII.GetBytes(
+				"From: sender@example.test\r\nTo: u@example.test\r\n" +
+				$"Subject: {itemKey}\r\nDate: Mon, 1 Jul 2024 10:00:00 +0000\r\n" +
+				"Content-Type: text/plain; charset=utf-8\r\n\r\npreview\r\n");
 		}
 
-		public Task<string> UpdateItemAsync(
-			string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct)
+		public Task<(ItemKey Key, ItemRevision Revision)> CreateDraftAsync(
+			FolderKey folder, MailItem item, CancellationToken ct)
 		{
-			Updated.Add(itemKey);
-			return Task.FromResult("updated-rev");
+			CreatedDrafts.Add(item.Rfc822.ToArray());
+			return Task.FromResult((new ItemKey($"draft-{CreatedDrafts.Count}"), new ItemRevision("000")));
 		}
 
-		/// <summary>Items a handler asked to delete, so a test can assert removal happened.</summary>
-		public List<string> Deleted { get; } = [];
-
-		/// <summary>
-		///   When set, <see cref="DeleteItemAsync" /> throws this instead of recording — a backend
-		///   hiccup on the post-send invite-mail cleanup that must NOT fail the command.
-		/// </summary>
-		public Func<Exception>? DeleteFailWith { get; set; }
-
-		public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
+		public Task<ItemRevision> UpdateFlagsAsync(
+			FolderKey folder, ItemKey item, MailFlagsPatch patch, ItemRevision? expected, CancellationToken ct)
 		{
-			if (DeleteFailWith is { } fail)
-				throw fail();
-			Deleted.Add($"{folderBackendKey}/{itemKey}");
-			return Task.CompletedTask;
+			Updated.Add(item.Value);
+			return Task.FromResult(new ItemRevision("updated-rev"));
+		}
+
+		public Task<(ItemKey Key, ItemRevision Revision)> ReplaceDraftAsync(
+			FolderKey folder, ItemKey item, MailItem value, CancellationToken ct)
+		{
+			Updated.Add(item.Value);
+			ReplacedDrafts.Add(item.Value);
+			// A real store's rewrite MOVES the key (IMAP delete+append); the host must not
+			// echo-suppress under the new one.
+			return Task.FromResult((new ItemKey($"{item.Value}-rewritten"), new ItemRevision("updated-rev")));
 		}
 
 		/// <summary>
 		///   Mirrors a real backend's MoveItemAsync — the moved item keeps its key and reports
-		///   whatever <see cref="Revisions" /> holds for it (defaulting to "" when a test hasn't set
-		///   one), never a manufactured placeholder.
+		///   whatever <see cref="RecordingStoreBase.Revisions" /> holds for it (defaulting to "" when
+		///   a test hasn't set one), never a manufactured placeholder.
 		/// </summary>
-		public Task<(string ItemKey, string Revision)> MoveItemAsync(
-			string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
+		public Task<(ItemKey Key, ItemRevision Revision)> MoveItemAsync(
+			FolderKey source, ItemKey item, FolderKey destination, CancellationToken ct)
 		{
-			Moved.Add($"{sourceFolderBackendKey}/{itemKey}->{destinationFolderBackendKey}");
-			return Task.FromResult((itemKey, Revisions.GetValueOrDefault(itemKey, "")));
+			Moved.Add($"{source.Value}/{item.Value}->{destination.Value}");
+			return Task.FromResult(
+				(item, new ItemRevision(Revisions.GetValueOrDefault(item.Value, ""))));
 		}
 
-		public Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct)
+		public Task<FolderKey> CreateFolderAsync(FolderKey? parent, string displayName, CancellationToken ct)
 		{
 			if (FolderOpFailWith is { } fail)
 				throw fail();
-			CreatedFolders.Add($"{parentBackendKey}/{displayName}");
-			return Task.FromResult($"{KeyPrefix}{displayName}");
+			CreatedFolders.Add($"{parent?.Value}/{displayName}");
+			return Task.FromResult(new FolderKey($"{KeyPrefix}{displayName}"));
 		}
 
-		public Task RenameFolderAsync(string backendKey, string newDisplayName, CancellationToken ct)
+		public Task RenameFolderAsync(FolderKey folder, string newDisplayName, CancellationToken ct)
 		{
 			if (FolderOpFailWith is { } fail)
 				throw fail();
-			RenamedFolders.Add(backendKey);
+			RenamedFolders.Add(folder.Value);
 			return Task.CompletedTask;
 		}
 
-		public Task DeleteFolderAsync(string backendKey, CancellationToken ct)
+		public Task DeleteFolderAsync(FolderKey folder, CancellationToken ct)
 		{
 			if (FolderOpFailWith is { } fail)
 				throw fail();
-			DeletedFolders.Add(backendKey);
+			DeletedFolders.Add(folder.Value);
 			return Task.CompletedTask;
 		}
+	}
 
-		public Task<IReadOnlyList<string>> WaitForChangesAsync(
-			IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
+	/// <summary>
+	///   A calendar store standing in for a CalDAV/JMAP calendar backend: iCalendar payloads plus
+	///   the meeting operations MeetingResponse drives.
+	/// </summary>
+	public sealed class RecordingCalendarStore : RecordingStoreBase, ICalendarStore, IMeetingOperations
+	{
+		public RecordingCalendarStore()
 		{
-			if (WaitForChangesAsyncOverride is { } asyncWait)
-				return asyncWait(folderBackendKeys, ct);
-			if (WaitForChanges is { } wait)
-				return Task.FromResult(wait(folderBackendKeys));
-			throw new NotSupportedException();
+			EasClass = Protocol.EasClass.Calendar;
+			KeyPrefix = "caldav:";
 		}
 
-		// ICalendarOperations — lets this store stand in for a calendar backend (MeetingResponse).
-
-		/// <summary>The stored event iCalendar <see cref="GetRawEventAsync" /> returns.</summary>
+		/// <summary>The stored event iCalendar a fetch returns (null = the item is gone).</summary>
 		public string? RawEvent { get; set; }
 
 		/// <summary>The calendar item key <see cref="RespondToMeetingAsync" /> returns (null = not found).</summary>
@@ -456,16 +572,37 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>Meeting responses applied: "{folderKey}/{uid}/{userResponse}".</summary>
 		public List<string> Responded { get; } = [];
 
-		public Task<string?> RespondToMeetingAsync(
-			string calendarFolderBackendKey, string eventUid, int userResponse, CancellationToken ct)
+		/// <summary>The complete payloads a handler wrote, in call order.</summary>
+		public List<string> Written { get; } = [];
+
+		public Task<CalendarItem?> GetItemAsync(FolderKey folder, ItemKey item, CancellationToken ct)
 		{
-			Responded.Add($"{calendarFolderBackendKey}/{eventUid}/{userResponse}");
-			return Task.FromResult(RespondHref);
+			Fetched.Add($"{folder.Value}/{item.Value}");
+			if (VanishedKeys.Contains(item.Value) || RawEvent is null)
+				return Task.FromResult<CalendarItem?>(null);
+			return Task.FromResult<CalendarItem?>(new CalendarItem { ICalendar = RawEvent });
 		}
 
-		public Task<string?> GetRawEventAsync(string folderBackendKey, string itemKey, CancellationToken ct)
+		public Task<(ItemKey Key, ItemRevision Revision)> CreateItemAsync(
+			FolderKey folder, CalendarItem item, CancellationToken ct)
 		{
-			return Task.FromResult(RawEvent);
+			Written.Add(item.ICalendar);
+			return Task.FromResult((new ItemKey($"event-{Written.Count}"), new ItemRevision("created-rev")));
+		}
+
+		public Task<ItemRevision> UpdateItemAsync(
+			FolderKey folder, ItemKey item, CalendarItem value, ItemRevision? expected, CancellationToken ct)
+		{
+			Updated.Add(item.Value);
+			Written.Add(value.ICalendar);
+			return Task.FromResult(new ItemRevision("updated-rev"));
+		}
+
+		public Task<ItemKey?> RespondToMeetingAsync(
+			FolderKey calendar, string eventUid, MeetingResponseKind response, CancellationToken ct)
+		{
+			Responded.Add($"{calendar.Value}/{eventUid}/{(int)response}");
+			return Task.FromResult(RespondHref is null ? null : (ItemKey?)new ItemKey(RespondHref));
 		}
 
 		public Task<bool> ShouldSendInvitationsAsync(CancellationToken ct)
@@ -483,17 +620,17 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>When set, SendAsync throws this instead of recording (a genuine send failure).</summary>
 		public Func<Exception>? FailWith { get; set; }
 
-		public Task SendAsync(byte[] mime, CancellationToken ct)
+		public Task SendAsync(ReadOnlyMemory<byte> rfc822, CancellationToken ct)
 		{
 			if (FailWith is { } fail)
 				throw fail();
-			Sent.Add(mime);
+			Sent.Add(rfc822.ToArray());
 			return Task.CompletedTask;
 		}
 	}
 
-	/// <summary>Mail-store side operations; records the folders a handler asked to empty.</summary>
-	public sealed class RecordingMailOperations : IMailStoreOperations
+	/// <summary>Mailbox side operations; records the folders a handler asked to empty.</summary>
+	public sealed class RecordingMailOperations : IMailboxOperations
 	{
 		public List<string> Emptied { get; } = [];
 
@@ -506,12 +643,12 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>True once SaveToSentAsync was reached (whether or not it was told to throw).</summary>
 		public bool SaveToSentAttempted { get; private set; }
 
-		public Task SaveToSentAsync(byte[] mime, CancellationToken ct)
+		public Task SaveToSentAsync(ReadOnlyMemory<byte> rfc822, CancellationToken ct)
 		{
 			SaveToSentAttempted = true;
 			if (SaveToSentShouldThrow)
 				throw new BackendException("save to Sent failed");
-			Saved.Add(mime);
+			Saved.Add(rfc822.ToArray());
 			return Task.CompletedTask;
 		}
 
@@ -521,30 +658,17 @@ public sealed class EasHandlerHarness : IDisposable
 		/// <summary>When set, GetRawMessageAsync throws this — a backend failure mid-request.</summary>
 		public Func<Exception>? GetRawFailWith { get; set; }
 
-		public Task<byte[]?> GetRawMessageAsync(string folderBackendKey, string itemKey, CancellationToken ct)
+		/// <summary>Number of times the raw-message fetch was actually invoked.</summary>
+		public int GetRawMessageCalls { get; private set; }
+
+		public Task<ReadOnlyMemory<byte>?> GetRawMessageAsync(FolderKey folder, ItemKey item, CancellationToken ct)
 		{
+			GetRawMessageCalls++;
 			if (GetRawFailWith is { } fail)
 				throw fail();
 			if (RawMessage is null)
 				throw new NotSupportedException();
-			return Task.FromResult<byte[]?>(RawMessage);
-		}
-
-		/// <summary>
-		///   The attachment <see cref="GetAttachmentAsync" /> returns when told to answer instead of
-		///   throwing (proves whether the backend was reached at all, vs. just returning null).
-		/// </summary>
-		public BackendAttachment? Attachment { get; set; }
-
-		/// <summary>Number of times <see cref="GetAttachmentAsync" /> was actually invoked.</summary>
-		public int GetAttachmentCalls { get; private set; }
-
-		public Task<BackendAttachment?> GetAttachmentAsync(string fileReference, CancellationToken ct)
-		{
-			GetAttachmentCalls++;
-			if (Attachment is not null)
-				return Task.FromResult<BackendAttachment?>(Attachment);
-			throw new NotSupportedException();
+			return Task.FromResult<ReadOnlyMemory<byte>?>(RawMessage);
 		}
 
 		/// <summary>
@@ -553,9 +677,9 @@ public sealed class EasHandlerHarness : IDisposable
 		/// </summary>
 		public List<string> Answered { get; } = [];
 
-		public Task SetAnsweredAsync(string folderBackendKey, string itemKey, bool forwarded, CancellationToken ct)
+		public Task SetAnsweredAsync(FolderKey folder, ItemKey item, bool forwarded, CancellationToken ct)
 		{
-			Answered.Add($"{folderBackendKey}/{itemKey}:{forwarded}");
+			Answered.Add($"{folder.Value}/{item.Value}:{forwarded}");
 			return Task.CompletedTask;
 		}
 
@@ -575,14 +699,15 @@ public sealed class EasHandlerHarness : IDisposable
 		/// </summary>
 		public Func<Exception>? SearchFailWith { get; set; }
 
-		public Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
-			string? folderBackendKey, string freeText, DateTime? sinceUtc, int maxResults, CancellationToken ct)
+		public Task<IReadOnlyList<SearchHit>> SearchAsync(
+			FolderKey? folder, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct)
 		{
 			SearchCalls++;
 			if (SearchFailWith is { } fail)
 				throw fail();
-			IReadOnlyList<(string FolderBackendKey, string ItemKey)> page =
-				SearchHits.Take(maxResults).ToList();
+			IReadOnlyList<SearchHit> page = SearchHits.Take(maxResults)
+				.Select(h => new SearchHit { Folder = new FolderKey(h.FolderBackendKey), Item = new ItemKey(h.ItemKey) })
+				.ToList();
 			return Task.FromResult(page);
 		}
 
@@ -593,11 +718,11 @@ public sealed class EasHandlerHarness : IDisposable
 		/// </summary>
 		public Func<Exception>? EmptyFolderFailWith { get; set; }
 
-		public Task EmptyFolderAsync(string folderBackendKey, CancellationToken ct)
+		public Task EmptyFolderAsync(FolderKey folder, CancellationToken ct)
 		{
 			if (EmptyFolderFailWith is { } fail)
 				throw fail();
-			Emptied.Add(folderBackendKey);
+			Emptied.Add(folder.Value);
 			return Task.CompletedTask;
 		}
 	}

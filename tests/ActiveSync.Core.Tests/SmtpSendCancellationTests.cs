@@ -27,7 +27,7 @@ public sealed class SmtpSendCancellationTests
 
 		SmtpSubmitBackend backend = new(
 			new SmtpOptions { Host = IPAddress.Loopback.ToString(), Port = server.Port, Security = "None" },
-			new BackendCredentials("user@example.test", "pw"),
+			new BackendCredentials { UserName = "user@example.test", Password = "pw" },
 			"user@example.test",
 			NullLogger.Instance);
 

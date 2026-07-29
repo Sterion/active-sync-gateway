@@ -122,7 +122,7 @@ public class DavTaskTests(GatewayFixture gateway)
 	{
 		if (TestBackend.DavUrl is not { } davUrl)
 			return false;
-		BackendCredentials credentials = new(user, TestBackend.Password);
+		BackendCredentials credentials = new() { UserName = user, Password = TestBackend.Password };
 		using WebDavClient dav = new(new Uri(davUrl), credentials);
 		string home;
 		try

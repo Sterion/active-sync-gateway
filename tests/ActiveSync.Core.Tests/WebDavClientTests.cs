@@ -257,6 +257,8 @@ public sealed class WebDavClientTests
 
 	// Continued from the case above: a REAL concurrent conflict — the stored content is someone else's edit, not
 	// ours — must keep surfacing as a failure. Only a content match proves it was our own replay.
+	// It surfaces TYPED (BackendPreconditionFailedException, a BackendException) so the host can
+	// tell "the item moved underneath the merge" from any other backend error and re-merge once.
 	[Fact]
 	public async Task UpdatePut_When412AndStoredContentDiffers_StillThrows()
 	{
@@ -265,9 +267,13 @@ public sealed class WebDavClientTests
 			: Ok("BEGIN:VCALENDAR\r\nSUMMARY:someone-elses-edit\r\nEND:VCALENDAR\r\n"));
 		using WebDavClient client = new(Base, new HttpClient(stub));
 
-		await Assert.ThrowsAsync<ActiveSync.Contracts.BackendException>(() =>
-			client.PutAsync("/dav/cal/x.ics", "BEGIN:VCALENDAR\r\nSUMMARY:my-edit\r\nEND:VCALENDAR\r\n",
-				"text/calendar", etag: "\"old-etag\"", ifNoneMatch: false, CancellationToken.None));
+		ActiveSync.Contracts.BackendPreconditionFailedException failure =
+			await Assert.ThrowsAsync<ActiveSync.Contracts.BackendPreconditionFailedException>(() =>
+				client.PutAsync("/dav/cal/x.ics", "BEGIN:VCALENDAR\r\nSUMMARY:my-edit\r\nEND:VCALENDAR\r\n",
+					"text/calendar", etag: "\"old-etag\"", ifNoneMatch: false, CancellationToken.None));
+
+		// Every codebase-wide `catch (BackendException)` guard must still funnel it.
+		Assert.IsAssignableFrom<ActiveSync.Contracts.BackendException>(failure);
 	}
 
 	// RFC 4918 permits a multistatus <D:href> to be an absolute URI, and every href fed to

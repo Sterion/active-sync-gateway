@@ -27,6 +27,9 @@
 		     Server depends on Core pervasively (CliServices, BackendProviderRegistry, ...) and this makes
 		     that dependency honest instead of an accident of the other references (S1). -->
 		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
+		<!-- The format -> EAS-XML conversion layer. Server is its only consumer: under the typed
+		     item currency every conversion happens above the store boundary, in Eas/Content. -->
+		<ProjectReference Include="..\ActiveSync.Eas.Conversion\ActiveSync.Eas.Conversion.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Common\ActiveSync.Backends.Common.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Imap\ActiveSync.Backends.Imap.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Jmap\ActiveSync.Backends.Jmap.csproj" />

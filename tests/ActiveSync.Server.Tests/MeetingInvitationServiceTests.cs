@@ -65,16 +65,19 @@ public sealed class MeetingInvitationServiceTests
 		}
 	}
 
-	private sealed class ThrowingCalendarStore : IContentStore, ICalendarOperations
+	/// <summary>
+	///   A calendar store whose ordinary payload fetch fails. That fetch IS the raw read now (the
+	///   dedicated GetRawEventAsync is gone with the typed currency), so it is what has to throw.
+	/// </summary>
+	private sealed class ThrowingCalendarStore : ICalendarStore, IMeetingOperations
 	{
-		public string EasClass => Protocol.EasClass.Calendar;
-		public bool OwnsBackendKey(string backendKey) => true;
+		public bool OwnsKey(FolderKey key) => true;
 
-		public Task<string?> GetRawEventAsync(string folderBackendKey, string itemKey, CancellationToken ct) =>
+		public Task<CalendarItem?> GetItemAsync(FolderKey folder, ItemKey item, CancellationToken ct) =>
 			throw new BackendException("transient DAV read failure");
 
-		public Task<string?> RespondToMeetingAsync(
-			string calendarFolderBackendKey, string eventUid, int userResponse, CancellationToken ct) =>
+		public Task<ItemKey?> RespondToMeetingAsync(
+			FolderKey calendar, string eventUid, MeetingResponseKind response, CancellationToken ct) =>
 			throw new NotSupportedException();
 
 		public Task<bool> ShouldSendInvitationsAsync(CancellationToken ct) => Task.FromResult(true);
@@ -82,27 +85,23 @@ public sealed class MeetingInvitationServiceTests
 		public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-			string folderBackendKey, ContentFilter filter, CancellationToken ct) =>
+		public Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+			FolderKey folder, ContentFilter filter, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<BackendItem?> GetItemAsync(
-			string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct) =>
+		public Task<(ItemKey Key, ItemRevision Revision)> CreateItemAsync(
+			FolderKey folder, CalendarItem item, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<(string ItemKey, string Revision)> CreateItemAsync(
-			string folderBackendKey, XElement applicationData, CancellationToken ct) =>
+		public Task<ItemRevision> UpdateItemAsync(
+			FolderKey folder, ItemKey item, CalendarItem value, ItemRevision? expected, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<string> UpdateItemAsync(
-			string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct) =>
+		public Task DeleteItemAsync(FolderKey folder, ItemKey item, bool permanent, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct) =>
-			throw new NotSupportedException();
-
-		public Task<IReadOnlyList<string>> WaitForChangesAsync(
-			IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct) =>
+		public Task<IReadOnlyList<FolderKey>> WaitForChangesAsync(
+			IReadOnlyList<FolderKey> folders, TimeSpan timeout, CancellationToken ct) =>
 			throw new NotSupportedException();
 	}
 }

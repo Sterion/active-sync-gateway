@@ -14,30 +14,38 @@
 		<Copyright>Copyright (c) 2026 Ruben Andersen</Copyright>
 	</PropertyGroup>
 
-	<!-- THE backend plugin contract version — one definition for both ActiveSync.Contracts and
-	     ActiveSync.Protocol, which version together as a single surface.
+	<!-- THE backend plugin contract version — the version of ActiveSync.Contracts, and of nothing
+	     else. It used to cover ActiveSync.Protocol as well, back when a plugin referenced both;
+	     Protocol is host-only now and takes the ordinary release version like every other
+	     assembly, so the contract surface this number pins is one assembly's.
 
 	     DELIBERATELY INDEPENDENT of the gateway release version. The release tag arrives as a
-	     global -p:Version and must never reach those two projects: if it did, tagging the gateway
-	     2.0.0 for a product reason would flip the contract major and lock out every existing
-	     plugin without the contract having changed at all.
+	     global -p:Version and must never reach ActiveSync.Contracts: if it did, tagging the
+	     gateway 2.0.0 for a product reason would flip the contract major and lock out every
+	     existing plugin without the contract having changed at all.
 
-	     Raise Major or Minor ONLY when the surface of either project changes. BOTH count as
-	     breaking — the loader demands an exact major.minor match — so Minor absorbs breaks that
-	     would otherwise inflate Major into a meaningless counter. Patch is free: use it for
-	     non-surface fixes (docs, comments), and the loader ignores it. -->
+	     Raise Major or Minor ONLY when that surface changes. BOTH count as breaking — the loader
+	     demands an exact major.minor match — so Minor absorbs breaks that would otherwise inflate
+	     Major into a meaningless counter. Patch is free: use it for non-surface fixes (docs,
+	     comments), and the loader ignores it.
+
+	     The optional side packages (ActiveSync.Contracts.Interop, ActiveSync.Contracts.Conformance)
+	     are NOT loader ABI and do not take this version — they ride the release tag and pin the
+	     contract they were built against as an exact dependency range. -->
 	<PropertyGroup>
 		<ContractVersionMajor>1</ContractVersionMajor>
-		<ContractVersionMinor>3</ContractVersionMinor>
+		<ContractVersionMinor>8</ContractVersionMinor>
 		<ContractVersionPatch>0</ContractVersionPatch>
 		<ContractVersion>$(ContractVersionMajor).$(ContractVersionMinor).$(ContractVersionPatch)</ContractVersion>
 	</PropertyGroup>
 
 	<!-- NuGet: nothing packs unless a project opts in with <IsPackable>true</IsPackable>.
-	     Exactly two do — ActiveSync.Contracts (the plugin contract) and ActiveSync.Protocol
-	     (its single dependency); see the CI pack/push step. The package METADATA (authors,
-	     license, repository URLs, symbols) lives in Directory.Build.targets gated on
-	     IsPackable, so a host-only assembly carries no packaging identity at all. -->
+	     Exactly three do — ActiveSync.Contracts (the plugin contract) plus the two OPTIONAL
+	     packages beside it, ActiveSync.Contracts.Interop (payload ergonomics) and
+	     ActiveSync.Contracts.Conformance (the store-obligation test kit); see the CI pack/push
+	     step. The package METADATA (authors, license, repository URLs, symbols) lives in
+	     Directory.Build.targets gated on IsPackable, so a host-only assembly carries no packaging
+	     identity at all. -->
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
 		<!-- `dotnet pack ActiveSync.slnx` intentionally skips the app/test/backend projects;

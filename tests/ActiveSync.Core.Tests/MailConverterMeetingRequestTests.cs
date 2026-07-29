@@ -1,6 +1,6 @@
 using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol.Wbxml;
 using MimeKit;
 
@@ -37,8 +37,9 @@ public class MailConverterMeetingRequestTests
 	{
 		List<XElement> data = MailConverter.ToApplicationData(
 			message,
-			new MailConverter.MessageFlags(true, false, false, false, null),
-			new BodyPreference(1, null, false),
+			new MailFlags { Seen = true },
+			[],
+			new BodyPreference { Type = BodyType.PlainText },
 			_ => "ref");
 		return data.First(e => e.Name == Email + "MeetingRequest");
 	}

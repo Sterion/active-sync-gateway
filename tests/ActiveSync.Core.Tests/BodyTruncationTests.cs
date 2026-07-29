@@ -1,5 +1,5 @@
 using System.Text;
-using ActiveSync.Backends.Common.Converters;
+using ActiveSync.Eas.Conversion;
 
 namespace ActiveSync.Core.Tests;
 

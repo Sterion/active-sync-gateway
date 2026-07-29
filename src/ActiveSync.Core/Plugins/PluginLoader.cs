@@ -398,12 +398,17 @@ public static class PluginLoader
 	}
 
 	/// <summary>
-	///   One load context per plugin. The contract assemblies (Contracts/Core/Protocol/Backends.* and
-	///   the framework) resolve from the DEFAULT context so their types unify with the host's;
-	///   only genuinely plugin-private dependencies load from the plugin folder.
+	///   One load context per plugin. Exactly one gateway assembly — <c>ActiveSync.Contracts</c> —
+	///   plus the framework resolve from the DEFAULT context, so their types unify with the host's;
+	///   everything else, gateway assemblies included, loads from the plugin folder when the plugin
+	///   ships it.
 	/// </summary>
 	private sealed class PluginLoadContext(string entryDll) : AssemblyLoadContext(isCollectible: false)
 	{
+		/// <summary>Read from the assembly rather than written as a literal, so a rename cannot silently
+		/// turn the one shared assembly into a plugin-local one.</summary>
+		private static readonly string ContractAssemblyName = typeof(IGatewayPlugin).Assembly.GetName().Name!;
+
 		private readonly AssemblyDependencyResolver _resolver = new(entryDll);
 		private readonly string _pluginDir = Path.GetDirectoryName(entryDll)!;
 
@@ -447,16 +452,33 @@ public static class PluginLoader
 		}
 
 		/// <summary>
-		///   The assemblies a plugin must share with the host: the plugin contract (and everything
-		///   the gateway ships alongside it) plus the framework, because their types appear in the
-		///   contract's own signatures. A private copy of any of these would make
-		///   <c>IBackendProvider</c> a different type and the provider would be ignored — which is
-		///   why <c>docs/plugins.md</c> tells plugin authors not to ship them.
+		///   The assemblies a plugin must share with the host: the plugin contract itself, plus the
+		///   framework and the <c>Microsoft.Extensions.*</c> abstractions, because their types appear
+		///   in the contract's own signatures (<c>IGatewayPlugin.Register</c> takes an
+		///   <c>IServiceCollection</c> and an <c>IConfiguration</c>). A private copy of any of these
+		///   would make <c>IBackendProvider</c> a different type and the provider would be ignored —
+		///   which is why <c>docs/plugins.md</c> tells plugin authors not to ship them.
+		///   <para>
+		///     The contract match is EXACT on the simple name, never a prefix. A prefix would also
+		///     capture <c>ActiveSync.Contracts.Interop</c> — an OPTIONAL package the gateway happens
+		///     to ship its own copy of — and resolve the plugin's copy host-first. That is the
+		///     silent-downgrade failure the <see cref="Load" /> comment describes, with a sharper
+		///     edge: the host's interop copy binds the HOST's MimeKit/Ical.Net in the default
+		///     context while the plugin's own code binds its private ones, so handing a
+		///     plugin-context <c>MimeMessage</c> to a host-context extension method fails on type
+		///     identity. A plugin using that package MUST ship it in its own folder, and this is
+		///     what lets it.
+		///   </para>
+		///   <para>
+		///     Narrowing to the one name also stops sharing Core, Crypto, Protocol and the backend
+		///     assemblies, which a plugin has no business binding to the host's copy of: none of
+		///     them appears in a contract signature any more, and they are not published.
+		///   </para>
 		/// </summary>
 		private static bool IsHostOwned(AssemblyName assemblyName)
 		{
 			string name = assemblyName.Name ?? string.Empty;
-			return name.StartsWith("ActiveSync.", StringComparison.Ordinal)
+			return string.Equals(name, ContractAssemblyName, StringComparison.Ordinal)
 			       || name.StartsWith("System.", StringComparison.Ordinal)
 			       || name.StartsWith("Microsoft.Extensions.", StringComparison.Ordinal)
 			       || name is "System" or "mscorlib" or "netstandard";

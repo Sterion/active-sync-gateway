@@ -1,30 +1,25 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Xml;
-using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
-using ActiveSync.Protocol;
-using ActiveSync.Protocol.Wbxml;
 
 namespace ActiveSync.Backends.Jmap;
 
 /// <summary>
 ///   Calendar content store over JMAP (JMAP for Calendars / JSCalendar). Folder keys are
-///   <c>jmap-cal:{calendarId}</c>; item keys are CalendarEvent ids. Events bridge JSCalendar ⇄
-///   iCalendar (<see cref="JsCalendarConverter" />) and then reuse the mature iCalendar ⇄ EAS
-///   converter. Listing uses CalendarEvent/get ids:null (CalendarEvent/query is FTS-backed and
+///   <c>jmap-cal:{calendarId}</c>; item keys are CalendarEvent ids. The contract's currency is
+///   iCalendar, and this store already built iCalendar mid-pipeline — it now STOPS there
+///   (<see cref="JsCalendarConverter" /> is the JSCalendar ⇄ iCalendar bridge; the EAS half is
+///   the host's). Listing uses CalendarEvent/get ids:null (CalendarEvent/query is FTS-backed and
 ///   eventually-consistent). Scheduling is left to the JMAP server, so the gateway does not
 ///   also mail iMIP (<see cref="ShouldSendInvitationsAsync" /> is false).
 /// </summary>
 public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, int pollSeconds)
-	: IContentStore, ICalendarOperations, IItemMoveOperations
+	: ICalendarStore, IMeetingOperations, IItemMoveOperations
 {
 	public const string KeyPrefix = "jmap-cal:";
 
 	private static readonly string[] Cap = [JmapCapabilities.Core, JmapCapabilities.Calendars];
-	private static readonly XNamespace Cal = EasNamespaces.Calendar;
 
 	private string? _account;
 
@@ -36,9 +31,8 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 	private List<JsonElement>? _cachedEvents;
 	private string? _cachedEventsState;
 
-	public string EasClass => Protocol.EasClass.Calendar;
-
-	public bool OwnsBackendKey(string backendKey) => backendKey.StartsWith(KeyPrefix, StringComparison.Ordinal);
+	/// <inheritdoc />
+	public bool OwnsKey(FolderKey key) => key.Value.StartsWith(KeyPrefix, StringComparison.Ordinal);
 
 	// This store used to declare IReadOnlyCollectionSource with IsReadOnlyCollection hard-
 	// coded to `false` — behaviourally identical to not implementing the interface (shared JMAP
@@ -46,6 +40,7 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 	// IBackendSession.IsReadOnlyFolder's OR and to anyone reading the type list. Dropped rather
 	// than left as a capability that was never real; see docs/backends.md.
 
+	/// <inheritdoc />
 	public async Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
@@ -61,51 +56,49 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		{
 			string id = cal.GetProperty("id").GetString()!;
 			bool isDefault = cal.TryGetProperty("isDefault", out JsonElement d) && d.ValueKind == JsonValueKind.True;
-			result.Add(new BackendFolder(
-				KeyPrefix + id,
-				cal.TryGetProperty("name", out JsonElement n) ? n.GetString() ?? id : id,
-				null,
-				isDefault ? EasFolderType.Calendar : EasFolderType.UserCalendar,
-				Protocol.EasClass.Calendar));
+			result.Add(new BackendFolder
+			{
+				Key = new FolderKey(KeyPrefix + id),
+				DisplayName = cal.TryGetProperty("name", out JsonElement n) ? n.GetString() ?? id : id,
+				Type = isDefault ? FolderType.Calendar : FolderType.UserCalendar
+			});
 		}
 
 		return result;
 	}
 
-	public async Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-		string folderBackendKey, ContentFilter filter, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+		FolderKey folder, ContentFilter filter, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		string calId = FromKey(folderBackendKey);
+		string calId = FromKey(folder.Value);
 		List<JsonElement> events = await AllEventsAsync(account, ct).ConfigureAwait(false);
 		// Honor the client's calendar FilterType window instead of ignoring it (CalDavStore
 		// applies a time-range; the JMAP store enumerates all events, so it filters in memory).
 		return events.Where(e => InCalendar(e, calId))
 			.Where(e => WithinFilter(e, filter))
-			.ToDictionary(e => e.GetProperty("id").GetString()!, Revision, StringComparer.Ordinal);
+			.ToDictionary(e => new ItemKey(e.GetProperty("id").GetString()!), e => new ItemRevision(Revision(e)));
 	}
 
-	public async Task<BackendItem?> GetItemAsync(
-		string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<CalendarItem?> GetItemAsync(FolderKey folder, ItemKey item, CancellationToken ct)
 	{
-		JsonElement? jsEvent = await GetEventAsync(itemKey, ct).ConfigureAwait(false);
-		if (jsEvent is not { } value)
-			return null;
-		string ics = JsCalendarConverter.ToICalendar(value);
-		// mailAddress is the acting user's mail address, so MeetingStatus can tell
-		// "I am the organizer" apart from "I am an invitee".
-		List<XElement>? data = CalendarConverter.ToApplicationData(ics, bodyPreference, mailAddress);
-		return data is null ? null : new BackendItem(data);
+		JsonElement? jsEvent = await GetEventAsync(item.Value, ct).ConfigureAwait(false);
+		// The pipeline stops at the iCalendar it already built — the EAS conversion is the host's.
+		return jsEvent is { } value
+			? new CalendarItem { ICalendar = JsCalendarConverter.ToICalendar(value) }
+			: null;
 	}
 
-	public async Task<(string ItemKey, string Revision)> CreateItemAsync(
-		string folderBackendKey, XElement applicationData, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<(ItemKey Key, ItemRevision Revision)> CreateItemAsync(
+		FolderKey folder, CalendarItem item, CancellationToken ct)
 	{
+		// The host already built the COMPLETE iCalendar; this only bridges it to JSCalendar.
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		string uid = applicationData.Element(Cal + "UID")?.Value ?? Guid.NewGuid().ToString();
-		string ics = CalendarConverter.FromApplicationData(applicationData, uid, null, defaultOrganizer: mailAddress);
-		Dictionary<string, object?> jsEvent = JsCalendarConverter.FromICalendar(ics, null);
-		jsEvent["calendarIds"] = new Dictionary<string, object?> { [FromKey(folderBackendKey)] = true };
+		Dictionary<string, object?> jsEvent = JsCalendarConverter.FromICalendar(item.ICalendar, null);
+		jsEvent["calendarIds"] = new Dictionary<string, object?> { [FromKey(folder.Value)] = true };
 
 		using JmapResponse response = await client.CallAsync(Cap, "CalendarEvent/set", new Dictionary<string, object?>
 		{
@@ -123,18 +116,26 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 
 		string id = made.GetProperty("id").GetString()!;
 		JsonElement? full = await GetEventAsync(id, ct).ConfigureAwait(false);
-		return (id, full is { } f ? Revision(f) : "0");
+		return (new ItemKey(id), new ItemRevision(full is { } f ? Revision(f) : "0"));
 	}
 
-	public async Task<string> UpdateItemAsync(
-		string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<ItemRevision> UpdateItemAsync(
+		FolderKey folder, ItemKey item, CalendarItem value, ItemRevision? expected, CancellationToken ct)
 	{
+		// The host merged already — `value` is the COMPLETE iCalendar. The existing card is still
+		// fetched, but only to preserve the JSCalendar members the iCalendar bridge cannot express.
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		JsonElement? existing = await GetEventAsync(itemKey, ct).ConfigureAwait(false);
-		string uid = existing is { } e && e.TryGetProperty("uid", out JsonElement u) ? u.GetString() ?? itemKey : itemKey;
-		string? existingIcs = existing is { } ev ? JsCalendarConverter.ToICalendar(ev) : null;
-		string ics = CalendarConverter.FromApplicationData(applicationData, uid, existingIcs, defaultOrganizer: mailAddress);
-		Dictionary<string, object?> jsEvent = JsCalendarConverter.FromICalendar(ics, existing);
+		JsonElement? existing = await GetEventAsync(item.Value, ct).ConfigureAwait(false);
+		// The `expected` precondition is honoured because the read above already paid for it: a
+		// mismatch means the event moved underneath the host's merge basis, and the host re-fetches,
+		// re-merges and retries once.
+		if (expected is { } expectedRevision && existing is { } current &&
+		    !string.Equals(Revision(current), expectedRevision.Value, StringComparison.Ordinal))
+			throw new BackendPreconditionFailedException(
+				$"JMAP CalendarEvent {item.Value} is no longer at the expected revision.");
+
+		Dictionary<string, object?> jsEvent = JsCalendarConverter.FromICalendar(value.ICalendar, existing);
 		// uid is immutable on update (server rejects it as invalidProperties); calendarIds and
 		// id are managed by move/create, not a content update.
 		jsEvent.Remove("uid");
@@ -144,27 +145,29 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		using JmapResponse response = await client.CallAsync(Cap, "CalendarEvent/set", new Dictionary<string, object?>
 		{
 			["accountId"] = account,
-			["update"] = new Dictionary<string, object?> { [itemKey] = jsEvent }
+			["update"] = new Dictionary<string, object?> { [item.Value] = jsEvent }
 		}, ct).ConfigureAwait(false);
-		EnsureNotIn(response.Arguments("0"), "notUpdated", itemKey);
-		JsonElement? full = await GetEventAsync(itemKey, ct).ConfigureAwait(false);
-		return full is { } f ? Revision(f) : "0";
+		EnsureNotIn(response.Arguments("0"), "notUpdated", item.Value);
+		JsonElement? full = await GetEventAsync(item.Value, ct).ConfigureAwait(false);
+		return new ItemRevision(full is { } f ? Revision(f) : "0");
 	}
 
+	/// <inheritdoc />
 	public async Task DeleteItemAsync(
-		string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
+		FolderKey folder, ItemKey item, bool permanent, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		using JmapResponse response = await client.CallAsync(Cap, "CalendarEvent/set", new Dictionary<string, object?>
 		{
 			["accountId"] = account,
-			["destroy"] = new[] { itemKey }
+			["destroy"] = new[] { item.Value }
 		}, ct).ConfigureAwait(false);
-		EnsureNotIn(response.Arguments("0"), "notDestroyed", itemKey);
+		EnsureNotIn(response.Arguments("0"), "notDestroyed", item.Value);
 	}
 
-	public async Task<(string ItemKey, string Revision)> MoveItemAsync(
-		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<(ItemKey Key, ItemRevision Revision)> MoveItemAsync(
+		FolderKey source, ItemKey item, FolderKey destination, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		using JmapResponse response = await client.CallAsync(Cap, "CalendarEvent/set", new Dictionary<string, object?>
@@ -172,27 +175,28 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 			["accountId"] = account,
 			["update"] = new Dictionary<string, object?>
 			{
-				[itemKey] = new Dictionary<string, object?>
+				[item.Value] = new Dictionary<string, object?>
 				{
-					["calendarIds"] = new Dictionary<string, object?> { [FromKey(destinationFolderBackendKey)] = true }
+					["calendarIds"] = new Dictionary<string, object?> { [FromKey(destination.Value)] = true }
 				}
 			}
 		}, ct).ConfigureAwait(false);
-		EnsureNotIn(response.Arguments("0"), "notUpdated", itemKey);
+		EnsureNotIn(response.Arguments("0"), "notUpdated", item.Value);
 		// Report the item's REAL revision at the destination, not a placeholder the caller
 		// would otherwise have to invent (see UpdateItemAsync above for the identical shape).
-		JsonElement? full = await GetEventAsync(itemKey, ct).ConfigureAwait(false);
-		return (itemKey, full is { } f ? Revision(f) : "0");
+		JsonElement? full = await GetEventAsync(item.Value, ct).ConfigureAwait(false);
+		return (item, new ItemRevision(full is { } f ? Revision(f) : "0"));
 	}
 
 	// JMAP calendar folder mutation over ActiveSync is not supported, so this store does not
 	// implement IFolderOperations (it does support item move — IItemMoveOperations above).
 
-	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
-		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<IReadOnlyList<FolderKey>> WaitForChangesAsync(
+		IReadOnlyList<FolderKey> folders, TimeSpan timeout, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		Dictionary<string, string> baseline = await TokensAsync(account, folderBackendKeys, ct).ConfigureAwait(false);
+		Dictionary<FolderKey, string> baseline = await TokensAsync(account, folders, ct).ConfigureAwait(false);
 		DateTime deadline = DateTime.UtcNow + timeout;
 		int delaySeconds = 1;
 		int ceiling = Math.Max(1, pollSeconds);
@@ -204,8 +208,8 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 			if (delay > TimeSpan.Zero) await Task.Delay(delay, ct).ConfigureAwait(false);
 			delaySeconds = Math.Min(delaySeconds * 2, ceiling);
 
-			Dictionary<string, string> current = await TokensAsync(account, folderBackendKeys, ct).ConfigureAwait(false);
-			List<string> changed = folderBackendKeys
+			Dictionary<FolderKey, string> current = await TokensAsync(account, folders, ct).ConfigureAwait(false);
+			List<FolderKey> changed = folders
 				.Where(k => baseline.GetValueOrDefault(k) != current.GetValueOrDefault(k))
 				.ToList();
 			if (changed.Count > 0)
@@ -215,10 +219,19 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		return [];
 	}
 
-	// ---------- ICalendarOperations ----------
+	// ---------- IMeetingOperations ----------
 
-	public async Task<string?> RespondToMeetingAsync(
-		string calendarFolderBackendKey, string eventUid, int userResponse, CancellationToken ct)
+	/// <summary>
+	///   Sets the acting user's participation status on the stored event and reports the calendar
+	///   item that holds it.
+	/// </summary>
+	/// <param name="calendar">The calendar folder holding the event.</param>
+	/// <param name="eventUid">The event's iCalendar UID.</param>
+	/// <param name="response">The user's answer.</param>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
+	/// <returns>The calendar item holding the event, or <c>null</c> when none was found.</returns>
+	public async Task<ItemKey?> RespondToMeetingAsync(
+		FolderKey calendar, string eventUid, MeetingResponseKind response, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		List<JsonElement> events = await AllEventsAsync(account, ct).ConfigureAwait(false);
@@ -228,13 +241,17 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 			return null;
 		string itemKey = match.GetProperty("id").GetString()!;
 
-		// EAS userResponse: 1=Accept, 2=Tentative, 3=Decline.
-		string status = userResponse switch { 2 => "tentative", 3 => "declined", _ => "accepted" };
+		string status = response switch
+		{
+			MeetingResponseKind.Tentative => "tentative",
+			MeetingResponseKind.Declined => "declined",
+			_ => "accepted"
+		};
 		if (mailAddress is not null && FindParticipantId(match, mailAddress) is { } participantId)
 		{
 			// Dispose the response and surface a failed participation-status update instead of
 			// leaking the document and reporting a meeting response that never took.
-			using JmapResponse response = await client.CallAsync(Cap, "CalendarEvent/set", new Dictionary<string, object?>
+			using JmapResponse setResponse = await client.CallAsync(Cap, "CalendarEvent/set", new Dictionary<string, object?>
 			{
 				["accountId"] = account,
 				["update"] = new Dictionary<string, object?>
@@ -245,19 +262,15 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 					}
 				}
 			}, ct).ConfigureAwait(false);
-			EnsureNotIn(response.Arguments("0"), "notUpdated", itemKey);
+			EnsureNotIn(setResponse.Arguments("0"), "notUpdated", itemKey);
 		}
 
-		return itemKey;
-	}
-
-	public async Task<string?> GetRawEventAsync(string folderBackendKey, string itemKey, CancellationToken ct)
-	{
-		JsonElement? jsEvent = await GetEventAsync(itemKey, ct).ConfigureAwait(false);
-		return jsEvent is { } value ? JsCalendarConverter.ToICalendar(value) : null;
+		return new ItemKey(itemKey);
 	}
 
 	/// <summary>The JMAP server schedules meetings itself, so the gateway never also mails iMIP.</summary>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
+	/// <returns>Always <c>false</c>.</returns>
 	public Task<bool> ShouldSendInvitationsAsync(CancellationToken ct) => Task.FromResult(false);
 
 	// ---------- helpers ----------
@@ -279,8 +292,8 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		return list.GetArrayLength() == 0 ? null : list[0].Clone();
 	}
 
-	private async Task<Dictionary<string, string>> TokensAsync(
-		string account, IReadOnlyList<string> folderBackendKeys, CancellationToken ct)
+	private async Task<Dictionary<FolderKey, string>> TokensAsync(
+		string account, IReadOnlyList<FolderKey> folders, CancellationToken ct)
 	{
 		// The wait token is the account-level CalendarEvent state instead of a SHA-256 over the
 		// full JSCalendar body of every event, which used to be re-downloaded on every poll tick for
@@ -288,9 +301,9 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		// watched calendar's token — the wait over-notifies rather than misses (the safe direction;
 		// the client resyncs and finds nothing new). Mirrors the mail store's own state-token wait.
 		string state = await StateAsync(account, ct).ConfigureAwait(false);
-		Dictionary<string, string> tokens = new(StringComparer.Ordinal);
-		foreach (string folderKey in folderBackendKeys)
-			tokens[folderKey] = state;
+		Dictionary<FolderKey, string> tokens = new();
+		foreach (FolderKey folder in folders)
+			tokens[folder] = state;
 		return tokens;
 	}
 
@@ -456,7 +469,7 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 	/// </summary>
 	private static bool WithinFilter(JsonElement jsEvent, ContentFilter filter)
 	{
-		if (filter.SinceUtc is not { } since)
+		if (filter.Since is not { } since)
 			return true;
 		if (jsEvent.TryGetProperty("recurrenceRules", out _) ||
 		    jsEvent.TryGetProperty("recurrenceRule", out _) ||
@@ -471,7 +484,7 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 			catch (FormatException) { /* malformed duration — treat as instantaneous */ }
 		// start is a local/floating wall time and `since` is UTC; the ≤ tz-offset slop is
 		// acceptable for a coarse day-granularity window (CalDAV's time-range is no finer).
-		return start + duration >= since;
+		return start + duration >= since.UtcDateTime;
 	}
 
 	private static bool InCalendar(JsonElement jsEvent, string calId)

@@ -5,6 +5,7 @@ using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Sync;
 using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Server.Eas.Content;
 
 namespace ActiveSync.Server.Eas.Handlers;
 
@@ -34,7 +35,7 @@ public sealed class GetItemEstimateHandler(
 			                 ?? collection.Element(GIE + "SyncKey")?.Value ?? "0";
 			string? filterType = collection.Descendants(AS + "FilterType").FirstOrDefault()?.Value;
 
-			XElement Response(string status, int? estimate, IContentStore? resolvedStore = null)
+			XElement Response(string status, int? estimate, ContentAdapter? resolvedStore = null)
 			{
 				XElement collectionElement = new(GIE + "Collection",
 					new XElement(GIE + "CollectionId", collectionId),
@@ -49,7 +50,7 @@ public sealed class GetItemEstimateHandler(
 					collectionElement);
 			}
 
-			(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
+			(UserFolder Folder, ContentAdapter Store)? resolved = await folders.ResolveCollectionAsync(
 				context.Session, context.UserId, collectionId, ct);
 			if (resolved is null)
 			{
@@ -57,10 +58,10 @@ public sealed class GetItemEstimateHandler(
 				continue;
 			}
 
-			(UserFolder folder, IContentStore store) = resolved.Value;
+			(UserFolder folder, ContentAdapter store) = resolved.Value;
 			// GetItemEstimate is a query — peek at the sync key without mutating state
 			// (ValidateSyncKeyAsync, used by Sync, would reset the snapshot on key 0).
-			(SyncKeyValidation validation, Dictionary<string, string> snapshot, int stateFilterType) =
+			(SyncKeyValidation validation, Dictionary<string, SnapshotEntry> snapshot, int stateFilterType) =
 				await context.State.PeekSyncKeyAsync(context.Device, collectionId, syncKey, ct);
 			// MS-ASCMD's GetItemEstimate Status element is its own table, distinct from Sync's —
 			// 3 is SYNCSTATENOTPRIMED (the collection has never completed a Sync round) and 4 is
@@ -79,12 +80,12 @@ public sealed class GetItemEstimateHandler(
 			}
 
 			int ft = int.TryParse(filterType, out int f) ? f : stateFilterType;
-			ContentFilter filter = ContentFilter.ForClass(store.EasClass, ft);
+			ContentFilter filter = ContentFilters.ForClass(store.EasClass, ft);
 
-			IReadOnlyDictionary<string, string> current;
+			IReadOnlyDictionary<ItemKey, ItemRevision> current;
 			try
 			{
-				current = await store.GetItemRevisionsAsync(folder.BackendKey, filter, ct);
+				current = await store.Store.GetItemRevisionsAsync(new FolderKey(folder.BackendKey), filter, ct);
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException)
 			{
@@ -95,7 +96,9 @@ public sealed class GetItemEstimateHandler(
 				continue;
 			}
 
-			CollectionChanges diff = CollectionDiff.Compute(snapshot, current, int.MaxValue);
+			// Through CollectionSnapshot so an item still owing a read-only revert is counted as the
+			// Change the next Sync round will send, exactly as the diff there will see it.
+			(CollectionChanges diff, _) = CollectionSnapshot.Diff(snapshot, current, int.MaxValue);
 			responses.Add(Response("1", diff.Adds.Count + diff.Changes.Count + diff.Deletes.Count, store));
 		}
 

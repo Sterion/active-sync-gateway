@@ -14,6 +14,10 @@ public sealed class CompositeBackendSession : IBackendSession
 {
 	private readonly List<IBackendConnection> _connections = [];
 	private readonly List<IContentStore> _stores = [];
+	// Store → derived EAS class, built once at session build (the derivation also validates the
+	// exactly-one-alias contract rule per store, so a misbuilt provider fails at connection
+	// creation rather than mid-sync).
+	private readonly Dictionary<IContentStore, string> _storeClasses = new(ReferenceEqualityComparer.Instance);
 	// Only used so a disposal failure can be logged instead of thrown into the caller's
 	// `await using` — optional because most callers (tests, in particular) have no logger handy
 	// and a swallow-silently fallback is still strictly better than the previous throw.
@@ -74,20 +78,38 @@ public sealed class CompositeBackendSession : IBackendSession
 				foreach (ResolvedRole role in assigned)
 					registry.GetFor(group.Key, role.Role); // validates every assigned role
 				IBackendConnection connection = await provider.CreateConnectionAsync(
-					new BackendConnectionContext(gatewayCredentials, userId, mailAddress, assigned, sharedCollections), ct)
+					new BackendConnectionContext
+					{
+						GatewayCredentials = gatewayCredentials,
+						GatewayUserId = userId,
+						MailAddress = mailAddress,
+						Roles = assigned,
+						SharedCollections = sharedCollections
+					}, ct)
 					.ConfigureAwait(false);
 				session._connections.Add(connection);
-				session._stores.AddRange(connection.Stores);
+				foreach (IContentStore store in connection.Stores)
+				{
+					// EasClassOf also enforces the exactly-one-alias rule per store.
+					session._storeClasses[store] = ContentStoreClasses.EasClassOf(store);
+					session._stores.Add(store);
+				}
+
 				mailSubmit ??= connection.MailSubmit;
 				oof ??= connection.Oof;
 			}
 
-			session.MailStore = session.GetStoreForClass(EasClass.Email) as IMailStoreOperations
+			session.Mail = session.GetStoreForClass(EasClass.Email) as IMailStore
 				?? throw new InvalidOperationException("No provider filled the MailStore role for this session.");
+			// The mailbox side operations are mandatory alongside the mail store: SmartReply,
+			// Search, EmptyFolderContents and host-side attachment extraction all need them.
+			session.Mailbox = session.Mail as IMailboxOperations
+				?? throw new InvalidOperationException(
+					"The MailStore role's store does not implement IMailboxOperations, which the gateway requires.");
 			session.MailSubmit = mailSubmit
 				?? throw new InvalidOperationException("No provider filled the MailSubmit role for this session.");
-			session.Calendar = session.GetStoreForClass(EasClass.Calendar) as ICalendarOperations;
-			session.Contacts = session.GetStoreForClass(EasClass.Contacts) as IContactOperations;
+			session.Calendar = session.GetStoreForClass(EasClass.Calendar) as IMeetingOperations;
+			session.Contacts = session.GetStoreForClass(EasClass.Contacts) as IDirectoryOperations;
 			session.Oof = oof;
 			return session;
 		}
@@ -113,26 +135,36 @@ public sealed class CompositeBackendSession : IBackendSession
 	public int UserId { get; }
 	public string? MailAddress { get; }
 	public IReadOnlyList<IContentStore> Stores => _stores;
-	public IMailStoreOperations MailStore { get; private set; } = null!;
+	public IMailStore Mail { get; private set; } = null!;
+	public IMailboxOperations Mailbox { get; private set; } = null!;
 	public IMailSubmitOperations MailSubmit { get; private set; } = null!;
-	public IContactOperations? Contacts { get; private set; }
-	public ICalendarOperations? Calendar { get; private set; }
+	public IDirectoryOperations? Contacts { get; private set; }
+	public IMeetingOperations? Calendar { get; private set; }
 	public IOofBackend? Oof { get; private set; }
+	public SessionPayloadCache PayloadCache { get; } = new();
 
 	public IContentStore? GetStoreForClass(string easClass)
 	{
-		return _stores.FirstOrDefault(s => s.EasClass.Equals(easClass, StringComparison.OrdinalIgnoreCase));
+		return _stores.FirstOrDefault(s =>
+			_storeClasses[s].Equals(easClass, StringComparison.OrdinalIgnoreCase));
 	}
 
-	public IContentStore? GetStoreForBackendKey(string backendKey)
+	public IContentStore? GetStoreForKey(FolderKey key)
 	{
-		return _stores.FirstOrDefault(s => s.OwnsBackendKey(backendKey));
+		return _stores.FirstOrDefault(s => s.OwnsKey(key));
 	}
 
-	public bool IsReadOnlyFolder(string folderBackendKey)
+	public string EasClassOf(IContentStore store)
 	{
-		return GetStoreForBackendKey(folderBackendKey) is IReadOnlyCollectionSource source &&
-		       source.IsReadOnlyCollection(folderBackendKey);
+		return _storeClasses.TryGetValue(store, out string? easClass)
+			? easClass
+			: ContentStoreClasses.EasClassOf(store);
+	}
+
+	public bool IsReadOnlyFolder(FolderKey folder)
+	{
+		return GetStoreForKey(folder) is IReadOnlyCollectionSource source &&
+		       source.IsReadOnlyCollection(folder);
 	}
 
 	/// <summary>

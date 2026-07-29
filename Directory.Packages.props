@@ -20,7 +20,8 @@
 		<!-- ILogger for Backends.Common's MailKitWireLogger (previously flowed in transitively via Core). -->
 		<PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
 
-		<!-- SourceLink for the packed contract assemblies (Protocol, Core, Backends.Common). -->
+		<!-- SourceLink for the packed contract assemblies (Contracts and the optional packages
+		     beside it: Contracts.Interop, Contracts.Conformance). -->
 		<PackageVersion Include="Microsoft.SourceLink.GitHub" Version="8.0.0" />
 
 		<!-- Data / EF Core -->
@@ -33,6 +34,10 @@
 		<PackageVersion Include="FolkerKinzel.VCards" Version="8.2.0" />
 		<PackageVersion Include="Ical.Net" Version="5.2.3" />
 		<PackageVersion Include="MailKit" Version="4.17.0" />
+		<!-- MimeKit ships inside MailKit and always did; it is declared in its own right because
+		     ActiveSync.Eas.Conversion parses and builds MIME without wanting an IMAP/SMTP client.
+		     Keep the version in lockstep with MailKit's — MailKit depends on exactly this one. -->
+		<PackageVersion Include="MimeKit" Version="4.17.0" />
 
 		<!-- Web host -->
 		<PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />

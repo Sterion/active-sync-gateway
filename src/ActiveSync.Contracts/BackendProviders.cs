@@ -82,8 +82,20 @@ public sealed class ProviderSettings(IConfigurationSection section)
 ///   One role resolved for one account: which provider serves it, with what settings and
 ///   backend credentials.
 /// </summary>
-public sealed record ResolvedRole(
-	BackendRole Role, string ProviderName, ProviderSettings Settings, BackendCredentials Credentials);
+public sealed record ResolvedRole
+{
+	/// <summary>The role this resolution fills.</summary>
+	public required BackendRole Role { get; init; }
+
+	/// <summary>Name of the provider assigned to the role.</summary>
+	public required string ProviderName { get; init; }
+
+	/// <summary>The role's effective settings, bound by the provider itself.</summary>
+	public required ProviderSettings Settings { get; init; }
+
+	/// <summary>The backend credentials to present for this role.</summary>
+	public required BackendCredentials Credentials { get; init; }
+}
 
 /// <summary>
 ///   Everything a provider needs to open one account's connection: the gateway identity
@@ -93,12 +105,23 @@ public sealed record ResolvedRole(
 ///   shared-calendar grants. Host services (db factory, change notifier, logging) reach
 ///   providers through normal constructor injection instead.
 /// </summary>
-public sealed record BackendConnectionContext(
-	BackendCredentials GatewayCredentials,
-	int GatewayUserId,
-	string? MailAddress,
-	IReadOnlyList<ResolvedRole> Roles,
-	IReadOnlyList<SharedCollection> SharedCollections);
+public sealed record BackendConnectionContext
+{
+	/// <summary>The login the phone presented — never a backend login.</summary>
+	public required BackendCredentials GatewayCredentials { get; init; }
+
+	/// <summary>The immutable per-user id used for DB scoping, the encryption AAD and durable keys.</summary>
+	public required int GatewayUserId { get; init; }
+
+	/// <summary>The user's mail address, when one is known.</summary>
+	public string? MailAddress { get; init; }
+
+	/// <summary>The roles assigned to THIS provider for this account.</summary>
+	public required IReadOnlyList<ResolvedRole> Roles { get; init; }
+
+	/// <summary>The account's shared-collection grants.</summary>
+	public required IReadOnlyList<SharedCollection> SharedCollections { get; init; }
+}
 
 /// <summary>One provider's connection bundle for one account: its stores and side operations.</summary>
 public interface IBackendConnection : IAsyncDisposable
@@ -113,15 +136,83 @@ public interface IBackendConnection : IAsyncDisposable
 	IOofBackend? Oof { get; }
 }
 
+/// <summary>
+///   One resource a <see cref="BackendConnection" /> owns and disposes with itself (the IMAP
+///   session, the WebDAV/JMAP HTTP client, …).
+/// </summary>
+/// <remarks>
+///   The disposal list used to be <c>IReadOnlyList&lt;object&gt;</c> because owned resources are a
+///   mix of <see cref="IAsyncDisposable" /> and <see cref="IDisposable" />, which no single
+///   disposable interface covers — an untyped bag the host had to interrogate at runtime. This
+///   handle covers both without the <c>object</c>: the caller names which disposal it wants.
+///   <para>
+///     A CLASS, not a record: it has no value semantics — a record with no printable members would
+///     make all instances <c>Equals</c>-equal and its <c>ToString()</c> empty, both wrong for a
+///     resource handle.
+///   </para>
+///   <para>
+///     Two NAMED factories rather than an <c>Of</c> overload pair: a type implementing BOTH
+///     interfaces (common for connection types) would make <c>Of(x)</c> an ambiguous call. Prefer
+///     <see cref="OfAsync" /> for such a type — it matches this class's own dispose switch, which
+///     tries <see cref="IAsyncDisposable" /> first.
+///   </para>
+/// </remarks>
+public sealed class OwnedResource
+{
+	private OwnedResource(object resource)
+	{
+		Resource = resource;
+	}
+
+	/// <summary>The wrapped resource, for the owner's reference-identity checks.</summary>
+	internal object Resource { get; }
+
+	/// <summary>Wraps a resource disposed through <see cref="IAsyncDisposable.DisposeAsync" />.</summary>
+	/// <param name="resource">The resource the connection owns.</param>
+	/// <returns>A handle the connection disposes with itself.</returns>
+	public static OwnedResource OfAsync(IAsyncDisposable resource)
+	{
+		ArgumentNullException.ThrowIfNull(resource);
+		return new OwnedResource(resource);
+	}
+
+	/// <summary>Wraps a resource disposed through <see cref="IDisposable.Dispose" />.</summary>
+	/// <param name="resource">The resource the connection owns.</param>
+	/// <returns>A handle the connection disposes with itself.</returns>
+	public static OwnedResource OfSync(IDisposable resource)
+	{
+		ArgumentNullException.ThrowIfNull(resource);
+		return new OwnedResource(resource);
+	}
+
+	/// <summary>
+	///   Disposes the wrapped resource, preferring the async path when it offers both. Internal:
+	///   <see cref="BackendConnection" /> (same assembly) is the only caller — a provider hands the
+	///   handle over and stops thinking about disposal.
+	/// </summary>
+	internal ValueTask DisposeAsync()
+	{
+		switch (Resource)
+		{
+			case IAsyncDisposable asyncDisposable:
+				return asyncDisposable.DisposeAsync();
+			case IDisposable disposable:
+				disposable.Dispose();
+				return ValueTask.CompletedTask;
+			default:
+				return ValueTask.CompletedTask;
+		}
+	}
+}
+
 /// <summary>Ready-made <see cref="IBackendConnection" /> that disposes its owned resources.</summary>
 /// <remarks>
 ///   Disposal is idempotent (a second call is a no-op), keeps going when one resource throws
 ///   (surfacing the failures as an <see cref="AggregateException" /> so no later resource leaks a
 ///   live socket), and also disposes any content store that is itself disposable — stores routinely
 ///   hold connections, and the provider is no longer required to remember to list them in
-///   <paramref name="ownedResources" />. The parameter stays <c>object</c>-typed because the owned
-///   resources are a mix of <see cref="IAsyncDisposable" /> (ImapSession) and <see cref="IDisposable" />
-///   (WebDavClient, JmapClient), which no single disposable interface covers.
+///   <paramref name="ownedResources" />. Each entry is an <see cref="OwnedResource" /> naming its
+///   own disposal shape (sync or async).
 ///   The idempotence guard is an <c>int</c> flipped with <see cref="Interlocked.Exchange(ref int, int)" />,
 ///   not a plain <c>bool</c> read-then-write — two callers racing DisposeAsync (a session-eviction
 ///   sweep vs. a request completing, both plausible in <c>BackendSessionFactory</c>) could otherwise
@@ -131,7 +222,7 @@ public sealed class BackendConnection(
 	IReadOnlyList<IContentStore> stores,
 	IMailSubmitOperations? mailSubmit = null,
 	IOofBackend? oof = null,
-	IReadOnlyList<object>? ownedResources = null) : IBackendConnection
+	IReadOnlyList<OwnedResource>? ownedResources = null) : IBackendConnection
 {
 	private int _disposed;
 
@@ -159,29 +250,43 @@ public sealed class BackendConnection(
 
 		// Build the owned-resource identity set ONCE (reference equality) instead of an
 		// O(stores × ownedResources) Any(ReferenceEquals) scan inside the store loop below.
+		// Compared on the WRAPPED resource: a store handed over as an OwnedResource is the same
+		// object as the store in `stores`, the handle around it is not.
 		HashSet<object> owned = ownedResources is { Count: > 0 }
-			? new HashSet<object>(ownedResources, ReferenceEqualityComparer.Instance)
+			? new HashSet<object>(ownedResources.Select(static r => r.Resource), ReferenceEqualityComparer.Instance)
 			: [];
 
 		// Dispose every owned resource, plus any store that owns a connection — never let one
 		// throwing disposal strand the rest (a live IMAP/HTTP socket leaks otherwise).
-		foreach (object resource in ownedResources ?? [])
+		foreach (OwnedResource resource in ownedResources ?? [])
 			await SafeDisposeAsync(resource).ConfigureAwait(false);
 		foreach (IContentStore store in stores)
 			// A store explicitly listed as an owned resource is disposed once, above.
 			if (store is not IAsyncDisposable and not IDisposable || owned.Contains(store))
 				continue;
 			else
-				await SafeDisposeAsync(store).ConfigureAwait(false);
+				await SafeDisposeStoreAsync(store).ConfigureAwait(false);
 
 		if (failures is { Count: > 0 })
 			throw new AggregateException("One or more backend resources failed to dispose.", failures);
 
-		async ValueTask SafeDisposeAsync(object resource)
+		async ValueTask SafeDisposeAsync(OwnedResource resource)
 		{
 			try
 			{
-				switch (resource)
+				await resource.DisposeAsync().ConfigureAwait(false);
+			}
+			catch (Exception ex)
+			{
+				(failures ??= []).Add(ex);
+			}
+		}
+
+		async ValueTask SafeDisposeStoreAsync(IContentStore store)
+		{
+			try
+			{
+				switch (store)
 				{
 					case IAsyncDisposable asyncDisposable:
 						await asyncDisposable.DisposeAsync().ConfigureAwait(false);
@@ -280,7 +385,14 @@ public interface IPerUserResourceOwner
 // the return type of IWatcherDiagnostics, an OPTIONAL PROVIDER capability a plugin may implement.
 
 /// <summary>One live push watcher a provider holds (for the admin dashboard).</summary>
-public sealed record WatcherInfo(string User, string Resource);
+public sealed record WatcherInfo
+{
+	/// <summary>The gateway login the watcher belongs to.</summary>
+	public required string User { get; init; }
+
+	/// <summary>The watched resource (a folder name, or a provider-specific description).</summary>
+	public required string Resource { get; init; }
+}
 
 /// <summary>
 ///   Optional provider capability: live watcher state for the admin dashboard (e.g. the

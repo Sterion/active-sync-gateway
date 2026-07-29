@@ -2,7 +2,6 @@ using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
-using ActiveSync.Protocol;
 using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Backends.Dav;
@@ -11,7 +10,7 @@ namespace ActiveSync.Backends.Dav;
 ///   Tasks content store over CalDAV: VTODO items in the calendar-home-set collection named
 ///   by <see cref="DavServerOptions.TaskFolder" /> (Axigen layout: a "Tasks" calendar
 ///   collection whose supported-calendar-component-set is VTODO). Item keys are server
-///   hrefs; revisions are ETags.
+///   hrefs; revisions are ETags; the payload is the stored VTODO document verbatim.
 /// </summary>
 public sealed class CalDavTaskStore(
 	WebDavClient dav,
@@ -19,12 +18,11 @@ public sealed class CalDavTaskStore(
 	BackendCredentials credentials,
 	ILogger logger,
 	int pollSeconds)
-	: DavStoreBase(dav, options, credentials, logger, pollSeconds)
+	: DavStoreBase<TaskItem>(dav, options, credentials, logger, pollSeconds), ITaskStore
 {
 	public const string KeyPrefix = "caldav-tasks:";
 
 	protected override string Prefix => KeyPrefix;
-	public override string EasClass => Protocol.EasClass.Tasks;
 	protected override string MediaType => "text/calendar";
 	protected override string FileExtension => ".ics";
 	protected override string WellKnownPath => "/.well-known/caldav";
@@ -38,19 +36,20 @@ public sealed class CalDavTaskStore(
 	protected override string CollectionKindPlural => "task collections";
 	protected override string CtagLabel => "CalDAV-Tasks";
 
-	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
+	// The stored document IS the payload — identity in both directions (round-trip fidelity).
+	protected override TaskItem ToItem(string content)
 	{
-		return TasksConverter.ToApplicationData(content, bodyPreference);
+		return new TaskItem { ICalendar = content };
 	}
 
-	protected override string FromApplicationData(XElement applicationData, string uid, string? existingContent)
+	protected override string PayloadOf(TaskItem item)
 	{
-		return TasksConverter.FromApplicationData(applicationData, uid, existingContent);
+		return item.ICalendar;
 	}
 
 	protected override string? ExtractUid(string content)
 	{
-		return TasksConverter.ExtractUid(content);
+		return TaskPayload.ExtractUid(content);
 	}
 
 	protected override XElement BuildUidQueryBody(string uid)
@@ -64,6 +63,7 @@ public sealed class CalDavTaskStore(
 							new XElement(DavNs.CalDav + "text-match", uid))))));
 	}
 
+	/// <inheritdoc />
 	public override async Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 	{
 		string? taskFolderName = Options.TaskFolder;
@@ -103,12 +103,12 @@ public sealed class CalDavTaskStore(
 			    !string.Equals(segment, taskFolderName, StringComparison.OrdinalIgnoreCase))
 				continue;
 
-			folders.Add(new BackendFolder(
-				ToBackendKey(resource.Href),
-				string.IsNullOrWhiteSpace(name) ? taskFolderName : name!,
-				null,
-				folders.Count == 0 ? EasFolderType.Tasks : EasFolderType.UserTasks,
-				Protocol.EasClass.Tasks));
+			folders.Add(new BackendFolder
+			{
+				Key = new FolderKey(ToBackendKey(resource.Href)),
+				DisplayName = string.IsNullOrWhiteSpace(name) ? taskFolderName : name!,
+				Type = folders.Count == 0 ? FolderType.Tasks : FolderType.UserTasks
+			});
 		}
 
 		if (folders.Count == 0)
@@ -117,10 +117,11 @@ public sealed class CalDavTaskStore(
 		return folders;
 	}
 
-	public override async Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-		string folderBackendKey, ContentFilter filter, CancellationToken ct)
+	/// <inheritdoc />
+	public override async Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+		FolderKey folder, ContentFilter filter, CancellationToken ct)
 	{
-		string collection = FromBackendKey(folderBackendKey);
+		string collection = FromBackendKey(folder.Value);
 		XElement body = new(DavNs.CalDav + "calendar-query",
 			new XElement(DavNs.D + "prop", new XElement(DavNs.D + "getetag")),
 			new XElement(DavNs.CalDav + "filter",
@@ -128,14 +129,14 @@ public sealed class CalDavTaskStore(
 					new XElement(DavNs.CalDav + "comp-filter", new XAttribute("name", "VTODO")))));
 
 		List<DavResource> resources = await Dav.ReportAsync(collection, 1, body, ct).ConfigureAwait(false);
-		Dictionary<string, string> map = new(StringComparer.Ordinal);
+		Dictionary<ItemKey, ItemRevision> map = new();
 		foreach (DavResource resource in resources)
 		{
 			if (PathsEqual(resource.Href, collection))
 				continue;
 			string? etag = resource.Propstat.Descendants(DavNs.D + "getetag").FirstOrDefault()?.Value;
 			if (etag is not null)
-				map[resource.Href] = etag;
+				map[new ItemKey(resource.Href)] = new ItemRevision(etag);
 		}
 
 		return map;

@@ -18,7 +18,8 @@ public sealed class SieveOofBackend(
 {
 	public async Task<string?> EnableAsync(OofReply reply, CancellationToken ct)
 	{
-		string script = SieveVacationScript.Build(reply.BodyText, reply.StartUtc, reply.EndUtc);
+		string script = SieveVacationScript.Build(
+			reply.BodyText, reply.Start?.UtcDateTime, reply.End?.UtcDateTime);
 		await using ManageSieveClient client = new(options, credentials, wireLogger);
 		await client.ConnectAsync(ct).ConfigureAwait(false);
 

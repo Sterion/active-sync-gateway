@@ -1,8 +1,11 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Backend;
 using ActiveSync.Core.State;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Sync;
+using ActiveSync.Server.Eas.Content;
 
 namespace ActiveSync.Server.Eas.Handlers;
 
@@ -16,7 +19,7 @@ public sealed partial class SyncHandler
 	///   CollectionId alone identifies the collection — so it is emitted only for &lt;= 12.1 to keep
 	///   the 14.1 wire form byte-identical.
 	/// </summary>
-	private static void EchoClassIfLegacy(XElement collection, EasContext context, IContentStore store)
+	private static void EchoClassIfLegacy(XElement collection, EasContext context, ContentAdapter store)
 	{
 		if (context.Version <= EasVersion.V121)
 			collection.AddFirst(new XElement(AS + "Class", store.EasClass));
@@ -40,12 +43,12 @@ public sealed partial class SyncHandler
 				new XElement(AS + "Status", status));
 		}
 
-		(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
+		(UserFolder Folder, ContentAdapter Store)? resolved = await folders.ResolveCollectionAsync(
 			context.Session, context.UserId, collectionId, ct);
 		if (resolved is null)
 			return new CollectionResult(Error("12"), true, null); // folder hierarchy out of date
 
-		(UserFolder folder, IContentStore store) = resolved.Value;
+		(UserFolder folder, ContentAdapter store) = resolved.Value;
 		(SyncKeyValidation validation, CollectionState? state) = await context.State.ValidateSyncKeyAsync(
 			context.Device, collectionId, clientSyncKey, ct);
 		if (validation == SyncKeyValidation.Invalid || state is null)
@@ -59,7 +62,7 @@ public sealed partial class SyncHandler
 		{
 			state.OptionsJson = collectionOptions.ToJson();
 			int initialKey = await context.State.CommitCollectionStateAsync(
-				state, [], collectionOptions.FilterType, SyncKeyValidation.Initial, ct);
+				state, CollectionSnapshot.Empty(), collectionOptions.FilterType, SyncKeyValidation.Initial, ct);
 			XElement initial = new(AS + "Collection",
 				new XElement(AS + "SyncKey", initialKey.ToString()),
 				new XElement(AS + "CollectionId", collectionId),
@@ -68,10 +71,13 @@ public sealed partial class SyncHandler
 			return new CollectionResult(initial, true, null);
 		}
 
-		BodyPreference bodyPreference = new(
-			collectionOptions.BodyType, collectionOptions.TruncationSize, false,
-			context.Version >= EasVersion.V160);
-		ContentFilter filter = ContentFilter.ForClass(store.EasClass, collectionOptions.FilterType);
+		BodyPreference bodyPreference = new()
+		{
+			Type = EasBodyTypes.FromWire(collectionOptions.BodyType),
+			TruncationSize = collectionOptions.TruncationSize,
+			Eas16 = context.Version >= EasVersion.V160
+		};
+		ContentFilter filter = ContentFilters.ForClass(store.EasClass, collectionOptions.FilterType);
 		int windowSize = int.TryParse(collectionElement.Element(AS + "WindowSize")?.Value, out int cw)
 			? cw
 			: globalWindow;
@@ -85,9 +91,20 @@ public sealed partial class SyncHandler
 		// On a Replay the entity is NOT rolled back until this collection's own commit, so the
 		// snapshot to diff against is the previous generation, read explicitly here (mirrors
 		// PeekSyncKeyAsync). Current diffs against the live snapshot.
-		Dictionary<string, string> snapshot = validation == SyncKeyValidation.Replay
-			? SyncStateService.ReadPreviousSnapshot(state)
-			: SyncStateService.ReadSnapshot(state);
+		if ((validation == SyncKeyValidation.Replay
+			    ? SyncStateService.ReadPreviousSnapshot(state)
+			    : SyncStateService.ReadSnapshot(state)) is not { } snapshot)
+		{
+			// The stored snapshot is not in the current shape (written before the read-only revert
+			// marker moved out of the revision value space, or corrupt). Diffing against an empty
+			// snapshot would re-Add every item the device already holds, so send Status 3 and let the
+			// client restart this collection from SyncKey 0 — the announced cost of the shape change.
+			logger.LogWarning(
+				"Stored snapshot for {CollectionId} is not readable in the current format; asking {User} " +
+				"to resynchronize the collection from scratch", collectionId, context.UserName);
+			return new CollectionResult(Error("3"), true, null);
+		}
+
 		List<XElement> clientResponses = new();
 		bool snapshotDirty = false;
 
@@ -107,12 +124,13 @@ public sealed partial class SyncHandler
 		// only when the client actually sent Change commands, and only for conflict comparison —
 		// NOT for the diff, which must fetch AFTER the client commands land so echo suppression
 		// works. A fetch failure degrades to "no conflict detection" (the historical overwrite).
-		IReadOnlyDictionary<string, string>? conflictRevisions = null;
+		IReadOnlyDictionary<ItemKey, ItemRevision>? conflictRevisions = null;
 		bool hasChangeCommands = commands?.Elements(AS + "Change").Any() == true;
 		if (hasChangeCommands && collectionOptions.ServerWinsOnConflict)
 			try
 			{
-				conflictRevisions = await store.GetItemRevisionsAsync(folder.BackendKey, filter, ct);
+				conflictRevisions = await store.Store.GetItemRevisionsAsync(
+					new FolderKey(folder.BackendKey), filter, ct);
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException)
 			{
@@ -158,7 +176,7 @@ public sealed partial class SyncHandler
 		// ---- server → client changes ----
 		List<XElement> serverCommands = new();
 		bool moreAvailable = false;
-		Dictionary<string, string> newSnapshot = snapshot;
+		Dictionary<string, SnapshotEntry> newSnapshot = snapshot;
 		// Set when an Add or Change was skipped this round (its render failed). Backend state
 		// genuinely differs from the (rolled-back) persisted snapshot for that item, so offering this
 		// collection to the long-poll wait would have the watchdog re-check spin against the same
@@ -167,10 +185,10 @@ public sealed partial class SyncHandler
 
 		if (getChanges)
 		{
-			IReadOnlyDictionary<string, string> current;
+			IReadOnlyDictionary<ItemKey, ItemRevision> current;
 			try
 			{
-				current = await store.GetItemRevisionsAsync(folder.BackendKey, filter, ct);
+				current = await store.Store.GetItemRevisionsAsync(new FolderKey(folder.BackendKey), filter, ct);
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException)
 			{
@@ -178,9 +196,13 @@ public sealed partial class SyncHandler
 				return new CollectionResult(Error("5"), true, null);
 			}
 
-			CollectionChanges diff = CollectionDiff.Compute(snapshot, current, windowSize);
+			// The snapshot carries the read-only revert marker beside each revision, so the diff is
+			// driven through CollectionSnapshot: it hands CollectionDiff plain revisions plus the set
+			// of items owing a revert, and re-marries the flags with the resulting snapshot.
+			(CollectionChanges diff, Dictionary<string, SnapshotEntry> diffSnapshot) =
+				CollectionSnapshot.Diff(snapshot, current, windowSize);
 			moreAvailable = diff.MoreAvailable;
-			newSnapshot = diff.NewSnapshot;
+			newSnapshot = diffSnapshot;
 
 			// MS-ASCMD: an item that merely slid out of the FilterType window is still on the
 			// server and must be reported as SoftDelete; Delete means "gone for good". The two
@@ -188,13 +210,14 @@ public sealed partial class SyncHandler
 			// for the unfiltered map — and only when a *filtered* collection actually produced
 			// deletes, so unfiltered classes (contacts/tasks/notes, FilterType 0) pay nothing.
 			HashSet<string> agedOut = new(StringComparer.Ordinal);
-			if (diff.Deletes.Count > 0 && filter.SinceUtc is not null)
+			if (diff.Deletes.Count > 0 && filter.Since is not null)
 				try
 				{
-					IReadOnlyDictionary<string, string> unfiltered =
-						await store.GetItemRevisionsAsync(folder.BackendKey, ContentFilter.All, ct);
+					IReadOnlyDictionary<ItemKey, ItemRevision> unfiltered =
+						await store.Store.GetItemRevisionsAsync(
+							new FolderKey(folder.BackendKey), ContentFilter.All, ct);
 					foreach (string deletedKey in diff.Deletes)
-						if (unfiltered.ContainsKey(deletedKey))
+						if (unfiltered.ContainsKey(new ItemKey(deletedKey)))
 							agedOut.Add(deletedKey);
 				}
 				catch (Exception ex) when (ex is not OperationCanceledException)
@@ -213,21 +236,21 @@ public sealed partial class SyncHandler
 			windowKeys.AddRange(diff.Changes.Select(c => c.ServerId));
 			windowKeys.AddRange(diff.Deletes);
 			IReadOnlyDictionary<string, string>? davIds =
-				await folders.PreResolveDavItemIdsAsync(folder, store, windowKeys, ct);
+				await folders.PreResolveDavItemIdsAsync(folder, windowKeys, ct);
 
-			// Fetch every Add/Change item's body in ONE batched round instead of one backend
+			// Fetch every Add/Change item's payload in ONE batched round instead of one backend
 			// round trip (and, for IMAP, one per-user gate acquisition) per item. The default
 			// GetItemsAsync loops GetItemAsync so behaviour is unchanged; a store override batches
 			// at the protocol level. A batch-level failure degrades to per-item fetch inside
 			// BuildItemElementAsync (empty prefetch map), preserving the old resilience.
-			IReadOnlyDictionary<string, BackendItem?>? prefetched = null;
+			IReadOnlyDictionary<string, object?>? prefetched = null;
 			List<string> fetchKeys = new(diff.Adds.Count + diff.Changes.Count);
 			fetchKeys.AddRange(diff.Adds.Select(a => a.ServerId));
 			fetchKeys.AddRange(diff.Changes.Select(c => c.ServerId));
 			if (fetchKeys.Count > 0)
 				try
 				{
-					prefetched = await store.GetItemsAsync(folder.BackendKey, fetchKeys, bodyPreference, ct);
+					prefetched = await store.GetItemsAsync(folder.BackendKey, fetchKeys, ct);
 				}
 				catch (Exception ex) when (ex is not OperationCanceledException)
 				{
@@ -238,7 +261,8 @@ public sealed partial class SyncHandler
 			foreach (ItemChange add in diff.Adds)
 			{
 				XElement? element = await BuildItemElementAsync(
-					AS + "Add", context, folder, store, add.ServerId, bodyPreference, ct, davIds, prefetched);
+					AS + "Add", context, folder, store, add.ServerId, bodyPreference, ct, davIds, prefetched,
+					add.Revision);
 				if (element is not null)
 					serverCommands.Add(element);
 				else
@@ -251,26 +275,29 @@ public sealed partial class SyncHandler
 			foreach (ItemChange change in diff.Changes)
 			{
 				XElement? element = await BuildItemElementAsync(
-					AS + "Change", context, folder, store, change.ServerId, bodyPreference, ct, davIds, prefetched);
+					AS + "Change", context, folder, store, change.ServerId, bodyPreference, ct, davIds, prefetched,
+					change.Revision);
 				if (element is not null)
 					serverCommands.Add(element);
 				else
 				{
 					// CollectionDiff.Compute already wrote the NEW backend revision into
 					// newSnapshot when it charged this item to the window. Mirror the Add loop above:
-					// revert to the revision the client last acked (or the sentinel that never matches
-					// a real backend revision) so the round does NOT record this Change as delivered —
-					// the next diff must re-offer it, exactly as the contract's null convention promises.
-					newSnapshot[change.ServerId] = snapshot.TryGetValue(change.ServerId, out string? old)
+					// restore the entry the client last acked — including its pending-revert marker, so
+					// a revert whose render failed is still owed — so the round does NOT record this
+					// Change as delivered; the next diff must re-offer it, exactly as the contract's
+					// null convention promises. With no acked entry to restore, the marker alone forces
+					// the re-offer (it does not depend on the revision value).
+					newSnapshot[change.ServerId] = snapshot.TryGetValue(change.ServerId, out SnapshotEntry old)
 						? old
-						: ReadOnlyRevertRevision;
+						: new SnapshotEntry(new ItemRevision(change.Revision), true);
 					anyItemSkipped = true;
 				}
 			}
 
 			foreach (string deletedKey in diff.Deletes)
 			{
-				string serverId = await folders.ComposeServerIdAsync(folder, store, deletedKey, ct, davIds);
+				string serverId = await folders.ComposeServerIdAsync(folder, deletedKey, ct, davIds);
 				serverCommands.Add(new XElement(AS + (agedOut.Contains(deletedKey) ? "SoftDelete" : "Delete"),
 					new XElement(AS + "ServerId", serverId)));
 			}

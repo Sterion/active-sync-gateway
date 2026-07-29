@@ -53,7 +53,7 @@ public sealed class JmapOofTests(GatewayFixture gateway)
 	private static async Task<JsonElement?> VacationResponseAsync(string user)
 	{
 		using JmapClient client = new(
-			new Uri(TestBackend.JmapUrl!), new BackendCredentials(user, TestBackend.Password),
+			new Uri(TestBackend.JmapUrl!), new BackendCredentials { UserName = user, Password = TestBackend.Password },
 			allowInvalidCertificates: true);
 		JmapSessionResource session = await client.GetSessionAsync(CancellationToken.None);
 		using JmapResponse response = await client.CallAsync(

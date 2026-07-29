@@ -19,7 +19,7 @@ public class ImapSessionTests
 	{
 		ImapSession session = new(
 			new ImapOptions { Host = "localhost", Port = 143 },
-			new BackendCredentials("user", "pass"),
+			new BackendCredentials { UserName = "user", Password = "pass" },
 			NullLogger.Instance);
 
 		await session.DisposeAsync();
@@ -34,7 +34,7 @@ public class ImapSessionTests
 	{
 		ImapSession session = new(
 			new ImapOptions { Host = "localhost", Port = 143 },
-			new BackendCredentials("user", "pass"),
+			new BackendCredentials { UserName = "user", Password = "pass" },
 			NullLogger.Instance);
 
 		await session.DisposeAsync();
@@ -55,7 +55,7 @@ public class ImapSessionTests
 	{
 		ImapSession session = new(
 			new ImapOptions { Host = "localhost", Port = 143 },
-			new BackendCredentials("user", "pass"),
+			new BackendCredentials { UserName = "user", Password = "pass" },
 			NullLogger.Instance);
 
 		await session.DisposeAsync();

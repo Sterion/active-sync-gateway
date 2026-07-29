@@ -17,7 +17,7 @@ public sealed class ManageSieveClientTests
 {
 	private static SieveOptions Options(int port) => new() { Host = "127.0.0.1", Port = port, UseTls = false };
 
-	private static readonly BackendCredentials Credentials = new("user@example.test", "pw");
+	private static readonly BackendCredentials Credentials = new() { UserName = "user@example.test", Password = "pw" };
 
 	// Literal name + trailing ACTIVE flag ---------------------------------------------------
 
@@ -282,7 +282,7 @@ public sealed class ManageSieveClientTests
 		});
 
 		SieveOofBackend backend = new(Options(server.Port), Credentials);
-		OofReply reply = new("Away.", false, null, null);
+		OofReply reply = new() { BodyText = "Away." };
 
 		BackendException ex = await Assert.ThrowsAsync<BackendException>(() => backend.EnableAsync(reply, cts.Token));
 		Assert.Contains("SETACTIVE", ex.Message, StringComparison.OrdinalIgnoreCase);

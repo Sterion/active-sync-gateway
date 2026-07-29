@@ -1,6 +1,6 @@
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Eas.Conversion;
 using MimeKit;
 
 namespace ActiveSync.Server.Eas;
@@ -19,11 +19,11 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 	{
 		try
 		{
-			if (store is not ICalendarOperations calendar)
+			if (store is not ICalendarStore calendar || store is not IMeetingOperations meetings)
 				return;
-			string? ics = await calendar.GetRawEventAsync(folderBackendKey, itemKey, ct);
+			string? ics = await ReadIcsAsync(calendar, folderBackendKey, itemKey, ct);
 			CalendarConverter.SchedulingInfo? info = ics is null ? null : CalendarConverter.ReadSchedulingInfo(ics);
-			if (info is null || !await ShouldActAsync(context, calendar, info, ct))
+			if (info is null || !await ShouldActAsync(context, meetings, info, ct))
 				return;
 			await SendAsync(context, ImipMailBuilder.BuildRequest(
 				ics!, info.Organizer!, Recipients(info, context), $"Invitation: {info.Summary}"), ct);
@@ -46,11 +46,11 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 	{
 		try
 		{
-			if (store is not ICalendarOperations calendar)
+			if (store is not ICalendarStore calendar || store is not IMeetingOperations meetings)
 				return;
-			string? ics = await calendar.GetRawEventAsync(folderBackendKey, itemKey, ct);
+			string? ics = await ReadIcsAsync(calendar, folderBackendKey, itemKey, ct);
 			CalendarConverter.SchedulingInfo? info = ics is null ? null : CalendarConverter.ReadSchedulingInfo(ics);
-			if (info is null || !await ShouldActAsync(context, calendar, info, ct))
+			if (info is null || !await ShouldActAsync(context, meetings, info, ct))
 				return;
 
 			CalendarConverter.SchedulingInfo? previous =
@@ -94,11 +94,11 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 	{
 		try
 		{
-			if (store is not ICalendarOperations calendar)
+			if (store is not ICalendarStore calendar || store is not IMeetingOperations meetings)
 				return;
-			string? ics = await calendar.GetRawEventAsync(folderBackendKey, itemKey, ct);
+			string? ics = await ReadIcsAsync(calendar, folderBackendKey, itemKey, ct);
 			CalendarConverter.SchedulingInfo? info = ics is null ? null : CalendarConverter.ReadSchedulingInfo(ics);
-			if (info is null || !await ShouldActAsync(context, calendar, info, ct))
+			if (info is null || !await ShouldActAsync(context, meetings, info, ct))
 				return;
 			await SendAsync(context, ImipMailBuilder.BuildCancel(
 				info.Uid, info.Sequence + 1, info.Organizer!, Recipients(info, context), occurrenceUtc,
@@ -116,10 +116,10 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 	{
 		try
 		{
-			if (store is not ICalendarOperations calendar || deletedIcs is null)
+			if (store is not IMeetingOperations meetings || deletedIcs is null)
 				return;
 			CalendarConverter.SchedulingInfo? info = CalendarConverter.ReadSchedulingInfo(deletedIcs);
-			if (info is null || !await ShouldActAsync(context, calendar, info, ct))
+			if (info is null || !await ShouldActAsync(context, meetings, info, ct))
 				return;
 			await SendAsync(context, ImipMailBuilder.BuildCancel(
 				info.Uid, info.Sequence + 1, info.Organizer!, Recipients(info, context), null,
@@ -132,14 +132,19 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 	}
 
 	/// <summary>The stored ICS of a calendar item, for delete/change hooks that need the "before".</summary>
+	/// <remarks>
+	///   Under the typed currency the ordinary fetch IS the raw read — <c>CalendarItem.ICalendar</c>
+	///   is the stored (merged) document, so 16.x ghosting cannot hide attendees from it. The old
+	///   dedicated GetRawEventAsync is gone for exactly that reason.
+	/// </remarks>
 	public static async Task<string?> CaptureIcsAsync(
 		IContentStore store, string folderBackendKey, string itemKey, ILogger logger, CancellationToken ct)
 	{
-		if (store is not ICalendarOperations calendar)
+		if (store is not ICalendarStore calendar)
 			return null;
 		try
 		{
-			return await calendar.GetRawEventAsync(folderBackendKey, itemKey, ct);
+			return await ReadIcsAsync(calendar, folderBackendKey, itemKey, ct);
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
@@ -154,9 +159,18 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 		}
 	}
 
+	/// <summary>The stored iCalendar of one event via the ordinary typed fetch; null when it vanished.</summary>
+	private static async Task<string?> ReadIcsAsync(
+		ICalendarStore calendar, string folderBackendKey, string itemKey, CancellationToken ct)
+	{
+		CalendarItem? item = await calendar.GetItemAsync(
+			new FolderKey(folderBackendKey), new ItemKey(itemKey), ct);
+		return item?.ICalendar;
+	}
+
 	/// <summary>Attendees exist, the acting user is the organizer, and the knob/probe allows.</summary>
 	private static async Task<bool> ShouldActAsync(
-		EasContext context, ICalendarOperations calendar, CalendarConverter.SchedulingInfo info,
+		EasContext context, IMeetingOperations meetings, CalendarConverter.SchedulingInfo info,
 		CancellationToken ct)
 	{
 		if (info.Attendees.Count == 0 || info.Organizer is null)
@@ -164,7 +178,7 @@ public sealed class MeetingInvitationService(ILogger<MeetingInvitationService> l
 		string identity = context.Session.MailAddress ?? context.UserName;
 		if (!MailboxEquals(info.Organizer, identity))
 			return false;
-		return await calendar.ShouldSendInvitationsAsync(ct);
+		return await meetings.ShouldSendInvitationsAsync(ct);
 	}
 
 	/// <summary>

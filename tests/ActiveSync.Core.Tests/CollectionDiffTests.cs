@@ -184,4 +184,48 @@ public class CollectionDiffTests
 		// SECOND entry is added alongside it.
 		Assert.Single(round2.NewSnapshot);
 	}
+	[Fact]
+	public void ForceChanged_ReportsAChange_EvenWhenTheRevisionStillMatches()
+	{
+		// The host's read-only/conflict silent revert: the backend never moved, but the CLIENT's
+		// copy must be overwritten with the server's. It used to be expressed by poisoning the
+		// snapshot revision with a sentinel that could never match; the ids arrive as their own set
+		// now, so a revision is only ever the backend's word.
+		Dictionary<string, string> snapshot = Map(("1", "a"), ("2", "b"));
+		Dictionary<string, string> current = Map(("1", "a"), ("2", "b"));
+
+		CollectionChanges result = CollectionDiff.Compute(
+			snapshot, current, 100, new HashSet<string>(StringComparer.Ordinal) { "2" });
+
+		Assert.Empty(result.Adds);
+		Assert.Empty(result.Deletes);
+		Assert.Equal(["2"], result.Changes.Select(c => c.ServerId).ToArray());
+		Assert.Equal("b", result.NewSnapshot["2"]); // the backend's revision, not a sentinel
+	}
+
+	[Fact]
+	public void ForceChanged_IsChargedToTheWindow_AndTheUnsentOneKeepsItsSnapshotEntry()
+	{
+		Dictionary<string, string> snapshot = Map(("1", "a"), ("2", "b"));
+		Dictionary<string, string> current = Map(("1", "a"), ("2", "b"));
+
+		CollectionChanges result = CollectionDiff.Compute(
+			snapshot, current, 1, new HashSet<string>(StringComparer.Ordinal) { "1", "2" });
+
+		Assert.Single(result.Changes);
+		Assert.True(result.MoreAvailable);
+		Assert.Equal(2, result.NewSnapshot.Count);
+	}
+
+	[Fact]
+	public void ForceChanged_IdsAbsentFromTheSnapshot_AreIgnored()
+	{
+		// An unknown id is an Add (or nothing at all) — never a Change against a snapshot entry
+		// that does not exist.
+		CollectionChanges result = CollectionDiff.Compute(
+			Map(), Map(("1", "a")), 100, new HashSet<string>(StringComparer.Ordinal) { "1", "9" });
+
+		Assert.Single(result.Adds);
+		Assert.Empty(result.Changes);
+	}
 }

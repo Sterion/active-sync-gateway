@@ -1,6 +1,7 @@
 using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol.Wbxml;
 using Ical.Net;
 using Ical.Net.CalendarComponents;
@@ -202,7 +203,7 @@ public class CalendarConverterTests
 		                   """;
 
 		// ann accepting must not touch joann (substring matching would hit both).
-		string? updated = CalendarConverter.SetPartStat(ics, 1, "ann@example.com");
+		string? updated = CalendarPayload.SetPartStat(ics, 1, "ann@example.com");
 		Assert.NotNull(updated);
 		Assert.Contains("PARTSTAT=NEEDS-ACTION", updated);
 		Assert.Contains("PARTSTAT=ACCEPTED", updated);
@@ -210,10 +211,10 @@ public class CalendarConverterTests
 		Assert.Equal(1, accepted);
 
 		// Case-insensitive + mailto:-prefixed identity still matches.
-		Assert.NotNull(CalendarConverter.SetPartStat(ics, 2, "mailto:ANN@example.com"));
+		Assert.NotNull(CalendarPayload.SetPartStat(ics, 2, "mailto:ANN@example.com"));
 
 		// No attendee matches → null (no phantom update).
-		Assert.Null(CalendarConverter.SetPartStat(ics, 1, "nobody@example.com"));
+		Assert.Null(CalendarPayload.SetPartStat(ics, 1, "nobody@example.com"));
 	}
 
 	[Fact]
@@ -447,7 +448,7 @@ public class CalendarConverterTests
 		                    END:VCALENDAR
 		                    """;
 
-		string? updated = CalendarConverter.SetPartStat(ics, 1, "user@example.com");
+		string? updated = CalendarPayload.SetPartStat(ics, 1, "user@example.com");
 
 		Assert.NotNull(updated);
 		Calendar? calendar = Calendar.Load(updated);

@@ -51,7 +51,7 @@ public sealed class SyncConformanceTests : IDisposable
 	private async Task<UserFolder> RegisterInboxAsync()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 		return folders.Single(f => f.BackendKey == "imap:INBOX");
 	}
 
@@ -244,7 +244,7 @@ public sealed class SyncConformanceTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["10"] = "old" }, 0, SyncKeyValidation.Initial,
+			state!, new Dictionary<string, SnapshotEntry> { ["10"] = new SnapshotEntry("old") }, 0, SyncKeyValidation.Initial,
 			CancellationToken.None);
 
 		// The backend has since moved on: its current revision of item "10" differs from what the
@@ -304,7 +304,7 @@ public sealed class SyncConformanceTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["10"] = "x" }, 0, SyncKeyValidation.Initial,
+			state!, new Dictionary<string, SnapshotEntry> { ["10"] = new SnapshotEntry("x") }, 0, SyncKeyValidation.Initial,
 			CancellationToken.None);
 
 		XDocument? response = await _harness.RunAsync(handler, "Sync",
@@ -345,7 +345,7 @@ public sealed class SyncConformanceTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["10"] = "x", ["20"] = "y" }, 0, SyncKeyValidation.Initial,
+			state!, new Dictionary<string, SnapshotEntry> { ["10"] = new SnapshotEntry("x"), ["20"] = new SnapshotEntry("y") }, 0, SyncKeyValidation.Initial,
 			CancellationToken.None);
 
 		XDocument? response = await _harness.RunAsync(handler, "Sync",
@@ -373,10 +373,10 @@ public sealed class SyncConformanceTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["a"] = "1" }, 0, SyncKeyValidation.Initial,
+			state!, new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1") }, 0, SyncKeyValidation.Initial,
 			CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["a"] = "1", ["b"] = "1" }, 0, SyncKeyValidation.Current,
+			state!, new Dictionary<string, SnapshotEntry> { ["a"] = new SnapshotEntry("1"), ["b"] = new SnapshotEntry("1") }, 0, SyncKeyValidation.Current,
 			CancellationToken.None);
 
 		// The client re-sends the one-behind key → Replay. The rollback is DEFERRED to the round's own

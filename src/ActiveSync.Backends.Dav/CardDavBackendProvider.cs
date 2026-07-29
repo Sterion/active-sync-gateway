@@ -32,11 +32,17 @@ public sealed class CardDavBackendProvider(
 	{
 		return
 		[
-			new BackendConfigField("BaseUrl", "Base URL", BackendFieldType.Url, Required: true,
-				Help: "Absolute http(s) URL of the CardDAV server, e.g. https://dav.example.com."),
-			new BackendConfigField("HomeSetPath", "Home set path", BackendFieldType.String,
-				Help: "Path template of the user's address book home set — {user} and {localpart} are " +
-				      "substituted, e.g. \"/{user}/\". Empty discovers it via .well-known."),
+			new BackendConfigField
+			{
+				Name = "BaseUrl", Label = "Base URL", Type = BackendFieldType.Url, Required = true,
+				Help = "Absolute http(s) URL of the CardDAV server, e.g. https://dav.example.com."
+			},
+			new BackendConfigField
+			{
+				Name = "HomeSetPath", Label = "Home set path", Type = BackendFieldType.String,
+				Help = "Path template of the user's address book home set — {user} and {localpart} are " +
+				       "substituted, e.g. \"/{user}/\". Empty discovers it via .well-known."
+			},
 			.. BackendSchemaFields.Network()
 		];
 	}
@@ -64,6 +70,6 @@ public sealed class CardDavBackendProvider(
 			options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger, options.CheckRevocation);
 		CardDavStore store = new(client, options, role.Credentials, _logger,
 			hostOptions.CurrentValue.Eas.DavPollSeconds);
-		return Task.FromResult<IBackendConnection>(new BackendConnection([store], ownedResources: [client]));
+		return Task.FromResult<IBackendConnection>(new BackendConnection([store], ownedResources: [OwnedResource.OfSync(client)]));
 	}
 }

@@ -6,19 +6,24 @@ using System.Reflection;
 namespace ActiveSync.Contracts;
 
 /// <summary>
-///   The version of the backend plugin contract — the surface formed by
-///   <c>ActiveSync.Contracts</c> and <c>ActiveSync.Protocol</c>, which version together.
+///   The version of the backend plugin contract — the public surface of THIS assembly, and of
+///   nothing else. It once covered <c>ActiveSync.Protocol</c> too, back when the contract's own
+///   signatures named EAS constants from it; no EAS wire encoding crosses the store boundary any
+///   more, so Protocol is host-only, unpublished, and versions with the gateway release.
 ///   <para>
 ///     The value is READ FROM THIS ASSEMBLY rather than written here, because the single
 ///     definition lives in <c>Directory.Build.props</c> (<c>ContractVersion</c>) and is pinned
-///     onto both projects' <c>AssemblyVersion</c>. Raising it there raises it everywhere; there
+///     onto this project's <c>AssemblyVersion</c>. Raising it there raises it everywhere; there
 ///     is nothing to keep in sync by hand.
 ///   </para>
 ///   <para>
 ///     It is deliberately INDEPENDENT of the gateway's release version. The release tag flows
-///     into every other assembly as <c>-p:Version</c>, but not into these two: otherwise
+///     into every other assembly as <c>-p:Version</c>, but not into this one: otherwise
 ///     releasing the gateway as 2.0.0 for a product reason would flip the contract major and
-///     refuse every existing plugin, having changed no API at all.
+///     refuse every existing plugin, having changed no API at all. The optional packages beside
+///     the contract (<c>ActiveSync.Contracts.Interop</c>, <c>ActiveSync.Contracts.Conformance</c>)
+///     are not loader ABI and take the release version instead, pinning the contract they were
+///     built against as an exact dependency range.
 ///   </para>
 ///   <para>
 ///     <see cref="Major" /> AND <see cref="Minor" /> are both breaking: the loader requires a

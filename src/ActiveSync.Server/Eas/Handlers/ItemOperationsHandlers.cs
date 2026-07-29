@@ -1,12 +1,13 @@
 using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Server.Eas.Content;
 using Microsoft.Extensions.Options;
+using MimeKit;
 
 namespace ActiveSync.Server.Eas.Handlers;
 
@@ -86,16 +87,16 @@ public sealed class ItemOperationsHandler(
 			bool isCalendarAttachment =
 				fileReference.StartsWith(CalendarConverter.AttachmentReferencePrefix, StringComparison.Ordinal);
 			// A mail FileReference is client-supplied and names a backend folder directly, just
-			// like LongId below — the store's own parsing is only a shape test, not a membership
-			// test. Gate it through the same per-user folder registry before asking the backend.
+			// like LongId below — its shape alone is not a membership test. Gate it through the
+			// same per-user folder registry before asking the backend.
 			if (!isCalendarAttachment && !await IsAttachmentFolderRegisteredAsync(context, fileReference, ct))
 				return Failure("6");
 			BackendAttachment? attachment = isCalendarAttachment
 				? await FetchCalendarAttachmentAsync(context, fileReference, ct)
-				: await context.Session.MailStore.GetAttachmentAsync(fileReference, ct);
+				: await FetchMailAttachmentAsync(context, fileReference, ct);
 			if (attachment is null)
 				return Failure("6");
-			XElement data = new(IO + "Data", Convert.ToBase64String(attachment.Content));
+			XElement data = new(IO + "Data", Convert.ToBase64String(attachment.Content.Span));
 			data.SetAttributeValue(EasNamespaces.OpaqueAttribute, "1");
 			return new XElement(IO + "Fetch",
 				new XElement(IO + "Status", "1"),
@@ -112,7 +113,7 @@ public sealed class ItemOperationsHandler(
 			if (parts is null)
 				return Failure("2");
 			// The LongId is client-supplied and names a backend key directly, so the store's
-			// own OwnsBackendKey() is only a shape test — it says "imap:..." is mine, not
+			// own OwnsKey() is only a shape test — it says "imap:..." is mine, not
 			// "this folder is yours". The per-user folder registry is what says that, and it
 			// is the same gate CollectionId Fetch goes through.
 			List<UserFolder> registry = await context.State.GetFoldersAsync(context.UserId, ct);
@@ -124,37 +125,44 @@ public sealed class ItemOperationsHandler(
 				return Failure("6");
 			}
 
-			IContentStore? searchStore = context.Session.GetStoreForBackendKey(parts[0]);
+			IContentStore? searchStore = context.Session.GetStoreForKey(new FolderKey(parts[0]));
 			if (searchStore is null)
 				return Failure("6");
-			BodyPreference options = ParseBodyPreference(
+			ContentAdapter adapter = ContentAdapter.For(context.Session, searchStore, options.Value.Eas);
+			BodyPreference longIdPreference = ParseBodyPreference(
 				fetch.Element(IO + "Options"), context.Version >= EasVersion.V160);
-			BackendItem? found = await searchStore.GetItemAsync(parts[0], parts[1], options, ct);
-			if (found is null)
+			object? found = await adapter.GetItemAsync(parts[0], parts[1], ct);
+			List<XElement>? rendered = found is null
+				? null
+				: adapter.Render(found, longIdPreference, parts[0], parts[1]);
+			if (rendered is null)
 				return Failure("6");
 			return new XElement(IO + "Fetch",
 				new XElement(IO + "Status", "1"),
 				new XElement(IO + "LongId", longId),
-				new XElement(AS + "Class", searchStore.EasClass),
-				new XElement(IO + "Properties", found.ApplicationData));
+				new XElement(AS + "Class", adapter.EasClass),
+				new XElement(IO + "Properties", rendered));
 		}
 
 		if (collectionId is null || serverId is null)
 			return Failure("2");
 
-		(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
+		(UserFolder Folder, ContentAdapter Store)? resolved = await folders.ResolveCollectionAsync(
 			context.Session, context.UserId, collectionId, ct);
 		if (resolved is null)
 			return Failure("6");
-		(UserFolder folder, IContentStore store) = resolved.Value;
-		string? itemKey = await folders.ResolveItemKeyAsync(folder, store, serverId, ct);
+		(UserFolder folder, ContentAdapter store) = resolved.Value;
+		string? itemKey = await folders.ResolveItemKeyAsync(folder, serverId, ct);
 		if (itemKey is null)
 			return Failure("6");
 
 		BodyPreference bodyPreference = ParseBodyPreference(
 			fetch.Element(IO + "Options"), context.Version >= EasVersion.V160);
-		BackendItem? item = await store.GetItemAsync(folder.BackendKey, itemKey, bodyPreference, ct);
-		if (item is null)
+		object? item = await store.GetItemAsync(folder.BackendKey, itemKey, ct);
+		List<XElement>? properties = item is null
+			? null
+			: store.Render(item, bodyPreference, folder.BackendKey, itemKey);
+		if (properties is null)
 			return Failure("6");
 
 		return new XElement(IO + "Fetch",
@@ -162,7 +170,7 @@ public sealed class ItemOperationsHandler(
 			new XElement(AS + "CollectionId", collectionId),
 			new XElement(AS + "ServerId", serverId),
 			new XElement(AS + "Class", store.EasClass),
-			new XElement(IO + "Properties", item.ApplicationData));
+			new XElement(IO + "Properties", properties));
 	}
 
 	/// <summary>Resolves "calatt::&lt;serverId&gt;::&lt;index&gt;" to inline event-attachment bytes.</summary>
@@ -178,21 +186,57 @@ public sealed class ItemOperationsHandler(
 		if (colon <= 0)
 			return null;
 
-		(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
+		(UserFolder Folder, ContentAdapter Store)? resolved = await folders.ResolveCollectionAsync(
 			context.Session, context.UserId, serverId[..colon], ct);
-		if (resolved is null || resolved.Value.Store is not ICalendarAttachmentSource source)
+		if (resolved is null || resolved.Value.Store.Store is not ICalendarAttachmentSource source)
 			return null;
-		string? itemKey = await folders.ResolveItemKeyAsync(
-			resolved.Value.Folder, resolved.Value.Store, serverId, ct);
+		string? itemKey = await folders.ResolveItemKeyAsync(resolved.Value.Folder, serverId, ct);
 		if (itemKey is null)
 			return null;
-		return await source.GetEventAttachmentAsync(resolved.Value.Folder.BackendKey, itemKey, index, ct);
+		return await source.GetEventAttachmentAsync(
+			new FolderKey(resolved.Value.Folder.BackendKey), new ItemKey(itemKey), index, ct);
+	}
+
+	/// <summary>
+	///   Resolves a mail-attachment FileReference host-side: fetch the raw message via the
+	///   mailbox operations and extract the Nth attachment with MimeKit. The FileReference and
+	///   its index semantics ("position in MimeMessage.Attachments") are host knowledge — a store
+	///   never sees either.
+	/// </summary>
+	internal static async Task<BackendAttachment?> FetchMailAttachmentAsync(
+		EasContext context, string fileReference, CancellationToken ct)
+	{
+		if (MailFileReference.TryParse(fileReference) is not { } reference)
+			return null; // hand-crafted reference: same answer as an attachment that no longer exists
+
+		ReadOnlyMemory<byte>? raw;
+		try
+		{
+			raw = await context.Session.Mailbox.GetRawMessageAsync(
+				new FolderKey(reference.FolderBackendKey), new ItemKey(reference.ItemKey), ct);
+		}
+		catch (BackendItemNotFoundException)
+		{
+			return null; // hand-crafted item key inside the reference
+		}
+
+		if (raw is not { } rawBytes)
+			return null;
+
+		using MemoryStream stream = new(rawBytes.ToArray());
+		MimeMessage message = await MimeMessage.LoadAsync(stream, ct);
+		MimeEntity? attachment = message.Attachments.Skip(reference.AttachmentIndex).FirstOrDefault();
+		if (attachment is not MimePart { Content: not null } part)
+			return null;
+		using MemoryStream decoded = new();
+		await part.Content.DecodeToAsync(decoded, ct);
+		return new BackendAttachment { ContentType = part.ContentType.MimeType, Content = decoded.ToArray() };
 	}
 
 	private async Task<XElement> HandleEmptyFolderAsync(EasContext context, XElement operation, CancellationToken ct)
 	{
 		string collectionId = operation.Element(AS + "CollectionId")?.Value ?? "";
-		(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
+		(UserFolder Folder, ContentAdapter Store)? resolved = await folders.ResolveCollectionAsync(
 			context.Session, context.UserId, collectionId, ct);
 		// Distinct statuses for distinct causes so the client can tell them apart: 6 unresolvable,
 		// 2 not a mail folder OR read-only/access-denied (emptying is a bulk delete, so a read-only
@@ -215,7 +259,7 @@ public sealed class ItemOperationsHandler(
 		// try/catch HandleFetchAsync already wraps its own core in.
 		try
 		{
-			await context.Session.MailStore.EmptyFolderAsync(resolved.Value.Folder.BackendKey, ct);
+			await context.Session.Mailbox.EmptyFolderAsync(new FolderKey(resolved.Value.Folder.BackendKey), ct);
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
@@ -229,22 +273,31 @@ public sealed class ItemOperationsHandler(
 			new XElement(AS + "CollectionId", collectionId));
 	}
 
-	private static BodyPreference ParseBodyPreference(XElement? options, bool eas16)
+	/// <summary>
+	///   The body preference a Fetch renders with. Internal (not private) so the version gate
+	///   below — the one a hard-coded false used to break — is directly assertable.
+	/// </summary>
+	internal static BodyPreference ParseBodyPreference(XElement? options, bool eas16)
 	{
 		// AirSyncBase body Type codes (MS-ASAIRS): 1 = plain text, 2 = HTML, 3 = RTF,
 		// 4 = MIME. Default to 2 (HTML) when the client sends no preference.
-		// `eas16` (context.Version >= EasVersion.V160) must reach the store the same way it does
-		// through Sync (AGENTS.md: "version gating rides BodyPreference.Eas16") — a hard-coded
+		// `eas16` (context.Version >= EasVersion.V160) must reach the CONVERSION the same way it
+		// does through Sync (version gating rides the host-side BodyPreference) — a hard-coded
 		// false here silently drops airsyncbase:Location and event attachments for a 16.x client
 		// fetching outside Sync.
 		XElement? preference = options?.Elements(ASB + "BodyPreference").FirstOrDefault();
 		if (preference is null)
-			return new BodyPreference(2, null, false, eas16);
+			return new BodyPreference { Type = BodyType.Html, Eas16 = eas16 };
 		int type = int.TryParse(preference.Element(ASB + "Type")?.Value, out int t) ? t : 2;
 		long? truncation = long.TryParse(preference.Element(ASB + "TruncationSize")?.Value, out long tr)
 			? tr
 			: null;
-		return new BodyPreference(type, truncation, false, eas16);
+		return new BodyPreference
+		{
+			Type = EasBodyTypes.FromWire(type),
+			TruncationSize = truncation,
+			Eas16 = eas16
+		};
 	}
 
 	/// <summary>
@@ -256,11 +309,10 @@ public sealed class ItemOperationsHandler(
 	internal static async Task<bool> IsAttachmentFolderRegisteredAsync(
 		EasContext context, string fileReference, CancellationToken ct)
 	{
-		string[]? parts = DelimitedKey.Decode(fileReference, 3);
-		if (parts is null)
+		if (MailFileReference.TryParse(fileReference) is not { } reference)
 			return false; // malformed reference — same answer as "not found" to the caller
 		List<UserFolder> registry = await context.State.GetFoldersAsync(context.UserId, ct);
-		return registry.Any(f => string.Equals(f.BackendKey, parts[0], StringComparison.Ordinal));
+		return registry.Any(f => string.Equals(f.BackendKey, reference.FolderBackendKey, StringComparison.Ordinal));
 	}
 }
 
@@ -286,15 +338,8 @@ public sealed class GetAttachmentHandler : IEasCommandHandler
 			return;
 		}
 
-		BackendAttachment? attachment;
-		try
-		{
-			attachment = await context.Session.MailStore.GetAttachmentAsync(fileReference, ct);
-		}
-		catch (BackendItemNotFoundException)
-		{
-			attachment = null; // hand-crafted item key inside the reference
-		}
+		BackendAttachment? attachment =
+			await ItemOperationsHandler.FetchMailAttachmentAsync(context, fileReference, ct);
 
 		if (attachment is null)
 		{
@@ -305,6 +350,6 @@ public sealed class GetAttachmentHandler : IEasCommandHandler
 		// The content type comes from inside an untrusted email — make sure nothing
 		// renders it inline in a browser context.
 		context.Http.Response.Headers.ContentDisposition = "attachment";
-		await context.WriteBinaryAsync(attachment.Content, attachment.ContentType);
+		await context.WriteBinaryAsync(attachment.Content.ToArray(), attachment.ContentType);
 	}
 }

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Ruben Andersen
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 
 using System.Globalization;
 
@@ -49,10 +49,19 @@ public static class CollectionDiff
 	///   the charge order). Clamped to at least 1, so a non-positive value still makes progress
 	///   instead of producing an empty round forever.
 	/// </param>
+	/// <param name="forceChanged">
+	///   Ids that must be reported as Changes even when their revision still matches the snapshot —
+	///   the host's read-only/conflict silent revert, where the backend never moved but the CLIENT's
+	///   copy must be overwritten with the server's. It is passed as its own set precisely so the
+	///   host does not have to poison the revision value space with a sentinel that "can never match
+	///   a real revision"; a revision is the backend's word alone. Ids not present in
+	///   <paramref name="snapshot" /> are ignored (an unknown id is an Add or nothing).
+	/// </param>
 	public static CollectionChanges Compute(
 		IReadOnlyDictionary<string, string> snapshot,
 		IReadOnlyDictionary<string, string> current,
-		int windowSize)
+		int windowSize,
+		IReadOnlySet<string>? forceChanged = null)
 	{
 		snapshot = AsOrdinal(snapshot);
 		current = AsOrdinal(current);
@@ -64,7 +73,8 @@ public static class CollectionDiff
 		foreach ((string id, string revision) in current)
 			if (!snapshot.TryGetValue(id, out string? known))
 				adds.Add(new ItemChange(id, revision));
-			else if (!string.Equals(known, revision, StringComparison.Ordinal))
+			else if (!string.Equals(known, revision, StringComparison.Ordinal) ||
+			         forceChanged?.Contains(id) == true)
 				changes.Add(new ItemChange(id, revision));
 
 		foreach (string id in snapshot.Keys)

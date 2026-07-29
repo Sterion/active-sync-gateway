@@ -1,10 +1,8 @@
-using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
-using ActiveSync.Protocol;
 using Ical.Net;
 using Ical.Net.CalendarComponents;
 using Microsoft.EntityFrameworkCore;
@@ -19,25 +17,24 @@ public sealed class LocalContactStore(
 	int userId,
 	LocalContentProtector protector,
 	ILogger logger)
-	: LocalStoreBase(dbFactory, notifier, userId, protector), IContactOperations
+	: LocalStoreBase<ContactItem>(dbFactory, notifier, userId, protector), IContactStore, IDirectoryOperations
 {
 	public const string BackendKey = KeyPrefix + "contacts";
 
 	protected override string Collection => "contacts";
 	protected override string FolderDisplayName => "Contacts";
-	protected override int FolderType => EasFolderType.Contacts;
-	public override string EasClass => Protocol.EasClass.Contacts;
+	protected override FolderType FolderType => FolderType.Contacts;
 
-	public async Task<IReadOnlyList<IReadOnlyList<XElement>>> SearchGalAsync(
+	public async Task<IReadOnlyList<GalEntry>> SearchGalAsync(
 		string query, int maxResults, GalPhotoRequest? photos, CancellationToken ct)
 	{
 		await using SyncDbContext db = DbFactory.CreateDbContext();
-		List<IReadOnlyList<XElement>> results = new();
+		List<GalEntry> results = new();
 		int photosGranted = 0;
 		// Stream the rows (AsAsyncEnumerable) so the maxResults break stops pulling and
 		// decrypting rows once enough matches are found, instead of ToListAsync materializing the
 		// entire collection up front; AsNoTracking because this is a pure read; and parse each card
-		// ONCE via BuildGalEntry rather than three times (ToGalEntry + AppendGalPicture re-parsed).
+		// ONCE via BuildGalEntry (match, fields and photo in a single pass).
 		await foreach (string stored in Rows(db).AsNoTracking().Select(i => i.Content)
 			               .AsAsyncEnumerable().WithCancellation(ct).ConfigureAwait(false))
 		{
@@ -55,7 +52,7 @@ public sealed class LocalContactStore(
 				continue;
 			}
 
-			List<XElement>? gal = ContactConverter.BuildGalEntry(
+			GalEntry? gal = ContactPayload.BuildGalEntry(
 				vcf, query, photos is not null, photos?.MaxSizeBytes,
 				photosGranted >= (photos?.MaxCount ?? int.MaxValue), out bool granted);
 			if (gal is null)
@@ -73,14 +70,28 @@ public sealed class LocalContactStore(
 		return results;
 	}
 
-	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
+	// The stored text IS the payload (round-trip fidelity: what the host hands over is what it
+	// gets back), so both directions are the identity.
+	protected override ContactItem ParseContent(string content)
 	{
-		return ContactConverter.ToApplicationData(content, bodyPreference);
+		return new ContactItem { VCard = content };
 	}
 
-	protected override string BuildContent(XElement applicationData, string uid, string? existingContent)
+	protected override string BuildContent(ContactItem item, string? existingContent, string uid)
 	{
-		return ContactConverter.FromApplicationData(applicationData, uid, existingContent);
+		return item.VCard;
+	}
+
+	protected override string? ExtractUidCore(string content)
+	{
+		try
+		{
+			return ContactPayload.ExtractUid(content);
+		}
+		catch (Exception)
+		{
+			return null; // unparsable → keep the generated uid
+		}
 	}
 }
 
@@ -93,18 +104,17 @@ public sealed class LocalCalendarStore(
 	string gatewayLogin,
 	string partStatIdentity,
 	ILogger logger)
-	: LocalStoreBase(dbFactory, notifier, userId, protector),
-		ICalendarOperations, ICalendarAttachmentSource, IFreeBusySource
+	: LocalStoreBase<CalendarItem>(dbFactory, notifier, userId, protector),
+		ICalendarStore, IMeetingOperations, ICalendarAttachmentSource, IFreeBusySource
 {
 	public const string BackendKey = KeyPrefix + "calendar";
 
 	protected override string Collection => "calendar";
 	protected override string FolderDisplayName => "Calendar";
-	protected override int FolderType => EasFolderType.Calendar;
-	public override string EasClass => Protocol.EasClass.Calendar;
+	protected override FolderType FolderType => FolderType.Calendar;
 
-	public async Task<string?> RespondToMeetingAsync(
-		string calendarFolderBackendKey, string eventUid, int userResponse, CancellationToken ct)
+	public async Task<ItemKey?> RespondToMeetingAsync(
+		FolderKey calendar, string eventUid, MeetingResponseKind response, CancellationToken ct)
 	{
 		// Bounded retry mirroring LocalStoreBase.UpdateItemAsync — another device may bump
 		// the same row between our read and save, so each attempt re-reads the latest content
@@ -119,9 +129,9 @@ public sealed class LocalCalendarStore(
 			string plain = Protector.Unprotect(row.Content, UserId, Collection);
 			// partStatIdentity = mail address ?? gateway login; the row scope and encryption AAD
 			// above stay on the gateway UserId.
-			string? updated = CalendarConverter.SetPartStat(plain, userResponse, partStatIdentity);
+			string? updated = CalendarPayload.SetPartStat(plain, (int)response, partStatIdentity);
 			if (updated is null)
-				return row.Id.ToString();
+				return new ItemKey(row.Id.ToString());
 
 			row.Content = Protector.Protect(updated, UserId, Collection);
 			row.Version++;
@@ -141,15 +151,8 @@ public sealed class LocalCalendarStore(
 			}
 
 			NotifyChanged(); // wake waiting Pings, like every other local write path
-			return row.Id.ToString();
+			return new ItemKey(row.Id.ToString());
 		}
-	}
-
-	public async Task<string?> GetRawEventAsync(string folderBackendKey, string itemKey, CancellationToken ct)
-	{
-		await using SyncDbContext db = DbFactory.CreateDbContext();
-		LocalItem? row = await FindAsync(db, itemKey, ct).ConfigureAwait(false);
-		return row is null ? null : Protector.Unprotect(row.Content, UserId, Collection);
 	}
 
 	public Task<bool> ShouldSendInvitationsAsync(CancellationToken ct)
@@ -159,30 +162,39 @@ public sealed class LocalCalendarStore(
 		return Task.FromResult(true);
 	}
 
-	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
+	// The stored text IS the payload — identity in both directions (round-trip fidelity).
+	protected override CalendarItem ParseContent(string content)
 	{
-		// partStatIdentity is the acting user's mail address, so MeetingStatus can tell
-		// "I am the organizer" apart from "I am an invitee".
-		return CalendarConverter.ToApplicationData(content, bodyPreference, partStatIdentity);
+		return new CalendarItem { ICalendar = content };
 	}
 
-	protected override string BuildContent(XElement applicationData, string uid, string? existingContent)
+	protected override string BuildContent(CalendarItem item, string? existingContent, string uid)
 	{
-		// The local store has no DAV server to protect — Auto semantics (1 MiB cap).
-		return CalendarConverter.FromApplicationData(applicationData, uid, existingContent,
-			CalendarAttachmentPolicy.CapBytes(null), partStatIdentity);
+		return item.ICalendar;
 	}
 
-	/// <summary>ItemOperations fetch of an inline event attachment (calatt:: FileReference).</summary>
+	protected override string? ExtractUidCore(string content)
+	{
+		try
+		{
+			return CalendarPayload.ExtractUid(content);
+		}
+		catch (Exception)
+		{
+			return null; // unparsable → keep the generated uid
+		}
+	}
+
+	/// <summary>ItemOperations fetch of an inline event attachment (the Nth ATTACH of the stored event).</summary>
 	public async Task<BackendAttachment?> GetEventAttachmentAsync(
-		string folderBackendKey, string itemKey, int index, CancellationToken ct)
+		FolderKey folder, ItemKey item, int index, CancellationToken ct)
 	{
 		await using SyncDbContext db = DbFactory.CreateDbContext();
-		LocalItem? row = await FindAsync(db, itemKey, ct).ConfigureAwait(false);
+		LocalItem? row = await FindAsync(db, item.Value, ct).ConfigureAwait(false);
 		if (row is null)
 			return null;
 		string ics = Protector.Unprotect(row.Content, UserId, Collection);
-		return CalendarConverter.ExtractAttachment(ics, index);
+		return CalendarPayload.ExtractAttachment(ics, index);
 	}
 
 	/// <summary>
@@ -190,7 +202,7 @@ public sealed class LocalCalendarStore(
 	///   user's own calendar, so any other target has no data here (status 163 upstream).
 	/// </summary>
 	public async Task<IReadOnlyList<BusyPeriod>?> GetBusyPeriodsAsync(
-		string targetAddress, DateTime startUtc, DateTime endUtc, CancellationToken ct)
+		string targetAddress, DateTimeOffset start, DateTimeOffset end, CancellationToken ct)
 	{
 		if (!targetAddress.Equals(partStatIdentity, StringComparison.OrdinalIgnoreCase) &&
 		    !targetAddress.Equals(gatewayLogin, StringComparison.OrdinalIgnoreCase))
@@ -213,7 +225,7 @@ public sealed class LocalCalendarStore(
 				logger.LogWarning(ex, "Skipping an undecryptable calendar row during free/busy for user {UserId}", UserId);
 			}
 
-		return CalendarConverter.BusyPeriodsFromEvents(plaintext, startUtc, endUtc);
+		return CalendarPayload.BusyPeriodsFromEvents(plaintext, start.UtcDateTime, end.UtcDateTime);
 	}
 
 	protected override DateTime? ExtractItemDate(string content)
@@ -250,51 +262,71 @@ public sealed class LocalTaskStore(
 	LocalChangeNotifier notifier,
 	int userId,
 	LocalContentProtector protector)
-	: LocalStoreBase(dbFactory, notifier, userId, protector)
+	: LocalStoreBase<TaskItem>(dbFactory, notifier, userId, protector), ITaskStore
 {
 	public const string BackendKey = KeyPrefix + "tasks";
 
 	protected override string Collection => "tasks";
 	protected override string FolderDisplayName => "Tasks";
-	protected override int FolderType => EasFolderType.Tasks;
-	public override string EasClass => Protocol.EasClass.Tasks;
+	protected override FolderType FolderType => FolderType.Tasks;
 
-	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
+	// The stored text IS the payload — identity in both directions (round-trip fidelity).
+	protected override TaskItem ParseContent(string content)
 	{
-		return TasksConverter.ToApplicationData(content, bodyPreference);
+		return new TaskItem { ICalendar = content };
 	}
 
-	protected override string BuildContent(XElement applicationData, string uid, string? existingContent)
+	protected override string BuildContent(TaskItem item, string? existingContent, string uid)
 	{
-		return TasksConverter.FromApplicationData(applicationData, uid, existingContent);
+		return item.ICalendar;
+	}
+
+	protected override string? ExtractUidCore(string content)
+	{
+		try
+		{
+			return TaskPayload.ExtractUid(content);
+		}
+		catch (Exception)
+		{
+			return null; // unparsable → keep the generated uid
+		}
 	}
 }
 
 /// <summary>
-///   Notes served from the gateway database (iCalendar VJOURNAL rows). Always local —
-///   the DAV backends carry no notes.
+///   Notes served from the gateway database. The payload is the typed <see cref="NoteItem" />;
+///   at rest it is stored as iCalendar VJOURNAL text — a PRIVATE storage convention
+///   (<see cref="NoteJournalMapper" />), kept so existing sealed rows need no migration.
+///   Always local — the DAV backends carry no notes.
 /// </summary>
 public sealed class LocalNotesStore(
 	ISyncDbContextFactory dbFactory,
 	LocalChangeNotifier notifier,
 	int userId,
 	LocalContentProtector protector)
-	: LocalStoreBase(dbFactory, notifier, userId, protector)
+	: LocalStoreBase<NoteItem>(dbFactory, notifier, userId, protector), INotesStore
 {
 	public const string BackendKey = KeyPrefix + "notes";
 
 	protected override string Collection => "notes";
 	protected override string FolderDisplayName => "Notes";
-	protected override int FolderType => EasFolderType.Notes;
-	public override string EasClass => Protocol.EasClass.Notes;
+	protected override FolderType FolderType => FolderType.Notes;
 
-	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
+	protected override NoteItem? ParseContent(string content)
 	{
-		return NotesConverter.ToApplicationData(content, bodyPreference);
+		return NoteJournalMapper.ToNote(content);
 	}
 
-	protected override string BuildContent(XElement applicationData, string uid, string? existingContent)
+	protected override string BuildContent(NoteItem item, string? existingContent, string uid)
 	{
-		return NotesConverter.FromApplicationData(applicationData, uid, existingContent);
+		// Merging onto the existing journal preserves unmapped VJOURNAL properties (DTSTART,
+		// custom props) across an edit.
+		return NoteJournalMapper.ToJournal(item, existingContent, uid);
+	}
+
+	protected override string? ExtractUidCore(string content)
+	{
+		return NoteJournalMapper.ExtractUid(content);
 	}
 }

@@ -24,8 +24,8 @@ public sealed class JmapOofBackend(JmapClient client) : IOofBackend
 			["isEnabled"] = true,
 			["textBody"] = reply.BodyIsHtml ? null : reply.BodyText,
 			["htmlBody"] = reply.BodyIsHtml ? reply.BodyText : null,
-			["fromDate"] = Utc(reply.StartUtc),
-			["toDate"] = Utc(reply.EndUtc)
+			["fromDate"] = Utc(reply.Start),
+			["toDate"] = Utc(reply.End)
 		};
 		await SetSingletonAsync(account, patch, ct).ConfigureAwait(false);
 		return ""; // singleton — nothing to restore beyond "disabled"
@@ -61,8 +61,8 @@ public sealed class JmapOofBackend(JmapClient client) : IOofBackend
 			.PrimaryAccount(JmapCapabilities.VacationResponse);
 	}
 
-	private static string? Utc(DateTime? value)
+	private static string? Utc(DateTimeOffset? value)
 	{
-		return value is { } v ? JmapDate.ToUtc(v) : null;
+		return value is { } v ? JmapDate.ToUtc(v.UtcDateTime) : null;
 	}
 }

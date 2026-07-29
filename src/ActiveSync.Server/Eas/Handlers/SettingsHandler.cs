@@ -190,9 +190,15 @@ public sealed class SettingsHandler(
 			}
 			else
 			{
-				string? token = await oof.EnableAsync(new OofReply(
-					message, bodyType.Equals("HTML", StringComparison.OrdinalIgnoreCase),
-					state == 2 ? start : null, state == 2 ? end : null), ct);
+				string? token = await oof.EnableAsync(new OofReply
+				{
+					BodyText = message,
+					BodyIsHtml = bodyType.Equals("HTML", StringComparison.OrdinalIgnoreCase),
+					// The stored row keeps UTC DateTimes; the contract carries offsets (they are
+					// the same instant, stamped UTC so the conversion cannot invent a local zone).
+					Start = state == 2 ? AsUtcOffset(start) : null,
+					End = state == 2 ? AsUtcOffset(end) : null
+				}, ct);
 				// null = our own rule was already armed; the stored restore target stays.
 				if (token is not null)
 					previousActive = token;
@@ -214,6 +220,18 @@ public sealed class SettingsHandler(
 	private static string EasTime(DateTime utc)
 	{
 		return utc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+	}
+
+	/// <summary>
+	///   Stamps a stored UTC instant as a <see cref="DateTimeOffset" /> for the Oof contract. The
+	///   Kind is forced rather than trusted: EF hands back Unspecified-kinded values from SQLite,
+	///   and the DateTimeOffset(DateTime, TimeSpan) constructor throws on a Local-kinded input.
+	/// </summary>
+	private static DateTimeOffset? AsUtcOffset(DateTime? utc)
+	{
+		return utc is { } value
+			? new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc))
+			: null;
 	}
 
 	private static DateTime? ParseEasTime(string? value)

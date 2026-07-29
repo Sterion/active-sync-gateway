@@ -41,7 +41,7 @@ public sealed class SyncLostChangeTests : IDisposable
 	private async Task<UserFolder> RegisterInboxAsync()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 		return folders.Single(f => f.BackendKey == "imap:INBOX");
 	}
 
@@ -59,11 +59,6 @@ public sealed class SyncLostChangeTests : IDisposable
 	public async Task ChangeRenderFailure_IsReofferedOnNextRound_NotLostForever()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
-		// The default ItemApplicationData (an airsync:Subject) has no WBXML token and is deliberately
-		// unencodable (see EasHandlerHarness); this test round-trips the response through WBXML, so
-		// it needs an encodable body.
-		_harness.Session.Store.ItemApplicationData = _ =>
-			[new XElement(ASB + "Body", new XElement(ASB + "Type", "1"), new XElement(ASB + "Data", "preview"))];
 		SyncHandler handler = NewSyncHandler();
 
 		Device device = await _harness.State.GetOrCreateDeviceAsync(
@@ -71,7 +66,7 @@ public sealed class SyncLostChangeTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["10"] = "old10", ["20"] = "old20" }, 0,
+			state!, new Dictionary<string, SnapshotEntry> { ["10"] = new SnapshotEntry("old10"), ["20"] = new SnapshotEntry("old20") }, 0,
 			SyncKeyValidation.Initial, CancellationToken.None);
 
 		// Both items changed on the backend this round; "20"'s render fails (VanishedKeys stands in
@@ -119,7 +114,7 @@ public sealed class SyncLostChangeTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string>(), 0, SyncKeyValidation.Initial, CancellationToken.None);
+			state!, new Dictionary<string, SnapshotEntry>(), 0, SyncKeyValidation.Initial, CancellationToken.None);
 
 		// The backend reports one new item whose render permanently fails: the round has nothing to
 		// report (no payload) AND an item was skipped.

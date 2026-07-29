@@ -59,12 +59,12 @@ public sealed class CalDavTaskStoreTests
 		StubHandler stub = new(_ => Xml(multistatus));
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/cal/", TaskFolder = "Tasks" };
-		CalDavTaskStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CalDavTaskStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
 		IReadOnlyList<BackendFolder> folders = await store.ListFoldersAsync(CancellationToken.None);
 
-		BackendFolder def = Assert.Single(folders, f => f.EasType == EasFolderType.Tasks);
-		Assert.Equal("/dav/cal/a/Tasks/", def.BackendKey[CalDavTaskStore.KeyPrefix.Length..]);
+		BackendFolder def = Assert.Single(folders, f => f.Type == FolderType.Tasks);
+		Assert.Equal("/dav/cal/a/Tasks/", def.Key.Value[CalDavTaskStore.KeyPrefix.Length..]);
 	}
 
 	private static HttpResponseMessage Xml(string body)

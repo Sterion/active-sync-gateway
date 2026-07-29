@@ -19,6 +19,17 @@ public sealed class CardDavStoreTests
 {
 	private static readonly Uri Base = new("https://dav.example.com/");
 
+	/// <summary>
+	///   The complete vCard the HOST hands over on a create. It carries its own UID: the store
+	///   names the new resource's href after the payload's uid and verifies a stored resource by
+	///   comparing the UID it reads back, so the payload is what supplies it now (the pre-contract
+	///   store minted the uid itself and embedded it while converting).
+	/// </summary>
+	private static readonly ContactItem Card = new()
+	{
+		VCard = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada-1\r\nFN:Ada\r\nN:;Ada;;;\r\nEND:VCARD\r\n"
+	};
+
 	[Fact]
 	public async Task ListFolders_DefaultContacts_IsChosenDeterministically()
 	{
@@ -55,11 +66,11 @@ public sealed class CardDavStoreTests
 		StubHandler stub = new(_ => Xml(multistatus));
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
 		IReadOnlyList<BackendFolder> folders = await store.ListFoldersAsync(CancellationToken.None);
 
-		BackendFolder def = Assert.Single(folders, f => f.EasType == EasFolderType.Contacts);
+		BackendFolder def = Assert.Single(folders, f => f.Type == FolderType.Contacts);
 		Assert.Equal("Alpha", def.DisplayName);
 	}
 
@@ -126,10 +137,9 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
-		IReadOnlyList<IReadOnlyList<XElement>> results =
-			await store.SearchGalAsync("Alice", 25, null, CancellationToken.None);
+		IReadOnlyList<GalEntry> results = await store.SearchGalAsync("Alice", 25, null, CancellationToken.None);
 
 		Assert.Single(results); // found via the enumeration fallback, not silently empty
 		Assert.Equal(1, getCount); // fell back to a per-contact GET
@@ -211,10 +221,9 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
-		IReadOnlyList<IReadOnlyList<XElement>> results =
-			await store.SearchGalAsync("Alice", 25, null, CancellationToken.None);
+		IReadOnlyList<GalEntry> results = await store.SearchGalAsync("Alice", 25, null, CancellationToken.None);
 
 		Assert.Equal(2, results.Count);
 		Assert.Equal(0, getCount);       // no per-contact GET
@@ -259,16 +268,14 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
-		XElement app = new("ApplicationData",
-			new XElement(EasNamespaces.Contacts + "FirstName", "Ada"));
-		(string itemKey, string revision) = await store.CreateItemAsync(
-			CardDavStore.KeyPrefix + "/dav/ab/default/", app, CancellationToken.None);
+		(ItemKey itemKey, ItemRevision revision) = await store.CreateItemAsync(
+			new FolderKey(CardDavStore.KeyPrefix + "/dav/ab/default/"), Card, CancellationToken.None);
 
 		Assert.Equal(0, propfindCount);
-		Assert.False(string.IsNullOrEmpty(itemKey));
-		Assert.False(string.IsNullOrEmpty(revision));
+		Assert.False(string.IsNullOrEmpty(itemKey.Value));
+		Assert.False(string.IsNullOrEmpty(revision.Value));
 	}
 
 	// The eager pre-PUT listing was turned into a lazy Func consulted only inside
@@ -328,15 +335,13 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
-		XElement app = new("ApplicationData",
-			new XElement(EasNamespaces.Contacts + "FirstName", "Ada"));
-		(string itemKey, string revision) = await store.CreateItemAsync(
-			CardDavStore.KeyPrefix + "/dav/ab/default/", app, CancellationToken.None);
+		(ItemKey itemKey, ItemRevision revision) = await store.CreateItemAsync(
+			new FolderKey(CardDavStore.KeyPrefix + "/dav/ab/default/"), Card, CancellationToken.None);
 
-		Assert.Equal(canonicalHref, itemKey);
-		Assert.Equal("canon-etag", revision.Trim('"'));
+		Assert.Equal(canonicalHref, itemKey.Value);
+		Assert.Equal("canon-etag", revision.Value.Trim('"'));
 	}
 
 	// On a server whose listings AND UID-query index lag a PUT (Axigen — AGENTS.md: "listings
@@ -404,17 +409,15 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
-		XElement app = new("ApplicationData",
-			new XElement(EasNamespaces.Contacts + "FirstName", "Ada"));
-		(string itemKey, string revision) = await store.CreateItemAsync(
-			CardDavStore.KeyPrefix + "/dav/ab/default/", app, CancellationToken.None);
+		(ItemKey itemKey, ItemRevision revision) = await store.CreateItemAsync(
+			new FolderKey(CardDavStore.KeyPrefix + "/dav/ab/default/"), Card, CancellationToken.None);
 
 		Assert.Equal(0, otherItemGetCount); // the three pre-existing items must never be fetched
 		Assert.Equal(1, putHrefGetCount);   // resolved via one direct GET of the PUT target
-		Assert.Equal(putHref, itemKey);
-		Assert.Equal("put-etag", revision.Trim('"'));
+		Assert.Equal(putHref, itemKey.Value);
+		Assert.Equal("put-etag", revision.Value.Trim('"'));
 	}
 
 	// When the server exposes no ETag anywhere for a newly created item -- not on the PUT
@@ -460,16 +463,14 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
-		XElement app = new("ApplicationData", new XElement(EasNamespaces.Contacts + "FirstName", "Ada"));
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
+		(ItemKey _, ItemRevision revision1) = await store.CreateItemAsync(
+			new FolderKey(CardDavStore.KeyPrefix + "/dav/ab/default/"), Card, CancellationToken.None);
+		(ItemKey _, ItemRevision revision2) = await store.CreateItemAsync(
+			new FolderKey(CardDavStore.KeyPrefix + "/dav/ab/default/"), Card, CancellationToken.None);
 
-		(_, string revision1) = await store.CreateItemAsync(
-			CardDavStore.KeyPrefix + "/dav/ab/default/", app, CancellationToken.None);
-		(_, string revision2) = await store.CreateItemAsync(
-			CardDavStore.KeyPrefix + "/dav/ab/default/", app, CancellationToken.None);
-
-		Assert.False(Guid.TryParse(revision1, out _),
-			$"'{revision1}' looks like a random GUID, not a self-documenting sentinel");
+		Assert.False(Guid.TryParse(revision1.Value, out _),
+			$"'{revision1.Value}' looks like a random GUID, not a self-documenting sentinel");
 		Assert.Equal(revision1, revision2); // stable placeholder, not a fresh random value per call
 	}
 

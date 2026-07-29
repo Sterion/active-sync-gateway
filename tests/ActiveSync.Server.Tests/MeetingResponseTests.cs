@@ -39,7 +39,7 @@ public sealed class MeetingResponseTests : IDisposable
 	private async Task<UserFolder> InboxAsync()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 		return registry.Single();
 	}
 
@@ -138,19 +138,19 @@ public sealed class MeetingResponseTests : IDisposable
 			"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:evt-cal\r\n" +
 			"ORGANIZER:mailto:organizer@example.test\r\nSUMMARY:Filed meeting\r\n" +
 			"DTSTART:20260801T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
-		EasHandlerHarness.RecordingStore calendar = new()
+		EasHandlerHarness.RecordingCalendarStore calendar = new()
 		{
-			EasClass = EasClass.Calendar, KeyPrefix = "caldav:", RawEvent = ics, RespondHref = "event-href"
+			RawEvent = ics, RespondHref = "event-href"
 		};
 		_harness.Session.SecondaryStore = calendar;
 		_harness.Session.Calendar = calendar;
 
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("caldav:Cal", "Calendar", null, EasFolderType.Calendar, EasClass.Calendar));
+			EasHandlerHarness.Folder("caldav:Cal", "Calendar", FolderType.Calendar, EasClass.Calendar));
 		UserFolder calFolder = registry.Single();
 		// Map an item href → ServerId so the request's RequestId resolves back to it.
 		string serverId = await _harness.Folders.ComposeServerIdAsync(
-			calFolder, calendar, "event-href", CancellationToken.None);
+			calFolder, "event-href", CancellationToken.None);
 
 		XDocument? response = await RunAsync(serverId, calFolder.ServerId);
 
@@ -169,18 +169,18 @@ public sealed class MeetingResponseTests : IDisposable
 			"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:evt-f7\r\n" +
 			"ORGANIZER:mailto:organizer@example.test\r\nSUMMARY:Weekly sync\r\n" +
 			"DTSTART:20260801T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
-		EasHandlerHarness.RecordingStore calendar = new()
+		EasHandlerHarness.RecordingCalendarStore calendar = new()
 		{
-			EasClass = EasClass.Calendar, KeyPrefix = "caldav:", RawEvent = ics, RespondHref = "event-href"
+			RawEvent = ics, RespondHref = "event-href"
 		};
 		_harness.Session.SecondaryStore = calendar;
 		_harness.Session.Calendar = calendar;
 
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("caldav:Cal", "Calendar", null, EasFolderType.Calendar, EasClass.Calendar));
+			EasHandlerHarness.Folder("caldav:Cal", "Calendar", FolderType.Calendar, EasClass.Calendar));
 		UserFolder calFolder = registry.Single();
 		string serverId = await _harness.Folders.ComposeServerIdAsync(
-			calFolder, calendar, "event-href", CancellationToken.None);
+			calFolder, "event-href", CancellationToken.None);
 
 		XDocument? first = await RunCustomAsync(serverId, calFolder.ServerId, "1");
 		Assert.Equal("1", StatusOf(first));

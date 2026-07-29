@@ -59,12 +59,12 @@ public sealed class JmapCalendarStoreUnitTests
 		JmapClient client = new(Base, new HttpClient(stub));
 		JmapCalendarStore store = new(client, "u@example.test", pollSeconds: 1);
 
-		IReadOnlyDictionary<string, string> revs = await store.GetItemRevisionsAsync(
-			"jmap-cal:C1", new ContentFilter(DateTime.UtcNow.AddDays(-14)), CancellationToken.None);
+		IReadOnlyDictionary<ItemKey, ItemRevision> revs = await store.GetItemRevisionsAsync(
+			new FolderKey("jmap-cal:C1"), new ContentFilter { Since = DateTimeOffset.UtcNow.AddDays(-14) }, CancellationToken.None);
 
-		Assert.Contains("NEW", revs.Keys);         // inside the window
-		Assert.DoesNotContain("OLD", revs.Keys);    // single event before the window — filtered out
-		Assert.Contains("REC", revs.Keys);          // recurring — never dropped on a date filter
+		Assert.Contains(new ItemKey("NEW"), revs.Keys);         // inside the window
+		Assert.DoesNotContain(new ItemKey("OLD"), revs.Keys);    // single event before the window — filtered out
+		Assert.Contains(new ItemKey("REC"), revs.Keys);          // recurring — never dropped on a date filter
 	}
 
 	// GetItemRevisionsAsync is invoked once PER CALENDAR within one Sync round; it used to
@@ -94,8 +94,8 @@ public sealed class JmapCalendarStoreUnitTests
 		JmapClient client = new(Base, new HttpClient(stub));
 		JmapCalendarStore store = new(client, "u@example.test", pollSeconds: 1);
 
-		await store.GetItemRevisionsAsync("jmap-cal:C1", ContentFilter.All, CancellationToken.None);
-		await store.GetItemRevisionsAsync("jmap-cal:C2", ContentFilter.All, CancellationToken.None);
+		await store.GetItemRevisionsAsync(new FolderKey("jmap-cal:C1"), ContentFilter.All, CancellationToken.None);
+		await store.GetItemRevisionsAsync(new FolderKey("jmap-cal:C2"), ContentFilter.All, CancellationToken.None);
 
 		Assert.Equal(1, fullDownloads);
 	}
@@ -157,8 +157,8 @@ public sealed class JmapCalendarStoreUnitTests
 		JmapClient client = new(Base, new HttpClient(stub));
 		JmapCalendarStore store = new(client, "u@example.test", pollSeconds: 1);
 
-		IReadOnlyDictionary<string, string> revs = await store.GetItemRevisionsAsync(
-			"jmap-cal:C1", ContentFilter.All, CancellationToken.None);
+		IReadOnlyDictionary<ItemKey, ItemRevision> revs = await store.GetItemRevisionsAsync(
+			new FolderKey("jmap-cal:C1"), ContentFilter.All, CancellationToken.None);
 
 		Assert.True(queryCalls > 0, "a server that declares a finite maxObjectsInGet must be paged via CalendarEvent/query");
 		Assert.False(sawUnboundedGet, "must not send a blind ids:null get once a finite maxObjectsInGet is declared");
@@ -194,10 +194,10 @@ public sealed class JmapCalendarStoreUnitTests
 		JmapClient client = new(Base, new HttpClient(stub));
 		JmapCalendarStore store = new(client, "u@example.test", pollSeconds: 1);
 
-		IReadOnlyList<string> changed = await store.WaitForChangesAsync(
-			["jmap-cal:C1"], TimeSpan.FromSeconds(4), CancellationToken.None);
+		IReadOnlyList<FolderKey> changed = await store.WaitForChangesAsync(
+			[new FolderKey("jmap-cal:C1")], TimeSpan.FromSeconds(4), CancellationToken.None);
 
-		Assert.Contains("jmap-cal:C1", changed);
+		Assert.Contains(new FolderKey("jmap-cal:C1"), changed);
 		Assert.False(sawFullFetch); // the poll must not pull full event bodies
 	}
 
@@ -231,9 +231,9 @@ public sealed class JmapCalendarStoreUnitTests
 		});
 		JmapClient client = new(Base, new HttpClient(stub));
 		JmapCalendarStore store = new(client, "u@example.test", pollSeconds: 1);
-		IReadOnlyDictionary<string, string> revs = await store.GetItemRevisionsAsync(
-			"jmap-cal:C1", ContentFilter.All, CancellationToken.None);
-		return revs["E1"];
+		IReadOnlyDictionary<ItemKey, ItemRevision> revs = await store.GetItemRevisionsAsync(
+			new FolderKey("jmap-cal:C1"), ContentFilter.All, CancellationToken.None);
+		return revs[new ItemKey("E1")].Value;
 	}
 
 	private static HttpResponseMessage Json(string body)

@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+	  OPTIONAL conformance kit for backend plugin authors: it exercises a store against the
+	  obligations the contract states in PROSE — revision stability, "null means not fetched",
+	  create-then-list visibility, delete semantics, the wait timeout, key-space disjointness, the
+	  optional update precondition, payload round-trip fidelity. Those are exactly the invariants
+	  documentation has failed to convey, which is how the gateway's own unpublished helper
+	  assembly became load-bearing for every backend.
+
+	  Scope is STORE obligations only. Engine behaviour (SyncKey replay, windowing, echo
+	  suppression) is not testable from here — a store can neither pass nor fail it, and shipping
+	  the sync engine inside an MIT package to exercise it is precisely what the licensing split
+	  forbids. StoreConformance's own summary states that openly.
+
+	  References ActiveSync.Contracts and NOTHING else — no test framework, no domain library — so
+	  it runs from any test framework (or a console app) and adds no dependency to a plugin that
+	  only wants the checks.
+
+	  Versioned like ActiveSync.Contracts.Interop: the release tag, not $(ContractVersion), with an
+	  exact dependency pin on the contract it was built against.
+	-->
+	<PropertyGroup>
+		<RootNamespace>ActiveSync.Contracts.Conformance</RootNamespace>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<IsPackable>true</IsPackable>
+		<!-- Ship the XML docs; see ActiveSync.Contracts.csproj for why this cannot live with the
+		     other package-scoped properties in Directory.Build.targets. CS1591/CS1573 are live here
+		     against a 0-warning baseline. -->
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<PackageId>ActiveSync.Contracts.Conformance</PackageId>
+		<Description>ActiveSync Gateway — an optional conformance kit for backend plugins: runs an IContentStore against the store obligations the plugin contract states in prose (revision stability, batch-fetch null semantics, create/update/delete visibility, wait timeout, key-space disjointness, the optional update precondition) and returns a report. Framework-agnostic; references only ActiveSync.Contracts.</Description>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Contracts\ActiveSync.Contracts.csproj" />
+	</ItemGroup>
+
+	<!-- Exact contract pin, for the reason spelled out in ActiveSync.Contracts.Interop.csproj:
+	     contract minor is breaking, so a floor range would promise a compatibility this package
+	     does not have. -->
+	<Target Name="PinContractsDependencyToAnExactVersion" AfterTargets="_GetProjectReferenceVersions">
+		<ItemGroup>
+			<_ProjectReferencesWithVersions Condition="'%(Filename)' == 'ActiveSync.Contracts'">
+				<ProjectVersion>[$(ContractVersion)]</ProjectVersion>
+			</_ProjectReferencesWithVersions>
+		</ItemGroup>
+	</Target>
+
+</Project>

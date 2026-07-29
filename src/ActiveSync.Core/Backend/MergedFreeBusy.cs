@@ -14,36 +14,58 @@ public static class MergedFreeBusy
 	/// <summary>Spec cap: the string may not exceed 32 KB (the client re-queries for more).</summary>
 	private const int MaxDigits = 32 * 1024;
 
-	public static string Build(DateTime startUtc, DateTime endUtc, IReadOnlyList<BusyPeriod> periods)
+	/// <summary>
+	///   Renders the digit string for one window. The digits are HOST knowledge: a store reports
+	///   <see cref="BusyKind" />, and the mapping to the wire characters lives here (and only
+	///   here), which is why <see cref="BusyKind" /> itself pins no values.
+	/// </summary>
+	public static string Build(DateTimeOffset start, DateTimeOffset end, IReadOnlyList<BusyPeriod> periods)
 	{
 		// An inverted window (end before start) is a caller bug; clamping it to a single all-free
 		// digit silently answers "completely free" for nonsense input.
-		ArgumentOutOfRangeException.ThrowIfLessThan(endUtc, startUtc);
+		ArgumentOutOfRangeException.ThrowIfLessThan(end, start);
 
-		int intervals = (int)Math.Ceiling((endUtc - startUtc).TotalMinutes / Interval.TotalMinutes);
+		int intervals = (int)Math.Ceiling((end - start).TotalMinutes / Interval.TotalMinutes);
 		intervals = Math.Clamp(intervals, 1, MaxDigits);
 		char[] digits = new char[intervals];
 		Array.Fill(digits, '0');
 
 		foreach (BusyPeriod period in periods)
 		{
-			if (period.EndUtc <= startUtc || period.StartUtc >= endUtc)
+			if (period.End <= start || period.Start >= end)
 				continue;
-			// A malformed Kind ('\0', 'B', …) must never be copied verbatim into the digit
-			// string — it would ride straight into WBXML — so skip the period entirely.
-			int kindRank = Rank(period.Kind);
+			// An out-of-range Kind (a plugin casting an int onto the enum) must never be copied
+			// into the digit string — it would ride straight into WBXML — so skip the period.
+			char digit = Digit(period.Kind);
+			int kindRank = Rank(digit);
 			if (kindRank < 0)
 				continue;
-			int first = Math.Max(0, (int)((period.StartUtc - startUtc) / Interval));
-			int last = Math.Min(intervals - 1, (int)Math.Ceiling((period.EndUtc - startUtc) / Interval) - 1);
+			int first = Math.Max(0, (int)((period.Start - start) / Interval));
+			int last = Math.Min(intervals - 1, (int)Math.Ceiling((period.End - start) / Interval) - 1);
 			for (int i = first; i <= last; i++)
 				// Higher STATUS wins, by rank — not by ASCII value: '4' (no data) is the highest
 				// digit but the weakest signal, so a known busy/tentative/OOF must beat it.
 				if (kindRank > Rank(digits[i]))
-					digits[i] = period.Kind;
+					digits[i] = digit;
 		}
 
 		return new string(digits);
+	}
+
+	/// <summary>
+	///   The wire digit for a reported <see cref="BusyKind" />; '\0' for a value outside the enum,
+	///   which <see cref="Rank" /> then rejects.
+	/// </summary>
+	private static char Digit(BusyKind kind)
+	{
+		return kind switch
+		{
+			BusyKind.Free => '0',
+			BusyKind.Tentative => '1',
+			BusyKind.Busy => '2',
+			BusyKind.OutOfOffice => '3',
+			_ => '\0'
+		};
 	}
 
 	/// <summary>

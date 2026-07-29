@@ -67,7 +67,7 @@ public sealed class ResolveRecipientsTests : IDisposable
 	[Fact]
 	public async Task MultipleTos_ResponsesStayInRequestOrderWithTheirOwnMatch()
 	{
-		_harness.Session.Contacts = new QueryContacts(new Dictionary<string, IReadOnlyList<XElement>>
+		_harness.Session.Contacts = new QueryContacts(new Dictionary<string, GalEntry>
 		{
 			["alice"] = Hit("Alice", "alice@example.test"),
 			["bob"] = Hit("Bob", "bob@example.test"),
@@ -121,42 +121,44 @@ public sealed class ResolveRecipientsTests : IDisposable
 			$"Availability (index {availabilityIndex}) must precede Picture (index {pictureIndex})");
 	}
 
-	private static IReadOnlyList<XElement> Hit(string display, string email)
+	// The store hands over TYPED GAL entries now; the RR-namespace shaping (including the photo
+	// status) is the host's, which is exactly what these tests exercise.
+	private static GalEntry Hit(string display, string email)
 	{
-		return [new XElement(GAL + "DisplayName", display), new XElement(GAL + "EmailAddress", email)];
+		return new GalEntry { DisplayName = display, EmailAddress = email };
 	}
 
-	private static IReadOnlyList<XElement> HitWithPicture(string display, string email)
+	private static GalEntry HitWithPicture(string display, string email)
 	{
-		return
-		[
-			new XElement(GAL + "DisplayName", display),
-			new XElement(GAL + "EmailAddress", email),
-			new XElement(GAL + "Picture",
-				new XElement(GAL + "Status", "1"),
-				new XElement(GAL + "Data", Convert.ToBase64String("fake-photo-bytes"u8.ToArray())))
-		];
+		return new GalEntry
+		{
+			DisplayName = display,
+			EmailAddress = email,
+			Picture = new GalPictureResult
+			{
+				Status = GalPictureStatus.Available,
+				Picture = new GalPicture { Data = "fake-photo-bytes"u8.ToArray(), ContentType = "image/jpeg" }
+			}
+		};
 	}
 
 	/// <summary>A GAL that answers each query with its own configured match set.</summary>
-	private sealed class QueryContacts(Dictionary<string, IReadOnlyList<XElement>> byQuery) : IContactOperations
+	private sealed class QueryContacts(Dictionary<string, GalEntry> byQuery) : IDirectoryOperations
 	{
-		public Task<IReadOnlyList<IReadOnlyList<XElement>>> SearchGalAsync(
+		public Task<IReadOnlyList<GalEntry>> SearchGalAsync(
 			string query, int maxResults, GalPhotoRequest? photos, CancellationToken ct)
 		{
-			IReadOnlyList<IReadOnlyList<XElement>> page = byQuery.TryGetValue(query, out IReadOnlyList<XElement>? hit)
-				? [hit]
-				: [];
+			IReadOnlyList<GalEntry> page = byQuery.TryGetValue(query, out GalEntry? hit) ? [hit] : [];
 			return Task.FromResult(page);
 		}
 	}
 
-	private sealed class StubContacts(params IReadOnlyList<XElement>[] hits) : IContactOperations
+	private sealed class StubContacts(params GalEntry[] hits) : IDirectoryOperations
 	{
-		public Task<IReadOnlyList<IReadOnlyList<XElement>>> SearchGalAsync(
+		public Task<IReadOnlyList<GalEntry>> SearchGalAsync(
 			string query, int maxResults, GalPhotoRequest? photos, CancellationToken ct)
 		{
-			IReadOnlyList<IReadOnlyList<XElement>> page = hits.Take(maxResults).ToList();
+			IReadOnlyList<GalEntry> page = hits.Take(maxResults).ToList();
 			return Task.FromResult(page);
 		}
 	}

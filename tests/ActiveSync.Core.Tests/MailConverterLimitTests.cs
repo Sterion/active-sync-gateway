@@ -15,7 +15,7 @@ public class MailConverterLimitTests
 {
 	private static string InvokeLimit(string value, int max)
 	{
-		MethodInfo method = typeof(ActiveSync.Backends.Common.Converters.MailConverter)
+		MethodInfo method = typeof(ActiveSync.Eas.Conversion.MailConverter)
 			.GetMethod("Limit", BindingFlags.NonPublic | BindingFlags.Static)!;
 		return (string)method.Invoke(null, [value, max])!;
 	}
