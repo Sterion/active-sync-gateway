@@ -74,12 +74,14 @@ public sealed partial class JmapMailStore(
 			string id = mailbox.GetProperty("id").GetString()!;
 			string? parentId = mailbox.TryGetProperty("parentId", out JsonElement p) ? p.GetString() : null;
 			string? role = mailbox.TryGetProperty("role", out JsonElement r) ? r.GetString() : null;
-			result.Add(new BackendFolder(
-				ToKey(id),
-				mailbox.TryGetProperty("name", out JsonElement n) ? n.GetString() ?? id : id,
-				parentId is null ? null : ToKey(parentId),
-				RoleToEasType(role),
-				Protocol.EasClass.Email));
+			result.Add(new BackendFolder
+			{
+				BackendKey = ToKey(id),
+				DisplayName = mailbox.TryGetProperty("name", out JsonElement n) ? n.GetString() ?? id : id,
+				ParentBackendKey = parentId is null ? null : ToKey(parentId),
+				Type = RoleToFolderType(role),
+				EasClass = Protocol.EasClass.Email
+			});
 		}
 
 		return result;
@@ -242,7 +244,7 @@ public sealed partial class JmapMailStore(
 			keywords.Where(k => !k.StartsWith('$')).ToList());
 		List<XElement> data = MailConverter.ToApplicationData(
 			message, flags, bodyPreference, idx => MakeFileReference(folderBackendKey, itemKey, idx), receivedAt);
-		return new BackendItem(data);
+		return new BackendItem { ApplicationData = data };
 	}
 
 	public async Task<(string ItemKey, string Revision)> CreateItemAsync(
@@ -681,8 +683,8 @@ public sealed partial class JmapMailStore(
 	private static Dictionary<string, object?> MailboxFilter(string mailboxId, ContentFilter filter)
 	{
 		Dictionary<string, object?> f = new() { ["inMailbox"] = mailboxId };
-		if (filter.SinceUtc is { } since)
-			f["after"] = JmapDate.ToUtc(since);
+		if (filter.Since is { } since)
+			f["after"] = JmapDate.ToUtc(since.UtcDateTime);
 		return f;
 	}
 
@@ -707,15 +709,15 @@ public sealed partial class JmapMailStore(
 		return true;
 	}
 
-	private static int RoleToEasType(string? role)
+	private static FolderType RoleToFolderType(string? role)
 	{
 		return role switch
 		{
-			"inbox" => EasFolderType.Inbox,
-			"drafts" => EasFolderType.Drafts,
-			"trash" => EasFolderType.DeletedItems,
-			"sent" => EasFolderType.SentItems,
-			_ => EasFolderType.UserMail
+			"inbox" => FolderType.Inbox,
+			"drafts" => FolderType.Drafts,
+			"trash" => FolderType.DeletedItems,
+			"sent" => FolderType.SentItems,
+			_ => FolderType.UserMail
 		};
 	}
 

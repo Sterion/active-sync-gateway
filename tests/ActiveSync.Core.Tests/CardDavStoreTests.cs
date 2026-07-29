@@ -55,11 +55,11 @@ public sealed class CardDavStoreTests
 		StubHandler stub = new(_ => Xml(multistatus));
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
 		IReadOnlyList<BackendFolder> folders = await store.ListFoldersAsync(CancellationToken.None);
 
-		BackendFolder def = Assert.Single(folders, f => f.EasType == EasFolderType.Contacts);
+		BackendFolder def = Assert.Single(folders, f => f.Type == FolderType.Contacts);
 		Assert.Equal("Alpha", def.DisplayName);
 	}
 
@@ -126,7 +126,7 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
 		IReadOnlyList<IReadOnlyList<XElement>> results =
 			await store.SearchGalAsync("Alice", 25, null, CancellationToken.None);
@@ -211,7 +211,7 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
 		IReadOnlyList<IReadOnlyList<XElement>> results =
 			await store.SearchGalAsync("Alice", 25, null, CancellationToken.None);
@@ -259,7 +259,7 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
 		XElement app = new("ApplicationData",
 			new XElement(EasNamespaces.Contacts + "FirstName", "Ada"));
@@ -328,7 +328,7 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
 		XElement app = new("ApplicationData",
 			new XElement(EasNamespaces.Contacts + "FirstName", "Ada"));
@@ -404,7 +404,7 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 
 		XElement app = new("ApplicationData",
 			new XElement(EasNamespaces.Contacts + "FirstName", "Ada"));
@@ -460,7 +460,7 @@ public sealed class CardDavStoreTests
 		});
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/ab/" };
-		CardDavStore store = new(dav, options, new BackendCredentials("user", "pass"), NullLogger.Instance, pollSeconds: 60);
+		CardDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, NullLogger.Instance, pollSeconds: 60);
 		XElement app = new("ApplicationData", new XElement(EasNamespaces.Contacts + "FirstName", "Ada"));
 
 		(_, string revision1) = await store.CreateItemAsync(

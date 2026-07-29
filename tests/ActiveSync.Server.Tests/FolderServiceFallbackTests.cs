@@ -128,7 +128,7 @@ public sealed class FolderServiceFallbackTests : IDisposable
 	/// <summary>A session that exposes only its store list — enough for FolderService.RefreshAsync.</summary>
 	private sealed class StoresOnlySession(IReadOnlyList<IContentStore> stores) : IBackendSession
 	{
-		public BackendCredentials Credentials => new("u@example.test", "pw");
+		public BackendCredentials Credentials => new() { UserName = "u@example.test", Password = "pw" };
 		public int UserId => 1;
 		public string? MailAddress => "u@example.test";
 		public IReadOnlyList<IContentStore> Stores => stores;

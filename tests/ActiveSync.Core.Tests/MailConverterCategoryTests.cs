@@ -30,7 +30,7 @@ public class MailConverterCategoryTests
 		return MailConverter.ToApplicationData(
 			Message(),
 			new MailConverter.MessageFlags(true, false, false, false, keywords),
-			new BodyPreference(1, null, false),
+			new BodyPreference { Type = BodyType.PlainText },
 			_ => "ref");
 	}
 

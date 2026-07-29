@@ -7,6 +7,10 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\ActiveSync.Contracts\ActiveSync.Contracts.csproj" />
+		<!-- EXPLICIT since the contract severed its own Protocol reference: the EAS namespaces,
+		     the compact date format and the wire-log payload cap are used directly here (this is
+		     Protocol's heaviest consumer), and they no longer arrive transitively via Contracts. -->
+		<ProjectReference Include="..\ActiveSync.Protocol\ActiveSync.Protocol.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

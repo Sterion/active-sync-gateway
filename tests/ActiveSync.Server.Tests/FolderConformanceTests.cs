@@ -45,17 +45,17 @@ public sealed class FolderConformanceTests : IDisposable
 
 		// Generation 1: initial sync (key 0 → key 1) acknowledges the starting hierarchy.
 		await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email),
-			new BackendFolder("imap:Sent", "Sent", null, EasFolderType.SentItems, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email },
+			new BackendFolder { BackendKey = "imap:Sent", DisplayName = "Sent", Type = FolderType.SentItems, EasClass = EasClass.Email });
 		XDocument? initial = await _harness.RunAsync(handler, "FolderSync", FolderSyncRequest("0"));
 		Assert.Equal("1", initial?.Root?.Element(FH + "SyncKey")?.Value);
 
 		// Generation 2: a new folder appears; the client acks key 1 and the server advances to
 		// key 2 — but imagine the response carrying key 2 never reaches the client.
 		await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email),
-			new BackendFolder("imap:Sent", "Sent", null, EasFolderType.SentItems, EasClass.Email),
-			new BackendFolder("imap:Archive", "Archive", null, EasFolderType.UserMail, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email },
+			new BackendFolder { BackendKey = "imap:Sent", DisplayName = "Sent", Type = FolderType.SentItems, EasClass = EasClass.Email },
+			new BackendFolder { BackendKey = "imap:Archive", DisplayName = "Archive", Type = FolderType.UserMail, EasClass = EasClass.Email });
 		XDocument? gen2 = await _harness.RunAsync(handler, "FolderSync", FolderSyncRequest("1"));
 		Assert.Equal("2", gen2?.Root?.Element(FH + "SyncKey")?.Value);
 
@@ -79,7 +79,7 @@ public sealed class FolderConformanceTests : IDisposable
 	public async Task FolderSync_BackendTransportFailure_YieldsStatus6_NotAnUncaughtError()
 	{
 		await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
 
 		FolderSyncHandler handler = new(_harness.Folders, NullLogger<FolderSyncHandler>.Instance);
 
@@ -183,7 +183,7 @@ public sealed class FolderConformanceTests : IDisposable
 		_harness.Session.SecondaryStore = calendar;
 		// The post-create hierarchy refresh must find the new folder for the create to be
 		// reported as a success — simulate a calendar backend whose listing keeps up.
-		calendar.Listing = [new BackendFolder("caldav:MyCalendar", "MyCalendar", null, EasFolderType.UserCalendar, EasClass.Calendar)];
+		calendar.Listing = [new BackendFolder { BackendKey = "caldav:MyCalendar", DisplayName = "MyCalendar", Type = FolderType.UserCalendar, EasClass = EasClass.Calendar }];
 
 		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
 			new XDocument(new XElement(FH + "FolderCreate",
@@ -204,7 +204,7 @@ public sealed class FolderConformanceTests : IDisposable
 		// Regression guard: the default class (Email / Type 12) still routes to the mail store.
 		// The post-create hierarchy refresh must find the new folder for this to be reported
 		// as a success — simulate a mail backend whose listing keeps up.
-		_harness.Session.Store.Listing = [new BackendFolder("imap:Projects", "Projects", null, EasFolderType.UserMail, EasClass.Email)];
+		_harness.Session.Store.Listing = [new BackendFolder { BackendKey = "imap:Projects", DisplayName = "Projects", Type = FolderType.UserMail, EasClass = EasClass.Email }];
 
 		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
 			new XDocument(new XElement(FH + "FolderCreate",
@@ -226,7 +226,7 @@ public sealed class FolderConformanceTests : IDisposable
 	{
 		// Without a listing that reflects the new folder, the create is retryable (Status 6) —
 		// give this test the same happy-path listing so it still measures what it is named for.
-		_harness.Session.Store.Listing = [new BackendFolder("imap:Projects", "Projects", null, EasFolderType.UserMail, EasClass.Email)];
+		_harness.Session.Store.Listing = [new BackendFolder { BackendKey = "imap:Projects", DisplayName = "Projects", Type = FolderType.UserMail, EasClass = EasClass.Email }];
 
 		XDocument? response = await _harness.RunAsync(CreateHandler(), "FolderCreate",
 			new XDocument(new XElement(FH + "FolderCreate",
@@ -245,8 +245,8 @@ public sealed class FolderConformanceTests : IDisposable
 	public async Task FolderUpdate_WithADifferentParentId_IsRejected_NotSilentlyRenamedInPlace()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:Parent", "Parent", null, EasFolderType.UserMail, EasClass.Email),
-			new BackendFolder("imap:Child", "Child", "imap:Parent", EasFolderType.UserMail, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:Parent", DisplayName = "Parent", Type = FolderType.UserMail, EasClass = EasClass.Email },
+			new BackendFolder { BackendKey = "imap:Child", DisplayName = "Child", ParentBackendKey = "imap:Parent", Type = FolderType.UserMail, EasClass = EasClass.Email });
 		UserFolder child = registry.Single(f => f.BackendKey == "imap:Child");
 
 		// The client asks to move Child to the root (ParentId "0") while also renaming it — a
@@ -273,8 +273,8 @@ public sealed class FolderConformanceTests : IDisposable
 		// Regression guard: a FolderUpdate that does NOT ask for a parent change (the common case —
 		// a plain rename) must keep working exactly as before.
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:Parent", "Parent", null, EasFolderType.UserMail, EasClass.Email),
-			new BackendFolder("imap:Child", "Child", "imap:Parent", EasFolderType.UserMail, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:Parent", DisplayName = "Parent", Type = FolderType.UserMail, EasClass = EasClass.Email },
+			new BackendFolder { BackendKey = "imap:Child", DisplayName = "Child", ParentBackendKey = "imap:Parent", Type = FolderType.UserMail, EasClass = EasClass.Email });
 		UserFolder parent = registry.Single(f => f.BackendKey == "imap:Parent");
 		UserFolder child = registry.Single(f => f.BackendKey == "imap:Child");
 
@@ -295,7 +295,7 @@ public sealed class FolderConformanceTests : IDisposable
 		// Regression guard: the common "ParentId 0" case for a top-level folder must not be
 		// mistaken for a move.
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
 		UserFolder inbox = registry.Single();
 
 		XDocument? response = await _harness.RunAsync(UpdateHandler(), "FolderUpdate",

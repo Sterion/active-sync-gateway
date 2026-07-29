@@ -11,7 +11,7 @@ namespace ActiveSync.Core.Tests;
 /// </summary>
 public class BackendProviderTests
 {
-	private static readonly BackendCredentials Gateway = new("user@x", "pw");
+	private static readonly BackendCredentials Gateway = new() { UserName = "user@x", Password = "pw" };
 
 	private static BackendProviderRegistry Registry(params IBackendProvider[] providers)
 	{
@@ -41,10 +41,10 @@ public class BackendProviderTests
 		FakeProvider rest = new("rest", [BackendRole.Calendar, BackendRole.Contacts]);
 		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(mail, rest), Gateway, 1, "user@x",
 			[
-				new ResolvedRole(BackendRole.MailStore, "mail", ProviderSettings.Empty, Gateway),
-				new ResolvedRole(BackendRole.MailSubmit, "mail", ProviderSettings.Empty, Gateway),
-				new ResolvedRole(BackendRole.Calendar, "rest", ProviderSettings.Empty, Gateway),
-				new ResolvedRole(BackendRole.Contacts, "rest", ProviderSettings.Empty, Gateway)
+				new ResolvedRole { Role = BackendRole.MailStore, ProviderName = "mail", Settings = ProviderSettings.Empty, Credentials = Gateway },
+				new ResolvedRole { Role = BackendRole.MailSubmit, ProviderName = "mail", Settings = ProviderSettings.Empty, Credentials = Gateway },
+				new ResolvedRole { Role = BackendRole.Calendar, ProviderName = "rest", Settings = ProviderSettings.Empty, Credentials = Gateway },
+				new ResolvedRole { Role = BackendRole.Contacts, ProviderName = "rest", Settings = ProviderSettings.Empty, Credentials = Gateway }
 			], [], CancellationToken.None);
 
 		// One connection per provider, carrying exactly the roles assigned to it.
@@ -72,10 +72,10 @@ public class BackendProviderTests
 		FakeProvider submit = new("submit", [BackendRole.MailSubmit]);
 		await Assert.ThrowsAsync<InvalidOperationException>(() => CompositeBackendSession.CreateAsync(
 			Registry(store, submit), Gateway, 1, null,
-			[new ResolvedRole(BackendRole.MailStore, "store", ProviderSettings.Empty, Gateway)], [], CancellationToken.None));
+			[new ResolvedRole { Role = BackendRole.MailStore, ProviderName = "store", Settings = ProviderSettings.Empty, Credentials = Gateway }], [], CancellationToken.None));
 		await Assert.ThrowsAsync<InvalidOperationException>(() => CompositeBackendSession.CreateAsync(
 			Registry(store, submit), Gateway, 1, null,
-			[new ResolvedRole(BackendRole.MailSubmit, "submit", ProviderSettings.Empty, Gateway)], [], CancellationToken.None));
+			[new ResolvedRole { Role = BackendRole.MailSubmit, ProviderName = "submit", Settings = ProviderSettings.Empty, Credentials = Gateway }], [], CancellationToken.None));
 	}
 
 	[Fact]
@@ -92,9 +92,9 @@ public class BackendProviderTests
 		await Assert.ThrowsAsync<InvalidOperationException>(() => CompositeBackendSession.CreateAsync(
 			Registry(good, bad), Gateway, 1, null,
 			[
-				new ResolvedRole(BackendRole.MailStore, "good", ProviderSettings.Empty, Gateway),
-				new ResolvedRole(BackendRole.MailSubmit, "good", ProviderSettings.Empty, Gateway),
-				new ResolvedRole(BackendRole.Calendar, "bad", ProviderSettings.Empty, Gateway)
+				new ResolvedRole { Role = BackendRole.MailStore, ProviderName = "good", Settings = ProviderSettings.Empty, Credentials = Gateway },
+				new ResolvedRole { Role = BackendRole.MailSubmit, ProviderName = "good", Settings = ProviderSettings.Empty, Credentials = Gateway },
+				new ResolvedRole { Role = BackendRole.Calendar, ProviderName = "bad", Settings = ProviderSettings.Empty, Credentials = Gateway }
 			], [], CancellationToken.None));
 
 		Assert.True(good.LastResource!.Disposed); // the earlier connection must not leak
@@ -106,8 +106,8 @@ public class BackendProviderTests
 		FakeProvider mail = new("mail", [BackendRole.MailStore, BackendRole.MailSubmit]);
 		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(mail), Gateway, 1, null,
 			[
-				new ResolvedRole(BackendRole.MailStore, "mail", ProviderSettings.Empty, Gateway),
-				new ResolvedRole(BackendRole.MailSubmit, "mail", ProviderSettings.Empty, Gateway)
+				new ResolvedRole { Role = BackendRole.MailStore, ProviderName = "mail", Settings = ProviderSettings.Empty, Credentials = Gateway },
+				new ResolvedRole { Role = BackendRole.MailSubmit, ProviderName = "mail", Settings = ProviderSettings.Empty, Credentials = Gateway }
 			], [], CancellationToken.None);
 		await session.DisposeAsync();
 		Assert.True(mail.LastResource!.Disposed);
@@ -130,9 +130,9 @@ public class BackendProviderTests
 		FakeProvider good = new("good", [BackendRole.Calendar]);
 		CompositeBackendSession session = await CompositeBackendSession.CreateAsync(Registry(bad, good), Gateway, 1, null,
 			[
-				new ResolvedRole(BackendRole.MailStore, "bad", ProviderSettings.Empty, Gateway),
-				new ResolvedRole(BackendRole.MailSubmit, "bad", ProviderSettings.Empty, Gateway),
-				new ResolvedRole(BackendRole.Calendar, "good", ProviderSettings.Empty, Gateway)
+				new ResolvedRole { Role = BackendRole.MailStore, ProviderName = "bad", Settings = ProviderSettings.Empty, Credentials = Gateway },
+				new ResolvedRole { Role = BackendRole.MailSubmit, ProviderName = "bad", Settings = ProviderSettings.Empty, Credentials = Gateway },
+				new ResolvedRole { Role = BackendRole.Calendar, ProviderName = "good", Settings = ProviderSettings.Empty, Credentials = Gateway }
 			], [], CancellationToken.None);
 
 		Exception? escaped = await Record.ExceptionAsync(async () => await session.DisposeAsync());
@@ -252,7 +252,7 @@ public class BackendProviderTests
 			throw new NotSupportedException();
 
 		public Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
-			string? folderBackendKey, string freeText, DateTime? sinceUtc, int maxResults, CancellationToken ct) =>
+			string? folderBackendKey, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct) =>
 			throw new NotSupportedException();
 
 		public Task EmptyFolderAsync(string folderBackendKey, CancellationToken ct) => throw new NotSupportedException();

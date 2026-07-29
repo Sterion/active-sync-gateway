@@ -108,7 +108,7 @@ public sealed class UserFieldResolutionTests : IDisposable
 
 		UserResolver resolver = Resolver(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
-		ResolvedUser resolved = resolver.Resolve(new BackendCredentials("anna", "pw"));
+		ResolvedUser resolved = resolver.Resolve(new BackendCredentials { UserName = "anna", Password = "pw" });
 
 		Assert.Equal("db@x", resolved.MailAddress);                                   // DB wins
 		Assert.Equal("db.example.com", MailSettings(resolved).Section["Host"]);       // DB wins
@@ -147,20 +147,20 @@ public sealed class UserFieldResolutionTests : IDisposable
 		UserResolver resolver = Resolver(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 		Assert.Equal("db.example.com",
-			MailSettings(resolver.Resolve(new BackendCredentials("anna", "pw"))).Section["Host"]);
+			MailSettings(resolver.Resolve(new BackendCredentials { UserName = "anna", Password = "pw" })).Section["Host"]);
 
 		// Step 1: remove the DATABASE deviation → falls back to the config user value.
 		await _store.DeleteAsync("anna", CancellationToken.None);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 		Assert.Equal("config.example.com",
-			MailSettings(resolver.Resolve(new BackendCredentials("anna", "pw"))).Section["Host"]);
+			MailSettings(resolver.Resolve(new BackendCredentials { UserName = "anna", Password = "pw" })).Section["Host"]);
 
 		// Step 2: remove the CONFIG deviation → falls back to the global role section.
 		options.Users["anna"].Backends = null;
 		UserResolver globalOnly = Resolver(options);
 		await globalOnly.EnsureFreshAsync(true, CancellationToken.None);
 		Assert.Equal("imap.global",
-			MailSettings(globalOnly.Resolve(new BackendCredentials("anna", "pw"))).Section["Host"]);
+			MailSettings(globalOnly.Resolve(new BackendCredentials { UserName = "anna", Password = "pw" })).Section["Host"]);
 	}
 
 	[Fact]
@@ -187,12 +187,12 @@ public sealed class UserFieldResolutionTests : IDisposable
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
 
 		Assert.Equal("imap.moved",
-			MailSettings(resolver.Resolve(new BackendCredentials("inherits", "pw"))).Section["Host"]);
+			MailSettings(resolver.Resolve(new BackendCredentials { UserName = "inherits", Password = "pw" })).Section["Host"]);
 		Assert.Equal("own.example.com",
-			MailSettings(resolver.Resolve(new BackendCredentials("overrides", "pw"))).Section["Host"]);
+			MailSettings(resolver.Resolve(new BackendCredentials { UserName = "overrides", Password = "pw" })).Section["Host"]);
 		// A user with no declaration at all is pass-through and inherits it too.
 		Assert.Equal("imap.moved",
-			MailSettings(resolver.Resolve(new BackendCredentials("undeclared", "pw"))).Section["Host"]);
+			MailSettings(resolver.Resolve(new BackendCredentials { UserName = "undeclared", Password = "pw" })).Section["Host"]);
 	}
 
 	[Fact]
@@ -293,7 +293,7 @@ public sealed class UserFieldResolutionTests : IDisposable
 
 		UserResolver resolver = Resolver(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
-		ProviderSettings settings = MailSettings(resolver.Resolve(new BackendCredentials("anna", "pw")));
+		ProviderSettings settings = MailSettings(resolver.Resolve(new BackendCredentials { UserName = "anna", Password = "pw" }));
 
 		Assert.Equal("config.example.com", settings.Section["Host"]);
 		Assert.Equal("2143", settings.Section["Port"]);
@@ -431,7 +431,7 @@ public sealed class UserFieldResolutionTests : IDisposable
 
 		UserResolver resolver = Resolver(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
-		ResolvedUser resolved = resolver.Resolve(new BackendCredentials("anna", "pw"));
+		ResolvedUser resolved = resolver.Resolve(new BackendCredentials { UserName = "anna", Password = "pw" });
 
 		Assert.Equal("config-imap", resolved.Roles[BackendRole.MailStore].Credentials.UserName);
 		Assert.Equal("db-smtp", resolved.Roles[BackendRole.MailSubmit].Credentials.UserName);

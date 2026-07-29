@@ -681,11 +681,11 @@ public static class CalendarConverter
 				}
 			}
 
-			char kind = '2'; // FBTYPE defaults to BUSY (RFC 5545 §3.2.9)
+			BusyKind kind = BusyKind.Busy; // FBTYPE defaults to BUSY (RFC 5545 §3.2.9)
 			if (string.Equals(fbtype, "BUSY-TENTATIVE", StringComparison.OrdinalIgnoreCase))
-				kind = '1';
+				kind = BusyKind.Tentative;
 			else if (string.Equals(fbtype, "BUSY-UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
-				kind = '3';
+				kind = BusyKind.OutOfOffice;
 			else if (string.Equals(fbtype, "FREE", StringComparison.OrdinalIgnoreCase))
 				continue;
 
@@ -715,7 +715,7 @@ public static class CalendarConverter
 				}
 
 				if (end > start)
-					result.Add(new BusyPeriod(start, end, kind));
+					result.Add(new BusyPeriod { Start = AsUtcOffset(start), End = AsUtcOffset(end), Kind = kind });
 			}
 		}
 
@@ -756,12 +756,28 @@ public static class CalendarConverter
 					DateTime? end = ToUtc(occurrence.Period.EffectiveEndTime ?? occurrence.Period.EndTime);
 					if (start is null)
 						continue;
-					result.Add(new BusyPeriod(start.Value, end ?? start.Value.AddMinutes(30), '2'));
+					result.Add(new BusyPeriod
+					{
+						Start = AsUtcOffset(start.Value),
+						End = AsUtcOffset(end ?? start.Value.AddMinutes(30)),
+						Kind = BusyKind.Busy
+					});
 				}
 			}
 		}
 
 		return result;
+	}
+
+	/// <summary>
+	///   Wraps a UTC instant as a <see cref="DateTimeOffset" /> for the contract's busy periods.
+	///   The Kind is FORCED to UTC rather than trusted: the sources here (EasDateTime parsing,
+	///   Ical.Net occurrence expansion) yield UTC values whose Kind is sometimes Unspecified, and
+	///   the DateTimeOffset(DateTime, TimeSpan) constructor throws on a Local-kinded input.
+	/// </summary>
+	private static DateTimeOffset AsUtcOffset(DateTime utc)
+	{
+		return new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc));
 	}
 
 	/// <summary>Fetches one inline attachment by index (ItemOperations Fetch of calatt: references).</summary>
@@ -776,8 +792,11 @@ public static class CalendarConverter
 			.Where(a => a?.Data is { Length: > 0 }).ToList() ?? [];
 		if (index < 0 || index >= binaries.Count)
 			return null;
-		return new BackendAttachment(
-			binaries[index].FormatType ?? "application/octet-stream", binaries[index].Data!);
+		return new BackendAttachment
+		{
+			ContentType = binaries[index].FormatType ?? "application/octet-stream",
+			Content = binaries[index].Data!
+		};
 	}
 
 	private static CalendarEvent AddNewEvent(Calendar calendar)

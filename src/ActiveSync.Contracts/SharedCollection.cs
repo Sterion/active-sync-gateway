@@ -13,14 +13,20 @@ namespace ActiveSync.Contracts;
 ///   segment looks like an attempted (but misspelled) mode suffix, so a typo is reported rather
 ///   than silently absorbed into the href.
 /// </summary>
-public sealed record SharedCollection(string Href, bool ReadOnly)
+public sealed record SharedCollection
 {
+	/// <summary>The collection's href — an absolute path or a same-host URL, kept verbatim.</summary>
+	public required string Href { get; init; }
+
+	/// <summary>Whether the grant is read-only (client writes are silently reverted).</summary>
+	public bool ReadOnly { get; init; }
+
 	/// <summary>Parses "href" / "href|ro"; the href part is kept verbatim.</summary>
 	public static SharedCollection Parse(string entry)
 	{
 		int separator = entry.LastIndexOf('|');
 		if (separator < 0)
-			return new SharedCollection(entry.Trim(), false);
+			return new SharedCollection { Href = entry.Trim() };
 		string mode = entry[(separator + 1)..].Trim();
 		// DAV hrefs may themselves contain '|', so the trailing segment after the LAST '|' is
 		// treated as a mode delimiter ONLY when it is exactly "ro"/"rw" — the two suffixes this
@@ -29,12 +35,12 @@ public sealed record SharedCollection(string Href, bool ReadOnly)
 		// than treating the whole string as a (default read-write, like any unsuffixed href) href.
 		if (!mode.Equals("ro", StringComparison.OrdinalIgnoreCase) &&
 		    !mode.Equals("rw", StringComparison.OrdinalIgnoreCase))
-			return new SharedCollection(entry.Trim(), false);
+			return new SharedCollection { Href = entry.Trim() };
 		// Fail CLOSED between the two recognized suffixes — only an explicit "|rw" grants
 		// read-write; "|ro" is read-only. (An unrecognized suffix no longer reaches this line — the
 		// branch above keeps it as part of the href instead of guessing at a mode for it.)
 		bool readOnly = !mode.Equals("rw", StringComparison.OrdinalIgnoreCase);
-		return new SharedCollection(entry[..separator].Trim(), readOnly);
+		return new SharedCollection { Href = entry[..separator].Trim(), ReadOnly = readOnly };
 	}
 
 	/// <summary>Returns a failure message for an unusable entry, null when valid.</summary>

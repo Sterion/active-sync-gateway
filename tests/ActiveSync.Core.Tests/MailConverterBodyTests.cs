@@ -42,7 +42,7 @@ public class MailConverterBodyTests
 			fullSize = ms.Length;
 		}
 
-		BodyPreference preference = new(4, 200, false); // Type 4, 200-byte TruncationSize
+		BodyPreference preference = new() { Type = BodyType.Mime, TruncationSize = 200 };
 		XElement body = MailConverter.BuildBody(message, preference, out int nativeBodyType);
 
 		string truncatedFlag = body.Element(AirSyncBase + "Truncated")!.Value;
@@ -80,7 +80,7 @@ public class MailConverterBodyTests
 		message.Date = DateTimeOffset.UtcNow;
 		message.Body = part;
 
-		BodyPreference preference = new(4, null, false);
+		BodyPreference preference = new() { Type = BodyType.Mime };
 		XElement body = MailConverter.BuildBody(message, preference, out _);
 		string data = body.Element(AirSyncBase + "Data")!.Value;
 

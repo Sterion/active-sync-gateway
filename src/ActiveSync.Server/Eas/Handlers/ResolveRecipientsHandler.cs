@@ -34,9 +34,15 @@ public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> l
 		// Optional photos: Options > Picture (MaxSize, MaxPictures) — RR namespace.
 		GalPhotoRequest? photos = null;
 		if (options?.Element(RR + "Picture") is XElement picture)
-			photos = new GalPhotoRequest(
-				int.TryParse(picture.Element(RR + "MaxSize")?.Value, out int maxSize) ? maxSize : null,
-				int.TryParse(picture.Element(RR + "MaxPictures")?.Value, out int maxCount) ? maxCount : null);
+			photos = new GalPhotoRequest
+			{
+				MaxSizeBytes = int.TryParse(picture.Element(RR + "MaxSize")?.Value, out int maxSize)
+					? maxSize
+					: null,
+				MaxCount = int.TryParse(picture.Element(RR + "MaxPictures")?.Value, out int maxCount)
+					? maxCount
+					: null
+			};
 
 		// Optional free/busy: Options > Availability (StartTime, EndTime).
 		(DateTime StartUtc, DateTime EndUtc)? availabilityWindow = null;

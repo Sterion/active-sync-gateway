@@ -43,7 +43,7 @@ public sealed class SmtpSizePreflightMeasurementTests
 			Host = IPAddress.Loopback.ToString(), Port = server.Port, Security = "None", ForceFrom = true
 		};
 		SmtpSubmitBackend backend = new(
-			options, new BackendCredentials("user@example.test", "pw"), longCanonicalAddress, NullLogger.Instance);
+			options, new BackendCredentials { UserName = "user@example.test", Password = "pw" }, longCanonicalAddress, NullLogger.Instance);
 
 		await Assert.ThrowsAsync<BackendException>(() => backend.SendAsync(mime, CancellationToken.None));
 	}

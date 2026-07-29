@@ -29,11 +29,21 @@ public sealed class SieveBackendProvider(ILoggerFactory loggerFactory) : IBacken
 	{
 		return
 		[
-			new BackendConfigField("Host", "Host", BackendFieldType.String, Required: true,
-				Help: "ManageSieve host. There is no implicit \"same as IMAP\" default."),
-			new BackendConfigField("Port", "Port", BackendFieldType.Int, Default: "4190", Min: 1, Max: 65535),
-			new BackendConfigField("UseTls", "Require STARTTLS", BackendFieldType.Bool, Default: "true",
-				Help: "ManageSieve has no implicit-TLS port. Turn off for plaintext test stacks only."),
+			new BackendConfigField
+			{
+				Name = "Host", Label = "Host", Type = BackendFieldType.String, Required = true,
+				Help = "ManageSieve host. There is no implicit \"same as IMAP\" default."
+			},
+			new BackendConfigField
+			{
+				Name = "Port", Label = "Port", Type = BackendFieldType.Int,
+				Default = "4190", Min = 1, Max = 65535
+			},
+			new BackendConfigField
+			{
+				Name = "UseTls", Label = "Require STARTTLS", Type = BackendFieldType.Bool, Default = "true",
+				Help = "ManageSieve has no implicit-TLS port. Turn off for plaintext test stacks only."
+			},
 			.. BackendSchemaFields.Network()
 		];
 	}

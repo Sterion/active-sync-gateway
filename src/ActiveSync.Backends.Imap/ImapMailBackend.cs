@@ -76,16 +76,18 @@ public sealed partial class ImapMailBackend(
 			{
 				if (folder.Attributes.HasFlag(FolderAttributes.NonExistent))
 					continue;
-				int type = ClassifyFolder(folder);
+				FolderType type = ClassifyFolder(folder);
 				string? parentKey = folder.ParentFolder is { } parent && !string.IsNullOrEmpty(parent.FullName)
 					? ImapSession.ToBackendKey(parent.FullName)
 					: null;
-				result.Add(new BackendFolder(
-					ImapSession.ToBackendKey(folder.FullName),
-					folder.Name,
-					parentKey,
-					type,
-					Protocol.EasClass.Email));
+				result.Add(new BackendFolder
+				{
+					BackendKey = ImapSession.ToBackendKey(folder.FullName),
+					DisplayName = folder.Name,
+					ParentBackendKey = parentKey,
+					Type = type,
+					EasClass = Protocol.EasClass.Email
+				});
 			}
 
 			return result;
@@ -105,8 +107,8 @@ public sealed partial class ImapMailBackend(
 			// MailKit. Without this NOOP, a SEARCH on the shared session can miss mail
 			// delivered after the original SELECT indefinitely (observed on Stalwart).
 			await client.NoOpAsync(ct).ConfigureAwait(false);
-			SearchQuery query = filter.SinceUtc is { } since
-				? SearchQuery.DeliveredAfter(SearchFloor(since))
+			SearchQuery query = filter.Since is { } since
+				? SearchQuery.DeliveredAfter(SearchFloor(since.UtcDateTime))
 				: SearchQuery.All;
 			IList<UniqueId> uids = await folder.SearchAsync(query, ct).ConfigureAwait(false);
 			if (uids.Count == 0)
@@ -166,7 +168,7 @@ public sealed partial class ImapMailBackend(
 			List<XElement> data = MailConverter.ToApplicationData(
 				message, converterFlags, bodyPreference,
 				idx => MakeFileReference(folderBackendKey, itemKey, idx), summaries[0].InternalDate);
-			return new BackendItem(data);
+			return new BackendItem { ApplicationData = data };
 		}, ct);
 	}
 
@@ -511,7 +513,7 @@ public sealed partial class ImapMailBackend(
 				return null;
 			using MemoryStream ms = new();
 			await part.Content.DecodeToAsync(ms, ct).ConfigureAwait(false);
-			return new BackendAttachment(part.ContentType.MimeType, ms.ToArray());
+			return new BackendAttachment { ContentType = part.ContentType.MimeType, Content = ms.ToArray() };
 		}, ct);
 	}
 
@@ -540,7 +542,7 @@ public sealed partial class ImapMailBackend(
 	}
 
 	public Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
-		string? folderBackendKey, string freeText, DateTime? sinceUtc, int maxResults, CancellationToken ct)
+		string? folderBackendKey, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct)
 	{
 		return session.RunAsync<IReadOnlyList<(string, string)>>(async client =>
 		{
@@ -552,8 +554,8 @@ public sealed partial class ImapMailBackend(
 				.Or(SearchQuery.FromContains(freeText))
 				.Or(SearchQuery.ToContains(freeText))
 				.Or(SearchQuery.BodyContains(freeText));
-			if (sinceUtc is { } since)
-				query = query.And(SearchQuery.DeliveredAfter(SearchFloor(since)));
+			if (since is { } sinceValue)
+				query = query.And(SearchQuery.DeliveredAfter(SearchFloor(sinceValue.UtcDateTime)));
 			IList<UniqueId> uids = await folder.SearchAsync(query, ct).ConfigureAwait(false);
 			return uids
 				.OrderByDescending(u => u.Id)
@@ -587,18 +589,18 @@ public sealed partial class ImapMailBackend(
 		}, ct);
 	}
 
-	private static int ClassifyFolder(IMailFolder folder)
+	private static FolderType ClassifyFolder(IMailFolder folder)
 	{
 		if (folder.Attributes.HasFlag(FolderAttributes.Inbox) ||
 		    folder.FullName.Equals("INBOX", StringComparison.OrdinalIgnoreCase))
-			return EasFolderType.Inbox;
+			return FolderType.Inbox;
 		if (IsDraftsFolder(folder))
-			return EasFolderType.Drafts;
+			return FolderType.Drafts;
 		if (MatchesSpecialFolder(folder, FolderAttributes.Sent, SentNames))
-			return EasFolderType.SentItems;
+			return FolderType.SentItems;
 		if (MatchesSpecialFolder(folder, FolderAttributes.Trash, TrashNames))
-			return EasFolderType.DeletedItems;
-		return EasFolderType.UserMail;
+			return FolderType.DeletedItems;
+		return FolderType.UserMail;
 	}
 
 	/// <summary>

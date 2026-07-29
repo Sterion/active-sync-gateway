@@ -63,7 +63,7 @@ public class ImapFolderListingEfficiencyTests
 	private static async Task<int> CountListCommandsAsync(string user, CancellationToken ct)
 	{
 		ListCommandCountingLogger wire = new();
-		ImapSession session = new(Options, new BackendCredentials(user, TestBackend.Password), NullLogger.Instance, wire);
+		ImapSession session = new(Options, new BackendCredentials { UserName = user, Password = TestBackend.Password }, NullLogger.Instance, wire);
 		try
 		{
 			ImapMailBackend backend = new(session, user, _ => null, NullLogger.Instance);
@@ -125,7 +125,7 @@ public class ImapFolderListingEfficiencyTests
 		}
 
 		ListCommandCountingLogger wire = new();
-		ImapSession session = new(Options, new BackendCredentials(user, TestBackend.Password), NullLogger.Instance, wire);
+		ImapSession session = new(Options, new BackendCredentials { UserName = user, Password = TestBackend.Password }, NullLogger.Instance, wire);
 		try
 		{
 			ImapMailBackend backend = new(session, user, _ => null, NullLogger.Instance);

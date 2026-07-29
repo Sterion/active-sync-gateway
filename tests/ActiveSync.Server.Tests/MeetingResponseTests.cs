@@ -39,7 +39,7 @@ public sealed class MeetingResponseTests : IDisposable
 	private async Task<UserFolder> InboxAsync()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
 		return registry.Single();
 	}
 
@@ -146,7 +146,7 @@ public sealed class MeetingResponseTests : IDisposable
 		_harness.Session.Calendar = calendar;
 
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("caldav:Cal", "Calendar", null, EasFolderType.Calendar, EasClass.Calendar));
+			new BackendFolder { BackendKey = "caldav:Cal", DisplayName = "Calendar", Type = FolderType.Calendar, EasClass = EasClass.Calendar });
 		UserFolder calFolder = registry.Single();
 		// Map an item href → ServerId so the request's RequestId resolves back to it.
 		string serverId = await _harness.Folders.ComposeServerIdAsync(
@@ -177,7 +177,7 @@ public sealed class MeetingResponseTests : IDisposable
 		_harness.Session.Calendar = calendar;
 
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("caldav:Cal", "Calendar", null, EasFolderType.Calendar, EasClass.Calendar));
+			new BackendFolder { BackendKey = "caldav:Cal", DisplayName = "Calendar", Type = FolderType.Calendar, EasClass = EasClass.Calendar });
 		UserFolder calFolder = registry.Single();
 		string serverId = await _harness.Folders.ComposeServerIdAsync(
 			calFolder, calendar, "event-href", CancellationToken.None);

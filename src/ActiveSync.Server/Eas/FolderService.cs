@@ -32,7 +32,16 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 				existing ??= await state.GetFoldersAsync(userId, ct);
 				all.AddRange(existing
 					.Where(f => f.EasClass == store.EasClass)
-					.Select(f => new BackendFolder(f.BackendKey, f.DisplayName, f.ParentBackendKey, f.Type, f.EasClass)));
+					.Select(f => new BackendFolder
+					{
+						BackendKey = f.BackendKey,
+						DisplayName = f.DisplayName,
+						ParentBackendKey = f.ParentBackendKey,
+						// The registry column is the wire integer the store's FolderType was
+						// stored as; this is the same value coming back the other way.
+						Type = (FolderType)f.Type,
+						EasClass = f.EasClass
+					}));
 			}
 
 		return await state.RefreshFolderRegistryAsync(userId, all, ct);

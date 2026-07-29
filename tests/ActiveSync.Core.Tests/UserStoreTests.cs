@@ -89,7 +89,7 @@ public sealed class UserStoreTests : IDisposable
 		};
 		UserResolver resolver = Resolver(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
-		Assert.Equal("config@x", resolver.Resolve(new BackendCredentials("phone1", "pw")).MailAddress);
+		Assert.Equal("config@x", resolver.Resolve(new BackendCredentials { UserName = "phone1", Password = "pw" }).MailAddress);
 
 		// The database sets ONLY the backend user name. The config MailAddress must SURVIVE.
 		await _store.UpsertAsync("phone1",
@@ -97,7 +97,7 @@ public sealed class UserStoreTests : IDisposable
 			CancellationToken.None);
 		await resolver.EnsureFreshAsync(false, CancellationToken.None);
 
-		ResolvedUser fromDb = resolver.Resolve(new BackendCredentials("phone1", "pw"));
+		ResolvedUser fromDb = resolver.Resolve(new BackendCredentials { UserName = "phone1", Password = "pw" });
 		Assert.Equal("db-imap-user", fromDb.Roles[BackendRole.MailStore].Credentials.UserName);
 		Assert.Equal("config@x", fromDb.MailAddress);   // config field survives the DB override
 		MergedUser merged = resolver.MergedUsers["phone1"];
@@ -110,7 +110,7 @@ public sealed class UserStoreTests : IDisposable
 		// Clearing the database deviation reverts that field to config — not to nothing.
 		Assert.True(await _store.DeleteAsync("phone1", CancellationToken.None));
 		await resolver.EnsureFreshAsync(false, CancellationToken.None);
-		ResolvedUser fromConfig = resolver.Resolve(new BackendCredentials("phone1", "pw"));
+		ResolvedUser fromConfig = resolver.Resolve(new BackendCredentials { UserName = "phone1", Password = "pw" });
 		Assert.Equal("config-imap-user", fromConfig.Roles[BackendRole.MailStore].Credentials.UserName);
 		Assert.Equal("config@x", fromConfig.MailAddress);
 		Assert.False(resolver.MergedUsers["phone1"].FromDatabase);
@@ -234,7 +234,7 @@ public sealed class UserStoreTests : IDisposable
 		// MailAddress must NOT leak through the invalid row.
 		Assert.False(resolver.VerifyLocally("phone1", "pw"));
 		Assert.Throws<InvalidOperationException>(
-			() => resolver.Resolve(new BackendCredentials("phone1", "pw")));
+			() => resolver.Resolve(new BackendCredentials { UserName = "phone1", Password = "pw" }));
 	}
 
 	[Fact]
@@ -260,7 +260,7 @@ public sealed class UserStoreTests : IDisposable
 		// Never authenticates locally (no pass-through) and never resolves.
 		Assert.False(resolver.VerifyLocally("phone1", "pw"));
 		Assert.Throws<InvalidOperationException>(
-			() => resolver.Resolve(new BackendCredentials("phone1", "pw")));
+			() => resolver.Resolve(new BackendCredentials { UserName = "phone1", Password = "pw" }));
 	}
 
 	[Fact]
@@ -553,7 +553,7 @@ public sealed class UserStoreTests : IDisposable
 		await refreshTask;
 		await roleChangeTask;
 
-		string? tag = resolver.Resolve(new BackendCredentials("u", "pw"))
+		string? tag = resolver.Resolve(new BackendCredentials { UserName = "u", Password = "pw" })
 			.Roles[BackendRole.Notes].Settings.Section["Tag"];
 		Assert.Equal("v2", tag); // the live role change must not be lost to the stale refresh
 	}

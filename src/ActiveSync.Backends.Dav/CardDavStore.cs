@@ -197,12 +197,13 @@ public sealed class CardDavStore(
 			string? name = resource.Propstat.Descendants(DavNs.D + "displayname").FirstOrDefault()?.Value;
 			if (string.IsNullOrWhiteSpace(name))
 				name = resource.Href.TrimEnd('/').Split('/').LastOrDefault() ?? "Contacts";
-			folders.Add(new BackendFolder(
-				ToBackendKey(resource.Href),
-				name,
-				null,
-				first ? EasFolderType.Contacts : EasFolderType.UserContacts,
-				Protocol.EasClass.Contacts));
+			folders.Add(new BackendFolder
+			{
+				BackendKey = ToBackendKey(resource.Href),
+				DisplayName = name,
+				Type = first ? FolderType.Contacts : FolderType.UserContacts,
+				EasClass = Protocol.EasClass.Contacts
+			});
 			first = false;
 		}
 

@@ -60,7 +60,7 @@ public sealed class JmapCalendarStoreUnitTests
 		JmapCalendarStore store = new(client, "u@example.test", pollSeconds: 1);
 
 		IReadOnlyDictionary<string, string> revs = await store.GetItemRevisionsAsync(
-			"jmap-cal:C1", new ContentFilter(DateTime.UtcNow.AddDays(-14)), CancellationToken.None);
+			"jmap-cal:C1", new ContentFilter { Since = DateTimeOffset.UtcNow.AddDays(-14) }, CancellationToken.None);
 
 		Assert.Contains("NEW", revs.Keys);         // inside the window
 		Assert.DoesNotContain("OLD", revs.Keys);    // single event before the window — filtered out

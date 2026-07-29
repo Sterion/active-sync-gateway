@@ -52,7 +52,7 @@ internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>
 				{
 					row.DisplayName = bf.DisplayName;
 					row.ParentBackendKey = bf.ParentBackendKey;
-					row.Type = bf.EasType;
+					row.Type = (int)bf.Type;
 					row.EasClass = bf.EasClass;
 					row.Deleted = false;
 					row.DeletedUtc = null; // reappeared: restart the retention clock
@@ -67,7 +67,7 @@ internal sealed class FolderRegistry(SyncDbContext db, ILogger<SyncStateService>
 						BackendKey = bf.BackendKey,
 						DisplayName = bf.DisplayName,
 						ParentBackendKey = bf.ParentBackendKey,
-						Type = bf.EasType,
+						Type = (int)bf.Type,
 						EasClass = bf.EasClass
 					});
 #pragma warning restore VSTHRD103

@@ -69,12 +69,13 @@ public sealed class CalDavStoreTests
 		// "team" is shared TO this user (read-only) — must not be folded into the user's OWN
 		// availability. It also happens to appear inside the user's own home-set listing above,
 		// which ListFoldersAsync already anticipates via its own "granted" check.
-		SharedCollection[] shared = [new SharedCollection("/dav/cal/team/", ReadOnly: true)];
-		CalDavStore store = new(dav, options, new BackendCredentials("user", "pass"), "user@example.com",
+		SharedCollection[] shared = [new SharedCollection { Href = "/dav/cal/team/", ReadOnly = true }];
+		CalDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, "user@example.com",
 			NullLogger.Instance, pollSeconds: 60, shared);
 
 		await store.GetBusyPeriodsAsync("user@example.com",
-			new DateTime(2026, 1, 1), new DateTime(2026, 1, 2), CancellationToken.None);
+			new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+			new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero), CancellationToken.None);
 
 		Assert.DoesNotContain("/dav/cal/team/", reportPaths);
 		Assert.Contains("/dav/cal/own/", reportPaths);
@@ -103,13 +104,13 @@ public sealed class CalDavStoreTests
 		StubHandler stub = new(_ => Xml(homeSet));
 		using WebDavClient dav = new(Base, new HttpClient(stub));
 		DavServerOptions options = new() { BaseUrl = Base.ToString(), HomeSetPath = "/dav/cal/" };
-		SharedCollection[] shared = [new SharedCollection("/dav/cal/team/", ReadOnly: true)];
-		CalDavStore store = new(dav, options, new BackendCredentials("user", "pass"), "user@example.com",
+		SharedCollection[] shared = [new SharedCollection { Href = "/dav/cal/team/", ReadOnly = true }];
+		CalDavStore store = new(dav, options, new BackendCredentials { UserName = "user", Password = "pass" }, "user@example.com",
 			NullLogger.Instance, pollSeconds: 60, shared);
 
 		IReadOnlyList<BackendFolder> folders = await store.ListFoldersAsync(CancellationToken.None);
 
-		Assert.Contains(folders, f => f.EasType == EasFolderType.Calendar);
+		Assert.Contains(folders, f => f.Type == FolderType.Calendar);
 	}
 
 	private static HttpResponseMessage Xml(string body)

@@ -38,7 +38,7 @@ public class MailConverterMeetingRequestTests
 		List<XElement> data = MailConverter.ToApplicationData(
 			message,
 			new MailConverter.MessageFlags(true, false, false, false, null),
-			new BodyPreference(1, null, false),
+			new BodyPreference { Type = BodyType.PlainText },
 			_ => "ref");
 		return data.First(e => e.Name == Email + "MeetingRequest");
 	}

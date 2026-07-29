@@ -25,7 +25,7 @@ namespace ActiveSync.Core.Tests;
 /// </summary>
 public sealed class BackendSessionFactoryTests : IDisposable
 {
-	private static readonly BackendCredentials Creds = new("user1@example.com", "pass");
+	private static readonly BackendCredentials Creds = new() { UserName = "user1@example.com", Password = "pass" };
 
 	private readonly SqliteConnection _connection;
 	private readonly TestContextFactory _dbFactory;
@@ -128,7 +128,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 			NullLogger<BackendSessionFactory>.Instance);
 
 		provider.Gate = new TaskCompletionSource();
-		BackendCredentials creds = new("racer@x", "pw");
+		BackendCredentials creds = new() { UserName = "racer@x", Password = "pw" };
 		Task<bool> authTask = factory.AuthenticateAsync(creds, CancellationToken.None);
 
 		// Wait until the probe actually started (captured its snapshot version) before racing a
@@ -701,7 +701,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 			throw new NotSupportedException();
 
 		public Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
-			string? folderBackendKey, string freeText, DateTime? sinceUtc, int maxResults, CancellationToken ct) =>
+			string? folderBackendKey, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct) =>
 			throw new NotSupportedException();
 
 		public Task EmptyFolderAsync(string folderBackendKey, CancellationToken ct) => throw new NotSupportedException();

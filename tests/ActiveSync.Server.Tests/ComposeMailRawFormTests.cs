@@ -54,7 +54,7 @@ public sealed class ComposeMailRawFormTests : IDisposable
 		{
 			Http = http,
 			Parameters = new EasRequestParameters { Command = "SendMail", DeviceId = device.DeviceId },
-			Credentials = new BackendCredentials(EasHandlerHarness.UserName, "pw"),
+			Credentials = new BackendCredentials { UserName = EasHandlerHarness.UserName, Password = "pw" },
 			Session = _harness.Session,
 			Device = device,
 			State = _harness.State,

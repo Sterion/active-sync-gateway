@@ -47,39 +47,50 @@ public enum BackendFieldType
 ///   <see cref="Default" /> is the string form of the options-class default and MUST match it
 ///   (BackendSchemaDefaultsTests binds an empty section and compares).
 /// </summary>
-/// <param name="Name">
-///   The config key relative to the role section (e.g. "Host"), or the list ROOT for
-///   <see cref="BackendFieldType.StringList" /> (e.g. "SharedCollections" for keys
-///   "SharedCollections:0", "SharedCollections:1", …).
-/// </param>
-/// <param name="Label">Short human-readable label for the rendering surface.</param>
-/// <param name="Type">The field's shape — governs how it is entered, validated and rendered.</param>
-/// <param name="Required">Whether a value must be supplied; unset otherwise falls back to <paramref name="Default" />.</param>
-/// <param name="Default">
-///   The string form of the options-class property's own default value. MUST match it exactly —
-///   <c>BackendSchemaDefaultsTests</c> binds an empty section and compares, so a drift here renders
-///   a wrong "(default: X)" hint to the operator.
-/// </param>
-/// <param name="EnumValues">The allowed values when <paramref name="Type" /> is <see cref="BackendFieldType.Enum" />; otherwise unused.</param>
-/// <param name="Help">Longer help text shown alongside the field in the rendering surface.</param>
-/// <param name="Min">Inclusive lower bound for <see cref="BackendFieldType.Int" /> fields; otherwise unused.</param>
-/// <param name="Max">Inclusive upper bound for <see cref="BackendFieldType.Int" /> fields; otherwise unused.</param>
-/// <param name="SelfServiceEditable">
-///   Whether a NON-ADMIN account holder may set this field for their own account from the user
-///   portal. Defaults to <c>false</c>, so a field — and a whole plugin provider — is
-///   administration-only until it says otherwise. Opt a field in only when changing it cannot
-///   move the connection or weaken its trust: anything naming a host, URL, port, path template
-///   or certificate policy decides WHERE the gateway connects and WHAT it will trust, and the
-///   gateway presents the role's stored credential to whatever is there.
-/// </param>
-public sealed record BackendConfigField(
-	string Name,
-	string Label,
-	BackendFieldType Type,
-	bool Required = false,
-	string? Default = null,
-	IReadOnlyList<string>? EnumValues = null,
-	string Help = "",
-	long? Min = null,
-	long? Max = null,
-	bool SelfServiceEditable = false);
+public sealed record BackendConfigField
+{
+	/// <summary>
+	///   The config key relative to the role section (e.g. "Host"), or the list ROOT for
+	///   <see cref="BackendFieldType.StringList" /> (e.g. "SharedCollections" for keys
+	///   "SharedCollections:0", "SharedCollections:1", …).
+	/// </summary>
+	public required string Name { get; init; }
+
+	/// <summary>Short human-readable label for the rendering surface.</summary>
+	public required string Label { get; init; }
+
+	/// <summary>The field's shape — governs how it is entered, validated and rendered.</summary>
+	public required BackendFieldType Type { get; init; }
+
+	/// <summary>Whether a value must be supplied; unset otherwise falls back to <see cref="Default" />.</summary>
+	public bool Required { get; init; }
+
+	/// <summary>
+	///   The string form of the options-class property's own default value. MUST match it exactly —
+	///   <c>BackendSchemaDefaultsTests</c> binds an empty section and compares, so a drift here renders
+	///   a wrong "(default: X)" hint to the operator.
+	/// </summary>
+	public string? Default { get; init; }
+
+	/// <summary>The allowed values when <see cref="Type" /> is <see cref="BackendFieldType.Enum" />; otherwise unused.</summary>
+	public IReadOnlyList<string>? EnumValues { get; init; }
+
+	/// <summary>Longer help text shown alongside the field in the rendering surface.</summary>
+	public string Help { get; init; } = "";
+
+	/// <summary>Inclusive lower bound for <see cref="BackendFieldType.Int" /> fields; otherwise unused.</summary>
+	public long? Min { get; init; }
+
+	/// <summary>Inclusive upper bound for <see cref="BackendFieldType.Int" /> fields; otherwise unused.</summary>
+	public long? Max { get; init; }
+
+	/// <summary>
+	///   Whether a NON-ADMIN account holder may set this field for their own account from the user
+	///   portal. Defaults to <c>false</c>, so a field — and a whole plugin provider — is
+	///   administration-only until it says otherwise. Opt a field in only when changing it cannot
+	///   move the connection or weaken its trust: anything naming a host, URL, port, path template
+	///   or certificate policy decides WHERE the gateway connects and WHAT it will trust, and the
+	///   gateway presents the role's stored credential to whatever is there.
+	/// </summary>
+	public bool SelfServiceEditable { get; init; }
+}

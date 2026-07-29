@@ -53,7 +53,7 @@ public sealed class EasContextTests : IDisposable
 		{
 			Http = http,
 			Parameters = new EasRequestParameters { Command = "Ping", DeviceId = device.DeviceId },
-			Credentials = new BackendCredentials("u@example.test", "pw"),
+			Credentials = new BackendCredentials { UserName = "u@example.test", Password = "pw" },
 			Session = new EasHandlerHarness.StubSession(),
 			Device = device,
 			State = _state,

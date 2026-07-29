@@ -25,7 +25,7 @@ public sealed class LocalContactStore(
 
 	protected override string Collection => "contacts";
 	protected override string FolderDisplayName => "Contacts";
-	protected override int FolderType => EasFolderType.Contacts;
+	protected override FolderType FolderType => FolderType.Contacts;
 	public override string EasClass => Protocol.EasClass.Contacts;
 
 	public async Task<IReadOnlyList<IReadOnlyList<XElement>>> SearchGalAsync(
@@ -100,7 +100,7 @@ public sealed class LocalCalendarStore(
 
 	protected override string Collection => "calendar";
 	protected override string FolderDisplayName => "Calendar";
-	protected override int FolderType => EasFolderType.Calendar;
+	protected override FolderType FolderType => FolderType.Calendar;
 	public override string EasClass => Protocol.EasClass.Calendar;
 
 	public async Task<string?> RespondToMeetingAsync(
@@ -190,7 +190,7 @@ public sealed class LocalCalendarStore(
 	///   user's own calendar, so any other target has no data here (status 163 upstream).
 	/// </summary>
 	public async Task<IReadOnlyList<BusyPeriod>?> GetBusyPeriodsAsync(
-		string targetAddress, DateTime startUtc, DateTime endUtc, CancellationToken ct)
+		string targetAddress, DateTimeOffset start, DateTimeOffset end, CancellationToken ct)
 	{
 		if (!targetAddress.Equals(partStatIdentity, StringComparison.OrdinalIgnoreCase) &&
 		    !targetAddress.Equals(gatewayLogin, StringComparison.OrdinalIgnoreCase))
@@ -213,7 +213,7 @@ public sealed class LocalCalendarStore(
 				logger.LogWarning(ex, "Skipping an undecryptable calendar row during free/busy for user {UserId}", UserId);
 			}
 
-		return CalendarConverter.BusyPeriodsFromEvents(plaintext, startUtc, endUtc);
+		return CalendarConverter.BusyPeriodsFromEvents(plaintext, start.UtcDateTime, end.UtcDateTime);
 	}
 
 	protected override DateTime? ExtractItemDate(string content)
@@ -256,7 +256,7 @@ public sealed class LocalTaskStore(
 
 	protected override string Collection => "tasks";
 	protected override string FolderDisplayName => "Tasks";
-	protected override int FolderType => EasFolderType.Tasks;
+	protected override FolderType FolderType => FolderType.Tasks;
 	public override string EasClass => Protocol.EasClass.Tasks;
 
 	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
@@ -285,7 +285,7 @@ public sealed class LocalNotesStore(
 
 	protected override string Collection => "notes";
 	protected override string FolderDisplayName => "Notes";
-	protected override int FolderType => EasFolderType.Notes;
+	protected override FolderType FolderType => FolderType.Notes;
 	public override string EasClass => Protocol.EasClass.Notes;
 
 	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)

@@ -8,8 +8,11 @@
 > revision same day folding in an external design review — the mail store split in § 5.4, the
 > GAL photo statuses in § 5.8, the interop load-context hazard in § 5.6.1, the conformance-kit
 > scope in § 7, the per-unit converter-split specification in § 7.1, and a batch of signature
-> fixes.* Implementation has not started yet: as of approval, no code, packaging or other
-> documentation has been changed.
+> fixes.*
+>
+> **Implementation progress: Phase 1 landed on `plugin-restructure` (contract version 1.4), with
+> one recorded deviation — `BodyPreference.Eas16` survives until Phase 3 (§ 5.1).** Phases 2–5
+> are not started.
 >
 > **Authority rules.** `AGENTS.md` and `docs/plugins.md` describe the contract **as it exists
 > today** — they are the authority on current behaviour only, and nothing more. The moment
@@ -277,6 +280,19 @@ public enum BodyType { PlainText = 1, Html = 2, Rtf = 3, Mime = 4 }
 // these to the digits — that would re-import the wire encoding principle 3 removes.
 public enum BusyKind { Free, Tentative, Busy, OutOfOffice }
 ```
+
+> **Implementation deviation, recorded in Phase 1 (per this section's own rule).** Phase 1's
+> line item "drop `Eas16` from `BodyPreference`" was NOT carried out; the flag stays until
+> Phase 3 deletes the whole record. Reason, found in the code: while stores still perform the
+> EAS conversion (they do, until Phase 3/4 move it host-side), the store is handed nothing else
+> per request from which 16.x-ness could be derived — `CalendarConverter.ToApplicationData` is
+> the sole consumer and gates `airsyncbase:Location` and inline event attachments on it. Dropping
+> the flag in Phase 1 would therefore have silently regressed shipped 16.1 behaviour for two
+> phases and reddened Phase 2's own integration gate (`Eas16Tests` asserts both shapes), which
+> contradicts § 9's "each phase leaves the tree green" and makes 3a the plan's only red commit.
+> Everything else in the Phase 1 line landed as written, `BodyPreference.Type` included (now
+> `BodyType`). Consequence for the authority rules: `AGENTS.md`'s `BodyPreference.Eas16`
+> statement stays TRUE until Phase 3, and it is Phase 3 that must update it.
 
 `BodyPreference` **leaves the contract entirely** (an earlier draft merely dropped its `Eas16`
 flag). It is an AirSyncBase notion: under the payload currency no store can act on it — a
@@ -1154,12 +1170,20 @@ the phase number:**
   NOT among them — it ends up host-side, § 5.1).
 - Retype `BackendFolder` and `BusyPeriod`; drop `Eas16` from `BodyPreference` (the record itself
   is deleted in Phase 3 with the store retype — until then stores still take it, minus the leak).
+  **Landed with a deviation: `Eas16` was KEPT** — see the recorded note in § 5.1; dropping it
+  while stores still convert would have regressed 16.x shapes for two phases. `BodyPreference`
+  is otherwise retyped (`BodyType Type`) and init-only like every other model.
 - **Slim `ContentFilter`** — easy to miss, but it is the actual severance work: `Models.cs`'s
   `ForClass(string easClass, …)` is the ONLY use of Protocol in Contracts (`EasClass.Email` /
   `EasClass.Calendar` consts), so the ProjectReference cannot be deleted while it stands. The
   whole helper family — `ForClass` and the `FromMailFilterType`/`FromCalendarFilterType`
   EAS-wire-int mappings — moves host-side (principle 3: FilterType is wire encoding);
-  Contracts keeps only `ContentFilter(DateTimeOffset? Since)` + `All`.
+  Contracts keeps only `ContentFilter(DateTimeOffset? Since)` + `All`. *Landed as
+  `ActiveSync.Core.Backend.ContentFilters` — Core beside `MergedFreeBusy`, the existing
+  precedent for a host-side wire mapping over a contract value; the three call sites are all in
+  Server. The AirSyncBase body-Type wire integer gets the same treatment on the way in
+  (`Server/Eas/EasBodyTypes.FromWire`), so a client-supplied integer is never cast blindly onto
+  the `BodyType` enum.*
 - Standardise every instant on `DateTimeOffset` (principle 8): `BusyPeriod`, `OofReply`,
   `ContentFilter`, `SearchAsync` — one pass, so the surface never ships mixed.
 - Convert every Contracts model from positional to init-only property records (principle 7).

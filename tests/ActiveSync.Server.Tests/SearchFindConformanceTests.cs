@@ -47,7 +47,7 @@ public sealed class SearchFindConformanceTests : IDisposable
 	private async Task<UserFolder> InboxAsync()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
 		return registry.Single();
 	}
 
@@ -169,8 +169,8 @@ public sealed class SearchFindConformanceTests : IDisposable
 	public async Task Find_MailboxWide_ResultsCarryServerIdAndCollectionId_ResolvedPerHit()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email),
-			new BackendFolder("imap:Archive", "Archive", null, EasFolderType.UserMail, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email },
+			new BackendFolder { BackendKey = "imap:Archive", DisplayName = "Archive", Type = FolderType.UserMail, EasClass = EasClass.Email });
 		UserFolder inbox = registry.Single(f => f.BackendKey == "imap:INBOX");
 		UserFolder archive = registry.Single(f => f.BackendKey == "imap:Archive");
 

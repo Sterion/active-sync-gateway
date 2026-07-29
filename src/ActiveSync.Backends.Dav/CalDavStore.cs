@@ -164,7 +164,7 @@ public sealed class CalDavStore(
 	///   neither supported test backend offers a schedule-outbox.
 	/// </summary>
 	public async Task<IReadOnlyList<BusyPeriod>?> GetBusyPeriodsAsync(
-		string targetAddress, DateTime startUtc, DateTime endUtc, CancellationToken ct)
+		string targetAddress, DateTimeOffset start, DateTimeOffset end, CancellationToken ct)
 	{
 		bool self = targetAddress.Equals(partStatIdentity, StringComparison.OrdinalIgnoreCase) ||
 		            targetAddress.Equals(Credentials.UserName, StringComparison.OrdinalIgnoreCase);
@@ -206,8 +206,8 @@ public sealed class CalDavStore(
 
 		XElement query = new(DavNs.CalDav + "free-busy-query",
 			new XElement(DavNs.CalDav + "time-range",
-				new XAttribute("start", EasDateTime.ToCompact(startUtc)),
-				new XAttribute("end", EasDateTime.ToCompact(endUtc))));
+				new XAttribute("start", EasDateTime.ToCompact(start.UtcDateTime)),
+				new XAttribute("end", EasDateTime.ToCompact(end.UtcDateTime))));
 		List<BusyPeriod> result = new();
 		bool anyData = false;
 		foreach (string collection in collections)
@@ -271,12 +271,13 @@ public sealed class CalDavStore(
 			// A collection the user also holds a share entry for is a share, not their primary
 			// calendar — it must never claim the default-calendar slot.
 			bool granted = _sharedCollections.Any(s => SharedHrefEquals(s.Href, resource.Href));
-			folders.Add(new BackendFolder(
-				ToBackendKey(resource.Href),
-				name,
-				null,
-				first && !granted ? EasFolderType.Calendar : EasFolderType.UserCalendar,
-				Protocol.EasClass.Calendar));
+			folders.Add(new BackendFolder
+			{
+				BackendKey = ToBackendKey(resource.Href),
+				DisplayName = name,
+				Type = first && !granted ? FolderType.Calendar : FolderType.UserCalendar,
+				EasClass = Protocol.EasClass.Calendar
+			});
 			if (!granted)
 				first = false;
 		}
@@ -286,13 +287,13 @@ public sealed class CalDavStore(
 		// otherwise get ZERO folders of type 8 (Calendar), and iOS in particular expects a default
 		// calendar folder to exist. If nothing was promoted above, promote the first (already
 		// href-sorted) calendar folder, preferring one that is not itself a share.
-		if (folders.Count > 0 && folders.TrueForAll(f => f.EasType != EasFolderType.Calendar))
+		if (folders.Count > 0 && folders.TrueForAll(f => f.Type != FolderType.Calendar))
 		{
 			int promoteIndex = folders.FindIndex(f =>
 				!_sharedCollections.Any(s => SharedHrefEquals(s.Href, FromBackendKey(f.BackendKey))));
 			if (promoteIndex < 0)
 				promoteIndex = 0; // every home-set calendar is a share — fall back to the first anyway
-			folders[promoteIndex] = folders[promoteIndex] with { EasType = EasFolderType.Calendar };
+			folders[promoteIndex] = folders[promoteIndex] with { Type = FolderType.Calendar };
 		}
 
 		// Shared collections (config + `eas share` grants): each is probed individually and
@@ -333,12 +334,13 @@ public sealed class CalDavStore(
 				string? name = resource.Propstat.Descendants(DavNs.D + "displayname").FirstOrDefault()?.Value;
 				if (string.IsNullOrWhiteSpace(name))
 					name = shared.Href.TrimEnd('/').Split('/').LastOrDefault() ?? "Shared";
-				folders.Add(new BackendFolder(
-					ToBackendKey(resource.Href),
-					name,
-					null,
-					EasFolderType.UserCalendar,
-					Protocol.EasClass.Calendar));
+				folders.Add(new BackendFolder
+				{
+					BackendKey = ToBackendKey(resource.Href),
+					DisplayName = name,
+					Type = FolderType.UserCalendar,
+					EasClass = Protocol.EasClass.Calendar
+				});
 			}
 			catch (BackendException ex)
 			{
@@ -381,9 +383,9 @@ public sealed class CalDavStore(
 		// VEVENT comp-filter carries no time-range (verified live 2026-07-17). An epoch start
 		// is semantically "everything" — every event overlaps [1970, ∞) — so unfiltered syncs
 		// keep their meaning on well-behaved servers too.
-		DateTime since = filter.SinceUtc ?? DateTime.UnixEpoch;
+		DateTimeOffset since = filter.Since ?? DateTimeOffset.UnixEpoch;
 		return new XElement(DavNs.CalDav + "comp-filter", new XAttribute("name", "VEVENT"),
 			new XElement(DavNs.CalDav + "time-range",
-				new XAttribute("start", EasDateTime.ToCompact(since))));
+				new XAttribute("start", EasDateTime.ToCompact(since.UtcDateTime))));
 	}
 }

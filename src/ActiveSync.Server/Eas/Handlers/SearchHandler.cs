@@ -49,9 +49,15 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 				// Optional contact photos (MS-ASCMD 14.1): Options > Picture (MaxSize, MaxPictures).
 				GalPhotoRequest? photos = null;
 				if (store.Element(S + "Options")?.Element(S + "Picture") is XElement picture)
-					photos = new GalPhotoRequest(
-						int.TryParse(picture.Element(S + "MaxSize")?.Value, out int maxSize) ? maxSize : null,
-						int.TryParse(picture.Element(S + "MaxPictures")?.Value, out int maxCount) ? maxCount : null);
+					photos = new GalPhotoRequest
+					{
+						MaxSizeBytes = int.TryParse(picture.Element(S + "MaxSize")?.Value, out int maxSize)
+							? maxSize
+							: null,
+						MaxCount = int.TryParse(picture.Element(S + "MaxPictures")?.Value, out int maxCount)
+							? maxCount
+							: null
+					};
 
 				IContactOperations? contacts = context.Session.Contacts;
 				IReadOnlyList<IReadOnlyList<XElement>> hits = contacts is null
@@ -92,7 +98,13 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 					// eas16 must ride the same way it does through Sync/ItemOperations — a
 					// hard-coded false silently drops 16.x-only shapes from Search results too.
 					IReadOnlyDictionary<string, BackendItem?> items = await mailStore!.GetItemsAsync(
-						group.Key, keys, new BodyPreference(1, 1024, false, context.Version >= EasVersion.V160), ct);
+						group.Key, keys,
+						new BodyPreference
+						{
+							Type = BodyType.PlainText,
+							TruncationSize = 1024,
+							Eas16 = context.Version >= EasVersion.V160
+						}, ct);
 					foreach ((string folderKey, string itemKey) in group)
 						fetched[(folderKey, itemKey)] = items.GetValueOrDefault(itemKey);
 				}

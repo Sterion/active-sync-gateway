@@ -53,10 +53,13 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 	{
 		return
 		[
-			new BackendConfigField("BaseUrl", "Base URL", BackendFieldType.Url, Required: true,
-				Help: "Absolute http(s) URL of the JMAP server, e.g. https://mail.example.com. " +
-				      "The session is fetched from /.well-known/jmap. " +
-				      "One server serving several roles repeats the same URL in each."),
+			new BackendConfigField
+			{
+				Name = "BaseUrl", Label = "Base URL", Type = BackendFieldType.Url, Required = true,
+				Help = "Absolute http(s) URL of the JMAP server, e.g. https://mail.example.com. " +
+				       "The session is fetched from /.well-known/jmap. " +
+				       "One server serving several roles repeats the same URL in each."
+			},
 			.. BackendSchemaFields.Network()
 		];
 	}

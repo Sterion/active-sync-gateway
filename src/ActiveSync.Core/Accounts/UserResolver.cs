@@ -400,7 +400,13 @@ public sealed class UserResolver
 			// Pass-through: same credentials everywhere, the global role sections verbatim.
 			Dictionary<BackendRole, ResolvedRole> passThrough = new();
 			foreach ((BackendRole role, RoleAssignment assignment) in _rolesProvider.Current.Assignments)
-				passThrough[role] = new ResolvedRole(role, assignment.ProviderName, assignment.Settings, presented);
+				passThrough[role] = new ResolvedRole
+				{
+					Role = role,
+					ProviderName = assignment.ProviderName,
+					Settings = assignment.Settings,
+					Credentials = presented
+				};
 			return new ResolvedUser(
 				login, login.Contains('@') ? login : null, false, passThrough);
 		}
@@ -429,10 +435,17 @@ public sealed class UserResolver
 		string defaultPassword = template.DefaultBackendPassword ?? presented.Password;
 		Dictionary<BackendRole, ResolvedRole> roles = new();
 		foreach ((BackendRole role, RoleTemplate roleTemplate) in template.Roles)
-			roles[role] = new ResolvedRole(role, roleTemplate.ProviderName, roleTemplate.Settings,
-				new BackendCredentials(
-					roleTemplate.UserName ?? defaultUser,
-					roleTemplate.Password ?? defaultPassword));
+			roles[role] = new ResolvedRole
+			{
+				Role = role,
+				ProviderName = roleTemplate.ProviderName,
+				Settings = roleTemplate.Settings,
+				Credentials = new BackendCredentials
+				{
+					UserName = roleTemplate.UserName ?? defaultUser,
+					Password = roleTemplate.Password ?? defaultPassword
+				}
+			};
 		return new ResolvedUser(
 			login,
 			template.MailAddress ?? (login.Contains('@') ? login : null),

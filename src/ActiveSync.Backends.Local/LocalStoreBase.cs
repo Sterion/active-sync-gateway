@@ -28,7 +28,7 @@ public abstract class LocalStoreBase(
 	protected abstract string Collection { get; }
 
 	protected abstract string FolderDisplayName { get; }
-	protected abstract int FolderType { get; }
+	protected abstract FolderType FolderType { get; }
 
 	/// <summary>The owning gateway user — THE identity (DB scoping, AAD, notifier keys).</summary>
 	protected int UserId => userId;
@@ -53,7 +53,15 @@ public abstract class LocalStoreBase(
 	public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 	{
 		return Task.FromResult<IReadOnlyList<BackendFolder>>(
-			[new BackendFolder(FolderBackendKey, FolderDisplayName, null, FolderType, EasClass)]);
+		[
+			new BackendFolder
+			{
+				BackendKey = FolderBackendKey,
+				DisplayName = FolderDisplayName,
+				Type = FolderType,
+				EasClass = EasClass
+			}
+		]);
 	}
 
 	public async Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
@@ -62,8 +70,14 @@ public abstract class LocalStoreBase(
 		await using SyncDbContext db = dbFactory.CreateDbContext();
 		// AsNoTracking — a read-only revision listing must not populate the change tracker.
 		IQueryable<LocalItem> query = Rows(db).AsNoTracking();
-		if (filter.SinceUtc is { } since)
-			query = query.Where(i => i.ItemDateUtc == null || i.ItemDateUtc >= since);
+		// Hoisted out of the predicate: the stored column is a UTC DateTime, and a member access
+		// on the captured offset inside the expression tree is one more thing for the provider
+		// to have to evaluate.
+		if (filter.Since is { } since)
+		{
+			DateTime sinceUtc = since.UtcDateTime;
+			query = query.Where(i => i.ItemDateUtc == null || i.ItemDateUtc >= sinceUtc);
+		}
 		var rows = await query.Select(i => new { i.Id, i.Version }).ToListAsync(ct).ConfigureAwait(false);
 		return rows.ToDictionary(r => r.Id.ToString(), r => r.Version.ToString(), StringComparer.Ordinal);
 	}
@@ -77,7 +91,7 @@ public abstract class LocalStoreBase(
 			return null;
 		string content = protector.Unprotect(row.Content, userId, Collection);
 		IReadOnlyList<XElement>? elements = ToApplicationData(content, bodyPreference);
-		return elements is null ? null : new BackendItem(elements);
+		return elements is null ? null : new BackendItem { ApplicationData = elements };
 	}
 
 	public async Task<(string ItemKey, string Revision)> CreateItemAsync(

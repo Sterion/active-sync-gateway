@@ -21,7 +21,7 @@ public sealed class JmapContactStoreTests
 	{
 		JmapClient client = new(
 			new Uri(TestBackend.JmapGroupwareUrl),
-			new BackendCredentials(TestBackend.JmapGroupwareUser, TestBackend.JmapGroupwarePassword),
+			new BackendCredentials { UserName = TestBackend.JmapGroupwareUser, Password = TestBackend.JmapGroupwarePassword },
 			allowInvalidCertificates: true);
 		return new JmapContactStore(client, 5);
 	}

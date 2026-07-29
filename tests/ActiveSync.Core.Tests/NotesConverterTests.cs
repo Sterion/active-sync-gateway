@@ -34,7 +34,7 @@ public class NotesConverterTests
 		Assert.Contains("VJOURNAL", ics);
 		Assert.Equal(uid, NotesConverter.ExtractUid(ics));
 
-		List<XElement>? data = NotesConverter.ToApplicationData(ics, new BodyPreference(1, null, false));
+		List<XElement>? data = NotesConverter.ToApplicationData(ics, new BodyPreference { Type = BodyType.PlainText });
 		Assert.NotNull(data);
 		Assert.Equal("Shopping list", data.Single(e => e.Name == Notes + "Subject").Value);
 		Assert.Equal("IPM.StickyNote", data.Single(e => e.Name == Notes + "MessageClass").Value);
@@ -54,7 +54,7 @@ public class NotesConverterTests
 		string updated = NotesConverter.FromApplicationData(AppData("v2", "second"), uid, original);
 
 		Assert.Equal(uid, NotesConverter.ExtractUid(updated));
-		List<XElement>? data = NotesConverter.ToApplicationData(updated, new BodyPreference(1, null, false))!;
+		List<XElement>? data = NotesConverter.ToApplicationData(updated, new BodyPreference { Type = BodyType.PlainText })!;
 		Assert.Equal("v2", data.Single(e => e.Name == Notes + "Subject").Value);
 		Assert.Equal("second",
 			data.Single(e => e.Name == AirSyncBase + "Body").Element(AirSyncBase + "Data")?.Value);
@@ -66,7 +66,7 @@ public class NotesConverterTests
 		string body = new('x', 100);
 		string ics = NotesConverter.FromApplicationData(AppData("long", body), "uid-1", null);
 
-		List<XElement>? data = NotesConverter.ToApplicationData(ics, new BodyPreference(1, 10, false))!;
+		List<XElement>? data = NotesConverter.ToApplicationData(ics, new BodyPreference { Type = BodyType.PlainText, TruncationSize = 10 })!;
 		XElement bodyElement = data.Single(e => e.Name == AirSyncBase + "Body");
 		Assert.Equal(10, bodyElement.Element(AirSyncBase + "Data")?.Value?.Length);
 		Assert.Equal("1", bodyElement.Element(AirSyncBase + "Truncated")?.Value);

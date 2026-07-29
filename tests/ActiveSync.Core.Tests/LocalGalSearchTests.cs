@@ -96,7 +96,7 @@ public sealed class LocalGalSearchTests : IDisposable
 		     $"PHOTO;ENCODING=b;TYPE=JPEG:{Convert.ToBase64String(PhotoBytes)}\r\nEND:VCARD\r\n");
 
 		IReadOnlyList<IReadOnlyList<XElement>> results =
-			await _store.SearchGalAsync("Photo", 25, new GalPhotoRequest(null, null), CancellationToken.None);
+			await _store.SearchGalAsync("Photo", 25, new GalPhotoRequest { MaxSizeBytes = null, MaxCount = null }, CancellationToken.None);
 
 		IReadOnlyList<XElement> entry = Assert.Single(results);
 		XElement picture = entry.First(x => x.Name == Gal + "Picture");

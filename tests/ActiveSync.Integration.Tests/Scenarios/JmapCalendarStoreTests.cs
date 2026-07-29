@@ -20,7 +20,7 @@ public sealed class JmapCalendarStoreTests
 	{
 		JmapClient client = new(
 			new Uri(TestBackend.JmapGroupwareUrl),
-			new BackendCredentials(TestBackend.JmapGroupwareUser, TestBackend.JmapGroupwarePassword),
+			new BackendCredentials { UserName = TestBackend.JmapGroupwareUser, Password = TestBackend.JmapGroupwarePassword },
 			allowInvalidCertificates: true);
 		return new JmapCalendarStore(client, "admin@example.com", 5);
 	}

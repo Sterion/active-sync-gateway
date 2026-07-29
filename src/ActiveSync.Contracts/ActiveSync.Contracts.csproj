@@ -3,8 +3,9 @@
 	<!--
 	  The plugin contract: the interfaces, records and small helpers an out-of-repo backend
 	  plugin builds against (IBackendProvider, IContentStore, IGatewayPlugin, BackendRole,
-	  ProviderSettings, BackendConfigField, ...). Deliberately tiny — it references only
-	  ActiveSync.Protocol (EAS constants) and the Microsoft.Extensions config/DI abstractions,
+	  ProviderSettings, BackendConfigField, ...). Deliberately tiny — it references NO other
+	  project (ActiveSync.Protocol is host-only; the EAS wire encodings it held are gone from
+	  this surface) and only the Microsoft.Extensions config/DI abstractions,
 	  NOT Crypto, EF Core or Core's host graph. A plugin references THIS one package alone —
 	  Core, Crypto and Backends.Common are host-only and are no longer published.
 	  Licensed MIT (see LICENSE-MIT) so third-party plugins, including commercial ones, can
@@ -38,10 +39,6 @@
 		<PackageId>ActiveSync.Contracts</PackageId>
 		<Description>ActiveSync Gateway — the backend plugin contract (IBackendProvider, IContentStore, IGatewayPlugin, roles, provider settings and config schema). The one package to reference when writing a gateway backend plugin.</Description>
 	</PropertyGroup>
-
-	<ItemGroup>
-		<ProjectReference Include="..\ActiveSync.Protocol\ActiveSync.Protocol.csproj" />
-	</ItemGroup>
 
 	<!-- Lets ContractVersionTests exercise the internal ResolveAssemblyVersion fallback
 	     directly (with a null input) — the real assembly always has a version in a normal build,

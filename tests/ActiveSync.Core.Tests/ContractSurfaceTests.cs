@@ -42,11 +42,13 @@ public sealed class ContractSurfaceTests
 	[Fact]
 	public void ContractVersion_IsTheExpectedSurfaceVersion()
 	{
-		// WbxmlCodePages.Pages/Tokens/Reverse became genuinely immutable
-		// (FrozenDictionary/AsReadOnly instead of a castable-back List/Dictionary), and
-		// WbxmlDecoder.MaxDocumentBytes / WireLog.MaxChars became `static readonly` instead of
-		// `const` so a plugin cannot inline a policy knob's build-time value.
-		Assert.Equal(new Version(1, 3), ContractVersion.Current);
+		// The typed-contract redesign's first step: the FolderType/BodyType/BusyKind enums
+		// replace the wire int/char primitives, every instant crossing the boundary is a
+		// DateTimeOffset, ContentFilter keeps only its Since value (the FilterType-to-window
+		// maps moved host-side, which was the last use of ActiveSync.Protocol inside
+		// Contracts), and every contract model is an init-only property record instead of a
+		// positional one.
+		Assert.Equal(new Version(1, 4), ContractVersion.Current);
 	}
 
 	// BackendItemNotFoundException derived straight from Exception, so the codebase-wide

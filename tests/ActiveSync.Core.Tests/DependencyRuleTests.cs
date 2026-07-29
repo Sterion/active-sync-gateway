@@ -143,6 +143,35 @@ public sealed class DependencyRuleTests
 		Assert.Contains("ActiveSync.Core.csproj", csproj);
 	}
 
+	// ActiveSync.Contracts now references NO other project: the EAS wire encodings that made it
+	// depend on ActiveSync.Protocol (the FilterType-to-date-window maps, which named EasClass
+	// constants) are host-side, so a plugin compiles against the contract alone. A compiled-assembly
+	// check cannot see this — the constants were inlined by the compiler, so Contracts.dll never
+	// carried a Protocol reference even while the ProjectReference existed — and the reference is
+	// exactly what would let a Protocol type back onto the published surface. Read the csproj, the
+	// way the Server/Core reference check above does.
+	[Fact]
+	public void Contracts_HasNoProjectReferences()
+	{
+		string csproj = File.ReadAllText(
+			Path.Combine(FindRepoRoot(), "src", "ActiveSync.Contracts", "ActiveSync.Contracts.csproj"));
+
+		Assert.DoesNotContain("<ProjectReference", csproj);
+	}
+
+	// The other half of the severance: Backends.Common is Protocol's heaviest consumer (the EAS
+	// namespaces, the compact date format, the wire-log payload cap) and used to pick it up
+	// transitively through Contracts. With that gone it must name Protocol itself, or it stops
+	// compiling for a reason nothing in its own project file explains.
+	[Fact]
+	public void BackendsCommon_HasExplicitProjectReferenceToProtocol()
+	{
+		string csproj = File.ReadAllText(Path.Combine(
+			FindRepoRoot(), "src", "ActiveSync.Backends.Common", "ActiveSync.Backends.Common.csproj"));
+
+		Assert.Contains("ActiveSync.Protocol.csproj", csproj);
+	}
+
 	// S2 / K11: SecretValue (Crypto) and LocalContentProtector (Core/Security) each hand-roll the
 	// identical AES-256-GCM nonce‖ct‖tag framing independently — same NonceSize/TagSize,
 	// RandomNumberGenerator.Fill + `using AesGcm aes = new(key, TagSize)` + base64+prefix

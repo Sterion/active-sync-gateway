@@ -411,7 +411,7 @@ public class ContactConverterTests
 			"BEGIN:VCARD\r\nVERSION:3.0\r\nUID:c-note\r\nN:Person;Test;;;\r\nFN:Test Person\r\n" +
 			$"NOTE:{longNote}\r\nEND:VCARD\r\n";
 
-		List<XElement>? data = ContactConverter.ToApplicationData(vcard, new BodyPreference(1, 256, false));
+		List<XElement>? data = ContactConverter.ToApplicationData(vcard, new BodyPreference { Type = BodyType.PlainText, TruncationSize = 256 });
 
 		Assert.NotNull(data);
 		XElement body = data!.Single(e => e.Name == AirSyncBase + "Body");

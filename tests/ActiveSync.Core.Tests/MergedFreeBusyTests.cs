@@ -28,7 +28,7 @@ public sealed class MergedFreeBusyTests
 	public void BusyPeriod_MarksAllOverlappingIntervals()
 	{
 		// 12:45–13:20 busy in a 12:00–14:00 window: overlaps intervals 1 and 2 of 0..3.
-		BusyPeriod busy = new(Start.AddMinutes(45), Start.AddMinutes(80), '2');
+		BusyPeriod busy = new() { Start = Start.AddMinutes(45), End = Start.AddMinutes(80), Kind = BusyKind.Busy };
 		Assert.Equal("0220", MergedFreeBusy.Build(Start, Start.AddHours(2), [busy]));
 	}
 
@@ -36,15 +36,15 @@ public sealed class MergedFreeBusyTests
 	public void ShortPeriodInsideOneInterval_MarksThatInterval()
 	{
 		// Spec example: 5 busy minutes inside an interval mark the whole interval.
-		BusyPeriod busy = new(Start.AddMinutes(10), Start.AddMinutes(15), '2');
+		BusyPeriod busy = new() { Start = Start.AddMinutes(10), End = Start.AddMinutes(15), Kind = BusyKind.Busy };
 		Assert.Equal("20", MergedFreeBusy.Build(Start, Start.AddHours(1), [busy]));
 	}
 
 	[Fact]
 	public void HigherDigit_WinsOnOverlap()
 	{
-		BusyPeriod tentative = new(Start, Start.AddHours(1), '1');
-		BusyPeriod oof = new(Start.AddMinutes(30), Start.AddMinutes(60), '3');
+		BusyPeriod tentative = new() { Start = Start, End = Start.AddHours(1), Kind = BusyKind.Tentative };
+		BusyPeriod oof = new() { Start = Start.AddMinutes(30), End = Start.AddMinutes(60), Kind = BusyKind.OutOfOffice };
 		Assert.Equal("13", MergedFreeBusy.Build(Start, Start.AddHours(1), [tentative, oof]));
 	}
 
@@ -59,9 +59,9 @@ public sealed class MergedFreeBusyTests
 		                   "END:VFREEBUSY\r\nEND:VCALENDAR\r\n";
 		IReadOnlyList<BusyPeriod> periods = CalendarConverter.ParseFreeBusy(ics);
 		BusyPeriod period = Assert.Single(periods);
-		Assert.Equal('2', period.Kind);
-		Assert.Equal(new DateTime(2026, 7, 28, 14, 0, 0, DateTimeKind.Utc), period.StartUtc);
-		Assert.Equal(new DateTime(2026, 7, 28, 15, 30, 0, DateTimeKind.Utc), period.EndUtc);
+		Assert.Equal(BusyKind.Busy, period.Kind);
+		Assert.Equal(new DateTimeOffset(2026, 7, 28, 14, 0, 0, TimeSpan.Zero), period.Start);
+		Assert.Equal(new DateTimeOffset(2026, 7, 28, 15, 30, 0, TimeSpan.Zero), period.End);
 	}
 
 	/// <summary>
@@ -69,7 +69,7 @@ public sealed class MergedFreeBusyTests
 	///   (`parameters.Contains("BUSY-TENTATIVE", ...)`), so an unrelated parameter whose value
 	///   merely CONTAINS that text anywhere before the colon is misclassified, even though it is
 	///   not the FBTYPE parameter at all. Here an X- parameter happens to embed the substring, and
-	///   no real FBTYPE is present — the period must default to BUSY ('2'), not TENTATIVE ('1').
+	///   no real FBTYPE is present — the period must default to BUSY, not TENTATIVE.
 	/// </summary>
 	[Fact]
 	public void ParseFreeBusy_DoesNotMisreadAnUnrelatedParameterContainingFbtypeText()
@@ -81,40 +81,41 @@ public sealed class MergedFreeBusyTests
 		                   "END:VFREEBUSY\r\nEND:VCALENDAR\r\n";
 		IReadOnlyList<BusyPeriod> periods = CalendarConverter.ParseFreeBusy(ics);
 		BusyPeriod period = Assert.Single(periods);
-		Assert.Equal('2', period.Kind); // no real FBTYPE parameter present -> defaults to BUSY
+		Assert.Equal(BusyKind.Busy, period.Kind); // no real FBTYPE parameter present -> defaults to BUSY
 	}
 
 	[Fact]
 	public void PeriodsOutsideTheWindow_AreIgnored()
 	{
-		BusyPeriod before = new(Start.AddHours(-2), Start.AddHours(-1), '2');
-		BusyPeriod after = new(Start.AddHours(3), Start.AddHours(4), '2');
+		BusyPeriod before = new() { Start = Start.AddHours(-2), End = Start.AddHours(-1), Kind = BusyKind.Busy };
+		BusyPeriod after = new() { Start = Start.AddHours(3), End = Start.AddHours(4), Kind = BusyKind.Busy };
 		Assert.Equal("00", MergedFreeBusy.Build(Start, Start.AddHours(1), [before, after]));
 	}
 
-	// "no data" ('4') must NOT outrank a known "busy" ('2'). Char precedence made '4'
-	// (the highest ASCII digit) win, so a definitely-busy interval was reported as unknown and
-	// the meeting picker would suggest it as free-to-book.
+	// Precedence ladder over the kinds a STORE can report: OOF > busy > tentative > free.
+	// (The spec's "no data" digit '4' sits between free and tentative in MergedFreeBusy's own
+	// rank table, but no BusyPeriod can carry it — "no data" is IFreeBusySource returning null,
+	// which the handler answers with Availability status 163 instead of a digit string.)
 	[Fact]
-	public void NoData_DoesNotOutrankBusy()
+	public void Precedence_IsFreeThenTentativeThenBusyThenOof()
 	{
-		BusyPeriod busy = new(Start, Start.AddMinutes(30), '2');
-		BusyPeriod noData = new(Start, Start.AddMinutes(30), '4');
-		Assert.Equal("2", MergedFreeBusy.Build(Start, Start.AddMinutes(30), [busy, noData]));
-	}
-
-	// Full precedence ladder: OOF('3') > busy('2') > tentative('1') > no-data('4') > free('0').
-	[Fact]
-	public void Precedence_IsFreeThenNoDataThenTentativeThenBusyThenOof()
-	{
-		// A no-data period must still win over free (report unknown, not free) …
-		Assert.Equal("4", MergedFreeBusy.Build(Start, Start.AddMinutes(30),
-			[new BusyPeriod(Start, Start.AddMinutes(30), '4')]));
-		// … but lose to every known state.
+		Assert.Equal("0", MergedFreeBusy.Build(Start, Start.AddMinutes(30),
+			[new BusyPeriod { Start = Start, End = Start.AddMinutes(30), Kind = BusyKind.Free }]));
 		Assert.Equal("1", MergedFreeBusy.Build(Start, Start.AddMinutes(30),
-			[new BusyPeriod(Start, Start.AddMinutes(30), '4'), new BusyPeriod(Start, Start.AddMinutes(30), '1')]));
+		[
+			new BusyPeriod { Start = Start, End = Start.AddMinutes(30), Kind = BusyKind.Free },
+			new BusyPeriod { Start = Start, End = Start.AddMinutes(30), Kind = BusyKind.Tentative }
+		]));
+		Assert.Equal("2", MergedFreeBusy.Build(Start, Start.AddMinutes(30),
+		[
+			new BusyPeriod { Start = Start, End = Start.AddMinutes(30), Kind = BusyKind.Tentative },
+			new BusyPeriod { Start = Start, End = Start.AddMinutes(30), Kind = BusyKind.Busy }
+		]));
 		Assert.Equal("3", MergedFreeBusy.Build(Start, Start.AddMinutes(30),
-			[new BusyPeriod(Start, Start.AddMinutes(30), '2'), new BusyPeriod(Start, Start.AddMinutes(30), '3')]));
+		[
+			new BusyPeriod { Start = Start, End = Start.AddMinutes(30), Kind = BusyKind.Busy },
+			new BusyPeriod { Start = Start, End = Start.AddMinutes(30), Kind = BusyKind.OutOfOffice }
+		]));
 	}
 
 	// An inverted window (end < start) previously clamped to a single all-free digit,
@@ -126,13 +127,13 @@ public sealed class MergedFreeBusyTests
 			MergedFreeBusy.Build(Start, Start.AddHours(-1), []));
 	}
 
-	// A period whose Kind is outside '0'..'4' (a buggy provider returning '\0' or 'B')
-	// must not be copied verbatim into the digit string, which then rides into WBXML.
+	// A Kind outside the enum (a plugin casting a raw integer onto BusyKind) has no digit and
+	// must be dropped rather than emitting something that rides into WBXML.
 	[Fact]
-	public void MalformedKind_IsNotEmitted()
+	public void KindOutsideTheEnum_IsNotEmitted()
 	{
 		string result = MergedFreeBusy.Build(Start, Start.AddMinutes(30),
-			[new BusyPeriod(Start, Start.AddMinutes(30), 'B')]);
+			[new BusyPeriod { Start = Start, End = Start.AddMinutes(30), Kind = (BusyKind)99 }]);
 		Assert.Equal("0", result);
 	}
 }

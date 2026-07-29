@@ -74,7 +74,14 @@ public sealed class CompositeBackendSession : IBackendSession
 				foreach (ResolvedRole role in assigned)
 					registry.GetFor(group.Key, role.Role); // validates every assigned role
 				IBackendConnection connection = await provider.CreateConnectionAsync(
-					new BackendConnectionContext(gatewayCredentials, userId, mailAddress, assigned, sharedCollections), ct)
+					new BackendConnectionContext
+					{
+						GatewayCredentials = gatewayCredentials,
+						GatewayUserId = userId,
+						MailAddress = mailAddress,
+						Roles = assigned,
+						SharedCollections = sharedCollections
+					}, ct)
 					.ConfigureAwait(false);
 				session._connections.Add(connection);
 				session._stores.AddRange(connection.Stores);

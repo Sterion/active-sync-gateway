@@ -37,6 +37,6 @@ public sealed class CalDavBackendProviderTests
 	{
 		ProviderSettings settings = ProviderSettings.FromFlat(
 			new Dictionary<string, string?> { ["BaseUrl"] = "https://dav.example.com/" });
-		return new ResolvedRole(role, "caldav", settings, new BackendCredentials(user, "pw"));
+		return new ResolvedRole { Role = role, ProviderName = "caldav", Settings = settings, Credentials = new BackendCredentials { UserName = user, Password = "pw" } };
 	}
 }

@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Backend;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Sync;
@@ -68,10 +69,13 @@ public sealed partial class SyncHandler
 			return new CollectionResult(initial, true, null);
 		}
 
-		BodyPreference bodyPreference = new(
-			collectionOptions.BodyType, collectionOptions.TruncationSize, false,
-			context.Version >= EasVersion.V160);
-		ContentFilter filter = ContentFilter.ForClass(store.EasClass, collectionOptions.FilterType);
+		BodyPreference bodyPreference = new()
+		{
+			Type = EasBodyTypes.FromWire(collectionOptions.BodyType),
+			TruncationSize = collectionOptions.TruncationSize,
+			Eas16 = context.Version >= EasVersion.V160
+		};
+		ContentFilter filter = ContentFilters.ForClass(store.EasClass, collectionOptions.FilterType);
 		int windowSize = int.TryParse(collectionElement.Element(AS + "WindowSize")?.Value, out int cw)
 			? cw
 			: globalWindow;
@@ -188,7 +192,7 @@ public sealed partial class SyncHandler
 			// for the unfiltered map — and only when a *filtered* collection actually produced
 			// deletes, so unfiltered classes (contacts/tasks/notes, FilterType 0) pay nothing.
 			HashSet<string> agedOut = new(StringComparer.Ordinal);
-			if (diff.Deletes.Count > 0 && filter.SinceUtc is not null)
+			if (diff.Deletes.Count > 0 && filter.Since is not null)
 				try
 				{
 					IReadOnlyDictionary<string, string> unfiltered =

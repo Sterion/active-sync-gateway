@@ -349,7 +349,7 @@ public sealed partial class SyncHandler
 				string serverId = command.Element(AS + "ServerId")?.Value ?? "";
 				string itemKey = await folders.ResolveItemKeyAsync(folder, store, serverId, ct)
 				                 ?? throw new BackendItemNotFoundException(serverId);
-				BodyPreference full = new(bodyPreference.Type, null, false, bodyPreference.Eas16);
+				BodyPreference full = bodyPreference with { TruncationSize = null, AllOrNone = false };
 				BackendItem item = await store.GetItemAsync(folder.BackendKey, itemKey, full, ct)
 				                   ?? throw new BackendItemNotFoundException(serverId);
 				return new XElement(AS + "Fetch",

@@ -30,7 +30,7 @@ public sealed partial class JmapMailStore
 			return null;
 		using MemoryStream output = new();
 		await part.Content.DecodeToAsync(output, ct).ConfigureAwait(false);
-		return new BackendAttachment(part.ContentType.MimeType, output.ToArray());
+		return new BackendAttachment { ContentType = part.ContentType.MimeType, Content = output.ToArray() };
 	}
 
 	public static string MakeFileReference(string folderBackendKey, string itemKey, int attachmentIndex)

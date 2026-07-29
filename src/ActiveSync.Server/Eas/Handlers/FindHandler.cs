@@ -108,7 +108,10 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 
 		// Fetch the page's bodies in ONE batched call per folder rather than a sequential
 		// GetItemAsync per hit.
-		BodyPreference bodyPreference = new(1, 1024, false, true);
+		BodyPreference bodyPreference = new()
+		{
+			Type = BodyType.PlainText, TruncationSize = 1024, Eas16 = true
+		};
 		List<(string FolderKey, string ItemKey)> page = hits.Skip(start).Take(pageSize).ToList();
 		Dictionary<(string, string), BackendItem?> fetched = new();
 		foreach (IGrouping<string, (string FolderKey, string ItemKey)> group in page.GroupBy(h => h.FolderKey))
@@ -173,9 +176,15 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 	{
 		GalPhotoRequest? photos = null;
 		if (criterion.Element(F + "Options")?.Element(F + "Picture") is XElement picture)
-			photos = new GalPhotoRequest(
-				int.TryParse(picture.Element(F + "MaxSize")?.Value, out int maxSize) ? maxSize : null,
-				int.TryParse(picture.Element(F + "MaxPictures")?.Value, out int maxCount) ? maxCount : null);
+			photos = new GalPhotoRequest
+			{
+				MaxSizeBytes = int.TryParse(picture.Element(F + "MaxSize")?.Value, out int maxSize)
+					? maxSize
+					: null,
+				MaxCount = int.TryParse(picture.Element(F + "MaxPictures")?.Value, out int maxCount)
+					? maxCount
+					: null
+			};
 
 		IContactOperations? contacts = context.Session.Contacts;
 		IReadOnlyList<IReadOnlyList<XElement>> hits = contacts is null

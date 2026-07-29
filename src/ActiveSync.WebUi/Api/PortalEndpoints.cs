@@ -144,7 +144,8 @@ internal static class PortalEndpoints
 			bool verified;
 			try
 			{
-				verified = await sessionFactory.AuthenticateAsync(new BackendCredentials(login, request.Current), ct);
+				verified = await sessionFactory.AuthenticateAsync(
+					new BackendCredentials { UserName = login, Password = request.Current }, ct);
 			}
 			catch (BackendException)
 			{

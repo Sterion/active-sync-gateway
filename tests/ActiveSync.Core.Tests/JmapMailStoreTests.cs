@@ -234,7 +234,7 @@ public sealed class JmapMailStoreTests
 		JmapMailStore store = new(client, "u@example.test", pollSeconds: 1);
 
 		IReadOnlyDictionary<string, string> map = await store.GetItemRevisionsAsync(
-			JmapMailStore.ToKey("INBOXID"), new ContentFilter(null), CancellationToken.None);
+			JmapMailStore.ToKey("INBOXID"), ContentFilter.All, CancellationToken.None);
 
 		Assert.True(map.ContainsKey("C"),
 			"an item that shifted position under a concurrent delete must not be dropped from the revision map");
@@ -254,7 +254,7 @@ public sealed class JmapMailStoreTests
 		using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
 
 		IReadOnlyDictionary<string, string> map = await store.GetItemRevisionsAsync(
-			JmapMailStore.ToKey("INBOXID"), new ContentFilter(null), cts.Token);
+			JmapMailStore.ToKey("INBOXID"), ContentFilter.All, cts.Token);
 
 		Assert.True(stub.Calls < 100, $"the loop must terminate on its own; it made {stub.Calls} requests");
 		Assert.NotEmpty(map);

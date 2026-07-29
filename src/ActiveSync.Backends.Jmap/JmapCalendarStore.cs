@@ -61,12 +61,13 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		{
 			string id = cal.GetProperty("id").GetString()!;
 			bool isDefault = cal.TryGetProperty("isDefault", out JsonElement d) && d.ValueKind == JsonValueKind.True;
-			result.Add(new BackendFolder(
-				KeyPrefix + id,
-				cal.TryGetProperty("name", out JsonElement n) ? n.GetString() ?? id : id,
-				null,
-				isDefault ? EasFolderType.Calendar : EasFolderType.UserCalendar,
-				Protocol.EasClass.Calendar));
+			result.Add(new BackendFolder
+			{
+				BackendKey = KeyPrefix + id,
+				DisplayName = cal.TryGetProperty("name", out JsonElement n) ? n.GetString() ?? id : id,
+				Type = isDefault ? FolderType.Calendar : FolderType.UserCalendar,
+				EasClass = Protocol.EasClass.Calendar
+			});
 		}
 
 		return result;
@@ -95,7 +96,7 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 		// mailAddress is the acting user's mail address, so MeetingStatus can tell
 		// "I am the organizer" apart from "I am an invitee".
 		List<XElement>? data = CalendarConverter.ToApplicationData(ics, bodyPreference, mailAddress);
-		return data is null ? null : new BackendItem(data);
+		return data is null ? null : new BackendItem { ApplicationData = data };
 	}
 
 	public async Task<(string ItemKey, string Revision)> CreateItemAsync(
@@ -456,7 +457,7 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 	/// </summary>
 	private static bool WithinFilter(JsonElement jsEvent, ContentFilter filter)
 	{
-		if (filter.SinceUtc is not { } since)
+		if (filter.Since is not { } since)
 			return true;
 		if (jsEvent.TryGetProperty("recurrenceRules", out _) ||
 		    jsEvent.TryGetProperty("recurrenceRule", out _) ||
@@ -471,7 +472,7 @@ public sealed class JmapCalendarStore(JmapClient client, string? mailAddress, in
 			catch (FormatException) { /* malformed duration — treat as instantaneous */ }
 		// start is a local/floating wall time and `since` is UTC; the ≤ tz-offset slop is
 		// acceptable for a coarse day-granularity window (CalDAV's time-range is no finer).
-		return start + duration >= since;
+		return start + duration >= since.UtcDateTime;
 	}
 
 	private static bool InCalendar(JsonElement jsEvent, string calId)

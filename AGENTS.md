@@ -66,7 +66,10 @@ as `ActiveSync.Backends.Sieve` with the AUTHENTICATE line always masked.
 `IFreeBusySource.GetBusyPeriodsAsync` — null means "no data for that target" (per-recipient
 Availability Status 163), an EMPTY list means "completely free"; keep that distinction.
 `MergedFreeBusy.Build` (Core) turns busy periods into the spec digit string (30-minute
-intervals, overlap marks, higher digit wins). CalDAV free/busy is a hand-parsed
+intervals, overlap marks, higher digit wins) — a store reports a typed `BusyKind`, and the
+digit mapping ('0' free … '3' OOF) lives ONLY there, which is why `BusyKind` pins no values
+and carries no "no data" member (that state is the null return above, not a digit). CalDAV
+free/busy is a hand-parsed
 free-busy-query — **Ical.Net 5.x cannot deserialize the FREEBUSY property** (comes back
 null), so `CalendarConverter.ParseFreeBusy` parses the unfolded lines itself; don't
 "simplify" it back to Ical.Net without checking that bug is fixed. A free/busy failure
@@ -118,7 +121,10 @@ src/ActiveSync.Contracts/   The PLUGIN CONTRACT: the interfaces/records a backen
                             & the capability interfaces, IGatewayPlugin, BackendRole,
                             ProviderSettings, BackendConfigField, SharedCollection, the Backend
                             Models records, DelimitedKey). Namespace ActiveSync.Contracts.
-                            Depends only on Protocol + Microsoft.Extensions config/DI abstractions
+                            Depends on NO other project (Protocol included — the EAS wire encodings
+                            that needed it, the FilterType→date-window maps, are host-side in
+                            Core/Backend/ContentFilters; DependencyRuleTests pins the csproj clean),
+                            only Microsoft.Extensions config/DI abstractions
                             — NOT Crypto, EF Core or Core. THE one package an out-of-repo plugin
                             references. Host-only types stay in Core: BackendProviderRegistry, and
                             the composite session + its cache (IBackendSession / CompositeBackendSession,
@@ -138,10 +144,12 @@ src/ActiveSync.Core/        Provider engine (BackendProviderRegistry, CompositeB
 src/ActiveSync.Backends.Common/  Shared building blocks: MIME/iCal/vCard ⇄ EAS converters
                             + TLS/wire-logging helpers + the shared backend-options bases
                             (NetworkBackendOptions = the TLS knobs; MailConnectionOptions =
-                            Host/Port/UseSsl/Security). Depends on Contracts ONLY (+ MailKit,
-                            Ical.Net, FolkerKinzel.VCards) so those deps stay OUT of Core — the
-                            absence of a Core reference is test-enforced
-                            (DependencyRuleTests.BackendsCommon_DoesNotReferenceCore).
+                            Host/Port/UseSsl/Security). Depends on Contracts + Protocol (an EXPLICIT
+                            reference since Contracts severed its own; this is Protocol's heaviest
+                            consumer) and NOT Core (+ MailKit, Ical.Net, FolkerKinzel.VCards) so
+                            those deps stay OUT of Core — both halves are test-enforced
+                            (DependencyRuleTests.BackendsCommon_DoesNotReferenceCore /
+                            BackendsCommon_HasExplicitProjectReferenceToProtocol).
                             OPTIONS CONVENTION: a provider's own options class lives in ITS
                             assembly (e.g. ImapOptions, JmapOptions), deriving from the Common
                             bases and adding only its specifics; bound via ProviderSettings.
@@ -190,7 +198,9 @@ tests/ActiveSync.WebUi.Tests/      web UI unit tests (key repository, OIDC decis
 tests/ActiveSync.Integration.Tests/  real-backend E2E tests (see "Integration tests" below)
 ```
 
-Keep the dependency direction strict: `Protocol ← Contracts ← Core ← Backends ← Server`. Converters
+Keep the dependency direction strict: `{Protocol, Contracts} ← Core ← Backends ← Server` — Protocol
+and Contracts are two INDEPENDENT roots (neither references the other; a plugin takes Contracts
+alone), and everything above depends on both. Converters
 live in Backends (they need MimeKit/Ical.Net/FolkerKinzel), never in Protocol.
 
 ## Licensing (read before moving code between assemblies)

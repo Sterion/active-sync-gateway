@@ -35,7 +35,7 @@ public static class HttpBasicAuth
 			int backslash = user.LastIndexOf('\\');
 			if (backslash >= 0)
 				user = user[(backslash + 1)..];
-			return new BackendCredentials(user, password);
+			return new BackendCredentials { UserName = user, Password = password };
 		}
 		catch (FormatException)
 		{

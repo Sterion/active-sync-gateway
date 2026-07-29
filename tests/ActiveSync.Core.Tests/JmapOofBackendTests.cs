@@ -28,7 +28,11 @@ public class JmapOofBackendTests
 		JmapOofBackend backend = new(new JmapClient(new Uri("http://localhost:5232"), new HttpClient(capture)));
 
 		string? token = await backend.EnableAsync(
-			new OofReply("Away until Monday", false, new DateTime(2026, 7, 18, 0, 0, 0, DateTimeKind.Utc), null),
+			new OofReply
+			{
+				BodyText = "Away until Monday",
+				Start = new DateTimeOffset(2026, 7, 18, 0, 0, 0, TimeSpan.Zero)
+			},
 			CancellationToken.None);
 
 		Assert.Equal("", token);
@@ -45,7 +49,7 @@ public class JmapOofBackendTests
 		CaptureHandler capture = new();
 		JmapOofBackend backend = new(new JmapClient(new Uri("http://localhost:5232"), new HttpClient(capture)));
 
-		await backend.EnableAsync(new OofReply("<p>Away</p>", true, null, null), CancellationToken.None);
+		await backend.EnableAsync(new OofReply { BodyText = "<p>Away</p>", BodyIsHtml = true }, CancellationToken.None);
 
 		JsonElement patch = capture.LastSetPatch();
 		Assert.Equal("<p>Away</p>", patch.GetProperty("htmlBody").GetString());

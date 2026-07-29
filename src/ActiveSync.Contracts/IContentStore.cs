@@ -167,8 +167,18 @@ public interface ICalendarAttachmentSource
 		string folderBackendKey, string itemKey, int index, CancellationToken ct);
 }
 
-/// <summary>A busy period with its MergedFreeBusy digit ('1' tentative, '2' busy, '3' OOF).</summary>
-public sealed record BusyPeriod(DateTime StartUtc, DateTime EndUtc, char Kind);
+/// <summary>One period a target is not free, and how it counts against availability.</summary>
+public sealed record BusyPeriod
+{
+	/// <summary>When the period starts.</summary>
+	public required DateTimeOffset Start { get; init; }
+
+	/// <summary>When the period ends.</summary>
+	public required DateTimeOffset End { get; init; }
+
+	/// <summary>How the period counts against availability (tentative, busy, out-of-office).</summary>
+	public required BusyKind Kind { get; init; }
+}
 
 /// <summary>
 ///   Implemented by calendar stores that can answer free/busy queries for the
@@ -184,12 +194,12 @@ public interface IFreeBusySource
 	///   target must never fail the whole ResolveRecipients response.
 	/// </summary>
 	/// <param name="targetAddress">The recipient's address to query.</param>
-	/// <param name="startUtc">Start of the queried range, in UTC.</param>
-	/// <param name="endUtc">End of the queried range, in UTC.</param>
+	/// <param name="start">Start of the queried range.</param>
+	/// <param name="end">End of the queried range.</param>
 	/// <param name="ct">Cancellation token for the backend round-trip.</param>
 	/// <returns>The recipient's busy periods, an empty list if free, or <c>null</c> if no data is available.</returns>
 	Task<IReadOnlyList<BusyPeriod>?> GetBusyPeriodsAsync(
-		string targetAddress, DateTime startUtc, DateTime endUtc, CancellationToken ct);
+		string targetAddress, DateTimeOffset start, DateTimeOffset end, CancellationToken ct);
 }
 
 /// <summary>

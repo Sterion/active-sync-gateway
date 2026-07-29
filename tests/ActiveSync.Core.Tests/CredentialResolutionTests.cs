@@ -88,7 +88,7 @@ public sealed class CredentialResolutionTests : IDisposable
 		if (declaration is not null)
 			await _store.UpsertAsync(GatewayLogin, declaration, CancellationToken.None);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
-		return resolver.Resolve(new BackendCredentials(GatewayLogin, Presented));
+		return resolver.Resolve(new BackendCredentials { UserName = GatewayLogin, Password = Presented });
 	}
 
 	// ---- the fallbacks (proven first) ----
@@ -233,7 +233,7 @@ public sealed class CredentialResolutionTests : IDisposable
 
 		UserResolver resolver = Resolver(options);
 		await resolver.EnsureFreshAsync(true, CancellationToken.None);
-		ResolvedUser resolved = resolver.Resolve(new BackendCredentials(GatewayLogin, Presented));
+		ResolvedUser resolved = resolver.Resolve(new BackendCredentials { UserName = GatewayLogin, Password = Presented });
 
 		// MailStore: no role override anywhere → config default login + presented password.
 		Assert.Equal("config-backend-anna", resolved.Roles[BackendRole.MailStore].Credentials.UserName);
@@ -295,7 +295,7 @@ public sealed class CredentialResolutionTests : IDisposable
 		// is the open door the rule exists to close.
 		Assert.NotNull(resolver.VerifyLocally(GatewayLogin, Presented));
 		Assert.Throws<InvalidOperationException>(
-			() => resolver.Resolve(new BackendCredentials(GatewayLogin, Presented)));
+			() => resolver.Resolve(new BackendCredentials { UserName = GatewayLogin, Password = Presented }));
 	}
 
 	[Fact]
@@ -313,7 +313,7 @@ public sealed class CredentialResolutionTests : IDisposable
 		Assert.True(resolver.VerifyLocally(GatewayLogin, PhonePassword));
 		Assert.False(resolver.VerifyLocally(GatewayLogin, "backend-secret"));
 		// ...and it is still the secret the backend gets.
-		ResolvedUser resolved = resolver.Resolve(new BackendCredentials(GatewayLogin, PhonePassword));
+		ResolvedUser resolved = resolver.Resolve(new BackendCredentials { UserName = GatewayLogin, Password = PhonePassword });
 		Assert.Equal("backend-secret", resolved.Roles[BackendRole.MailStore].Credentials.Password);
 	}
 

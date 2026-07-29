@@ -103,12 +103,13 @@ public sealed class CalDavTaskStore(
 			    !string.Equals(segment, taskFolderName, StringComparison.OrdinalIgnoreCase))
 				continue;
 
-			folders.Add(new BackendFolder(
-				ToBackendKey(resource.Href),
-				string.IsNullOrWhiteSpace(name) ? taskFolderName : name!,
-				null,
-				folders.Count == 0 ? EasFolderType.Tasks : EasFolderType.UserTasks,
-				Protocol.EasClass.Tasks));
+			folders.Add(new BackendFolder
+			{
+				BackendKey = ToBackendKey(resource.Href),
+				DisplayName = string.IsNullOrWhiteSpace(name) ? taskFolderName : name!,
+				Type = folders.Count == 0 ? FolderType.Tasks : FolderType.UserTasks,
+				EasClass = Protocol.EasClass.Tasks
+			});
 		}
 
 		if (folders.Count == 0)

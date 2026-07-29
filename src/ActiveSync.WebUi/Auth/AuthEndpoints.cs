@@ -111,7 +111,7 @@ internal static class AuthEndpoints
 		try
 		{
 			authenticated = await sessionFactory.AuthenticateAsync(
-				new BackendCredentials(request.Username, request.Password), ct);
+				new BackendCredentials { UserName = request.Username, Password = request.Password }, ct);
 		}
 		catch (BackendException ex)
 		{

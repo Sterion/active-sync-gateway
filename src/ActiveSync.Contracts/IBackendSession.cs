@@ -27,7 +27,7 @@ public interface IMailStoreOperations
 
 	/// <summary>Server-side mailbox search; returns (folderBackendKey, itemKey) hits, newest first.</summary>
 	Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
-		string? folderBackendKey, string freeText, DateTime? sinceUtc, int maxResults, CancellationToken ct);
+		string? folderBackendKey, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct);
 
 	/// <summary>Empties a folder (ItemOperations EmptyFolderContents).</summary>
 	Task EmptyFolderAsync(string folderBackendKey, CancellationToken ct);
@@ -45,7 +45,14 @@ public interface IMailSubmitOperations
 ///   photos over <see cref="MaxSizeBytes" /> report status 174, photos beyond
 ///   <see cref="MaxCount" /> across the result set report status 175.
 /// </summary>
-public sealed record GalPhotoRequest(int? MaxSizeBytes, int? MaxCount);
+public sealed record GalPhotoRequest
+{
+	/// <summary>Largest photo the client accepts, in bytes; <c>null</c> means no size limit.</summary>
+	public int? MaxSizeBytes { get; init; }
+
+	/// <summary>How many photos the client accepts across the whole result set; <c>null</c> means no limit.</summary>
+	public int? MaxCount { get; init; }
+}
 
 /// <summary>Contact-specific operations (GAL search for ResolveRecipients / Search).</summary>
 public interface IContactOperations
@@ -63,7 +70,20 @@ public interface IContactOperations
 ///   The out-of-office auto-reply, one body for every audience; null Start/End means
 ///   "until disabled". Backends that cannot render HTML may send the body as-is.
 /// </summary>
-public sealed record OofReply(string BodyText, bool BodyIsHtml, DateTime? StartUtc, DateTime? EndUtc);
+public sealed record OofReply
+{
+	/// <summary>The reply body, sent to every audience.</summary>
+	public required string BodyText { get; init; }
+
+	/// <summary>Whether <see cref="BodyText" /> is HTML rather than plain text.</summary>
+	public bool BodyIsHtml { get; init; }
+
+	/// <summary>When the auto-reply starts; <c>null</c> means "immediately".</summary>
+	public DateTimeOffset? Start { get; init; }
+
+	/// <summary>When the auto-reply ends; <c>null</c> means "until disabled".</summary>
+	public DateTimeOffset? End { get; init; }
+}
 
 /// <summary>
 ///   Out-of-office backend (ManageSieve today). The state database is the source of truth

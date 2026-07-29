@@ -34,7 +34,7 @@ public class ImapMailBackendCorrectnessTests
 
 	private static (ImapSession Session, ImapMailBackend Backend) CreateBackend(string user)
 	{
-		ImapSession session = new(Options, new BackendCredentials(user, TestBackend.Password), NullLogger.Instance);
+		ImapSession session = new(Options, new BackendCredentials { UserName = user, Password = TestBackend.Password }, NullLogger.Instance);
 		ImapMailBackend backend = new(session, user, _ => null, NullLogger.Instance);
 		return (session, backend);
 	}
@@ -153,7 +153,7 @@ public class ImapMailBackendCorrectnessTests
 				ct);
 			Assert.NotNull(created.ItemKey);
 
-			Assert.Equal(EasFolderType.Drafts, nested.EasType);
+			Assert.Equal(FolderType.Drafts, nested.Type);
 		}
 		finally
 		{
@@ -317,7 +317,7 @@ public class ImapMailBackendCorrectnessTests
 		string user = TestBackend.User1;
 		CancellationToken ct = CancellationToken.None;
 		ConnectionCountingLogger wire = new();
-		BackendCredentials credentials = new(user, TestBackend.Password);
+		BackendCredentials credentials = new() { UserName = user, Password = TestBackend.Password };
 		ImapSession session = new(Options, credentials, NullLogger.Instance, wire);
 		ImapStatusPoller poller = new(Options, credentials, NullLogger.Instance, wire);
 		ImapMailBackend backend = new(session, user, _ => null, NullLogger.Instance, () => poller);

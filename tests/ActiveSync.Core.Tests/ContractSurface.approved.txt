@@ -7,36 +7,35 @@
 # The history below is APPEND-ONLY: each line pins the surface a contract version
 # shipped with. Editing an existing line defeats the guard that a surface change
 # must come with a version bump.
-# Current contract version: 1.3
+# Current contract version: 1.4
 
 === VERSION HISTORY (append-only) ===
 1.0  6985799512ffa341b07b1eb951c0bf0e4975c4c14a1541db6c341ac23f9abddd
 1.1  c8f8776e4f743228eb42a2e7da8fb2dd868c46c5edd60453aa4faae06965a07b
 1.2  18125a915c4d7c4edfddd9d6374913494903961359dc309d4788d9de415f1671
 1.3  2ded1138ca645958ae27b922b50e0fde9727e353b4e21b1879a2f56658ba2a9e
+1.4  be9ee060f4263f4a1605db4910094e3454282e7728b97707334956e798d598ed
 
 === SURFACE ===
 assembly ActiveSync.Contracts
   class ActiveSync.Contracts.BackendAttachment implements System.IEquatable<ActiveSync.Contracts.BackendAttachment>
-    ctor (System.String ContentType, System.Byte[] Content)
+    ctor ()
     method System.Boolean Equals(ActiveSync.Contracts.BackendAttachment other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.BackendAttachment left, ActiveSync.Contracts.BackendAttachment right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.BackendAttachment left, ActiveSync.Contracts.BackendAttachment right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.String& ContentType, System.Byte[]& Content)
     property System.Byte[] Content { get;set; }
     property System.String ContentType { get;set; }
   class ActiveSync.Contracts.BackendConfigField implements System.IEquatable<ActiveSync.Contracts.BackendConfigField>
-    ctor (System.String Name, System.String Label, ActiveSync.Contracts.BackendFieldType Type, System.Boolean Required, System.String Default, System.Collections.Generic.IReadOnlyList<System.String> EnumValues, System.String Help, System.Nullable<System.Int64> Min, System.Nullable<System.Int64> Max, System.Boolean SelfServiceEditable)
+    ctor ()
     method System.Boolean Equals(ActiveSync.Contracts.BackendConfigField other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.BackendConfigField left, ActiveSync.Contracts.BackendConfigField right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.BackendConfigField left, ActiveSync.Contracts.BackendConfigField right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.String& Name, System.String& Label, ActiveSync.Contracts.BackendFieldType& Type, System.Boolean& Required, System.String& Default, System.Collections.Generic.IReadOnlyList`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& EnumValues, System.String& Help, System.Nullable`1[[System.Int64, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& Min, System.Nullable`1[[System.Int64, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& Max, System.Boolean& SelfServiceEditable)
     property ActiveSync.Contracts.BackendFieldType Type { get;set; }
     property System.Boolean Required { get;set; }
     property System.Boolean SelfServiceEditable { get;set; }
@@ -54,28 +53,26 @@ assembly ActiveSync.Contracts
     property ActiveSync.Contracts.IOofBackend Oof { get; }
     property System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.IContentStore> Stores { get; }
   class ActiveSync.Contracts.BackendConnectionContext implements System.IEquatable<ActiveSync.Contracts.BackendConnectionContext>
-    ctor (ActiveSync.Contracts.BackendCredentials GatewayCredentials, System.Int32 GatewayUserId, System.String MailAddress, System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.ResolvedRole> Roles, System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.SharedCollection> SharedCollections)
+    ctor ()
     method System.Boolean Equals(ActiveSync.Contracts.BackendConnectionContext other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.BackendConnectionContext left, ActiveSync.Contracts.BackendConnectionContext right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.BackendConnectionContext left, ActiveSync.Contracts.BackendConnectionContext right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(ActiveSync.Contracts.BackendCredentials& GatewayCredentials, System.Int32& GatewayUserId, System.String& MailAddress, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Contracts.ResolvedRole, ActiveSync.Contracts, Version=1.3.0.0, Culture=neutral, PublicKeyToken=null]]& Roles, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Contracts.SharedCollection, ActiveSync.Contracts, Version=1.3.0.0, Culture=neutral, PublicKeyToken=null]]& SharedCollections)
     property ActiveSync.Contracts.BackendCredentials GatewayCredentials { get;set; }
     property System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.ResolvedRole> Roles { get;set; }
     property System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.SharedCollection> SharedCollections { get;set; }
     property System.Int32 GatewayUserId { get;set; }
     property System.String MailAddress { get;set; }
   class ActiveSync.Contracts.BackendCredentials implements System.IEquatable<ActiveSync.Contracts.BackendCredentials>
-    ctor (System.String UserName, System.String Password)
+    ctor ()
     method System.Boolean Equals(ActiveSync.Contracts.BackendCredentials other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.BackendCredentials left, ActiveSync.Contracts.BackendCredentials right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.BackendCredentials left, ActiveSync.Contracts.BackendCredentials right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.String& UserName, System.String& Password)
     property System.String Password { get;set; }
     property System.String UserName { get;set; }
   class ActiveSync.Contracts.BackendException : System.Exception implements System.Runtime.Serialization.ISerializable
@@ -90,28 +87,26 @@ assembly ActiveSync.Contracts
     field ActiveSync.Contracts.BackendFieldType StringList = 6
     field ActiveSync.Contracts.BackendFieldType Url = 5
   class ActiveSync.Contracts.BackendFolder implements System.IEquatable<ActiveSync.Contracts.BackendFolder>
-    ctor (System.String BackendKey, System.String DisplayName, System.String ParentBackendKey, System.Int32 EasType, System.String EasClass)
+    ctor ()
     method System.Boolean Equals(ActiveSync.Contracts.BackendFolder other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.BackendFolder left, ActiveSync.Contracts.BackendFolder right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.BackendFolder left, ActiveSync.Contracts.BackendFolder right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.String& BackendKey, System.String& DisplayName, System.String& ParentBackendKey, System.Int32& EasType, System.String& EasClass)
-    property System.Int32 EasType { get;set; }
+    property ActiveSync.Contracts.FolderType Type { get;set; }
     property System.String BackendKey { get;set; }
     property System.String DisplayName { get;set; }
     property System.String EasClass { get;set; }
     property System.String ParentBackendKey { get;set; }
   class ActiveSync.Contracts.BackendItem implements System.IEquatable<ActiveSync.Contracts.BackendItem>
-    ctor (System.Collections.Generic.IReadOnlyList<System.Xml.Linq.XElement> ApplicationData)
+    ctor ()
     method System.Boolean Equals(ActiveSync.Contracts.BackendItem other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.BackendItem left, ActiveSync.Contracts.BackendItem right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.BackendItem left, ActiveSync.Contracts.BackendItem right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.Collections.Generic.IReadOnlyList`1[[System.Xml.Linq.XElement, System.Private.Xml.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51]]& ApplicationData)
     property System.Collections.Generic.IReadOnlyList<System.Xml.Linq.XElement> ApplicationData { get;set; }
   class ActiveSync.Contracts.BackendItemNotFoundException : ActiveSync.Contracts.BackendException implements System.Runtime.Serialization.ISerializable
     ctor (System.String message)
@@ -124,7 +119,7 @@ assembly ActiveSync.Contracts
     field ActiveSync.Contracts.BackendRole Oof = 6
     field ActiveSync.Contracts.BackendRole Tasks = 3
   class ActiveSync.Contracts.BodyPreference implements System.IEquatable<ActiveSync.Contracts.BodyPreference>
-    ctor (System.Int32 Type, System.Nullable<System.Int64> TruncationSize, System.Boolean AllOrNone, System.Boolean Eas16)
+    ctor ()
     field ActiveSync.Contracts.BodyPreference PlainText
     method System.Boolean Equals(ActiveSync.Contracts.BodyPreference other)
     method System.Boolean Equals(System.Object obj)
@@ -132,37 +127,41 @@ assembly ActiveSync.Contracts
     method System.Boolean op_Inequality(ActiveSync.Contracts.BodyPreference left, ActiveSync.Contracts.BodyPreference right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.Int32& Type, System.Nullable`1[[System.Int64, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& TruncationSize, System.Boolean& AllOrNone, System.Boolean& Eas16)
+    property ActiveSync.Contracts.BodyType Type { get;set; }
     property System.Boolean AllOrNone { get;set; }
     property System.Boolean Eas16 { get;set; }
-    property System.Int32 Type { get;set; }
     property System.Nullable<System.Int64> TruncationSize { get;set; }
+  enum ActiveSync.Contracts.BodyType implements System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable
+    field ActiveSync.Contracts.BodyType Html = 2
+    field ActiveSync.Contracts.BodyType Mime = 4
+    field ActiveSync.Contracts.BodyType PlainText = 1
+    field ActiveSync.Contracts.BodyType Rtf = 3
+  enum ActiveSync.Contracts.BusyKind implements System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable
+    field ActiveSync.Contracts.BusyKind Busy = 2
+    field ActiveSync.Contracts.BusyKind Free = 0
+    field ActiveSync.Contracts.BusyKind OutOfOffice = 3
+    field ActiveSync.Contracts.BusyKind Tentative = 1
   class ActiveSync.Contracts.BusyPeriod implements System.IEquatable<ActiveSync.Contracts.BusyPeriod>
-    ctor (System.DateTime StartUtc, System.DateTime EndUtc, System.Char Kind)
+    ctor ()
     method System.Boolean Equals(ActiveSync.Contracts.BusyPeriod other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.BusyPeriod left, ActiveSync.Contracts.BusyPeriod right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.BusyPeriod left, ActiveSync.Contracts.BusyPeriod right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.DateTime& StartUtc, System.DateTime& EndUtc, System.Char& Kind)
-    property System.Char Kind { get;set; }
-    property System.DateTime EndUtc { get;set; }
-    property System.DateTime StartUtc { get;set; }
+    property ActiveSync.Contracts.BusyKind Kind { get;set; }
+    property System.DateTimeOffset End { get;set; }
+    property System.DateTimeOffset Start { get;set; }
   class ActiveSync.Contracts.ContentFilter implements System.IEquatable<ActiveSync.Contracts.ContentFilter>
-    ctor (System.Nullable<System.DateTime> SinceUtc)
+    ctor ()
     field ActiveSync.Contracts.ContentFilter All
-    method ActiveSync.Contracts.ContentFilter ForClass(System.String easClass, System.Int32 filterType)
-    method ActiveSync.Contracts.ContentFilter FromCalendarFilterType(System.Int32 filterType)
-    method ActiveSync.Contracts.ContentFilter FromMailFilterType(System.Int32 filterType)
     method System.Boolean Equals(ActiveSync.Contracts.ContentFilter other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.ContentFilter left, ActiveSync.Contracts.ContentFilter right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.ContentFilter left, ActiveSync.Contracts.ContentFilter right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.Nullable`1[[System.DateTime, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& SinceUtc)
-    property System.Nullable<System.DateTime> SinceUtc { get;set; }
+    property System.Nullable<System.DateTimeOffset> Since { get;set; }
   class ActiveSync.Contracts.ContractVersion
     property System.Int32 Major { get; }
     property System.Int32 Minor { get; }
@@ -170,15 +169,32 @@ assembly ActiveSync.Contracts
   class ActiveSync.Contracts.DelimitedKey
     method System.String Encode(System.String[] parts)
     method System.String[] Decode(System.String value, System.Int32 expectedParts)
+  enum ActiveSync.Contracts.FolderType implements System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable
+    field ActiveSync.Contracts.FolderType Calendar = 8
+    field ActiveSync.Contracts.FolderType Contacts = 9
+    field ActiveSync.Contracts.FolderType DeletedItems = 4
+    field ActiveSync.Contracts.FolderType Drafts = 3
+    field ActiveSync.Contracts.FolderType Inbox = 2
+    field ActiveSync.Contracts.FolderType Journal = 11
+    field ActiveSync.Contracts.FolderType Notes = 10
+    field ActiveSync.Contracts.FolderType Outbox = 6
+    field ActiveSync.Contracts.FolderType SentItems = 5
+    field ActiveSync.Contracts.FolderType Tasks = 7
+    field ActiveSync.Contracts.FolderType UserCalendar = 13
+    field ActiveSync.Contracts.FolderType UserContacts = 14
+    field ActiveSync.Contracts.FolderType UserGeneric = 1
+    field ActiveSync.Contracts.FolderType UserJournal = 16
+    field ActiveSync.Contracts.FolderType UserMail = 12
+    field ActiveSync.Contracts.FolderType UserNotes = 17
+    field ActiveSync.Contracts.FolderType UserTasks = 15
   class ActiveSync.Contracts.GalPhotoRequest implements System.IEquatable<ActiveSync.Contracts.GalPhotoRequest>
-    ctor (System.Nullable<System.Int32> MaxSizeBytes, System.Nullable<System.Int32> MaxCount)
+    ctor ()
     method System.Boolean Equals(ActiveSync.Contracts.GalPhotoRequest other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.GalPhotoRequest left, ActiveSync.Contracts.GalPhotoRequest right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.GalPhotoRequest left, ActiveSync.Contracts.GalPhotoRequest right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.Nullable`1[[System.Int32, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& MaxSizeBytes, System.Nullable`1[[System.Int32, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& MaxCount)
     property System.Nullable<System.Int32> MaxCount { get;set; }
     property System.Nullable<System.Int32> MaxSizeBytes { get;set; }
   interface ActiveSync.Contracts.IBackendConnection implements System.IAsyncDisposable
@@ -218,7 +234,7 @@ assembly ActiveSync.Contracts
     method System.Threading.Tasks.Task RenameFolderAsync(System.String backendKey, System.String newDisplayName, System.Threading.CancellationToken ct)
     method System.Threading.Tasks.Task<System.String> CreateFolderAsync(System.String parentBackendKey, System.String displayName, System.Threading.CancellationToken ct)
   interface ActiveSync.Contracts.IFreeBusySource
-    method System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.BusyPeriod>> GetBusyPeriodsAsync(System.String targetAddress, System.DateTime startUtc, System.DateTime endUtc, System.Threading.CancellationToken ct)
+    method System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.BusyPeriod>> GetBusyPeriodsAsync(System.String targetAddress, System.DateTimeOffset start, System.DateTimeOffset end, System.Threading.CancellationToken ct)
   interface ActiveSync.Contracts.IGatewayPlugin
     method System.Void Register(Microsoft.Extensions.DependencyInjection.IServiceCollection services, Microsoft.Extensions.Configuration.IConfiguration configuration)
   interface ActiveSync.Contracts.IItemMoveOperations
@@ -229,7 +245,7 @@ assembly ActiveSync.Contracts
     method System.Threading.Tasks.Task SetAnsweredAsync(System.String folderBackendKey, System.String itemKey, System.Boolean forwarded, System.Threading.CancellationToken ct)
     method System.Threading.Tasks.Task<ActiveSync.Contracts.BackendAttachment> GetAttachmentAsync(System.String fileReference, System.Threading.CancellationToken ct)
     method System.Threading.Tasks.Task<System.Byte[]> GetRawMessageAsync(System.String folderBackendKey, System.String itemKey, System.Threading.CancellationToken ct)
-    method System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<System.ValueTuple<System.String, System.String>>> SearchAsync(System.String folderBackendKey, System.String freeText, System.Nullable<System.DateTime> sinceUtc, System.Int32 maxResults, System.Threading.CancellationToken ct)
+    method System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<System.ValueTuple<System.String, System.String>>> SearchAsync(System.String folderBackendKey, System.String freeText, System.Nullable<System.DateTimeOffset> since, System.Int32 maxResults, System.Threading.CancellationToken ct)
   interface ActiveSync.Contracts.IMailSubmitOperations
     method System.Threading.Tasks.Task SendAsync(System.Byte[] mime, System.Threading.CancellationToken ct)
   interface ActiveSync.Contracts.IOofBackend
@@ -244,17 +260,16 @@ assembly ActiveSync.Contracts
   interface ActiveSync.Contracts.IWatcherDiagnostics
     method System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.WatcherInfo> SnapshotWatchers()
   class ActiveSync.Contracts.OofReply implements System.IEquatable<ActiveSync.Contracts.OofReply>
-    ctor (System.String BodyText, System.Boolean BodyIsHtml, System.Nullable<System.DateTime> StartUtc, System.Nullable<System.DateTime> EndUtc)
+    ctor ()
     method System.Boolean Equals(ActiveSync.Contracts.OofReply other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.OofReply left, ActiveSync.Contracts.OofReply right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.OofReply left, ActiveSync.Contracts.OofReply right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.String& BodyText, System.Boolean& BodyIsHtml, System.Nullable`1[[System.DateTime, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& StartUtc, System.Nullable`1[[System.DateTime, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& EndUtc)
     property System.Boolean BodyIsHtml { get;set; }
-    property System.Nullable<System.DateTime> EndUtc { get;set; }
-    property System.Nullable<System.DateTime> StartUtc { get;set; }
+    property System.Nullable<System.DateTimeOffset> End { get;set; }
+    property System.Nullable<System.DateTimeOffset> Start { get;set; }
     property System.String BodyText { get;set; }
   class ActiveSync.Contracts.ProviderSettings
     ctor (Microsoft.Extensions.Configuration.IConfigurationSection section)
@@ -263,20 +278,19 @@ assembly ActiveSync.Contracts
     property ActiveSync.Contracts.ProviderSettings Empty { get; }
     property Microsoft.Extensions.Configuration.IConfigurationSection Section { get; }
   class ActiveSync.Contracts.ResolvedRole implements System.IEquatable<ActiveSync.Contracts.ResolvedRole>
-    ctor (ActiveSync.Contracts.BackendRole Role, System.String ProviderName, ActiveSync.Contracts.ProviderSettings Settings, ActiveSync.Contracts.BackendCredentials Credentials)
+    ctor ()
     method System.Boolean Equals(ActiveSync.Contracts.ResolvedRole other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.ResolvedRole left, ActiveSync.Contracts.ResolvedRole right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.ResolvedRole left, ActiveSync.Contracts.ResolvedRole right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(ActiveSync.Contracts.BackendRole& Role, System.String& ProviderName, ActiveSync.Contracts.ProviderSettings& Settings, ActiveSync.Contracts.BackendCredentials& Credentials)
     property ActiveSync.Contracts.BackendCredentials Credentials { get;set; }
     property ActiveSync.Contracts.BackendRole Role { get;set; }
     property ActiveSync.Contracts.ProviderSettings Settings { get;set; }
     property System.String ProviderName { get;set; }
   class ActiveSync.Contracts.SharedCollection implements System.IEquatable<ActiveSync.Contracts.SharedCollection>
-    ctor (System.String Href, System.Boolean ReadOnly)
+    ctor ()
     method ActiveSync.Contracts.SharedCollection Parse(System.String entry)
     method System.Boolean Equals(ActiveSync.Contracts.SharedCollection other)
     method System.Boolean Equals(System.Object obj)
@@ -285,7 +299,6 @@ assembly ActiveSync.Contracts
     method System.Int32 GetHashCode()
     method System.String ToString()
     method System.String Validate(System.String entry, System.String baseUrl)
-    method System.Void Deconstruct(System.String& Href, System.Boolean& ReadOnly)
     property System.Boolean ReadOnly { get;set; }
     property System.String Href { get;set; }
   class ActiveSync.Contracts.SupportedGatewayContractAttribute : System.Attribute
@@ -300,14 +313,13 @@ assembly ActiveSync.Contracts
     method System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage> SendHttpAsync(System.Func<System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage>> send, System.Threading.CancellationToken ct, System.Boolean idempotent, System.Action<System.String, System.Int32> onRetry)
     method System.Threading.Tasks.Task<T> RunAsync(System.Func<System.Threading.Tasks.Task<T>> action, System.Func<System.Exception, System.Boolean> isTransient, System.Threading.CancellationToken ct, System.Boolean idempotent, System.Action<System.Exception, System.Int32> onRetry)
   class ActiveSync.Contracts.WatcherInfo implements System.IEquatable<ActiveSync.Contracts.WatcherInfo>
-    ctor (System.String User, System.String Resource)
+    ctor ()
     method System.Boolean Equals(ActiveSync.Contracts.WatcherInfo other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.WatcherInfo left, ActiveSync.Contracts.WatcherInfo right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.WatcherInfo left, ActiveSync.Contracts.WatcherInfo right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.String& User, System.String& Resource)
     property System.String Resource { get;set; }
     property System.String User { get;set; }
 assembly ActiveSync.Protocol
@@ -395,7 +407,7 @@ assembly ActiveSync.Protocol
     method System.Boolean op_Inequality(ActiveSync.Protocol.Sync.CollectionChanges left, ActiveSync.Protocol.Sync.CollectionChanges right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.3.0.0, Culture=neutral, PublicKeyToken=null]]& Adds, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.3.0.0, Culture=neutral, PublicKeyToken=null]]& Changes, System.Collections.Generic.IReadOnlyList`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& Deletes, System.Boolean& MoreAvailable, System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& NewSnapshot)
+    method System.Void Deconstruct(System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.4.0.0, Culture=neutral, PublicKeyToken=null]]& Adds, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.4.0.0, Culture=neutral, PublicKeyToken=null]]& Changes, System.Collections.Generic.IReadOnlyList`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& Deletes, System.Boolean& MoreAvailable, System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& NewSnapshot)
     property System.Boolean MoreAvailable { get;set; }
     property System.Collections.Generic.Dictionary<System.String, System.String> NewSnapshot { get;set; }
     property System.Collections.Generic.IReadOnlyList<ActiveSync.Protocol.Sync.ItemChange> Adds { get;set; }

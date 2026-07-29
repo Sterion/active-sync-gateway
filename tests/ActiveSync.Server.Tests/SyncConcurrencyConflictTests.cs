@@ -44,8 +44,8 @@ public sealed class SyncConcurrencyConflictTests : IDisposable
 	public async Task Sync_ConcurrentCollectionCommitRace_ReturnsStatus5ForThatCollection_SiblingsUnaffected()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email),
-			new BackendFolder("imap:Sent", "Sent", null, EasFolderType.SentItems, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email },
+			new BackendFolder { BackendKey = "imap:Sent", DisplayName = "Sent", Type = FolderType.SentItems, EasClass = EasClass.Email });
 		UserFolder inbox = registry.Single(f => f.BackendKey == "imap:INBOX");
 		UserFolder sent = registry.Single(f => f.BackendKey == "imap:Sent");
 

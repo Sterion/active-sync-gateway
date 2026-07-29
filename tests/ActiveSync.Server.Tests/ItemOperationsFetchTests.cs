@@ -41,7 +41,7 @@ public sealed class ItemOperationsFetchTests : IDisposable
 			[new XElement(EasNamespaces.AirSyncBase + "DisplayName", "x")];
 
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
 		UserFolder inbox = registry.Single();
 
 		XDocument? response = await _harness.RunAsync(
@@ -101,7 +101,7 @@ public sealed class ItemOperationsFetchTests : IDisposable
 	private Task RegisterInboxAsync()
 	{
 		return _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
 	}
 
 	private Task<XDocument?> FetchLongIdAsync(string longId)

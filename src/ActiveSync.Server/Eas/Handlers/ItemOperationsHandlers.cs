@@ -239,12 +239,17 @@ public sealed class ItemOperationsHandler(
 		// fetching outside Sync.
 		XElement? preference = options?.Elements(ASB + "BodyPreference").FirstOrDefault();
 		if (preference is null)
-			return new BodyPreference(2, null, false, eas16);
+			return new BodyPreference { Type = BodyType.Html, Eas16 = eas16 };
 		int type = int.TryParse(preference.Element(ASB + "Type")?.Value, out int t) ? t : 2;
 		long? truncation = long.TryParse(preference.Element(ASB + "TruncationSize")?.Value, out long tr)
 			? tr
 			: null;
-		return new BodyPreference(type, truncation, false, eas16);
+		return new BodyPreference
+		{
+			Type = EasBodyTypes.FromWire(type),
+			TruncationSize = truncation,
+			Eas16 = eas16
+		};
 	}
 
 	/// <summary>

@@ -49,12 +49,13 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		{
 			string id = book.GetProperty("id").GetString()!;
 			bool isDefault = book.TryGetProperty("isDefault", out JsonElement d) && d.ValueKind == JsonValueKind.True;
-			result.Add(new BackendFolder(
-				KeyPrefix + id,
-				book.TryGetProperty("name", out JsonElement n) ? n.GetString() ?? id : id,
-				null,
-				isDefault ? EasFolderType.Contacts : EasFolderType.UserContacts,
-				Protocol.EasClass.Contacts));
+			result.Add(new BackendFolder
+			{
+				BackendKey = KeyPrefix + id,
+				DisplayName = book.TryGetProperty("name", out JsonElement n) ? n.GetString() ?? id : id,
+				Type = isDefault ? FolderType.Contacts : FolderType.UserContacts,
+				EasClass = Protocol.EasClass.Contacts
+			});
 		}
 
 		return result;
@@ -81,7 +82,9 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct)
 	{
 		JsonElement? card = await GetCardAsync(itemKey, ct).ConfigureAwait(false);
-		return card is { } c ? new BackendItem(JsContactConverter.ToApplicationData(c, bodyPreference)) : null;
+		return card is { } c
+			? new BackendItem { ApplicationData = JsContactConverter.ToApplicationData(c, bodyPreference) }
+			: null;
 	}
 
 	public async Task<(string ItemKey, string Revision)> CreateItemAsync(

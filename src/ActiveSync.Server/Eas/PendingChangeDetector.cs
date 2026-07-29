@@ -26,7 +26,7 @@ public static class PendingChangeDetector
 			return false; // never completed a sync — nothing to compare against
 
 		Dictionary<string, string> snapshot = SyncStateService.ReadSnapshot(state);
-		ContentFilter filter = ContentFilter.ForClass(store.EasClass, state.FilterType);
+		ContentFilter filter = ContentFilters.ForClass(store.EasClass, state.FilterType);
 
 		IReadOnlyDictionary<string, string> current;
 		try

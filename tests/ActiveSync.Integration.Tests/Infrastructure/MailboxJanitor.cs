@@ -51,7 +51,7 @@ public static class MailboxJanitor
 	{
 		if (TestBackend.DavUrl is not { } davUrl)
 			return;
-		BackendCredentials credentials = new(user, TestBackend.Password);
+		BackendCredentials credentials = new() { UserName = user, Password = TestBackend.Password };
 		DavServerOptions options = new() { BaseUrl = davUrl, HomeSetPath = TestBackend.DavHomeSetPath };
 
 		using WebDavClient calClient = new(new Uri(davUrl), credentials);

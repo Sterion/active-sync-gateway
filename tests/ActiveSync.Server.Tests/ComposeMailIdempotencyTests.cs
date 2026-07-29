@@ -41,14 +41,14 @@ public sealed class ComposeMailIdempotencyTests : IDisposable
 	private async Task<UserFolder> InboxAsync()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
 		return registry.Single();
 	}
 
 	private async Task<UserFolder> DraftsAsync()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:Drafts", "Drafts", null, EasFolderType.Drafts, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:Drafts", DisplayName = "Drafts", Type = FolderType.Drafts, EasClass = EasClass.Email });
 		return registry.Single();
 	}
 

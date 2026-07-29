@@ -33,9 +33,13 @@ public sealed class SmtpBackendProvider(ILoggerFactory loggerFactory) : IBackend
 		return
 		[
 			.. BackendSchemaFields.MailConnection(465),
-			new BackendConfigField("ForceFrom", "Rewrite the From header", BackendFieldType.Bool, Default: "false",
-				Help: "Replace the sender of outgoing mail with the authenticated user. " +
-				      "Enable only when your server does not enforce sender alignment itself.")
+			new BackendConfigField
+			{
+				Name = "ForceFrom", Label = "Rewrite the From header", Type = BackendFieldType.Bool,
+				Default = "false",
+				Help = "Replace the sender of outgoing mail with the authenticated user. " +
+				       "Enable only when your server does not enforce sender alignment itself."
+			}
 		];
 	}
 

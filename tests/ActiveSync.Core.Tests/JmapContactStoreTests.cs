@@ -96,7 +96,7 @@ public sealed class JmapContactStoreTests
 		JmapContactStore store = new(client, pollSeconds: 1);
 
 		IReadOnlyList<IReadOnlyList<XElement>> results = await store.SearchGalAsync(
-			"Jane", maxResults: 10, new GalPhotoRequest(null, null), CancellationToken.None);
+			"Jane", maxResults: 10, new GalPhotoRequest { MaxSizeBytes = null, MaxCount = null }, CancellationToken.None);
 
 		Assert.Single(results);
 		XElement? picture = results[0].FirstOrDefault(e => e.Name.LocalName == "Picture");

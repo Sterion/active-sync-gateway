@@ -126,7 +126,7 @@ public static class MailConverter
 		int type;
 		switch (preference.Type)
 		{
-			case 4: // full MIME
+			case BodyType.Mime: // full MIME
 				using (MemoryStream ms = new())
 				{
 					// A serialized RFC 822 stream is a byte stream, not UTF-8 text --
@@ -144,7 +144,7 @@ public static class MailConverter
 
 				type = 4;
 				break;
-			case 2 when html is not null:
+			case BodyType.Html when html is not null:
 				content = html;
 				type = 2;
 				break;

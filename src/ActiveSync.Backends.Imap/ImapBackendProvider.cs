@@ -156,14 +156,16 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 			if (!lazy.IsValueCreated || !lazy.Value.IsStarted)
 				continue;
 			int separator = key.IndexOf('\n');
-			watchers.Add(new WatcherInfo(
-				separator < 0 ? key : key[..separator],
-				separator < 0 ? "" : key[(separator + 1)..]));
+			watchers.Add(new WatcherInfo
+			{
+				User = separator < 0 ? key : key[..separator],
+				Resource = separator < 0 ? "" : key[(separator + 1)..]
+			});
 		}
 
 		foreach ((string user, Lazy<ImapStatusPoller> lazy) in _pollers)
 			if (lazy.IsValueCreated && lazy.Value.IsStarted)
-				watchers.Add(new WatcherInfo(user, "(status poll)"));
+				watchers.Add(new WatcherInfo { User = user, Resource = "(status poll)" });
 
 		return watchers;
 	}

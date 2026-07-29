@@ -115,7 +115,7 @@ public sealed class OofTests(GatewayFixture gateway)
 				Host = TestBackend.SieveHost, Port = TestBackend.SievePort,
 				AllowInvalidCertificates = true
 			},
-			new BackendCredentials(user, TestBackend.Password));
+			new BackendCredentials { UserName = user, Password = TestBackend.Password });
 	}
 
 	private static async Task<IReadOnlyList<(string Name, bool Active)>> ListScriptsAsync(string user)

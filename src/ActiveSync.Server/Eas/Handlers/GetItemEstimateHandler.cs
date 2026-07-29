@@ -79,7 +79,7 @@ public sealed class GetItemEstimateHandler(
 			}
 
 			int ft = int.TryParse(filterType, out int f) ? f : stateFilterType;
-			ContentFilter filter = ContentFilter.ForClass(store.EasClass, ft);
+			ContentFilter filter = ContentFilters.ForClass(store.EasClass, ft);
 
 			IReadOnlyDictionary<string, string> current;
 			try

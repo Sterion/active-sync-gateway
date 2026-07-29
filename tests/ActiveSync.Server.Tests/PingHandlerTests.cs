@@ -71,9 +71,9 @@ public sealed class PingHandlerTests : IDisposable
 		_harness.Options.Eas.MinHeartbeatSeconds = 1; // keep the un-capped (red) path from idling long
 		_harness.Session.Store.WaitForChanges = _ => Array.Empty<string>();
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email),
-			new BackendFolder("imap:A", "A", null, EasFolderType.UserMail, EasClass.Email),
-			new BackendFolder("imap:B", "B", null, EasFolderType.UserMail, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email },
+			new BackendFolder { BackendKey = "imap:A", DisplayName = "A", Type = FolderType.UserMail, EasClass = EasClass.Email },
+			new BackendFolder { BackendKey = "imap:B", DisplayName = "B", Type = FolderType.UserMail, EasClass = EasClass.Email });
 
 		PingHandler handler = NewHandler();
 		XDocument? response = await _harness.RunAsync(handler, "Ping",
@@ -86,7 +86,7 @@ public sealed class PingHandlerTests : IDisposable
 	private async Task<UserFolder> InboxAsync()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
 		return registry.Single(f => f.BackendKey == "imap:INBOX");
 	}
 

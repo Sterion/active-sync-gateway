@@ -82,8 +82,20 @@ public sealed class ProviderSettings(IConfigurationSection section)
 ///   One role resolved for one account: which provider serves it, with what settings and
 ///   backend credentials.
 /// </summary>
-public sealed record ResolvedRole(
-	BackendRole Role, string ProviderName, ProviderSettings Settings, BackendCredentials Credentials);
+public sealed record ResolvedRole
+{
+	/// <summary>The role this resolution fills.</summary>
+	public required BackendRole Role { get; init; }
+
+	/// <summary>Name of the provider assigned to the role.</summary>
+	public required string ProviderName { get; init; }
+
+	/// <summary>The role's effective settings, bound by the provider itself.</summary>
+	public required ProviderSettings Settings { get; init; }
+
+	/// <summary>The backend credentials to present for this role.</summary>
+	public required BackendCredentials Credentials { get; init; }
+}
 
 /// <summary>
 ///   Everything a provider needs to open one account's connection: the gateway identity
@@ -93,12 +105,23 @@ public sealed record ResolvedRole(
 ///   shared-calendar grants. Host services (db factory, change notifier, logging) reach
 ///   providers through normal constructor injection instead.
 /// </summary>
-public sealed record BackendConnectionContext(
-	BackendCredentials GatewayCredentials,
-	int GatewayUserId,
-	string? MailAddress,
-	IReadOnlyList<ResolvedRole> Roles,
-	IReadOnlyList<SharedCollection> SharedCollections);
+public sealed record BackendConnectionContext
+{
+	/// <summary>The login the phone presented — never a backend login.</summary>
+	public required BackendCredentials GatewayCredentials { get; init; }
+
+	/// <summary>The immutable per-user id used for DB scoping, the encryption AAD and durable keys.</summary>
+	public required int GatewayUserId { get; init; }
+
+	/// <summary>The user's mail address, when one is known.</summary>
+	public string? MailAddress { get; init; }
+
+	/// <summary>The roles assigned to THIS provider for this account.</summary>
+	public required IReadOnlyList<ResolvedRole> Roles { get; init; }
+
+	/// <summary>The account's shared-collection grants.</summary>
+	public required IReadOnlyList<SharedCollection> SharedCollections { get; init; }
+}
 
 /// <summary>One provider's connection bundle for one account: its stores and side operations.</summary>
 public interface IBackendConnection : IAsyncDisposable
@@ -280,7 +303,14 @@ public interface IPerUserResourceOwner
 // the return type of IWatcherDiagnostics, an OPTIONAL PROVIDER capability a plugin may implement.
 
 /// <summary>One live push watcher a provider holds (for the admin dashboard).</summary>
-public sealed record WatcherInfo(string User, string Resource);
+public sealed record WatcherInfo
+{
+	/// <summary>The gateway login the watcher belongs to.</summary>
+	public required string User { get; init; }
+
+	/// <summary>The watched resource (a folder name, or a provider-specific description).</summary>
+	public required string Resource { get; init; }
+}
 
 /// <summary>
 ///   Optional provider capability: live watcher state for the admin dashboard (e.g. the

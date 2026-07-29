@@ -36,7 +36,7 @@ public sealed class ItemOperationsAttachmentRegistryTests : IDisposable
 	{
 		await RegisterInboxAsync();
 		// The backend WOULD happily answer — proving the gate, not a coincidental null result.
-		_harness.Session.Mail.Attachment = new BackendAttachment("text/plain", "secret"u8.ToArray());
+		_harness.Session.Mail.Attachment = new BackendAttachment { ContentType = "text/plain", Content = "secret"u8.ToArray() };
 
 		string fileReference = DelimitedKey.Encode("imap:Someone-Else", "42", "0");
 		XDocument? response = await _harness.RunAsync(
@@ -56,7 +56,7 @@ public sealed class ItemOperationsAttachmentRegistryTests : IDisposable
 	public async Task ItemOperationsFetch_ForARegisteredFolder_StillReachesTheStore()
 	{
 		await RegisterInboxAsync();
-		_harness.Session.Mail.Attachment = new BackendAttachment("text/plain", "hello"u8.ToArray());
+		_harness.Session.Mail.Attachment = new BackendAttachment { ContentType = "text/plain", Content = "hello"u8.ToArray() };
 
 		string fileReference = DelimitedKey.Encode("imap:INBOX", "42", "0");
 		XDocument? response = await _harness.RunAsync(
@@ -76,7 +76,7 @@ public sealed class ItemOperationsAttachmentRegistryTests : IDisposable
 	public async Task GetAttachment_ForAFolderOutsideTheRegistry_IsRefused()
 	{
 		await RegisterInboxAsync();
-		_harness.Session.Mail.Attachment = new BackendAttachment("text/plain", "secret"u8.ToArray());
+		_harness.Session.Mail.Attachment = new BackendAttachment { ContentType = "text/plain", Content = "secret"u8.ToArray() };
 
 		DefaultHttpContext http = new();
 		http.Response.Body = new MemoryStream();
@@ -91,7 +91,7 @@ public sealed class ItemOperationsAttachmentRegistryTests : IDisposable
 				DeviceId = device.DeviceId,
 				AttachmentName = DelimitedKey.Encode("imap:Someone-Else", "42", "0")
 			},
-			Credentials = new BackendCredentials(EasHandlerHarness.UserName, "pw"),
+			Credentials = new BackendCredentials { UserName = EasHandlerHarness.UserName, Password = "pw" },
 			Session = _harness.Session,
 			Device = device,
 			State = _harness.State,
@@ -108,6 +108,6 @@ public sealed class ItemOperationsAttachmentRegistryTests : IDisposable
 	private Task RegisterInboxAsync()
 	{
 		return _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:INBOX", "Inbox", null, EasFolderType.Inbox, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
 	}
 }

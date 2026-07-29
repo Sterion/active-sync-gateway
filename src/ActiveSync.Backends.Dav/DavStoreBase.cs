@@ -86,7 +86,7 @@ public abstract class DavStoreBase(
 		if (result is null)
 			return null;
 		IReadOnlyList<XElement>? elements = ToApplicationData(result.Value.Content, bodyPreference);
-		return elements is null ? null : new BackendItem(elements);
+		return elements is null ? null : new BackendItem { ApplicationData = elements };
 	}
 
 	public async Task<(string ItemKey, string Revision)> CreateItemAsync(

@@ -84,8 +84,8 @@ public sealed class LocalStoreResilienceTests : IDisposable
 			NullLogger.Instance);
 
 		IReadOnlyList<BusyPeriod>? busy = await store.GetBusyPeriodsAsync(
-			"u@example.com", new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc),
-			new DateTime(2026, 8, 2, 0, 0, 0, DateTimeKind.Utc), CancellationToken.None);
+			"u@example.com", new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero),
+			new DateTimeOffset(2026, 8, 2, 0, 0, 0, TimeSpan.Zero), CancellationToken.None);
 
 		Assert.NotNull(busy);
 		Assert.Single(busy);

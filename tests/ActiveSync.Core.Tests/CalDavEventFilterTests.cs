@@ -18,7 +18,7 @@ public class CalDavEventFilterTests
 		DateTime localSince = new DateTime(2026, 6, 1, 7, 0, 0, DateTimeKind.Utc).ToLocalTime();
 		Assert.Equal(DateTimeKind.Local, localSince.Kind);
 
-		XElement filter = CalDavStore.BuildEventFilter(new ContentFilter(localSince));
+		XElement filter = CalDavStore.BuildEventFilter(new ContentFilter { Since = localSince });
 		string start = filter.Descendants()
 			.First(e => e.Name.LocalName == "time-range").Attribute("start")!.Value;
 
@@ -28,7 +28,7 @@ public class CalDavEventFilterTests
 	[Fact]
 	public void BuildEventFilter_NullSince_UsesEpoch()
 	{
-		XElement filter = CalDavStore.BuildEventFilter(new ContentFilter(null));
+		XElement filter = CalDavStore.BuildEventFilter(ContentFilter.All);
 		string start = filter.Descendants()
 			.First(e => e.Name.LocalName == "time-range").Attribute("start")!.Value;
 

@@ -60,7 +60,7 @@ public class TasksConverterTests
 	{
 		Assert.Equal("415849554944-006A56E48B-F5B1F6C007DBFEF8", TasksConverter.ExtractUid(AxigenTask));
 
-		List<XElement>? data = TasksConverter.ToApplicationData(AxigenTask, new BodyPreference(1, null, false));
+		List<XElement>? data = TasksConverter.ToApplicationData(AxigenTask, new BodyPreference { Type = BodyType.PlainText });
 		Assert.NotNull(data);
 		Assert.Equal("Test Task", data.Single(e => e.Name == Tasks + "Subject").Value);
 		Assert.Equal("0", data.Single(e => e.Name == Tasks + "Complete").Value); // IN-PROCESS/50%
@@ -95,7 +95,7 @@ public class TasksConverterTests
 		Assert.Contains("DUE;VALUE=DATE:20260801", ics); // date-only, no timezone drift
 		Assert.Equal(uid, TasksConverter.ExtractUid(ics));
 
-		List<XElement>? data = TasksConverter.ToApplicationData(ics, new BodyPreference(1, null, false))!;
+		List<XElement>? data = TasksConverter.ToApplicationData(ics, new BodyPreference { Type = BodyType.PlainText })!;
 		Assert.Equal("Buy milk", data.Single(e => e.Name == Tasks + "Subject").Value);
 		Assert.Equal("two liters",
 			data.Single(e => e.Name == AirSyncBase + "Body").Element(AirSyncBase + "Data")?.Value);
@@ -120,7 +120,7 @@ public class TasksConverterTests
 			new XElement(Tasks + "Complete", "1"),
 			new XElement(Tasks + "DateCompleted", "2026-07-20T10:00:00.000Z")), uid, open);
 		Assert.Contains("STATUS:COMPLETED", done);
-		List<XElement>? doneData = TasksConverter.ToApplicationData(done, new BodyPreference(1, null, false))!;
+		List<XElement>? doneData = TasksConverter.ToApplicationData(done, new BodyPreference { Type = BodyType.PlainText })!;
 		Assert.Equal("1", doneData.Single(e => e.Name == Tasks + "Complete").Value);
 		Assert.Equal("2026-07-20T10:00:00.000Z",
 			doneData.Single(e => e.Name == Tasks + "DateCompleted").Value);
@@ -128,7 +128,7 @@ public class TasksConverterTests
 		string reopened = TasksConverter.FromApplicationData(AppData(
 			new XElement(Tasks + "Subject", "t"),
 			new XElement(Tasks + "Complete", "0")), uid, done);
-		List<XElement>? reopenedData = TasksConverter.ToApplicationData(reopened, new BodyPreference(1, null, false))!;
+		List<XElement>? reopenedData = TasksConverter.ToApplicationData(reopened, new BodyPreference { Type = BodyType.PlainText })!;
 		Assert.Equal("0", reopenedData.Single(e => e.Name == Tasks + "Complete").Value);
 	}
 
@@ -150,7 +150,7 @@ public class TasksConverterTests
 			new XElement(Tasks + "Subject", "t renamed")), uid, existing);
 
 		Assert.Contains("ACTION:DISPLAY", updated); // the reminder VALARM survived
-		List<XElement> data = TasksConverter.ToApplicationData(updated, new BodyPreference(1, null, false))!;
+		List<XElement> data = TasksConverter.ToApplicationData(updated, new BodyPreference { Type = BodyType.PlainText })!;
 		Assert.Equal("1", data.Single(e => e.Name == Tasks + "Complete").Value);
 		Assert.StartsWith("2026-08-01", data.Single(e => e.Name == Tasks + "DueDate").Value);
 		Assert.Equal("t renamed", data.Single(e => e.Name == Tasks + "Subject").Value);
@@ -174,7 +174,7 @@ public class TasksConverterTests
 
 		Assert.DoesNotContain("ACTION:DISPLAY", updated);
 		Assert.Contains("ACTION:EMAIL", updated);
-		List<XElement> data = TasksConverter.ToApplicationData(updated, new BodyPreference(1, null, false))!;
+		List<XElement> data = TasksConverter.ToApplicationData(updated, new BodyPreference { Type = BodyType.PlainText })!;
 		Assert.DoesNotContain(data, e => e.Name == Tasks + "ReminderSet" && e.Value == "1");
 	}
 
@@ -191,7 +191,7 @@ public class TasksConverterTests
 		// "TRIGGER:" line, and the reminder silently vanishes on the next sync back.
 		Assert.Contains("TRIGGER;VALUE=DATE-TIME:20260731T090000Z", ics);
 
-		List<XElement> data = TasksConverter.ToApplicationData(ics, new BodyPreference(1, null, false))!;
+		List<XElement> data = TasksConverter.ToApplicationData(ics, new BodyPreference { Type = BodyType.PlainText })!;
 		Assert.Equal("1", data.Single(e => e.Name == Tasks + "ReminderSet").Value);
 		Assert.Equal("2026-07-31T09:00:00.000Z", data.Single(e => e.Name == Tasks + "ReminderTime").Value);
 	}
@@ -243,7 +243,7 @@ public class TasksConverterTests
 			recurrence), uid, null);
 		Assert.Contains(rruleFragment, ics);
 
-		List<XElement> data = TasksConverter.ToApplicationData(ics, new BodyPreference(1, null, false))!;
+		List<XElement> data = TasksConverter.ToApplicationData(ics, new BodyPreference { Type = BodyType.PlainText })!;
 		XElement emitted = data.Single(e => e.Name == Tasks + "Recurrence");
 		Assert.Equal(type.ToString(), emitted.Element(Tasks + "Type")?.Value);
 		Assert.NotNull(emitted.Element(Tasks + "Start")); // required by MS-ASTASK
@@ -271,7 +271,7 @@ public class TasksConverterTests
 				new XElement(Tasks + "Occurrences", "5"))), uid, null);
 		Assert.Contains("INTERVAL=2", counted);
 		Assert.Contains("COUNT=5", counted);
-		List<XElement> countedData = TasksConverter.ToApplicationData(counted, new BodyPreference(1, null, false))!;
+		List<XElement> countedData = TasksConverter.ToApplicationData(counted, new BodyPreference { Type = BodyType.PlainText })!;
 		XElement countedRecurrence = countedData.Single(e => e.Name == Tasks + "Recurrence");
 		Assert.Equal("2", countedRecurrence.Element(Tasks + "Interval")?.Value);
 		Assert.Equal("5", countedRecurrence.Element(Tasks + "Occurrences")?.Value);
@@ -284,7 +284,7 @@ public class TasksConverterTests
 				new XElement(Tasks + "Start", "2026-08-03T00:00:00.000Z"),
 				new XElement(Tasks + "Until", "2026-12-31T00:00:00.000Z"))), uid, null);
 		Assert.Contains("UNTIL=20261231", bounded);
-		List<XElement> boundedData = TasksConverter.ToApplicationData(bounded, new BodyPreference(1, null, false))!;
+		List<XElement> boundedData = TasksConverter.ToApplicationData(bounded, new BodyPreference { Type = BodyType.PlainText })!;
 		// Tasks dates use the long form, like every other date field in this class.
 		Assert.Equal("2026-12-31T00:00:00.000Z",
 			boundedData.Single(e => e.Name == Tasks + "Recurrence").Element(Tasks + "Until")?.Value);
@@ -378,7 +378,7 @@ public class TasksConverterTests
 		              END:VCALENDAR
 		              """;
 
-		List<XElement>? data = TasksConverter.ToApplicationData(ics, new BodyPreference(1, null, false));
+		List<XElement>? data = TasksConverter.ToApplicationData(ics, new BodyPreference { Type = BodyType.PlainText });
 
 		Assert.NotNull(data);
 		XElement? recurrence = data!.FirstOrDefault(e => e.Name == Tasks + "Recurrence");

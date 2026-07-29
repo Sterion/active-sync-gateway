@@ -36,7 +36,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 	public async Task DraftSubmit_WhenFilingToSentFails_StillSucceedsAndRecordsReplayMarker()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:Drafts", "Drafts", null, EasFolderType.Drafts, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:Drafts", DisplayName = "Drafts", Type = FolderType.Drafts, EasClass = EasClass.Email });
 		UserFolder drafts = folders.Single(f => f.BackendKey == "imap:Drafts");
 
 		// The submit succeeds; filing to Sent — a best-effort follow-up — fails.
@@ -59,7 +59,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		XElement? result = await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, command,
 			new Dictionary<string, string>(StringComparer.Ordinal),
-			new BodyPreference(1, null, false), deletesAsMoves: true, ledger, syncKeyForClaim: 1,
+			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ledger, syncKeyForClaim: 1,
 			CancellationToken.None);
 
 		// A successful submission is reported as success, not the Status 6 the catch would emit.
@@ -83,7 +83,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 	public async Task DraftSubmit_ResentAfterACrashBeforeCommit_DoesNotSubmitTwice()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:Drafts", "Drafts", null, EasFolderType.Drafts, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:Drafts", DisplayName = "Drafts", Type = FolderType.Drafts, EasClass = EasClass.Email });
 		UserFolder drafts = folders.Single(f => f.BackendKey == "imap:Drafts");
 
 		SyncHandler handler = NewSyncHandler();
@@ -106,7 +106,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, CommandFor("c1"),
 			new Dictionary<string, string>(StringComparer.Ordinal),
-			new BodyPreference(1, null, false), deletesAsMoves: true, ClientCommandLedger.Empty(),
+			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ClientCommandLedger.Empty(),
 			syncKeyForClaim: 1, CancellationToken.None);
 
 		// Attempt 2: the client, having never seen a response, resends the identical Add under the
@@ -115,7 +115,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, CommandFor("c1"),
 			new Dictionary<string, string>(StringComparer.Ordinal),
-			new BodyPreference(1, null, false), deletesAsMoves: true, ClientCommandLedger.Empty(),
+			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ClientCommandLedger.Empty(),
 			syncKeyForClaim: 1, CancellationToken.None);
 
 		// The draft must have gone out over SMTP exactly once — not once per attempt.
@@ -133,7 +133,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 	public async Task DraftSubmit_ResentAfterATransientSendFailure_ActuallyResendsInsteadOfReportingFalseSuccess()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:Drafts", "Drafts", null, EasFolderType.Drafts, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:Drafts", DisplayName = "Drafts", Type = FolderType.Drafts, EasClass = EasClass.Email });
 		UserFolder drafts = folders.Single(f => f.BackendKey == "imap:Drafts");
 
 		SyncHandler handler = NewSyncHandler();
@@ -157,7 +157,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		await Assert.ThrowsAsync<BackendException>(() => handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, CommandFor("c1"),
 			new Dictionary<string, string>(StringComparer.Ordinal),
-			new BodyPreference(1, null, false), deletesAsMoves: true, ClientCommandLedger.Empty(),
+			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ClientCommandLedger.Empty(),
 			syncKeyForClaim: 1, CancellationToken.None));
 
 		Assert.Empty(_harness.Session.Submit.Sent); // nothing went out on the failed attempt
@@ -170,7 +170,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		XElement? result = await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, CommandFor("c1"),
 			new Dictionary<string, string>(StringComparer.Ordinal),
-			new BodyPreference(1, null, false), deletesAsMoves: true, ClientCommandLedger.Empty(),
+			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ClientCommandLedger.Empty(),
 			syncKeyForClaim: 1, CancellationToken.None);
 
 		Assert.Equal("1", result?.Element(AS + "Status")?.Value);
@@ -188,7 +188,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 	public async Task DraftChangeSubmit_ResentAfterACrashBeforeCommit_DoesNotSubmitTwice()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
-			new BackendFolder("imap:Drafts", "Drafts", null, EasFolderType.Drafts, EasClass.Email));
+			new BackendFolder { BackendKey = "imap:Drafts", DisplayName = "Drafts", Type = FolderType.Drafts, EasClass = EasClass.Email });
 		UserFolder drafts = folders.Single(f => f.BackendKey == "imap:Drafts");
 
 		SyncHandler handler = NewSyncHandler();
@@ -210,13 +210,13 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, CommandFor(),
 			new Dictionary<string, string>(StringComparer.Ordinal),
-			new BodyPreference(1, null, false), deletesAsMoves: true, ClientCommandLedger.Empty(),
+			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ClientCommandLedger.Empty(),
 			syncKeyForClaim: 1, CancellationToken.None);
 
 		await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, CommandFor(),
 			new Dictionary<string, string>(StringComparer.Ordinal),
-			new BodyPreference(1, null, false), deletesAsMoves: true, ClientCommandLedger.Empty(),
+			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ClientCommandLedger.Empty(),
 			syncKeyForClaim: 1, CancellationToken.None);
 
 		Assert.Single(_harness.Session.Submit.Sent);

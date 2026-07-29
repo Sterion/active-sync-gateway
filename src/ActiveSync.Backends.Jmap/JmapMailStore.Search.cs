@@ -7,14 +7,14 @@ namespace ActiveSync.Backends.Jmap;
 public sealed partial class JmapMailStore
 {
 	public async Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
-		string? folderBackendKey, string freeText, DateTime? sinceUtc, int maxResults, CancellationToken ct)
+		string? folderBackendKey, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		Dictionary<string, object?> filter = new() { ["text"] = freeText };
 		if (folderBackendKey is not null)
 			filter["inMailbox"] = FromKey(folderBackendKey);
-		if (sinceUtc is { } since)
-			filter["after"] = JmapDate.ToUtc(since);
+		if (since is { } sinceValue)
+			filter["after"] = JmapDate.ToUtc(sinceValue.UtcDateTime);
 
 		JmapCall query = new("Email/query", new Dictionary<string, object?>
 		{

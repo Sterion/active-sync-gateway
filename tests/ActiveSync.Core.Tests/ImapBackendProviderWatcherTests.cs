@@ -37,7 +37,7 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	[Fact]
 	public void GetOrCreateWatcher_SamePasswordDifferentHost_ReturnsADifferentWatcher()
 	{
-		BackendCredentials credentials = new("bob@example.com", "same-password");
+		BackendCredentials credentials = new() { UserName = "bob@example.com", Password = "same-password" };
 		ImapOptions original = new() { Host = "old-imap.example.com", Port = 143 };
 		ImapOptions moved = new() { Host = "new-imap.example.com", Port = 143 };
 
@@ -56,7 +56,7 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	[Fact]
 	public void GetOrCreateWatcher_SameEverything_ReturnsTheSameWatcher()
 	{
-		BackendCredentials credentials = new("bob@example.com", "same-password");
+		BackendCredentials credentials = new() { UserName = "bob@example.com", Password = "same-password" };
 		ImapOptions options = new() { Host = "imap.example.com", Port = 143 };
 
 		ImapIdleWatcher? first = _provider.GetOrCreateWatcher("bob@example.com", options, credentials, "INBOX");
@@ -76,7 +76,7 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	[Fact]
 	public void GetOrCreatePoller_SameEverything_ReturnsTheSamePoller()
 	{
-		BackendCredentials credentials = new("bob@example.com", "same-password");
+		BackendCredentials credentials = new() { UserName = "bob@example.com", Password = "same-password" };
 		ImapOptions options = new() { Host = "imap.example.com", Port = 143 };
 
 		ImapStatusPoller first = _provider.GetOrCreatePoller("bob@example.com", options, credentials);
@@ -93,7 +93,7 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	[Fact]
 	public void GetOrCreatePoller_SamePasswordDifferentHost_ReturnsADifferentPoller()
 	{
-		BackendCredentials credentials = new("bob@example.com", "same-password");
+		BackendCredentials credentials = new() { UserName = "bob@example.com", Password = "same-password" };
 		ImapOptions original = new() { Host = "old-imap.example.com", Port = 143 };
 		ImapOptions moved = new() { Host = "new-imap.example.com", Port = 143 };
 
@@ -111,7 +111,7 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	[Fact]
 	public void TrimUserResources_WithoutTheUser_EvictsThePollConnection()
 	{
-		BackendCredentials credentials = new("bob@example.com", "same-password");
+		BackendCredentials credentials = new() { UserName = "bob@example.com", Password = "same-password" };
 		ImapOptions options = new() { Host = "imap.example.com", Port = 143 };
 
 		ImapStatusPoller before = _provider.GetOrCreatePoller("bob@example.com", options, credentials);
@@ -135,7 +135,7 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	[Fact]
 	public void SnapshotWatchers_ExcludesAMaterializedButNeverStartedWatcher()
 	{
-		BackendCredentials credentials = new("bob@example.com", "pw");
+		BackendCredentials credentials = new() { UserName = "bob@example.com", Password = "pw" };
 		ImapOptions options = new() { Host = "imap.example.com", Port = 143 };
 
 		// Materializes the Lazy<ImapIdleWatcher> (GetOrCreateWatcher dereferences .Value) without
@@ -169,7 +169,7 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 	[Fact]
 	public async Task SnapshotWatchers_IncludesAStartedPollConnection()
 	{
-		BackendCredentials credentials = new("bob@example.com", "pw");
+		BackendCredentials credentials = new() { UserName = "bob@example.com", Password = "pw" };
 		ImapOptions options = new() { Host = "imap.example.com", Port = 143 };
 		ImapStatusPoller poller = _provider.GetOrCreatePoller("bob@example.com", options, credentials);
 
@@ -188,7 +188,7 @@ public sealed class ImapBackendProviderWatcherTests : IAsyncLifetime
 				.GetField("_watchers", BindingFlags.NonPublic | BindingFlags.Instance)!
 				.GetValue(_provider)!;
 		watchers["no-separator-key"] = new Lazy<ImapIdleWatcher>(() =>
-			new ImapIdleWatcher(new ImapOptions(), new BackendCredentials("x", "y"), "INBOX", NullLogger.Instance));
+			new ImapIdleWatcher(new ImapOptions(), new BackendCredentials { UserName = "x", Password = "y" }, "INBOX", NullLogger.Instance));
 
 		Exception? ex = Record.Exception(() =>
 			_provider.TrimUserResources(new HashSet<string>(StringComparer.OrdinalIgnoreCase)));

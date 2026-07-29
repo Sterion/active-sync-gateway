@@ -105,7 +105,7 @@ public sealed class EasHandlerHarness : IDisposable
 		{
 			Http = http,
 			Parameters = new EasRequestParameters { Command = command, DeviceId = device.DeviceId },
-			Credentials = new BackendCredentials(UserName, "pw"),
+			Credentials = new BackendCredentials { UserName = UserName, Password = "pw" },
 			Session = Session,
 			Device = device,
 			State = State,
@@ -144,7 +144,7 @@ public sealed class EasHandlerHarness : IDisposable
 			{
 				Command = command, DeviceId = device.DeviceId, ProtocolVersion = protocolVersion
 			},
-			Credentials = new BackendCredentials(credentialsUserName ?? UserName, "pw"),
+			Credentials = new BackendCredentials { UserName = credentialsUserName ?? UserName, Password = "pw" },
 			Session = Session,
 			Device = device,
 			State = State,
@@ -173,7 +173,7 @@ public sealed class EasHandlerHarness : IDisposable
 		/// </summary>
 		public RecordingStore? SecondaryStore { get; set; }
 
-		public BackendCredentials Credentials => new(UserName, "pw");
+		public BackendCredentials Credentials => new() { UserName = UserName, Password = "pw" };
 		public int UserId => 1;
 		public string? MailAddress => UserName;
 		public IReadOnlyList<IContentStore> Stores =>
@@ -343,7 +343,7 @@ public sealed class EasHandlerHarness : IDisposable
 				return Task.FromResult<BackendItem?>(null);
 			IReadOnlyList<XElement> data = ItemApplicationData?.Invoke(itemKey)
 				?? [new XElement(EasNamespaces.AirSync + "Subject", itemKey)];
-			return Task.FromResult<BackendItem?>(new BackendItem(data));
+			return Task.FromResult<BackendItem?>(new BackendItem { ApplicationData = data });
 		}
 
 		/// <summary>
@@ -576,7 +576,7 @@ public sealed class EasHandlerHarness : IDisposable
 		public Func<Exception>? SearchFailWith { get; set; }
 
 		public Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
-			string? folderBackendKey, string freeText, DateTime? sinceUtc, int maxResults, CancellationToken ct)
+			string? folderBackendKey, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct)
 		{
 			SearchCalls++;
 			if (SearchFailWith is { } fail)
