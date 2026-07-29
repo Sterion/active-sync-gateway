@@ -21,6 +21,10 @@
 		     EAS-conversion assembly and the interop helpers are referenced directly. -->
 		<ProjectReference Include="..\..\src\ActiveSync.Eas.Conversion\ActiveSync.Eas.Conversion.csproj" />
 		<ProjectReference Include="..\..\src\ActiveSync.Contracts.Interop\ActiveSync.Contracts.Interop.csproj" />
+		<!-- The published conformance kit, run against the fixture plugin's store — the in-repo proof
+		     that a plugin built on ActiveSync.Contracts alone satisfies the store obligations, and
+		     that the kit itself works. -->
+		<ProjectReference Include="..\..\src\ActiveSync.Contracts.Conformance\ActiveSync.Contracts.Conformance.csproj" />
 		<ProjectReference Include="..\..\src\ActiveSync.Backends.Imap\ActiveSync.Backends.Imap.csproj" />
 		<ProjectReference Include="..\..\src\ActiveSync.Backends.Jmap\ActiveSync.Backends.Jmap.csproj" />
 		<ProjectReference Include="..\..\src\ActiveSync.Backends.Smtp\ActiveSync.Backends.Smtp.csproj" />

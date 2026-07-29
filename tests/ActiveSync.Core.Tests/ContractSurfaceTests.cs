@@ -42,15 +42,13 @@ public sealed class ContractSurfaceTests
 	[Fact]
 	public void ContractVersion_IsTheExpectedSurfaceVersion()
 	{
-		// The typed-contract redesign's fourth step (converter relocation): the EAS half of the
-		// converters moved out of ActiveSync.Backends.Common into the new host-only
-		// ActiveSync.Eas.Conversion, the payload helpers a store needs stayed behind, the
-		// iCalendar load/serialize quirk handling became ActiveSync.Contracts.Interop, and the
-		// calendar-attachment cap became the host option ActiveSync:Eas:CalendarAttachments.
-		// The two published assemblies' own surface did NOT move this step — the bump is the
-		// redesign's per-phase rule (every phase raises the minor), so the version history simply
-		// records the same hash under 1.7.
-		Assert.Equal(new Version(1, 7), ContractVersion.Current);
+		// The typed-contract redesign's fifth and final step (packaging, licensing, documentation):
+		// ActiveSync.Protocol stopped being published — host-only, PolyForm, back on the release
+		// version — and the two optional packages beside the contract were shipped
+		// (ActiveSync.Contracts.Interop, ActiveSync.Contracts.Conformance), each pinning the
+		// contract as an exact dependency range. The contract's own C# surface did not move; the
+		// SNAPSHOT did, because Protocol left it, and the bump is the redesign's per-phase rule.
+		Assert.Equal(new Version(1, 8), ContractVersion.Current);
 	}
 
 	// BackendItemNotFoundException derived straight from Exception, so the codebase-wide

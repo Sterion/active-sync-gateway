@@ -10,7 +10,9 @@
 > scope in § 7, the per-unit converter-split specification in § 7.1, and a batch of signature
 > fixes.*
 >
-> **Implementation progress: Phases 1–4 landed on `plugin-restructure` (contract version 1.7).**
+> **Implementation progress: ALL FIVE PHASES landed on `plugin-restructure` (contract version
+> 1.8).** What remains is the owner's own: reviewing the result, merging to `main`, and raising
+> the contract major to 2.0 by hand (decision 14 — no phase of this plan touched it).
 > Phase 3 is two commits per the § 9 execution model: the 3a checkpoint (exemplars + host seam +
 > the completed contract surface) and the 3b completion (every remaining provider converted —
 > `dav`, `jmap`, `smtp`; `sieve` needed nothing — plus the test-suite port). Recorded deviations:
@@ -19,13 +21,16 @@
 > the snapshot entry type, because `ActiveSync.Protocol` cannot see a Contracts type (§ 5.2);
 > plus the Phase 3a/3b notes in § 5.5, § 6.3 and the Phase 3 section; Phase 4's own notes are in
 > its § 9 section (the class names on the backend side of the converter split, the interop
-> project's early birth, and the calendar-attachment knob decision). Phase 5 is not started.
+> project's early birth, and the calendar-attachment knob decision), and Phase 5's in its own
+> (the pack-don't-assume verification, the framework-agnostic conformance kit, the per-file
+> relicensing of `ActiveSync.Protocol`).
 >
 > **Authority rules.** `AGENTS.md` and `docs/plugins.md` describe the contract **as it exists
 > today** — they are the authority on current behaviour only, and nothing more. The moment
-> implementation of this design begins, THIS document is the authority on the *target* design:
-> `docs/plugins.md` in particular describes the OLD contract and is stale until its Phase 5
-> rewrite — an implementer must never "correct" the new surface back toward what that page says.
+> implementation of this design begins, THIS document is the authority on the *target* design.
+> (That inversion has now run its course: Phase 5 rewrote `docs/plugins.md` around the
+> implemented surface, so the two describe the same contract again and the ordinary rule —
+> those pages document what exists, this one records why — applies from here.)
 > `AGENTS.md`'s *invariants* (sync model, licensing, the contract-bump procedure, the 14.1
 > byte-identical rule) remain binding throughout; where this document deliberately changes
 > something `AGENTS.md` states (e.g. `BodyPreference.Eas16`, the attachment FileReference
@@ -1187,10 +1192,16 @@ it "on completion" or for any other reason.
 Each phase is independently landable and leaves the tree green. Phases 1–2 are low-risk and can be
 reviewed before committing to the rest.
 
-**Every phase changes the published surface**, so every phase raises `ContractVersionMinor` and
-regenerates the approved snapshot — not just Phase 1. `ContractSurfaceApprovalTests` enforces
-this mechanically (and its history block is append-only), so phases landing between two release
-tags still each record their own bump; only the tag publishes.
+**A phase that changes the published surface raises `ContractVersionMinor` and regenerates the
+approved snapshot** — not just Phase 1. `ContractSurfaceApprovalTests` enforces that
+mechanically (and its history block is append-only), so phases landing between two release tags
+still each record their own bump; only the tag publishes. An earlier revision of this line
+asserted that *every* phase changes the surface, which Phase 4 disproved: it relocated code
+without moving a single public member of the published assemblies. Its bump to **1.7 stands as
+recorded** — a deliberate, vacuous version line rather than a retrofitted correction, because
+the approval history is append-only and rewriting a shipped line to "fix" it would defeat the
+guard it exists to be. Phase 5's bump to 1.8 is likewise not a C# surface change: the snapshot
+moved because `ActiveSync.Protocol` left it.
 
 **Execution model (owner's choice, 2026-07-29).** All five phases land on one long-lived
 branch, **`plugin-restructure`** (created from `main` if absent), as **one commit per phase —
@@ -1567,6 +1578,60 @@ this phase are different code: the semantics concentrate in 3a, the tokens in 3b
   `Backends.Common` became load-bearing), and it gives the replaced fixture plugin something
   real to be validated against rather than merely compiling. Versioned with the release, like
   the interop package, with the same exact Contracts pin.
+- **Verification** (this phase had no line of its own; recorded here as executed): solution
+  builds at 0 warnings; the full unit suite green; the contract surface regenerated under the
+  new minor; and the packaging claims checked by actually packing rather than by reading the
+  workflow — see the notes below.
+
+**Phase 5 implementation notes (recorded at completion; § 5's deviation rule):**
+
+- **The packaging claims were verified by packing, not asserted.** `dotnet pack ActiveSync.slnx
+  -c Release -p:Version=9.9.9` produces exactly three packages — `ActiveSync.Contracts.1.8.0`
+  (its own contract version, the global `-p:Version` correctly unable to reach it),
+  `ActiveSync.Contracts.Interop.9.9.9` and `ActiveSync.Contracts.Conformance.9.9.9` (the release
+  tag) — and **no `ActiveSync.Protocol` package at all**. Both optional nuspecs carry
+  `<dependency id="ActiveSync.Contracts" version="[1.8.0]" />`, the exact range § 5.6 requires;
+  the mechanism is a target rewriting `ProjectVersion` on `_ProjectReferencesWithVersions`, since
+  a bare `ProjectReference` emits NuGet's default floor range. The interop nuspec also carries
+  MimeKit 4.17.0 / Ical.Net 5.2.3 / FolkerKinzel.VCards 8.2.0, which is decision 7's
+  self-documenting property made visible. The branch-build check confirmed what § 5.6 predicted:
+  the pack/push step (including the `dist/nupkg` directory itself) is entirely inside
+  `if: needs.test.outputs.version != ''`, and `version` is empty for any ref that is not
+  `X.Y.Z`/`vX.Y.Z` — so a branch build produces no package and no push, with no workflow change.
+- **`ActiveSync.Protocol` keeps `GenerateDocumentationFile=true` although it ships nothing.**
+  The property was package-scoped in intent, but its live effect is CS1591/CS1573 against a
+  0-warning baseline, and that discipline is worth more on a layer transcribed from the MS-AS*
+  specs than the packaging it was originally attached to.
+- **Relicensing is per-file and explicit.** Every `ActiveSync.Protocol` source file's
+  `SPDX-License-Identifier` went `MIT` → `PolyForm-Noncommercial-1.0.0` (the rest of the PolyForm
+  tree carries no SPDX header at all, but a file that WAS MIT deserves the statement rather than
+  its absence). `LICENSE`, `LICENSE-MIT` and the README table record the cut-off explicitly: the
+  published versions stay MIT permanently. **One file outside Protocol was corrected in passing**
+  — `Backends.Dav/SharedCollectionEntry.cs` still carried an MIT header from its Phase 2 move out
+  of Contracts, i.e. an MIT claim on a PolyForm file.
+- **The conformance kit is framework-agnostic, not an xunit base class.** `StoreConformance
+  .RunAsync` returns a `ConformanceReport` of named checks with `Passed`/`Failed`/**`Skipped`**
+  outcomes. Two reasons: a published MIT package must not force a test framework (or a domain
+  library — the sample payloads are hand-written text, so the kit's only reference is Contracts),
+  and `Skipped` is load-bearing. The contract has genuine "a store that cannot do this still
+  conforms" clauses — the `expected` precondition above all — and reporting those as passes would
+  be a lie about what was proved.
+- **The kit is proved able to fail.** `PluginConformanceTests` runs it three ways: against the
+  fixture plugin's store loaded through `PluginLoader` (the end-to-end "one package is enough"
+  proof), asserting the lifecycle and precondition checks actually RAN rather than skipped away,
+  and against a deliberately broken in-test store whose revisions move on every enumeration —
+  which must be reported as a failure. A conformance suite nobody has watched fail is vacuous.
+- **The fixture plugin honours `expected`.** `TestNotesStore` keeps a per-item version counter
+  and throws `BackendPreconditionFailedException`, so the kit's precondition check exercises the
+  throwing path in CI rather than reporting the "store ignores it" skip.
+- **`THIRD-PARTY-NOTICES.md` needed no regeneration.** The line item is conditional on package
+  references moving; `Directory.Packages.props` is untouched, and the interop package's new
+  MimeKit/FolkerKinzel references are packages the `ActiveSync.Server` publish closure — which is
+  what the notices file covers — already carried.
+- **The branch-tagged container image is deliberately left alone.** Phase 3b's note flagged it as
+  a Phase 5 *candidate* ("if branch dispatches should stop doing that"), not a line item: it is a
+  publishing-policy question for the owner, not part of packaging the contract. Nothing here
+  changes when the image step runs.
 
 ---
 

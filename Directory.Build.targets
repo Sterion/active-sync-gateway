@@ -1,8 +1,9 @@
 <Project>
 
-	<!-- NuGet package metadata for the ONLY published projects: ActiveSync.Contracts (the
-	     plugin contract) and ActiveSync.Protocol (its single dependency). Kept in one place so
-	     the two packages stay consistent.
+	<!-- NuGet package metadata for the ONLY published projects: ActiveSync.Contracts (the plugin
+	     contract) plus the two optional packages beside it, ActiveSync.Contracts.Interop and
+	     ActiveSync.Contracts.Conformance. Kept in one place so the packages stay consistent — all
+	     three are MIT, which is why the license expression can live here rather than per project.
 
 	     This lives in .targets rather than Directory.Build.props on purpose: .props is imported
 	     BEFORE the project body, so a PropertyGroup gated on IsPackable there would read the
@@ -16,8 +17,7 @@
 		     like everything else in this group. This file is imported AFTER the SDK has already
 		     computed DocumentationFile from it, so an assignment here evaluates to true and
 		     produces no .xml at all — a silently hollow "success" where the doc file never ships
-		     and CS1591 never fires. It is set per-project in the two packable csproj files
-		     instead. (The mirror of the .props problem described above: .props is too early for
+		     and CS1591 never fires. It is set per-project in each packable csproj instead. (The mirror of the .props problem described above: .props is too early for
 		     an IsPackable gate, .targets is too late for this one.) -->
 		<!-- Authors/Company are the legal identity, not the GitHub handle: "Sterion" is a
 		     personal alias and not an entity, so it stays only in the repository URLs below.

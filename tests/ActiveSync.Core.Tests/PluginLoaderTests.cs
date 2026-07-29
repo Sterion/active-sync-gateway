@@ -1,7 +1,9 @@
 using System.Buffers.Binary;
+using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
+using System.Runtime.Loader;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.Plugins;
@@ -233,6 +235,35 @@ public sealed class PluginLoaderTests : IDisposable
 
 		IBackendProvider provider = registry.GetFor("testplugin", BackendRole.Notes);
 		Assert.Same(typeof(IBackendProvider), provider.GetType().GetInterface("IBackendProvider"));
+	}
+
+	/// <summary>
+	///   The sharp edge of the host-owned rule, and why it matches the contract's simple name
+	///   EXACTLY rather than by prefix: <c>ActiveSync.Contracts.Interop</c> is an OPTIONAL package
+	///   the gateway also ships a copy of, and under an <c>ActiveSync.*</c> (or even
+	///   <c>ActiveSync.Contracts</c>) PREFIX the plugin's own copy would resolve host-first. That is
+	///   not a harmless downgrade: the host's copy binds the HOST's MimeKit/Ical.Net in the default
+	///   context while the plugin's code binds its private ones, so passing a plugin-context
+	///   MimeMessage into a host-context extension method fails on type identity. The plugin must
+	///   get ITS copy — and the contract itself must still come from the host.
+	/// </summary>
+	[Fact]
+	public void PluginLocalInteropAssembly_ResolvesFromThePluginFolder_WhileTheContractStaysHostOwned()
+	{
+		string pluginDir = StagePlugin("ActiveSync.TestPlugin");
+		string shipped = Path.Combine(pluginDir, "ActiveSync.Contracts.Interop.dll");
+		File.Copy(typeof(ActiveSync.Contracts.Interop.IcalHelpers).Assembly.Location, shipped);
+
+		BackendProviderRegistry registry = LoadAndBuildRegistry(ConfigFor(_root));
+		IBackendProvider provider = registry.GetFor("testplugin", BackendRole.Notes);
+
+		AssemblyLoadContext plugin = AssemblyLoadContext.GetLoadContext(provider.GetType().Assembly)!;
+		Assembly interop = plugin.LoadFromAssemblyName(new AssemblyName("ActiveSync.Contracts.Interop"));
+		Assert.Equal(shipped, interop.Location, ignoreCase: true);
+		Assert.NotSame(typeof(ActiveSync.Contracts.Interop.IcalHelpers).Assembly, interop);
+
+		Assembly contracts = plugin.LoadFromAssemblyName(new AssemblyName("ActiveSync.Contracts"));
+		Assert.Same(typeof(IGatewayPlugin).Assembly, contracts);
 	}
 
 	/// <summary>

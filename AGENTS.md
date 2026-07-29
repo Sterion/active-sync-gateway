@@ -131,6 +131,11 @@ src/ActiveSync.Protocol/    WBXML codec, code pages, MS-ASHTTP query parser, EAS
                             composite-key encoder the wire-facing FileReference/LongId values use
                             (DelimitedKey — host-side, since no delimited key crosses the store
                             boundary). Depends on NOTHING project-wise. No ASP.NET, no MailKit.
+                            HOST-ONLY: it was published beside Contracts up to contract 1.7, when
+                            the contract's own signatures still named EAS constants; nothing here is
+                            usable by a plugin now, so IsPackable=false, it takes the RELEASE version
+                            like every other host assembly (no $(ContractVersion) pin), and new work
+                            in it is PolyForm. Published package versions stay MIT forever.
 src/ActiveSync.Contracts/   The PLUGIN CONTRACT: the interfaces/records a backend provider
                             implements + uses (IBackendProvider, IBackendConnection, the split
                             content stores — IContentStore + IContentStore<TItem> with the class
@@ -155,15 +160,35 @@ src/ActiveSync.Contracts/   The PLUGIN CONTRACT: the interfaces/records a backen
                             the composite session + its cache (IBackendSession / CompositeBackendSession,
                             IBackendSessionFactory / BackendSessionFactory, BackendSessionInfo — a
                             plugin implements IBackendConnection, never the composite session).
-src/ActiveSync.Contracts.Interop/  OPTIONAL ergonomics beside the contract, and the ONE helper
-                            both sides of the store boundary need: IcalHelpers.Load/Serialize
+src/ActiveSync.Contracts.Interop/  OPTIONAL, PUBLISHED (MIT) ergonomics beside the contract: the ONE
+                            helper both sides of the store boundary need — IcalHelpers.Load/Serialize
                             (the Ical.Net quirk handling — unparsable text throws BackendException,
-                            output is normalized to CRLF). It carries the domain libraries so
-                            Contracts itself never has to; a Notes plugin references Contracts
-                            alone and inherits nothing. Consumed in-repo by Eas.Conversion,
-                            Backends.Common and Backends.Local. NOT loader ABI and NOT part of the
-                            contract-surface snapshot (a domain-library major bump must move this
-                            assembly, never $(ContractVersion)); packaging is a later phase.
+                            output is normalized to CRLF) — plus the payload <-> object-model
+                            extensions (MailItem <-> MimeMessage, Calendar/TaskItem <-> Ical.Net
+                            Calendar, ContactItem <-> VCard) and SampleItems test builders. It
+                            carries the domain libraries so Contracts itself never has to; a Notes
+                            plugin references Contracts alone and inherits nothing. Consumed in-repo
+                            by Eas.Conversion, Backends.Common and Backends.Local. NOT loader ABI and
+                            NOT part of the contract-surface snapshot (a domain-library major bump
+                            must move this assembly, never $(ContractVersion)) — so it takes the
+                            RELEASE version and pins Contracts as an EXACT [X.Y.Z] dependency, since
+                            contract minor is breaking and a floor range would be a false promise.
+                            A plugin using it MUST ship it in its own folder (the loader shares
+                            ActiveSync.Contracts by EXACT name, not by prefix, precisely so the
+                            plugin's copy wins and binds the plugin's own MimeKit/Ical.Net).
+src/ActiveSync.Contracts.Conformance/  OPTIONAL, PUBLISHED (MIT) test kit: StoreConformance.RunAsync
+                            exercises a store against the obligations the contract states in PROSE
+                            (revision stability, "null = not fetched", create-then-list visibility,
+                            delete semantics, the wait timeout, key-space disjointness, payload
+                            round-trip, the optional `expected` precondition) and returns a report;
+                            a check that cannot apply is Skipped, which is NOT a failure. STORE
+                            obligations only — engine behaviour (SyncKey replay, windowing, echo
+                            suppression) is not testable from a store and would mean shipping the
+                            PolyForm engine inside an MIT package. References Contracts ONLY: no test
+                            framework, no domain library, so it runs from any harness. Versioned and
+                            pinned like Contracts.Interop. Run in-repo against the fixture plugin
+                            (PluginConformanceTests), which is what keeps "one package is enough"
+                            tested rather than asserted.
 src/ActiveSync.Eas.Conversion/  HOST-ONLY, never published: the format -> EAS-XML conversion
                             layer. MailConverter / CalendarConverter / ContactConverter /
                             TasksConverter (ApplicationData both ways + the ghosting merge),
@@ -251,6 +276,14 @@ tests/ActiveSync.Core.Tests/       diff engine, sync-key state machine, options 
                                    WebDAV redirect safety) — there is no per-assembly test
                                    project, so Core.Tests references the provider assemblies plus
                                    ActiveSync.Eas.Conversion / .Contracts.Interop and hosts them.
+                                   It also references .Contracts.Conformance and runs it against the
+                                   fixture plugin (PluginConformanceTests), which is both the
+                                   "one package is enough" proof and the kit's own coverage.
+tests/ActiveSync.TestPlugin/       the fixture out-of-repo plugin: a working INotesStore over
+                                   ActiveSync.Contracts + BCL only, loaded from a temp plugins dir by
+                                   PluginLoaderTests. Beside it, tests/PluginPrivateLib stands in for
+                                   a plugin's PRIVATE dependency (the copy the plugin ships must win
+                                   over the host's).
 tests/ActiveSync.Server.Tests/     handler-level tests (has InternalsVisibleTo into Server)
 tests/ActiveSync.WebUi.Tests/      web UI unit tests (key repository, OIDC decision matrix)
 tests/ActiveSync.Integration.Tests/  real-backend E2E tests (see "Integration tests" below)
@@ -267,19 +300,24 @@ never in Core, and no longer in Backends: a store trades in payloads and convert
 The repository is licensed in **two parts**, and the boundary is the same one `IsPackable`
 draws:
 
-- **`ActiveSync.Contracts` + `ActiveSync.Protocol` → MIT** (`LICENSE-MIT`). These are the two
-  published NuGet packages, permissive on purpose so third-party plugins — including
-  commercial ones — can build against them.
+- **`ActiveSync.Contracts` + `ActiveSync.Contracts.Interop` + `ActiveSync.Contracts.Conformance`
+  → MIT** (`LICENSE-MIT`). These are the three published NuGet packages, permissive on purpose
+  so third-party plugins — including commercial ones — can build against them.
 - **Everything else → PolyForm Noncommercial 1.0.0** (`LICENSE`). Source-available, not open
   source: any noncommercial use is permitted, commercial use is not (`COMMERCIAL.md`).
 
-**The invariant that matters: anything moved INTO Contracts or Protocol becomes permanently
+**The invariant that matters: anything moved INTO a published assembly becomes permanently
 permissive.** A published package version can never be un-published — the MIT grant on it is
-irrevocable. So a refactor that relocates gateway logic down into those two assemblies is a
-licensing decision, not just a structural one. Keep them to contract interfaces and protocol
-primitives; converters, the sync engine and anything with commercial value stay above the line.
-(Core, Crypto and Backends.Common were packed up to 1.1.2 and are now host-only — see the
-provider-engine notes.)
+irrevocable. So a refactor that relocates gateway logic down into those assemblies is a
+licensing decision, not just a structural one. Keep them to contract interfaces, format
+ergonomics and test scaffolding; converters, the sync engine and anything with commercial value
+stay above the line.
+
+`ActiveSync.Protocol` is the worked example of both halves of that rule. It was MIT and
+published up to contract 1.7; it is host-only now, so it is PolyForm going forward and no
+longer packed — but every version already on NuGet stays MIT permanently, and no later decision
+can change that. (Core, Crypto and Backends.Common were packed up to 1.1.2 and are host-only in
+the same way — see the provider-engine notes.)
 
 Two mechanical consequences:
 
@@ -701,22 +739,34 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   value never throws on read. Multi-pod: each replica polls its own stamp; no cross-process bus.
 - **Out-of-repo plugins**: `Core/Plugins/PluginLoader` loads assemblies from
   `ActiveSync:Plugins:Directory` (default `/app/plugins`, one subdir per plugin, entry dll
-  = dir name) in a per-plugin non-collectible `AssemblyLoadContext` that resolves the
-  contract (Contracts/Core/Protocol/Backends.*/framework) from the HOST — so a plugin's
-  `IBackendProvider` IS the host type the registry indexes. Each `IGatewayPlugin.Register`
+  = dir name) in a per-plugin non-collectible `AssemblyLoadContext`. Exactly ONE gateway assembly
+  resolves from the HOST — **`ActiveSync.Contracts`, matched by EXACT simple name** — plus the
+  framework and `Microsoft.Extensions.*` (their types are in the contract's own signatures), so a
+  plugin's `IBackendProvider` IS the host type the registry indexes. Everything else, Core /
+  Protocol / Backends.* included, is plugin-local when the plugin ships it. The exact match is
+  load-bearing, not tidiness: a `ActiveSync.` (or even `ActiveSync.Contracts`) PREFIX would also
+  capture `ActiveSync.Contracts.Interop`, which the gateway ships its own copy of, and host-resolve
+  the plugin's copy — binding the HOST's MimeKit/Ical.Net in the default context while the plugin's
+  code binds its private ones, i.e. a type-identity failure at the seam. A plugin using the interop
+  package therefore MUST ship it in its own folder (the inverse of the ship-nothing rule for the
+  contract), and `PluginLoaderTests` pins both halves. Each `IGatewayPlugin.Register`
   adds its providers. Fail-fast (corrupt/incompatible/no-entry aborts startup; empty dir =
   no-op), major-version-gated against **`ActiveSync.Contracts`** (the loader keys the gate off
   `typeof(IGatewayPlugin).Assembly`, which now IS Contracts). Wired in ProgramServer AND
-  CliServices before the container is built. ONLY Contracts + Protocol are packed to NuGet on
-  tagged CI — Core/Crypto/Backends.Common were unpublished and deleted from GitHub Packages
-  (2026-07-25), so a plugin references **ActiveSync.Contracts** alone. Package metadata lives in
+  CliServices before the container is built. Three packages are packed to NuGet on tagged CI —
+  Contracts plus the OPTIONAL Contracts.Interop / Contracts.Conformance; Protocol joined
+  Core/Crypto/Backends.Common as host-only (Protocol at contract 1.7, the others unpublished and
+  deleted from GitHub Packages 2026-07-25), so a plugin references **ActiveSync.Contracts** alone
+  and opts into the other two only if it wants them. Package metadata lives in
   `Directory.Build.targets` gated on `IsPackable` (a .props gate would evaluate too early), so a
-  host-only assembly carries no license/authors at all. See docs/plugins.md (contract NOT
-  ABI-stable pre-2.0).
+  host-only assembly carries no license/authors at all. `tests/ActiveSync.TestPlugin` is the in-repo
+  proof the one package suffices: a real `INotesStore` (Contracts + BCL only), loaded through the
+  loader and run against the published conformance kit in `PluginConformanceTests`. See
+  docs/plugins.md (contract NOT ABI-stable pre-2.0).
 - > ### ⛔ CHANGING THE CONTRACT SURFACE? RAISE `ContractVersionMinor` FIRST.
   >
-  > **If you add, remove, rename or retype ANY public member of `ActiveSync.Contracts` or
-  > `ActiveSync.Protocol`, you MUST raise `<ContractVersionMinor>` in `Directory.Build.props`
+  > **If you add, remove, rename or retype ANY public member of `ActiveSync.Contracts`, you MUST
+  > raise `<ContractVersionMinor>` in `Directory.Build.props`
   > in the same change.** Every out-of-repo plugin declares an exact contract `major.minor` and
   > is refused by the loader on a mismatch, so a changed surface shipped under an unchanged
   > version silently breaks plugins that still claim compatibility.
@@ -725,8 +775,8 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   > asked.** Minor absorbs every breaking change by policy; that is precisely why major stays
   > meaningful.
   >
-  > This is enforced, not merely documented: `ContractSurfaceApprovalTests` snapshots the public
-  > surface of both assemblies and pins its hash per contract version in
+  > This is enforced, not merely documented: `ContractSurfaceApprovalTests` snapshots that
+  > assembly's public surface and pins its hash per contract version in
   > `tests/ActiveSync.Core.Tests/ContractSurface.approved.txt`. Change the surface without a bump
   > and the build fails with instructions. The history block is **append-only** — editing an
   > existing line defeats the guard instead of satisfying it. After a deliberate change:
@@ -734,14 +784,20 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   > `ContractSurfaceTests.ContractVersion_IsTheExpectedSurfaceVersion` → regenerate with
   > `EAS_APPROVE_CONTRACT_SURFACE=1 dotnet test --filter FullyQualifiedName~ContractSurfaceApprovalTests`.
   >
-  > Think twice before moving a type INTO either assembly at all: it also becomes permanently
+  > Think twice before moving a type INTO that assembly at all: it also becomes permanently
   > MIT-licensed (see the Licensing section) and permanently part of the plugin ABI.
+  >
+  > The two OPTIONAL packages (`Contracts.Interop`, `Contracts.Conformance`) are deliberately
+  > OUTSIDE this gate: they are not loader ABI, so a domain-library bump must be free to move
+  > them without moving `$(ContractVersion)` and refusing every plugin for an unrelated reason.
+  > They are still permanently MIT once published.
 - **Contract version ≠ release version — do not conflate them.** `$(ContractVersion)` in
-  `Directory.Build.props` is the single definition, pinned onto Contracts' and Protocol's
+  `Directory.Build.props` is the single definition, pinned onto Contracts'
   `AssemblyVersion`/`FileVersion`/`PackageVersion` so the release tag (which CI passes as a global
-  `-p:Version`) can NEVER reach those two. That separation is load-bearing: if it leaked, tagging
-  the gateway 2.0.0 for a product reason would flip the contract major and refuse every existing
-  plugin without the contract having changed. `ContractVersion.Major/Minor` READ that assembly
+  `-p:Version`) can NEVER reach it. It used to cover Protocol as well; Protocol is host-only now
+  and takes the release version like everything else. That separation is load-bearing: if it
+  leaked, tagging the gateway 2.0.0 for a product reason would flip the contract major and refuse
+  every existing plugin without the contract having changed. `ContractVersion.Major/Minor` READ that assembly
   version (properties, not `const` — a `const` is inlined into the consumer and would report the
   plugin's build-time value while appearing to report the host's), so there is nothing to keep in
   sync by hand. Raise `$(ContractVersion)` ONLY for a real surface change; both major and minor are
@@ -1103,7 +1159,7 @@ banner. Rules:
 
 ## Testing expectations
 
-- **Public-surface changes to `ActiveSync.Contracts`/`ActiveSync.Protocol` → raise
+- **Public-surface changes to `ActiveSync.Contracts` → raise
   `<ContractVersionMinor>` in `Directory.Build.props` and regenerate the approved snapshot**
   (`EAS_APPROVE_CONTRACT_SURFACE=1`). `ContractSurfaceApprovalTests` fails the build otherwise.
   Never raise `<ContractVersionMajor>` unless a human asked — see the callout in the provider-engine

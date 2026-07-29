@@ -7,9 +7,12 @@ ordinary providers registered at startup; an **out-of-repo plugin** is the same 
 shipped as a separate assembly the gateway loads from a directory. Nothing about a plugin
 provider is second-class — config assigns it to a role by name exactly like a built-in.
 
-The in-repo `jmap` provider (`src/ActiveSync.Backends.Jmap`) is the reference for a
-multi-role HTTP backend built on this seam — the pattern you use to add a backend the
-project doesn't ship.
+Two references worth opening beside this page:
+
+- `tests/ActiveSync.TestPlugin` — the smallest COMPLETE plugin: an entry point, a provider and
+  a working `INotesStore`, built against `ActiveSync.Contracts` and nothing else.
+- `src/ActiveSync.Backends.Jmap` — a multi-role HTTP backend (mail, calendar, contacts,
+  submission and out-of-office over one session), for the shape of a real one.
 
 ## The contract
 
@@ -17,16 +20,29 @@ Reference **one** NuGet package (published to GitHub Packages, and nuget.org whe
 configured) — its version is the *contract* version, which moves independently of the
 gateway's release version (see *Versioning* below):
 
-- **`ActiveSync.Contracts`** — the whole plugin contract: `IBackendProvider`,
-  `IContentStore`, `IGatewayPlugin`, the roles, provider settings and config schema. It is a
-  tiny assembly that pulls in only `ActiveSync.Protocol` (EAS constants) and the
-  Microsoft.Extensions config/DI abstractions — **not** Core, Crypto or EF Core.
+- **`ActiveSync.Contracts`** — the whole plugin contract: `IBackendProvider`, the content
+  stores, `IGatewayPlugin`, the roles, provider settings and the config schema. It depends on
+  the Microsoft.Extensions configuration/DI abstractions and nothing else — no Core, no
+  Crypto, no EF Core, and no MIME/iCalendar/vCard library.
 
-That is the entire published surface — `ActiveSync.Contracts` plus the `ActiveSync.Protocol`
-it pulls in. The gateway's other assemblies (`ActiveSync.Core`, `ActiveSync.Crypto`,
-`ActiveSync.Backends.Common`) are host implementation detail and are **not** published, so a
-plugin brings its own MIME/iCalendar/vCard handling and its own sealing if it needs them.
-They were packed up to 1.1.2 and withdrawn; nothing replaces them.
+That is the entire required surface. `ActiveSync.Protocol` used to be published beside it and
+is **not** any more: no EAS wire encoding crosses the store boundary, so there is nothing in it
+for a plugin to reference. The gateway's other assemblies (`ActiveSync.Core`,
+`ActiveSync.Crypto`, `ActiveSync.Backends.Common`, `ActiveSync.Eas.Conversion`) are host
+implementation detail and are not published either.
+
+Two **optional** packages sit beside the contract. Neither is needed to write a plugin:
+
+| Package | What it gives you |
+|---|---|
+| `ActiveSync.Contracts.Interop` | Converts the payload records to and from MimeKit / Ical.Net / FolkerKinzel.VCards, plus sample payload builders for tests. Opting in pulls those three libraries. |
+| `ActiveSync.Contracts.Conformance` | Runs your store against the obligations this page states in prose and returns a report. References only `ActiveSync.Contracts` — no test framework, no domain library. |
+
+Both track the **gateway release version** rather than the contract version, and each pins the
+contract it was built against as an exact dependency (`[1.8.0]`). Pick the release that shipped
+your contract version and the versions line up by construction. Neither is part of the
+loader's compatibility gate, so a MimeKit or Ical.Net major bump can move them without refusing
+a single plugin.
 
 A plugin assembly contains:
 
@@ -37,6 +53,8 @@ A plugin assembly contains:
 using ActiveSync.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+
+[assembly: SupportedGatewayContract(1, 8)]   // see Versioning; mandatory
 
 public sealed class MyPlugin : IGatewayPlugin
 {
@@ -66,8 +84,8 @@ public sealed class MyNotesProvider : IBackendProvider
 
     public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct)
     {
-        // Build one IContentStore per content role assigned to you, over one connection.
-        // context.GatewayCredentials is the IDENTITY (DB scoping, cache keys); each role's
+        // Build one content store per content role assigned to you, over one connection.
+        // context.GatewayUserId is the IDENTITY (DB scoping, durable keys); each role's
         // Credentials are what to present to the backend. Async so you can open a transport
         // (a TCP/TLS connect, an auth round-trip) here; return Task.FromResult if you don't need to.
         MyOptions options = context.Roles[0].Settings.Bind<MyOptions>();
@@ -77,30 +95,142 @@ public sealed class MyNotesProvider : IBackendProvider
 }
 ```
 
-Key rules:
+## What a store trades in
 
-- **`Name`** is the discriminator config uses (`"Provider": "my-notes"`). It must be
-  unique across all providers — a collision fails startup.
-- **Bind your own options** from `ProviderSettings` inside your provider. The host passes
-  the raw role section through; it deliberately cannot see your option type. That is what
-  lets a plugin carry configuration the host was never compiled against.
-- **`IContentStore.OwnsBackendKey`** must claim a key space disjoint from every other
-  store in a session (the built-ins use `imap:`, `caldav:`, `carddav:`, `local:` — pick
-  your own prefix). The session dispatches folder/item keys to the first store that
-  claims them.
-- **Optional capabilities** are extra interfaces a store/provider may also implement:
-  `IItemMoveOperations` (MoveItems — a store that cannot move an item simply omits it, and
-  the command answers "move failed"), `IFolderOperations` (client folder create/rename/delete —
-  omit it and those commands answer "not permitted"), `ICalendarOperations`, `IFreeBusySource`,
-  `ICalendarAttachmentSource`, `IContactOperations`, `IReadOnlyCollectionSource` (on stores);
-  `ICredentialVerifier` (verify a login for the auth path — required if your provider serves
-  `MailStore` for pass-through users), `IPerUserResourceOwner` (trim per-user caches on session
-  eviction), `IReadinessSource` (a `/readyz` probe). `IContentStore` itself is only the item CRUD
-  plus folder listing and the change wait — everything else is a capability you opt into. Implement
-  only what applies.
-- **The gateway login is the identity** — DB row scoping, the local-content encryption
-  AAD, and session/cache keys all derive from `context.GatewayCredentials.UserName`, never
-  a per-backend user name.
+**No EAS XML crosses the store boundary.** A store hands over the payload in a standard
+interchange format, or a typed record where no standard exists, and the host does every EAS
+conversion itself:
+
+| Class | Store interface | Payload |
+|---|---|---|
+| Mail | `IMailStore` | `MailItem` — raw RFC822 bytes plus `MailFlags`, categories, the backend's received timestamp |
+| Calendar | `ICalendarStore` | `CalendarItem` — an iCalendar `VEVENT` document |
+| Tasks | `ITaskStore` | `TaskItem` — an iCalendar `VTODO` document |
+| Contacts | `IContactStore` | `ContactItem` — a vCard document |
+| Notes | `INotesStore` | `NoteItem` — typed (subject, body, categories): there is no accepted notes standard, and notes should be the easiest plugin to write |
+
+A store implements **exactly one** of those five. The host derives the store's content class
+from which one it implements — implement two, or none, and the session build rejects it.
+
+Consequences worth stating plainly, because they remove work rather than add it:
+
+- **You never see a partial update.** EAS 16.x sends only changed elements, but the host reads
+  the current payload, merges the client's partial data onto it, and hands you a COMPLETE
+  payload. There is no ghosting to model, no "was this field sent or cleared?" question.
+- **You never truncate.** Body preferences are an EAS presentation concern applied host-side.
+  Return the whole thing.
+- **What you store is what you return.** The contract carries the payload precisely so
+  properties EAS cannot express survive an edit. Store the document you are given.
+- **Buffer ownership**: memory crossing the boundary in either direction must stay valid and
+  unchanged indefinitely — the host caches payloads. If you pool buffers, copy before returning.
+
+The four payload classes share one generic shape:
+
+```csharp
+public interface IContentStore<TItem> : IContentStore where TItem : class
+{
+    Task<TItem?> GetItemAsync(FolderKey folder, ItemKey item, CancellationToken ct);
+    Task<IReadOnlyDictionary<ItemKey, TItem?>> GetItemsAsync(               // default impl loops the above
+        FolderKey folder, IReadOnlyList<ItemKey> items, CancellationToken ct);
+    Task<(ItemKey Key, ItemRevision Revision)> CreateItemAsync(
+        FolderKey folder, TItem item, CancellationToken ct);
+    Task<ItemRevision> UpdateItemAsync(
+        FolderKey folder, ItemKey item, TItem value, ItemRevision? expected, CancellationToken ct);
+}
+```
+
+**Mail is deliberately not that shape.** Its everyday write is a flags/categories patch that
+never rewrites the message, and its only content write — the 16.x draft rewrite — can change
+the item key (IMAP does it as delete + append). So `IMailStore` carries `UpdateFlagsAsync`
+(taking a `MailFlagsPatch`, whose `Optional<T>` fields carry "the client sent this" on the
+value), plus `CreateDraftAsync` and `ReplaceDraftAsync`, whose return value may report a moved
+key.
+
+### Keys, revisions and the diff
+
+`FolderKey`, `ItemKey` and `ItemRevision` are single-value wrappers over a string, opaque to
+the host. The rules behind them are what the sync engine depends on:
+
+- **`OwnsKey(FolderKey)`** must claim a key space disjoint from every other store in a session
+  (the built-ins use `imap:`, `caldav:`, `caldav-tasks:`, `carddav:`, `local:` — pick your own
+  prefix). The session dispatches to the first store that claims a key.
+- **`GetItemRevisionsAsync` enumerates the WHOLE collection.** The engine diffs that map
+  against its snapshot, so an item missing from the map reads as a deletion. There is no
+  incremental-delta path in the contract; a state token is only ever a change *sentinel* for
+  the wait.
+- **A revision must be stable while the item is unchanged**, and must change when it changes.
+  Anything else re-sends every item to every device on every sync round. It is otherwise
+  entirely yours: an ETag, a flags hash, a row version.
+- **`null` from a fetch means "not fetched", never "gone"**: the engine skips the item and
+  does NOT advance its snapshot, so it retries next round. That is what makes a transient
+  backend failure cost one item and one round rather than a lost message.
+- **`expected` on an update is an upgrade, not an obligation.** A store that can check it
+  (DAV `If-Match`, JMAP `ifInState`, a row version) throws
+  `BackendPreconditionFailedException` on a mismatch and the host re-fetches, re-merges and
+  retries once. A store that cannot check it ignores the parameter and writes. Both conform.
+
+### Optional capabilities
+
+Capabilities are extra interfaces your store or provider may also implement; the host
+`is`-tests for them. Implement only what applies — the command answers gracefully when you do
+not.
+
+On a **store**: `IItemMoveOperations` (MoveItems), `IFolderOperations` (client folder
+create/rename/delete), `IFreeBusySource` (availability — `null` means "no data", an empty list
+means "free"), `ICalendarAttachmentSource` (inline event attachments, indexed by position among
+the payload's own `ATTACH` properties), `IReadOnlyCollectionSource` (shared collections the
+engine silently reverts writes to).
+
+On a **provider**: `ICredentialVerifier` (the auth probe — required if you serve `MailStore`
+for pass-through logins), `IPerUserResourceOwner` (trim per-user caches on session eviction),
+`IReadinessSource` (a `/readyz` probe), `IWatcherDiagnostics` (live push watchers for the admin
+dashboard).
+
+Beside the stores, a connection may expose the side operations: `IMailboxOperations` (empty
+folder, save to Sent, mark answered, fetch a raw message, search), `IMailSubmitOperations`
+(send RFC822), `IMeetingOperations` (respond to a meeting; whether the backend already sends
+invitations itself), `IDirectoryOperations` (GAL search, returning typed `GalEntry` records
+whose photo result carries a status rather than a bare nullable) and `IOofBackend`.
+
+### Key rules
+
+- **`Name`** is the discriminator config uses (`"Provider": "my-notes"`). It must be unique
+  across all providers — a collision fails startup.
+- **Bind your own options** from `ProviderSettings` inside your provider. The host passes the
+  raw role section through; it deliberately cannot see your option type. That is what lets a
+  plugin carry configuration the host was never compiled against.
+- **The identity is `context.GatewayUserId`** — an immutable, never-reused integer. Every
+  durable per-user thing the gateway keys on derives from it. The gateway *login* is a mutable
+  attribute (renaming it leaves sync state attached), so never use it, or a per-backend user
+  name, as a durable key. It is the right key only for ephemeral credential-bearing caches.
+- **Throw `BackendException`** (or your own subclass of it) for backend failures, and
+  `BackendItemNotFoundException` when the object is gone. The host funnels those; anything else
+  reads as a bug.
+
+## Testing your store
+
+`ActiveSync.Contracts.Conformance` exercises the obligations above — the ones the type system
+cannot state — and returns a report you can assert on from any test framework:
+
+```csharp
+ConformanceReport report = await StoreConformance.RunAsync(store, new ConformanceOptions
+{
+    Folder = new FolderKey("my-notes:default"),   // null = the first folder the store lists
+    AllowMutation = true                          // it creates, updates and deletes one item
+});
+
+Assert.True(report.Passed, report.ToString());
+```
+
+It checks folder listing and key-space disjointness, revision stability across unchanged
+enumerations, create-then-list visibility, the batch fetch's `null` semantics, update and
+delete semantics, the wait timeout, payload round-trip fidelity, and the update precondition
+where you implement it. A check that does not apply is reported as **Skipped**, which is not a
+failure: the contract has genuine "a store that cannot do this still conforms" clauses.
+
+What it deliberately does not cover is engine behaviour — SyncKey replay, windowing, echo
+suppression. Those belong to the gateway, not to your store; you can neither pass nor fail
+them.
 
 ## Configuration
 
@@ -177,15 +307,27 @@ any private dependencies beside it.
 ```
 /app/plugins/
   my-notes/
-    my-notes.dll          <- entry assembly (matches the directory name)
-    SomePrivateDep.dll     <- private dependencies, if any
+    my-notes.dll                        <- entry assembly (matches the directory name)
+    ActiveSync.Contracts.Interop.dll    <- SHIP this one if you use it (see below)
+    MimeKit.dll                         <- and the libraries it needs
+    SomePrivateDep.dll                  <- your other private dependencies
 ```
 
-Do **not** ship copies of `ActiveSync.Contracts`/`ActiveSync.Protocol` or the framework
-in your plugin directory — the loader resolves those from the host so your types unify
-with the gateway's (a private copy would make `IBackendProvider` a different type and the
-provider would be ignored). Mark those package references `<Private>false</Private>` (or
-`ExcludeAssets="runtime"`).
+Do **not** ship a copy of `ActiveSync.Contracts` or the framework — the loader resolves those
+from the host so your types unify with the gateway's (a private copy would make
+`IBackendProvider` a different type and the provider would be ignored). Mark that package
+reference `<Private>false</Private>` (or `ExcludeAssets="runtime"`).
+
+**`ActiveSync.Contracts.Interop` inverts that rule: ship it.** It is an ordinary private
+dependency despite the name — the loader shares the contract assembly by exact name, not by
+prefix, precisely so your copy of the interop package wins. If the host's copy were used
+instead, it would bind the *host's* MimeKit and Ical.Net while your code binds yours, and
+passing a `MimeMessage` across that line fails on type identity. The same goes for
+`ActiveSync.Contracts.Conformance`, though that one normally lives in your test project rather
+than your plugin folder.
+
+Prefer `dotnet publish` for the plugin folder, so your dependencies actually travel with it. A
+plugin built against MimeKit 4.17 that ships no copy silently binds to whatever the host has.
 
 Two ways to get the directory populated:
 
@@ -204,18 +346,21 @@ both as-is; a plugin with a native dependency must ship both RIDs.
 
 ## Loading behavior
 
-- Each plugin loads in its own `AssemblyLoadContext`. The shared assemblies — anything named
-  `ActiveSync.*`, plus `System.*`/`Microsoft.Extensions.*` and the framework — always resolve
-  from the **host**, because their types appear in the contract's own signatures and a private
-  copy would make `IBackendProvider` a different type. **Everything else resolves from your
-  plugin folder first**, so a library you pinned is the one you get even when the gateway ships
-  a different version of it; if the folder does not have it, the host's copy is the fallback.
-  Both a `dotnet publish` layout (with `.deps.json`) and a hand-assembled drop of DLLs work.
+- Each plugin loads in its own `AssemblyLoadContext`. Exactly one gateway assembly is shared
+  with the host — **`ActiveSync.Contracts`**, matched by exact name — along with the framework
+  and `Microsoft.Extensions.*`, because those types appear in the contract's own signatures.
+  **Everything else resolves from your plugin folder first**, so a library you pinned is the one
+  you get even when the gateway ships a different version of it; if the folder does not have it,
+  the host's copy is the fallback. Both a `dotnet publish` layout (with `.deps.json`) and a
+  hand-assembled drop of DLLs work.
 - Loading is **fail-fast**: a corrupt/incompatible plugin, a subdirectory whose entry
   assembly is missing, or an assembly with no public `IGatewayPlugin` aborts startup rather
   than silently degrading a role that config assigned to it. An absent or empty plugins
   directory is a no-op, and directories whose name starts with `.` are ignored (so a
   Kubernetes projected volume's `..data` is not mistaken for a half-copied plugin).
+- Every assembly in the folder is checked against the host's contract version, not just the
+  entry one — so a bundled helper built against a different contract is refused at startup
+  instead of failing deep inside a sync.
 - Each loaded provider appears on the startup banner via its role line.
 
 ### The load context is not a sandbox
@@ -254,13 +399,13 @@ loaded.
 
 ## Versioning
 
-The backend contract is **not ABI-stable before 2.0** — `IContentStore` and friends still
+The backend contract is **not ABI-stable before 2.0** — the stores and their neighbours still
 evolve with new EAS features.
 
 **Declare the contract you support.** Every plugin entry assembly must carry:
 
 ```csharp
-[assembly: SupportedGatewayContract(1, 2)] // must equal ActiveSync.Contracts.ContractVersion.Major/Minor
+[assembly: SupportedGatewayContract(1, 8)] // must equal ActiveSync.Contracts.ContractVersion.Major/Minor
 ```
 
 The loader reads that declaration from metadata *before loading anything* and refuses the
@@ -269,16 +414,22 @@ purpose: your plugin's own version is your business (a plugin at 3.7.2 may suppo
 1.0), and the package version you happened to compile against says nothing about which
 contract you actually verified against. Only you know that.
 
-**Both components are breaking.** Major *and* minor must match — a plugin declaring 1.0 will
-not load on a 1.1 host. That is deliberate while the contract is pre-2.0: it lets an
+**Both components are breaking.** Major *and* minor must match — a plugin declaring 1.7 will
+not load on a 1.8 host. That is deliberate while the contract is pre-2.0: it lets an
 incompatible change ship as a minor bump instead of inflating the major into a meaningless
 counter. The patch component is not part of the declaration and never gates anything.
 
-**The contract version is not the gateway version.** It moves only when the contract surface
-changes, so it stays put across ordinary gateway releases — a gateway released as 1.5.0, or
-even 2.0.0, still runs a plugin declaring contract 1.0, as long as the surface itself did not
-change. Track the contract, not the release. You can read the host's value at runtime as
+**The contract version is not the gateway version.** It is the version of
+`ActiveSync.Contracts` alone, and it moves only when that surface changes, so it stays put
+across ordinary gateway releases — a gateway released as 1.5.0, or even 2.0.0, still runs a
+plugin declaring contract 1.0, as long as the surface itself did not change. Track the
+contract, not the release. You can read the host's value at runtime as
 `ActiveSync.Contracts.ContractVersion.Current` (`Major.Minor`).
+
+The optional packages are the other way round: they carry the release version and pin their
+contract exactly, so `ActiveSync.Contracts.Interop 1.6.0` depends on `[1.8.0]` of the contract
+and simply will not restore beside a different one. That is intentional — a floor range would
+promise a compatibility that contract minors do not have.
 
 When the contract does move, rebuild against the new package and update your declaration; the
 loader's error message names both versions.

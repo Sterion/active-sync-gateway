@@ -1,27 +1,27 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-	<!-- Published so out-of-repo plugins compile against the EAS/WBXML contract. Licensed MIT
-	     (see LICENSE-MIT) — one of only two projects that are; the rest of the repository is
-	     PolyForm Noncommercial. Anything moved INTO this assembly becomes permanently
-	     permissive, so keep it to protocol primitives. -->
-	<!-- Versioned by the CONTRACT alongside ActiveSync.Contracts, not by the gateway release —
-	     set explicitly so a global -p:Version=<tag> cannot reach them. See Directory.Build.props. -->
-	<PropertyGroup>
-		<AssemblyVersion>$(ContractVersion).0</AssemblyVersion>
-		<FileVersion>$(ContractVersion).0</FileVersion>
-		<PackageVersion>$(ContractVersion)</PackageVersion>
-		<InformationalVersion>$(ContractVersion)</InformationalVersion>
-	</PropertyGroup>
+	<!-- HOST-ONLY. This assembly used to be published beside ActiveSync.Contracts because the
+	     contract's own signatures named EAS constants from it; under the typed plugin contract no
+	     EAS wire encoding crosses the store boundary at all, so a plugin has nothing to reference
+	     here — 81% of the assembly (WBXML, the MS-ASHTTP query parser, the diff engine, EasVersion)
+	     was never usable by a plugin in the first place.
 
+	     Two consequences of stopping the publication, both deliberate:
+
+	     - LICENSING. New work here is PolyForm Noncommercial like the rest of the gateway (see
+	       LICENSE), not MIT. The versions ALREADY PUBLISHED to NuGet stay MIT forever — an
+	       irrevocable grant on the bytes that shipped — which is exactly why moving a type INTO a
+	       published assembly is a licensing decision. LICENSE-MIT records the cut-off.
+	     - VERSIONING. It rejoins the ordinary release-version flow: no version properties here, so
+	       the global -p:Version=<tag> CI passes reaches it like every other host assembly. Only
+	       ActiveSync.Contracts opts out, by pinning $(ContractVersion) explicitly. -->
 	<PropertyGroup>
-		<IsPackable>true</IsPackable>
-		<!-- Ship the XML docs — see the matching comment in ActiveSync.Contracts.csproj for why
-		     this cannot live with the other package-scoped properties in Directory.Build.targets.
-		     CS1591/CS1573 are live here against a 0-warning baseline: a new undocumented public
-		     member FAILS the build. Document it; never suppress it. -->
+		<!-- Kept ON although nothing is packed: CS1591/CS1573 are live here against a 0-warning
+		     baseline, so a new undocumented public member FAILS the build. That discipline is worth
+		     keeping on a protocol layer transcribed from the MS-AS* specs, where the comment
+		     explaining WHICH spec paragraph a table came from is the valuable part. Document it;
+		     never suppress it. -->
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
-		<PackageId>ActiveSync.Protocol</PackageId>
-		<Description>ActiveSync Gateway — EAS/WBXML protocol primitives (code pages, constants, query parser). Reference this to build a gateway backend plugin.</Description>
 	</PropertyGroup>
 
 </Project>

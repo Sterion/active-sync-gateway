@@ -1,18 +1,40 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<!--
-	  OPTIONAL ergonomics beside the plugin contract: the load/serialize quirk handling both
-	  halves of the seam need when they touch an interchange payload. It carries the domain
-	  libraries (today Ical.Net) so ActiveSync.Contracts itself never has to — a plugin that
-	  only implements INotesStore references the contract alone and inherits nothing.
-	  Deliberately NOT referenced by ActiveSync.Contracts, and deliberately not loader ABI: a
-	  domain-library major bump moves this assembly and leaves the contract version still.
-	  Publishing (IsPackable, the release-tag version, the exact Contracts pin) is the packaging
-	  phase's line item; for now it is an in-repo assembly consumed by the host's conversion
-	  layer and by Backends.Common/Backends.Local.
+	  OPTIONAL ergonomics beside the plugin contract: the load/serialize quirk handling both halves
+	  of the seam need when they touch an interchange payload, plus the extension methods that turn
+	  a contract payload into the object model of the library a plugin already uses (MimeKit,
+	  Ical.Net, FolkerKinzel.VCards) and back. It carries those libraries so ActiveSync.Contracts
+	  itself never has to — a plugin that only implements INotesStore references the contract alone
+	  and inherits nothing.
+
+	  Deliberately NOT referenced by ActiveSync.Contracts, and deliberately NOT loader ABI: a
+	  domain-library major bump moves this assembly and leaves the contract version still, so no
+	  plugin is ever refused by the loader for a reason unrelated to the contract. That is also why
+	  it is excluded from the contract-surface approval snapshot.
+
+	  A plugin using this package MUST ship it in its own plugin folder beside its private
+	  MimeKit/Ical.Net/FolkerKinzel copies — the inverse of the rule for ActiveSync.Contracts, which
+	  must always come from the host. See docs/plugins.md.
 	-->
 	<PropertyGroup>
 		<RootNamespace>ActiveSync.Contracts.Interop</RootNamespace>
+	</PropertyGroup>
+
+	<!-- NO version properties, unlike ActiveSync.Contracts: this package takes the gateway RELEASE
+	     version from the global -p:Version=<tag> CI passes (the SDK falls back to $(Version) for any
+	     version property a project leaves empty). That is what makes it self-documenting — package
+	     versions are centralised in Directory.Packages.props, so interop X.Y.Z carries exactly the
+	     MimeKit / Ical.Net / FolkerKinzel.VCards versions gateway X.Y.Z was built against. The
+	     accepted cost is a republish on every tag even when nothing here changed. -->
+	<PropertyGroup>
+		<IsPackable>true</IsPackable>
+		<!-- Ship the XML docs; see ActiveSync.Contracts.csproj for why this cannot live with the
+		     other package-scoped properties in Directory.Build.targets. CS1591/CS1573 are live here
+		     against a 0-warning baseline. -->
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<PackageId>ActiveSync.Contracts.Interop</PackageId>
+		<Description>ActiveSync Gateway — optional ergonomics for backend plugins: convert the contract's payload records (MailItem, CalendarItem, TaskItem, ContactItem) to and from MimeKit, Ical.Net and FolkerKinzel.VCards, plus sample payload builders for tests. Not required to write a plugin; ActiveSync.Contracts alone is.</Description>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -21,6 +43,23 @@
 
 	<ItemGroup>
 		<PackageReference Include="Ical.Net" />
+		<PackageReference Include="MimeKit" />
+		<PackageReference Include="FolkerKinzel.VCards" />
 	</ItemGroup>
+
+	<!-- The dependency on ActiveSync.Contracts must be an EXACT range, [X.Y.Z], not NuGet's default
+	     floor [X.Y.Z, ). Contract MINOR is breaking by policy, so "any Contracts >= 1.8.0" is a
+	     false promise: a plugin could resolve this package beside a later contract whose surface
+	     legitimately changed and fail at runtime INSIDE a helper, with a MissingMethodException the
+	     loader's own gate never saw. An exact range turns that into a restore-time error.
+	     _ProjectReferencesWithVersions is the item NuGet's pack task reads the dependency version
+	     from; rewriting ProjectVersion after it is populated is the supported seam. -->
+	<Target Name="PinContractsDependencyToAnExactVersion" AfterTargets="_GetProjectReferenceVersions">
+		<ItemGroup>
+			<_ProjectReferencesWithVersions Condition="'%(Filename)' == 'ActiveSync.Contracts'">
+				<ProjectVersion>[$(ContractVersion)]</ProjectVersion>
+			</_ProjectReferencesWithVersions>
+		</ItemGroup>
+	</Target>
 
 </Project>

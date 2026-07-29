@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Ruben Andersen
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 
 using System.Globalization;
 using ActiveSync.Protocol.Wbxml;

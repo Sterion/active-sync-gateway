@@ -9,6 +9,7 @@
 		<Project Path="src/ActiveSync.Backends.Smtp/ActiveSync.Backends.Smtp.csproj" />
 		<Project Path="src/ActiveSync.Cli/ActiveSync.Cli.csproj" />
 		<Project Path="src/ActiveSync.Contracts/ActiveSync.Contracts.csproj" />
+		<Project Path="src/ActiveSync.Contracts.Conformance/ActiveSync.Contracts.Conformance.csproj" />
 		<Project Path="src/ActiveSync.Contracts.Interop/ActiveSync.Contracts.Interop.csproj" />
 		<Project Path="src/ActiveSync.Core/ActiveSync.Core.csproj" />
 		<Project Path="src/ActiveSync.Crypto/ActiveSync.Crypto.csproj" />

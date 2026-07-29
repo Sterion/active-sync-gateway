@@ -45,8 +45,11 @@ internal sealed class InternalTestBackendProvider : IBackendProvider
 }
 
 /// <summary>
-///   A do-nothing provider named "testplugin" supporting the Notes role. CreateConnection is
-///   never exercised by the loader tests — they only assert registration and type identity.
+///   A WORKING provider named "testplugin" serving the Notes role over
+///   <see cref="TestNotesStore" />. It used to throw from <c>CreateConnectionAsync</c>, which made
+///   the fixture prove only that a plugin can register — never that one can actually sync. The
+///   conformance kit runs against the store this returns, so "ActiveSync.Contracts alone is enough
+///   to write a backend" is tested rather than asserted.
 /// </summary>
 public sealed class TestBackendProvider : IBackendProvider
 {
@@ -63,6 +66,8 @@ public sealed class TestBackendProvider : IBackendProvider
 	public string DescribeRole(BackendRole role, ProviderSettings settings) =>
 		$"test plugin provider (dep: {PluginPrivateLib.PrivateDependency.LoadedFrom})";
 
+	// One store per account connection, held by the connection and disposed with it — the shape
+	// every in-repo provider uses. Nothing here needs a transport, so there is nothing to await.
 	public Task<IBackendConnection> CreateConnectionAsync(BackendConnectionContext context, CancellationToken ct) =>
-		throw new NotSupportedException("The test plugin provider does not open connections.");
+		Task.FromResult<IBackendConnection>(new BackendConnection([new TestNotesStore()]));
 }
