@@ -45,11 +45,11 @@ public sealed class PortalMergedViewTests
 		JsonElement meta = await host.ReadJsonAsync(await client.GetAsync("/user/api/backends/meta"));
 		string[] names = [.. meta.GetProperty("Calendar").GetProperty("fields").EnumerateArray()
 			.Select(f => f.GetProperty("name").GetString()!)];
-		Assert.Contains("CalendarAttachments", names);
+		Assert.Contains("SendInvitations", names);
 
 		HttpResponseMessage response = await client.PutAsJsonAsync("/user/api/backends/Calendar", new
 		{
-			settings = new Dictionary<string, string?> { ["CalendarAttachments"] = "Off" },
+			settings = new Dictionary<string, string?> { ["SendInvitations"] = "Off" },
 		});
 		Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 	}
@@ -76,7 +76,7 @@ public sealed class PortalMergedViewTests
 					Settings = new Dictionary<string, string?>
 					{
 						["BaseUrl"] = "https://dav.example.com",
-						["CalendarAttachments"] = "Auto",
+						["SendInvitations"] = "Auto",
 					},
 				},
 			},
@@ -87,14 +87,14 @@ public sealed class PortalMergedViewTests
 		HttpResponseMessage response = await client.PutAsJsonAsync("/user/api/backends/Calendar", new
 		{
 			userName = "bob.dav.default",
-			settings = new Dictionary<string, string?> { ["CalendarAttachments"] = "Auto" },
+			settings = new Dictionary<string, string?> { ["SendInvitations"] = "Auto" },
 		});
 		Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
 		UserOptions? stored = await new UserStore(host.Factory).GetAsync("bob", CancellationToken.None);
 		BackendRoleOverride? role = stored?.Backends?.GetValueOrDefault("Calendar");
 		Assert.Null(role?.UserName);
-		Assert.Null(role?.Settings?.GetValueOrDefault("CalendarAttachments"));
+		Assert.Null(role?.Settings?.GetValueOrDefault("SendInvitations"));
 	}
 
 	[Fact]

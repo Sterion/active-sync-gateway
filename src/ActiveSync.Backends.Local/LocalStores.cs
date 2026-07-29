@@ -52,7 +52,7 @@ public sealed class LocalContactStore(
 				continue;
 			}
 
-			GalEntry? gal = ContactConverter.BuildGalEntry(
+			GalEntry? gal = ContactPayload.BuildGalEntry(
 				vcf, query, photos is not null, photos?.MaxSizeBytes,
 				photosGranted >= (photos?.MaxCount ?? int.MaxValue), out bool granted);
 			if (gal is null)
@@ -86,7 +86,7 @@ public sealed class LocalContactStore(
 	{
 		try
 		{
-			return ContactConverter.ExtractUid(content);
+			return ContactPayload.ExtractUid(content);
 		}
 		catch (Exception)
 		{
@@ -129,7 +129,7 @@ public sealed class LocalCalendarStore(
 			string plain = Protector.Unprotect(row.Content, UserId, Collection);
 			// partStatIdentity = mail address ?? gateway login; the row scope and encryption AAD
 			// above stay on the gateway UserId.
-			string? updated = CalendarConverter.SetPartStat(plain, (int)response, partStatIdentity);
+			string? updated = CalendarPayload.SetPartStat(plain, (int)response, partStatIdentity);
 			if (updated is null)
 				return new ItemKey(row.Id.ToString());
 
@@ -177,7 +177,7 @@ public sealed class LocalCalendarStore(
 	{
 		try
 		{
-			return CalendarConverter.ExtractUid(content);
+			return CalendarPayload.ExtractUid(content);
 		}
 		catch (Exception)
 		{
@@ -194,7 +194,7 @@ public sealed class LocalCalendarStore(
 		if (row is null)
 			return null;
 		string ics = Protector.Unprotect(row.Content, UserId, Collection);
-		return CalendarConverter.ExtractAttachment(ics, index);
+		return CalendarPayload.ExtractAttachment(ics, index);
 	}
 
 	/// <summary>
@@ -225,7 +225,7 @@ public sealed class LocalCalendarStore(
 				logger.LogWarning(ex, "Skipping an undecryptable calendar row during free/busy for user {UserId}", UserId);
 			}
 
-		return CalendarConverter.BusyPeriodsFromEvents(plaintext, start.UtcDateTime, end.UtcDateTime);
+		return CalendarPayload.BusyPeriodsFromEvents(plaintext, start.UtcDateTime, end.UtcDateTime);
 	}
 
 	protected override DateTime? ExtractItemDate(string content)
@@ -285,7 +285,7 @@ public sealed class LocalTaskStore(
 	{
 		try
 		{
-			return TasksConverter.ExtractUid(content);
+			return TaskPayload.ExtractUid(content);
 		}
 		catch (Exception)
 		{

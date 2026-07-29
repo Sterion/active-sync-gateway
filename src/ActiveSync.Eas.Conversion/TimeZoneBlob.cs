@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace ActiveSync.Backends.Common.Converters;
+namespace ActiveSync.Eas.Conversion;
 
 /// <summary>
 ///   Builds the EAS TIME_ZONE_INFORMATION blob (MS-ASTZ): a 172-byte little-endian structure

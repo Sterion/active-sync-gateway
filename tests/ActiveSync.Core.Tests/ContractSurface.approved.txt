@@ -7,7 +7,7 @@
 # The history below is APPEND-ONLY: each line pins the surface a contract version
 # shipped with. Editing an existing line defeats the guard that a surface change
 # must come with a version bump.
-# Current contract version: 1.6
+# Current contract version: 1.7
 
 === VERSION HISTORY (append-only) ===
 1.0  6985799512ffa341b07b1eb951c0bf0e4975c4c14a1541db6c341ac23f9abddd
@@ -17,6 +17,7 @@
 1.4  be9ee060f4263f4a1605db4910094e3454282e7728b97707334956e798d598ed
 1.5  ff55dd25edac51cf1bacb539b9f38db760256faef29bbb6d2933920c3e7cec27
 1.6  77dbad75d37005e7c7ec1b9dbed5011767651e64a61e2be1e24ae25742eea8e1
+1.7  f7edd9c8a65c7e3d5eaebfe0cc19775151b7b7b8b5da95ab61feb10d5786aaae
 
 === SURFACE ===
 assembly ActiveSync.Contracts
@@ -585,7 +586,7 @@ assembly ActiveSync.Protocol
     method System.Boolean op_Inequality(ActiveSync.Protocol.Sync.CollectionChanges left, ActiveSync.Protocol.Sync.CollectionChanges right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.6.0.0, Culture=neutral, PublicKeyToken=null]]& Adds, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.6.0.0, Culture=neutral, PublicKeyToken=null]]& Changes, System.Collections.Generic.IReadOnlyList`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& Deletes, System.Boolean& MoreAvailable, System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& NewSnapshot)
+    method System.Void Deconstruct(System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.7.0.0, Culture=neutral, PublicKeyToken=null]]& Adds, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.7.0.0, Culture=neutral, PublicKeyToken=null]]& Changes, System.Collections.Generic.IReadOnlyList`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& Deletes, System.Boolean& MoreAvailable, System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& NewSnapshot)
     property System.Boolean MoreAvailable { get;set; }
     property System.Collections.Generic.Dictionary<System.String, System.String> NewSnapshot { get;set; }
     property System.Collections.Generic.IReadOnlyList<ActiveSync.Protocol.Sync.ItemChange> Adds { get;set; }

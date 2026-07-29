@@ -1,12 +1,13 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
+using ActiveSync.Contracts.Interop;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using Ical.Net;
 using Ical.Net.CalendarComponents;
 using Ical.Net.DataTypes;
 
-namespace ActiveSync.Backends.Common.Converters;
+namespace ActiveSync.Eas.Conversion;
 
 /// <summary>
 ///   iCalendar VTODO ↔ EAS Tasks-class ApplicationData (MS-ASTASK). Recurrence maps both
@@ -20,11 +21,6 @@ public static class TasksConverter
 {
 	private static readonly XNamespace Tasks = EasNamespaces.Tasks;
 	private static readonly XNamespace AirSyncBase = EasNamespaces.AirSyncBase;
-
-	public static string? ExtractUid(string ics)
-	{
-		return Calendar.Load(ics)?.Todos.FirstOrDefault()?.Uid;
-	}
 
 	public static List<XElement>? ToApplicationData(string ics, BodyPreference bodyPreference)
 	{

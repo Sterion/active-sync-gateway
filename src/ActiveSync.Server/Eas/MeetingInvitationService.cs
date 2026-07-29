@@ -1,6 +1,6 @@
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Eas.Conversion;
 using MimeKit;
 
 namespace ActiveSync.Server.Eas;

@@ -1,6 +1,6 @@
 using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Core.State;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol;
 using ActiveSync.Server.Eas.Content;
 

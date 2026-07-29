@@ -2,6 +2,7 @@ using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol.Wbxml;
 
 namespace ActiveSync.Core.Tests;
@@ -58,7 +59,7 @@ public class TasksConverterTests
 	[Fact]
 	public void AxigenSample_ParsesAsIncompleteNormalPriorityTask()
 	{
-		Assert.Equal("415849554944-006A56E48B-F5B1F6C007DBFEF8", TasksConverter.ExtractUid(AxigenTask));
+		Assert.Equal("415849554944-006A56E48B-F5B1F6C007DBFEF8", TaskPayload.ExtractUid(AxigenTask));
 
 		List<XElement>? data = TasksConverter.ToApplicationData(AxigenTask, new BodyPreference { Type = BodyType.PlainText });
 		Assert.NotNull(data);
@@ -93,7 +94,7 @@ public class TasksConverterTests
 
 		Assert.Contains("VTODO", ics);
 		Assert.Contains("DUE;VALUE=DATE:20260801", ics); // date-only, no timezone drift
-		Assert.Equal(uid, TasksConverter.ExtractUid(ics));
+		Assert.Equal(uid, TaskPayload.ExtractUid(ics));
 
 		List<XElement>? data = TasksConverter.ToApplicationData(ics, new BodyPreference { Type = BodyType.PlainText })!;
 		Assert.Equal("Buy milk", data.Single(e => e.Name == Tasks + "Subject").Value);

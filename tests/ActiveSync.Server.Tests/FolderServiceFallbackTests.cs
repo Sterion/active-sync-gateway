@@ -1,6 +1,7 @@
 using System.Data.Common;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Server.Eas;
@@ -33,7 +34,7 @@ public sealed class FolderServiceFallbackTests : IDisposable
 			.Options;
 		SqliteSyncDbContext db = new(options);
 		db.Database.EnsureCreated();
-		return new FolderService(new SyncStateService(db), NullLogger<FolderService>.Instance);
+		return new FolderService(new SyncStateService(db), TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLogger<FolderService>.Instance);
 	}
 
 	// When several DAV stores are down at once (the common correlated case), the catch used to

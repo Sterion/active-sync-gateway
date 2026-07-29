@@ -1,6 +1,7 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Server.Eas;
@@ -24,7 +25,7 @@ public sealed class FolderServiceTests : IDisposable
 			.UseSqlite(_connection).Options;
 		_db = new SqliteSyncDbContext(options);
 		_db.Database.EnsureCreated();
-		_service = new FolderService(new SyncStateService(_db), NullLogger<FolderService>.Instance);
+		_service = new FolderService(new SyncStateService(_db), TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLogger<FolderService>.Instance);
 	}
 
 	public void Dispose()

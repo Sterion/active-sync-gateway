@@ -1,6 +1,6 @@
 using ActiveSync.Contracts;
 
-namespace ActiveSync.Backends.Common.Converters;
+namespace ActiveSync.Eas.Conversion;
 
 /// <summary>
 ///   The client's body preference plus the negotiated-protocol flag the EAS converters need:

@@ -27,14 +27,10 @@ public sealed class DavServerOptions : NetworkBackendOptions
 	/// </summary>
 	public string? TaskFolder { get; set; } = "Tasks";
 
-	/// <summary>
-	///   CalDav only — event attachments for EAS 16.x clients: "Auto" (enabled, 1 MiB per
-	///   attachment), "On" (enabled, 16 MiB) or "Off". Attachments are stored INLINE in the
-	///   event (base64 ATTACH property) so they work against any CalDAV server and the
-	///   local store alike — the size cap exists because inline blobs bloat the events on
-	///   the DAV server.
-	/// </summary>
-	public string CalendarAttachments { get; set; } = "Auto";
+	// CalendarAttachments moved OUT of this provider and became the host option
+	// ActiveSync:Eas:CalendarAttachments. It always governed what the CONVERTER writes into the
+	// event, and conversion is host-side under the typed item currency — a provider setting the
+	// host had to read would break the rule that it never knows a provider's option shape.
 
 	/// <summary>
 	///   CalDav only (CardDav ignores it for now) — extra collection hrefs synced as

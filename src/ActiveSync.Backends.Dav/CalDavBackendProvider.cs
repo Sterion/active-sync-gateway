@@ -44,8 +44,6 @@ public sealed class CalDavBackendProvider(
 		}
 
 		BackendSettingsValidation.AbsoluteHttpUrl(options.BaseUrl, context, failures);
-		BackendSettingsValidation.Choice(options.CalendarAttachments, "CalendarAttachments", context, failures,
-			"Auto", "On", "Off");
 		BackendSettingsValidation.Choice(options.SendInvitations, "SendInvitations", context, failures,
 			"Auto", "On", "Off");
 		BackendSettingsValidation.CaPath(options.CaCertificatePath, context, failures);
@@ -94,16 +92,9 @@ public sealed class CalDavBackendProvider(
 				Help = "Path template of the user's collection home set — {user} and {localpart} are substituted, " +
 				       "e.g. \"/{user}/\". Empty discovers it via .well-known and current-user-principal."
 			},
-			// The three below are the account holder's own preferences, and none of them can
-			// move the connection: SharedCollections entries are validated against BaseUrl's
-			// host, which stays admin-only.
-			new BackendConfigField
-			{
-				Name = "CalendarAttachments", Label = "Event attachments", Type = BackendFieldType.Enum,
-				Default = "Auto", EnumValues = ["Auto", "On", "Off"],
-				Help = "Inline (base64) attachments for EAS 16.x clients. Auto caps them at 1 MiB, On at 16 MiB.",
-				SelfServiceEditable = true
-			},
+			// The two below are the account holder's own preferences, and neither can move the
+			// connection: SharedCollections entries are validated against BaseUrl's host, which
+			// stays admin-only.
 			new BackendConfigField
 			{
 				Name = "SendInvitations", Label = "Send iMIP invitations", Type = BackendFieldType.Enum,
@@ -128,8 +119,8 @@ public sealed class CalDavBackendProvider(
 		DavServerOptions options = settings.Bind<DavServerOptions>();
 		return role == BackendRole.Tasks
 			? $"caldav VTODO collection \"{(string.IsNullOrWhiteSpace(options.TaskFolder) ? "Tasks" : options.TaskFolder)}\""
-			: $"caldav {options.BaseUrl} (attachments={options.CalendarAttachments}, " +
-			  $"invitations={options.SendInvitations}, shared={options.SharedCollections?.Count ?? 0})";
+			: $"caldav {options.BaseUrl} (invitations={options.SendInvitations}, " +
+			  $"shared={options.SharedCollections?.Count ?? 0})";
 	}
 
 	public Task<bool> ProbeReadinessAsync(ProviderSettings settings, CancellationToken ct)

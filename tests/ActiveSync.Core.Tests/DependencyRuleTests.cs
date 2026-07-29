@@ -97,13 +97,101 @@ public sealed class DependencyRuleTests
 	// root everything else in the assembly uses — one assembly, two namespace roots, neither matching
 	// the assembly name. Renaming it to ActiveSync.Backends.Common.Converters (folder-aligned, a child
 	// of the assembly's own root) fixes that; this proves the old root is gone and the new one exists.
+	// The example type is one of the payload helpers, since the EAS converters themselves have left
+	// this assembly entirely (see EasConversion_OwnsTheEasHalfOfTheConverters below).
 	[Fact]
 	public void ConverterTypes_UseTheCommonAssemblyRootNamespace()
 	{
 		System.Reflection.Assembly common = typeof(MailKitWireLogger).Assembly;
 
 		Assert.Null(common.GetType("ActiveSync.Backends.Converters.ContactConverter"));
-		Assert.NotNull(common.GetType("ActiveSync.Backends.Common.Converters.ContactConverter"));
+		Assert.NotNull(common.GetType("ActiveSync.Backends.Common.Converters.ContactPayload"));
+	}
+
+	// The EAS conversion layer is host-only and must NEVER reference ActiveSync.Core: Core carries
+	// no domain library, and ActiveSync.WebUi references Core ONLY — so a Core reference here would
+	// hand MimeKit / Ical.Net / FolkerKinzel.VCards to the admin UI and to the slim CLI's graph,
+	// destroying the boundary Backends.Common was built to defend. Mirrors
+	// BackendsCommon_DoesNotReferenceCore.
+	[Fact]
+	public void EasConversion_DoesNotReferenceCore()
+	{
+		string[] referenced = typeof(ActiveSync.Eas.Conversion.CalendarConverter).Assembly
+			.GetReferencedAssemblies()
+			.Select(static a => a.Name!)
+			.ToArray();
+
+		Assert.DoesNotContain("ActiveSync.Core", referenced);
+	}
+
+	// The other half of that boundary, and the one a stray using would breach silently: Core must
+	// carry no MIME/iCalendar/vCard library at all. Its whole package list is EF Core, Npgsql,
+	// SQLite and Microsoft.Extensions.* — the converters living above it is what keeps that true.
+	[Fact]
+	public void Core_CarriesNoDomainLibrary()
+	{
+		string[] referenced = typeof(Core.Backend.BackendProviderRegistry).Assembly
+			.GetReferencedAssemblies()
+			.Select(static a => a.Name!)
+			.ToArray();
+
+		Assert.DoesNotContain("MimeKit", referenced);
+		Assert.DoesNotContain("MailKit", referenced);
+		Assert.DoesNotContain("Ical.Net", referenced);
+		Assert.DoesNotContain("FolkerKinzel.VCards", referenced);
+	}
+
+	// The converter split itself: the EAS half (ApplicationData in/out, the ghosting merge, the
+	// MS-ASTZ blob) lives in ActiveSync.Eas.Conversion, and what a STORE needs from a payload it
+	// already owns stays in Backends.Common. A type in the wrong assembly is how the split erodes —
+	// a backend gaining an EAS converter again would re-import exactly the out-of-band knowledge
+	// the typed item currency removed.
+	[Fact]
+	public void EasConversion_OwnsTheEasHalfOfTheConverters()
+	{
+		System.Reflection.Assembly conversion = typeof(ActiveSync.Eas.Conversion.CalendarConverter).Assembly;
+		System.Reflection.Assembly common = typeof(MailKitWireLogger).Assembly;
+
+		foreach (string easHalf in (string[])
+		         ["CalendarConverter", "ContactConverter", "TasksConverter", "MailConverter",
+			         "DraftMessageBuilder", "ImipMailBuilder", "TimeZoneBlob", "BodyPreference"])
+		{
+			Assert.NotNull(conversion.GetType($"ActiveSync.Eas.Conversion.{easHalf}"));
+			Assert.Null(common.GetType($"ActiveSync.Backends.Common.Converters.{easHalf}"));
+		}
+
+		foreach (string storeNeed in (string[])
+		         ["CalendarPayload", "ContactPayload", "TaskPayload", "MailKeywords"])
+			Assert.NotNull(common.GetType($"ActiveSync.Backends.Common.Converters.{storeNeed}"));
+	}
+
+	// The iCalendar load/serialize quirk handling is the one converter helper both sides of the
+	// store boundary need, so it sits in the optional interop assembly rather than being duplicated
+	// or dragged back into either half.
+	[Fact]
+	public void IcalHelpers_LiveInTheInteropAssembly()
+	{
+		System.Reflection.Assembly interop = typeof(ActiveSync.Contracts.Interop.IcalHelpers).Assembly;
+
+		Assert.Equal("ActiveSync.Contracts.Interop", interop.GetName().Name);
+		Assert.Null(typeof(MailKitWireLogger).Assembly
+			.GetType("ActiveSync.Backends.Common.Converters.IcalHelpers"));
+	}
+
+	// ActiveSync.Contracts.Interop carries the domain libraries so ActiveSync.Contracts never has
+	// to: a plugin implementing only INotesStore references the contract alone and inherits
+	// nothing. The interop assembly must therefore stay a leaf — contract plus domain libraries,
+	// no host graph.
+	[Fact]
+	public void ContractsInterop_ReferencesOnlyTheContractAndDomainLibraries()
+	{
+		string[] referenced = typeof(ActiveSync.Contracts.Interop.IcalHelpers).Assembly
+			.GetReferencedAssemblies()
+			.Select(static a => a.Name!)
+			.Where(static name => name.StartsWith("ActiveSync.", StringComparison.Ordinal))
+			.ToArray();
+
+		Assert.Equal(["ActiveSync.Contracts"], referenced);
 	}
 
 	// S8 (round 1), narrowed by S7 (round 2): ActiveSync.Backends.Common is a published, plugin-facing
@@ -222,13 +310,14 @@ public sealed class DependencyRuleTests
 	// single-value-recurrence call sites they were written for. This pins the suppression as narrowly
 	// scoped: every `disable` in the file has a matching `restore` in the same file, and none of them
 	// sit ahead of the `namespace` declaration (which is what a file-wide suppression looks like).
+	// The obsolete surface is used on both sides of the converter split, so both are covered.
 	[Theory]
-	[InlineData("CalendarConverter.cs")]
-	[InlineData("TasksConverter.cs")]
-	public void Cs0618Suppressions_AreScopedNarrowly_NotFileWide(string fileName)
+	[InlineData("src/ActiveSync.Eas.Conversion/CalendarConverter.cs")]
+	[InlineData("src/ActiveSync.Eas.Conversion/TasksConverter.cs")]
+	[InlineData("src/ActiveSync.Backends.Common/Converters/CalendarPayload.cs")]
+	public void Cs0618Suppressions_AreScopedNarrowly_NotFileWide(string relativePath)
 	{
-		string file = Path.Combine(
-			FindRepoRoot(), "src", "ActiveSync.Backends.Common", "Converters", fileName);
+		string file = Path.Combine(FindRepoRoot(), relativePath.Replace('/', Path.DirectorySeparatorChar));
 		string[] lines = File.ReadAllLines(file);
 		int namespaceLine = Array.FindIndex(
 			lines, static l => l.TrimStart().StartsWith("namespace ", StringComparison.Ordinal));

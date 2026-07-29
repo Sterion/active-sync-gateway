@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace ActiveSync.Backends.Common.Converters;
+namespace ActiveSync.Eas.Conversion;
 
 /// <summary>
 ///   Plain-text body preparation shared by the converters: UTF-8-aware truncation to a byte

@@ -67,6 +67,10 @@ internal static class SettingKeys
 			"Default Sync window size.", Min: 1, Max: 522),
 		new("ActiveSync:Eas:SessionIdleMinutes", ValueType.Int, false, "15",
 			"Idle backend session eviction time.", Min: 1, Max: 1440),
+		new("ActiveSync:Eas:CalendarAttachments", ValueType.Enum, false, "Auto",
+			"Inline (base64) event attachments for EAS 16.x clients: Auto caps them at 1 MiB, On at 16 MiB, " +
+			"Off refuses them. A host key because the cap governs the host-side EAS merge, not a backend.",
+			EnumValues: ["Auto", "On", "Off"]),
 		new("ActiveSync:Eas:FolderRetentionDays", ValueType.Int, false, "30",
 			"Days a vanished folder is kept before its state is reclaimed (0 disables the sweep).", Min: 0, Max: 3650),
 		new("ActiveSync:Eas:SendDedupRetentionDays", ValueType.Int, false, "30",

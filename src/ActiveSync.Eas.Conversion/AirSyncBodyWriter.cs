@@ -1,7 +1,7 @@
 using System.Xml.Linq;
 using ActiveSync.Protocol.Wbxml;
 
-namespace ActiveSync.Backends.Common.Converters;
+namespace ActiveSync.Eas.Conversion;
 
 /// <summary>
 ///   Builds the AirSyncBase &lt;Body&gt; element shared by the calendar/task/note/contact

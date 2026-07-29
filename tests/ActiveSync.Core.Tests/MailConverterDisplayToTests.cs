@@ -1,6 +1,6 @@
 using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol.Wbxml;
 using MimeKit;
 

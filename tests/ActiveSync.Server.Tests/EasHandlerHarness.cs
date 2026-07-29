@@ -44,7 +44,7 @@ public sealed class EasHandlerHarness : IDisposable
 		_db.SaveChanges();
 		UserId = user.UserId;
 		State = new SyncStateService(_db);
-		Folders = new FolderService(State, NullLogger<FolderService>.Instance);
+		Folders = new FolderService(State, TestOptionsMonitor.Of(new ActiveSyncOptions()), NullLogger<FolderService>.Instance);
 	}
 
 	/// <summary>
@@ -97,7 +97,7 @@ public sealed class EasHandlerHarness : IDisposable
 	/// </summary>
 	public Eas.Content.ContentAdapter MailAdapter()
 	{
-		return Eas.Content.ContentAdapter.For(Session, Session.Store);
+		return Eas.Content.ContentAdapter.For(Session, Session.Store, new EasOptions());
 	}
 
 	/// <summary>

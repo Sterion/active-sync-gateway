@@ -24,7 +24,7 @@ public sealed class GalPictureTests
 	private static (GalPictureResult Picture, bool Granted) Build(
 		string vcf, int? maxPhotoBytes, bool limitReached)
 	{
-		GalEntry? entry = ContactConverter.BuildGalEntry(
+		GalEntry? entry = ContactPayload.BuildGalEntry(
 			vcf, "Person", wantPhoto: true, maxPhotoBytes, limitReached, out bool granted);
 		Assert.NotNull(entry);
 		Assert.NotNull(entry!.Picture);
@@ -77,7 +77,7 @@ public sealed class GalPictureTests
 	{
 		// A null Picture means "the client did not ask", which is distinct from every status
 		// above — the host then emits no gal:Picture element at all.
-		GalEntry? entry = ContactConverter.BuildGalEntry(
+		GalEntry? entry = ContactPayload.BuildGalEntry(
 			VcardWithPhoto, "Person", wantPhoto: false, null, false, out bool granted);
 
 		Assert.NotNull(entry);

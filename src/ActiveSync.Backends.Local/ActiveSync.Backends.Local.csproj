@@ -5,6 +5,9 @@
 	<ItemGroup>
 		<ProjectReference Include="..\ActiveSync.Core\ActiveSync.Core.csproj" />
 		<ProjectReference Include="..\ActiveSync.Backends.Common\ActiveSync.Backends.Common.csproj" />
+		<!-- EXPLICIT: the notes store's private VJOURNAL storage convention loads and serializes
+		     iCalendar through IcalHelpers, which lives in the interop assembly. -->
+		<ProjectReference Include="..\ActiveSync.Contracts.Interop\ActiveSync.Contracts.Interop.csproj" />
 	</ItemGroup>
 
 </Project>

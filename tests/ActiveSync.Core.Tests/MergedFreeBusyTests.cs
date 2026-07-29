@@ -57,7 +57,7 @@ public sealed class MergedFreeBusyTests
 		                   "DTSTAMP:20260717T051745Z\r\n" +
 		                   "FREEBUSY;FBTYPE=BUSY:20260728T140000Z/20260728T153000Z\r\n" +
 		                   "END:VFREEBUSY\r\nEND:VCALENDAR\r\n";
-		IReadOnlyList<BusyPeriod> periods = CalendarConverter.ParseFreeBusy(ics);
+		IReadOnlyList<BusyPeriod> periods = CalendarPayload.ParseFreeBusy(ics);
 		BusyPeriod period = Assert.Single(periods);
 		Assert.Equal(BusyKind.Busy, period.Kind);
 		Assert.Equal(new DateTimeOffset(2026, 7, 28, 14, 0, 0, TimeSpan.Zero), period.Start);
@@ -79,7 +79,7 @@ public sealed class MergedFreeBusyTests
 		                   "DTSTAMP:20260717T051745Z\r\n" +
 		                   "FREEBUSY;X-NOTE=NOT-BUSY-TENTATIVE-REALLY:20260728T140000Z/20260728T153000Z\r\n" +
 		                   "END:VFREEBUSY\r\nEND:VCALENDAR\r\n";
-		IReadOnlyList<BusyPeriod> periods = CalendarConverter.ParseFreeBusy(ics);
+		IReadOnlyList<BusyPeriod> periods = CalendarPayload.ParseFreeBusy(ics);
 		BusyPeriod period = Assert.Single(periods);
 		Assert.Equal(BusyKind.Busy, period.Kind); // no real FBTYPE parameter present -> defaults to BUSY
 	}

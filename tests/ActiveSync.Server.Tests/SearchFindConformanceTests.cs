@@ -1,7 +1,8 @@
 using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using ActiveSync.Server.Eas.Handlers;
@@ -34,12 +35,12 @@ public sealed class SearchFindConformanceTests : IDisposable
 
 	private SearchHandler NewSearch()
 	{
-		return new SearchHandler(_harness.Folders, NullLogger<SearchHandler>.Instance);
+		return new SearchHandler(_harness.Folders, TestOptionsMonitor.SnapshotOf(new ActiveSyncOptions()), NullLogger<SearchHandler>.Instance);
 	}
 
 	private FindHandler NewFind()
 	{
-		return new FindHandler(_harness.Folders, NullLogger<FindHandler>.Instance);
+		return new FindHandler(_harness.Folders, TestOptionsMonitor.SnapshotOf(new ActiveSyncOptions()), NullLogger<FindHandler>.Instance);
 	}
 
 	private async Task<UserFolder> InboxAsync()

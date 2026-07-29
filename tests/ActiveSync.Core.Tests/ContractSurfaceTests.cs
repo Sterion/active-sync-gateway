@@ -42,14 +42,15 @@ public sealed class ContractSurfaceTests
 	[Fact]
 	public void ContractVersion_IsTheExpectedSurfaceVersion()
 	{
-		// The typed-contract redesign's third step (the item currency): typed payload records
-		// (MailItem/CalendarItem/TaskItem/ContactItem/NoteItem), the store split into
-		// IContentStore<TItem> aliases plus the hand-written IMailStore (flags patch + draft
-		// paths), the § 5.8 side-operation sweep (IMailboxOperations/IMeetingOperations/
-		// IDirectoryOperations, typed keys, GalEntry, SearchHit), and
-		// BackendPreconditionFailedException. BodyPreference/BackendItem leave the contract —
-		// EAS conversion is host-side now.
-		Assert.Equal(new Version(1, 6), ContractVersion.Current);
+		// The typed-contract redesign's fourth step (converter relocation): the EAS half of the
+		// converters moved out of ActiveSync.Backends.Common into the new host-only
+		// ActiveSync.Eas.Conversion, the payload helpers a store needs stayed behind, the
+		// iCalendar load/serialize quirk handling became ActiveSync.Contracts.Interop, and the
+		// calendar-attachment cap became the host option ActiveSync:Eas:CalendarAttachments.
+		// The two published assemblies' own surface did NOT move this step — the bump is the
+		// redesign's per-phase rule (every phase raises the minor), so the version history simply
+		// records the same hash under 1.7.
+		Assert.Equal(new Version(1, 7), ContractVersion.Current);
 	}
 
 	// BackendItemNotFoundException derived straight from Exception, so the codebase-wide

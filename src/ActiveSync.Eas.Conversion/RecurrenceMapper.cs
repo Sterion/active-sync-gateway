@@ -3,7 +3,7 @@ using ActiveSync.Protocol;
 using Ical.Net;
 using Ical.Net.DataTypes;
 
-namespace ActiveSync.Backends.Common.Converters;
+namespace ActiveSync.Eas.Conversion;
 
 /// <summary>
 ///   EAS Recurrence element ↔ iCalendar RRULE, shared by the Calendar (MS-ASCAL) and

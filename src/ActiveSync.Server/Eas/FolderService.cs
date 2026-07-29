@@ -1,8 +1,10 @@
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Server.Eas.Content;
+using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Server.Eas;
 
@@ -13,7 +15,8 @@ namespace ActiveSync.Server.Eas;
 ///   listing time and stamped onto the registry row (a resolved <see cref="UserFolder" /> then
 ///   carries it, so ServerId composition needs no store at all).
 /// </summary>
-public sealed class FolderService(SyncStateService state, ILogger<FolderService> logger)
+public sealed class FolderService(
+	SyncStateService state, IOptionsMonitor<ActiveSyncOptions> hostOptions, ILogger<FolderService> logger)
 {
 	public async Task<List<UserFolder>> RefreshAsync(IBackendSession session, int userId, CancellationToken ct)
 	{
@@ -61,7 +64,9 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 		if (folder is null)
 			return null;
 		IContentStore? store = session.GetStoreForKey(new FolderKey(folder.BackendKey));
-		return store is null ? null : (folder, ContentAdapter.For(session, store));
+		// CurrentValue per resolve, never captured: the adapter's host options (the calendar
+		// attachment cap) are live settings like every other.
+		return store is null ? null : (folder, ContentAdapter.For(session, store, hostOptions.CurrentValue.Eas));
 	}
 
 	/// <summary>

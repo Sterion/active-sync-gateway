@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
+using ActiveSync.Contracts.Interop;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using Ical.Net;
@@ -13,19 +14,13 @@ using Ical.Net.Serialization;
 // Ical.Net matches what the protocol can carry (scoped CS0618 suppressions below, one per call
 // site, rather than a file-wide one).
 
-namespace ActiveSync.Backends.Common.Converters;
+namespace ActiveSync.Eas.Conversion;
 
 /// <summary>iCalendar VEVENT ↔ EAS Calendar-class ApplicationData (MS-ASCAL).</summary>
 public static class CalendarConverter
 {
 	private static readonly XNamespace Cal = EasNamespaces.Calendar;
 	private static readonly XNamespace AirSyncBase = EasNamespaces.AirSyncBase;
-
-	public static string? ExtractUid(string ics)
-	{
-		Calendar? calendar = Calendar.Load(ics);
-		return calendar?.Events.FirstOrDefault()?.Uid;
-	}
 
 	public static List<XElement>? ToApplicationData(
 		string ics, BodyPreference bodyPreference, string? actingUserMailAddress = null)
@@ -543,7 +538,9 @@ public static class CalendarConverter
 	///   text is only ever removed from the front of the value (a value legitimately containing
 	///   "mailto:" more than once must keep every occurrence but the leading one).
 	///   Internal (not private) so <see cref="MailConverter" /> can reuse the same logic for its own
-	///   ORGANIZER read rather than repeating the substring-Replace pattern this fixes.
+	///   ORGANIZER read rather than repeating the substring-Replace pattern this fixes. The
+	///   backend-side payload helpers keep their own copy — the two assemblies cannot share it,
+	///   and a seven-line prefix strip is not worth a contract member.
 	/// </summary>
 	internal static string? StripMailto(string? value)
 	{
@@ -644,161 +641,6 @@ public static class CalendarConverter
 			: -1;
 	}
 
-	// ---------- free/busy (ResolveRecipients Availability) ----------
-
-	/// <summary>
-	///   Parses free-busy-query output (VFREEBUSY) into EAS busy periods. Hand-parsed at the
-	///   line level: Ical.Net 5.x does not deserialize the FREEBUSY property (its value comes
-	///   back null), and the format is trivially simple — unfold, take FREEBUSY lines, read
-	///   the FBTYPE parameter and the comma-separated "start/end" or "start/duration" periods.
-	/// </summary>
-	public static IReadOnlyList<BusyPeriod> ParseFreeBusy(string ics)
-	{
-		List<BusyPeriod> result = new();
-		string unfolded = ics.Replace("\r\n ", "").Replace("\r\n\t", "").Replace("\n ", "").Replace("\n\t", "");
-		foreach (string rawLine in unfolded.Split('\n'))
-		{
-			string line = rawLine.TrimEnd('\r');
-			if (!line.StartsWith("FREEBUSY", StringComparison.OrdinalIgnoreCase))
-				continue;
-			int colon = line.IndexOf(':');
-			if (colon < 0)
-				continue;
-
-			string parameters = line[..colon];
-			// Find the FBTYPE parameter by NAME (split on ';', match the key before '='),
-			// not by substring-scanning the whole segment — an unrelated parameter (or a TZID)
-			// whose value merely contains "BUSY-TENTATIVE"/etc. anywhere must not be misread as
-			// FBTYPE.
-			string? fbtype = null;
-			foreach (string segment in parameters.Split(';', StringSplitOptions.RemoveEmptyEntries))
-			{
-				int eq = segment.IndexOf('=');
-				if (eq >= 0 && segment[..eq].Equals("FBTYPE", StringComparison.OrdinalIgnoreCase))
-				{
-					fbtype = segment[(eq + 1)..];
-					break;
-				}
-			}
-
-			BusyKind kind = BusyKind.Busy; // FBTYPE defaults to BUSY (RFC 5545 §3.2.9)
-			if (string.Equals(fbtype, "BUSY-TENTATIVE", StringComparison.OrdinalIgnoreCase))
-				kind = BusyKind.Tentative;
-			else if (string.Equals(fbtype, "BUSY-UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
-				kind = BusyKind.OutOfOffice;
-			else if (string.Equals(fbtype, "FREE", StringComparison.OrdinalIgnoreCase))
-				continue;
-
-			foreach (string period in line[(colon + 1)..].Split(',', StringSplitOptions.RemoveEmptyEntries))
-			{
-				string[] parts = period.Trim().Split('/');
-				if (parts.Length != 2)
-					continue;
-				if (!EasDateTime.TryParse(parts[0], out DateTime start))
-					continue; // a malformed period must not sink the whole answer
-				DateTime end;
-				// The second half is either an end time or an ISO 8601 duration.
-				if (parts[1].StartsWith('P') || parts[1].StartsWith("+P", StringComparison.Ordinal))
-				{
-					try
-					{
-						end = start + System.Xml.XmlConvert.ToTimeSpan(parts[1].TrimStart('+'));
-					}
-					catch (FormatException)
-					{
-						continue;
-					}
-				}
-				else if (!EasDateTime.TryParse(parts[1], out end))
-				{
-					continue;
-				}
-
-				if (end > start)
-					result.Add(new BusyPeriod { Start = AsUtcOffset(start), End = AsUtcOffset(end), Kind = kind });
-			}
-		}
-
-		return result;
-	}
-
-	/// <summary>
-	///   Busy periods from stored events (the local calendar store's free/busy source):
-	///   occurrences are expanded within the window; TRANSPARENT events do not block time.
-	/// </summary>
-	public static IReadOnlyList<BusyPeriod> BusyPeriodsFromEvents(
-		IEnumerable<string> icsContents, DateTime startUtc, DateTime endUtc)
-	{
-		List<BusyPeriod> result = new();
-		foreach (string ics in icsContents)
-		{
-			Calendar? calendar;
-			try
-			{
-				calendar = Calendar.Load(ics);
-			}
-			catch (Exception)
-			{
-				continue; // an unparsable stored event must not sink the whole answer
-			}
-
-			foreach (CalendarEvent evt in calendar?.Events ?? Enumerable.Empty<CalendarEvent>())
-			{
-				if (string.Equals(evt.Transparency, "TRANSPARENT", StringComparison.OrdinalIgnoreCase))
-					continue;
-				// GetOccurrences is lazy and unbounded for open-ended recurrences — the
-				// TakeWhile on the window end is what terminates it.
-				foreach (Occurrence occurrence in evt
-					         .GetOccurrences(new CalDateTime(startUtc, "UTC"))
-					         .TakeWhile(o => ToUtc(o.Period.StartTime) is not { } s || s < endUtc))
-				{
-					DateTime? start = ToUtc(occurrence.Period.StartTime);
-					DateTime? end = ToUtc(occurrence.Period.EffectiveEndTime ?? occurrence.Period.EndTime);
-					if (start is null)
-						continue;
-					result.Add(new BusyPeriod
-					{
-						Start = AsUtcOffset(start.Value),
-						End = AsUtcOffset(end ?? start.Value.AddMinutes(30)),
-						Kind = BusyKind.Busy
-					});
-				}
-			}
-		}
-
-		return result;
-	}
-
-	/// <summary>
-	///   Wraps a UTC instant as a <see cref="DateTimeOffset" /> for the contract's busy periods.
-	///   The Kind is FORCED to UTC rather than trusted: the sources here (EasDateTime parsing,
-	///   Ical.Net occurrence expansion) yield UTC values whose Kind is sometimes Unspecified, and
-	///   the DateTimeOffset(DateTime, TimeSpan) constructor throws on a Local-kinded input.
-	/// </summary>
-	private static DateTimeOffset AsUtcOffset(DateTime utc)
-	{
-		return new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc));
-	}
-
-	/// <summary>Fetches one inline attachment by index (ItemOperations Fetch of calatt: references).</summary>
-	public static BackendAttachment? ExtractAttachment(string ics, int index)
-	{
-		Calendar? calendar = Calendar.Load(ics);
-#pragma warning disable CS0618 // obsolete single-value RecurrenceId (see file header note)
-		CalendarEvent? master = calendar?.Events.FirstOrDefault(e => e.RecurrenceId is null)
-		                        ?? calendar?.Events.FirstOrDefault();
-#pragma warning restore CS0618
-		List<Attachment> binaries = master?.Attachments?
-			.Where(a => a?.Data is { Length: > 0 }).ToList() ?? [];
-		if (index < 0 || index >= binaries.Count)
-			return null;
-		return new BackendAttachment
-		{
-			ContentType = binaries[index].FormatType ?? "application/octet-stream",
-			Content = binaries[index].Data!
-		};
-	}
-
 	private static CalendarEvent AddNewEvent(Calendar calendar)
 	{
 		CalendarEvent evt = new();
@@ -812,47 +654,6 @@ public static class CalendarConverter
 		// offset error (an unparsable/short/foreign TimeZone blob falling back to a coarser
 		// reading) of up to +-11h still cannot cross midnight and land on the wrong nominal day.
 		return (offset is { } o ? utc + o : utc).AddHours(12).Date;
-	}
-
-	/// <summary>Updates the user's PARTSTAT for a MeetingResponse (1=accept, 2=tentative, 3=decline).</summary>
-	public static string? SetPartStat(string ics, int userResponse, string userEmail)
-	{
-		Calendar? calendar = Calendar.Load(ics);
-		// Master-first, matching every other entry point in this file — an ICS that lists a
-		// modified-occurrence override before the master VEVENT must still update the master's
-		// attendee, or the acceptance is lost for the series the next time anything reads the
-		// stored (master) PARTSTAT.
-#pragma warning disable CS0618 // obsolete single-value RecurrenceId (see file header note)
-		CalendarEvent? evt = calendar?.Events.FirstOrDefault(e => e.RecurrenceId is null)
-			?? calendar?.Events.FirstOrDefault();
-#pragma warning restore CS0618
-		if (calendar is null || evt is null)
-			return null;
-
-		string partStat = userResponse switch
-		{
-			1 => "ACCEPTED",
-			2 => "TENTATIVE",
-			3 => "DECLINED",
-			_ => "NEEDS-ACTION"
-		};
-
-		bool updated = false;
-		foreach (Attendee attendee in evt.Attendees ?? [])
-		{
-			string? email = attendee.Value?.ToString();
-			// Exact mailbox comparison — substring matching would let ann@example.com
-			// update joann@example.com's participation status.
-			if (email is not null && MailboxEquals(email, userEmail))
-			{
-				attendee.ParticipationStatus = partStat;
-				updated = true;
-			}
-		}
-
-		if (!updated)
-			return null;
-		return IcalHelpers.Serialize(calendar);
 	}
 
 	private static bool MailboxEquals(string a, string b)

@@ -10,7 +10,7 @@ using FolkerKinzel.VCards.Extensions;
 using FolkerKinzel.VCards.Models;
 using FolkerKinzel.VCards.Models.Properties;
 
-namespace ActiveSync.Backends.Common.Converters;
+namespace ActiveSync.Eas.Conversion;
 
 /// <summary>vCard ↔ EAS Contacts-class ApplicationData (MS-ASCNTC).</summary>
 public static class ContactConverter
@@ -18,18 +18,11 @@ public static class ContactConverter
 	private static readonly XNamespace Contacts = EasNamespaces.Contacts;
 	private static readonly XNamespace Contacts2 = EasNamespaces.Contacts2;
 	private static readonly XNamespace AirSyncBase = EasNamespaces.AirSyncBase;
-	private static readonly XNamespace Gal = EasNamespaces.Gal;
-
-	public static string? ExtractUid(string vcf)
-	{
-		ContactIDProperty? id = Vcf.Parse(vcf).FirstOrDefault()?.ContactID;
-		return id?.Value?.String ?? id?.Value?.Guid?.ToString() ?? id?.Value?.Uri?.ToString();
-	}
 
 	/// <summary>
 	///   Returns null for an empty or unparsable card, matching every sibling converter —
-	///   the store base classes read that as "skip this item", so one corrupt card costs one
-	///   contact instead of the whole Sync response.
+	///   the host reads that as "skip this item", so one corrupt card costs one contact
+	///   instead of the whole Sync response.
 	/// </summary>
 	/// <summary>The wire PHOTO cap, named rather than the undocumented literal it used to be.</summary>
 	internal const int MaxWirePhotoBytes = 96 * 1024;
@@ -295,7 +288,7 @@ public static class ContactConverter
 	/// <summary>
 	///   "Surplus" (not one of Email1-3) must be decided the same way Email1-3 itself was
 	///   picked — <c>vcard.EMails.OrderByPref()</c>, via <see cref="Ghost" />/
-	///   <see cref="ToApplicationData(string,int)" /> — not by raw FILE position, which is not
+	///   <see cref="ToApplicationData(string,int,long?)" /> — not by raw FILE position, which is not
 	///   guaranteed to match pref order (a PREF param on a later line promotes it to the front).
 	///   Matching against what ended up WRITTEN (the merged/possibly client-overridden Email1-3
 	///   values) is wrong too: a client that replaces Email1Address leaves the stored card's old
@@ -399,95 +392,6 @@ public static class ContactConverter
 		string name = end >= 0 ? line[..end] : line;
 		int dot = name.LastIndexOf('.'); // strip Apple-style group prefixes ("item1.X-ABLABEL")
 		return dot >= 0 ? name[(dot + 1)..] : name;
-	}
-
-	/// <summary>
-	///   Parses the vCard ONCE and produces the typed GAL entry plus (optionally) its photo
-	///   outcome. Returns null when the card is unparsable or does not match the query. The store
-	///   enforces the photo limits here (it holds the request and counts grants across the whole
-	///   result set); the HOST maps <see cref="GalPictureStatus" /> to the MS-ASCMD wire statuses.
-	///   Returns the entry with <see cref="GalEntry.Picture" /> null when
-	///   <paramref name="wantPhoto" /> is false (the client did not request pictures at all).
-	/// </summary>
-	public static GalEntry? BuildGalEntry(
-		string vcf, string query, bool wantPhoto, int? maxPhotoBytes, bool photoLimitReached, out bool photoGranted)
-	{
-		photoGranted = false;
-		if (Vcf.Parse(vcf).FirstOrDefault() is not { } vcard)
-			return null;
-		GalEntry? entry = ToGalEntry(vcard, query);
-		if (entry is null)
-			return null;
-		if (wantPhoto)
-		{
-			GalPictureResult picture = BuildGalPicture(vcard, maxPhotoBytes, photoLimitReached);
-			photoGranted = picture.Status == GalPictureStatus.Available;
-			entry = entry with { Picture = picture };
-		}
-
-		return entry;
-	}
-
-	private static GalEntry? ToGalEntry(VCard vcard, string query)
-	{
-		string display = vcard.DisplayNames?.FirstOrDefault(d => d is not null)?.Value ?? "";
-		string email = vcard.EMails.OrderByPref().FirstOrDefault(e => e?.Value is not null)?.Value ?? "";
-		Name? name = vcard.NameViews?.FirstOrDefault(n => n is not null)?.Value;
-		string first = name?.Given.FirstOrDefault() ?? "";
-		string last = name?.Surnames.FirstOrDefault() ?? "";
-
-		bool matches = new[] { display, email, first, last }
-			.Any(v => v.Contains(query, StringComparison.OrdinalIgnoreCase));
-		if (!matches)
-			return null;
-
-		string? phone = vcard.Phones.OrderByPref().FirstOrDefault(p => p?.Value is not null)?.Value;
-		string? company = vcard.Organizations?.FirstOrDefault(o => o is not null)?.Value?.Name;
-		return new GalEntry
-		{
-			DisplayName = display,
-			EmailAddress = string.IsNullOrEmpty(email) ? null : email,
-			FirstName = string.IsNullOrEmpty(first) ? null : first,
-			LastName = string.IsNullOrEmpty(last) ? null : last,
-			Phone = phone,
-			Company = company
-		};
-	}
-
-	/// <summary>
-	///   The photo outcome per the MS-ASCMD photo rules, typed: the count limit outranks
-	///   everything (the request's budget is spent), then "no photo", then the size limit —
-	///   data is carried exactly when the status says so.
-	/// </summary>
-	private static GalPictureResult BuildGalPicture(VCard? vcard, int? maxSizeBytes, bool limitReached)
-	{
-		if (limitReached)
-			return new GalPictureResult { Status = GalPictureStatus.OverCountLimit };
-
-		byte[]? photo = vcard?.Photos?.FirstOrDefault(p => p is not null)?.Value?.Bytes;
-		if (photo is not { Length: > 0 })
-			return new GalPictureResult { Status = GalPictureStatus.None };
-
-		if (maxSizeBytes is { } maxSize && photo.Length > maxSize)
-			return new GalPictureResult { Status = GalPictureStatus.OverSizeLimit };
-
-		return new GalPictureResult
-		{
-			Status = GalPictureStatus.Available,
-			Picture = new GalPicture { Data = photo, ContentType = SniffImageContentType(photo) }
-		};
-	}
-
-	/// <summary>Cheap magic-byte sniff for the photo's MIME type (vCard PHOTO carries no reliable one).</summary>
-	private static string SniffImageContentType(ReadOnlySpan<byte> bytes)
-	{
-		return bytes switch
-		{
-			[0xFF, 0xD8, ..] => "image/jpeg",
-			[0x89, 0x50, 0x4E, 0x47, ..] => "image/png",
-			[0x47, 0x49, 0x46, ..] => "image/gif",
-			_ => "application/octet-stream"
-		};
 	}
 
 	private static string? StripEmailDisplay(string? value)

@@ -9,7 +9,7 @@ using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using MimeKit;
 
-namespace ActiveSync.Backends.Common.Converters;
+namespace ActiveSync.Eas.Conversion;
 
 /// <summary>Converts MIME messages to EAS Email-class ApplicationData (MS-ASEMAIL / MS-ASAIRS).</summary>
 public static class MailConverter
@@ -479,29 +479,10 @@ public static class MailConverter
 		return element;
 	}
 
-	// Managed/system keywords that must never surface as user categories (nor be removed
-	// by a client clearing its category list). Everything backslash-prefixed is an IMAP
-	// system flag by definition.
-	private static readonly HashSet<string> SystemKeywords = new(StringComparer.OrdinalIgnoreCase)
-	{
-		"$Forwarded", "$MDNSent", "$SubmitPending", "$Submitted",
-		"$Junk", "$NotJunk", "Junk", "NonJunk", "$Phishing"
-	};
-
-	/// <summary>
-	///   The category-relevant subset of a message's IMAP keywords: system keywords
-	///   filtered out, sorted for stable revision strings.
-	/// </summary>
-	public static IReadOnlyList<string> CategoryKeywords(IEnumerable<string>? keywords)
-	{
-		if (keywords is null)
-			return [];
-		return keywords
-			.Where(k => k.Length > 0 && k[0] != '\\' && !SystemKeywords.Contains(k))
-			.OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
-			.ToList();
-	}
-
+	// The keyword→category classification stayed backend-side (MailKeywords in
+	// ActiveSync.Backends.Common): a mail store builds its revision string and its category
+	// writes from it, and it is the store that hands the classified list over here.
+	//
 	// The converter's own MessageFlags record is gone: the contract's typed MailFlags (plus the
 	// store-classified category list) is what crosses the boundary now, and this converter reads
 	// it directly.

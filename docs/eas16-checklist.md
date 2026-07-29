@@ -112,7 +112,7 @@ Status column is updated as commits land.
 | 3 | Calendar partial Change | 16.x Change carries only modified properties — merge, never replace (extends the existing presence-guard merge). | done |
 | 4 | Occurrence operations | airsyncbase:InstanceId (0x2D) identifies one occurrence in Sync Delete/Change of recurring events. | done |
 | 5 | Structured Location | 16.x moves the event location to airsyncbase:Location (DisplayName + address/geo children). ≤14.1 keeps calendar:Location. Map DisplayName ⇄ the iCal LOCATION property; other children unmapped for now. | done |
-| 6 | Calendar attachments | airsyncbase:Attachments with Add/Delete/ClientId/Content on events; gated by `Dav:CalendarAttachments` (Auto/On/Off, per-user via overrides). | done |
+| 6 | Calendar attachments | airsyncbase:Attachments with Add/Delete/ClientId/Content on events; gated by the host option `Eas:CalendarAttachments` (Auto/On/Off), since the cap governs the host-side merge that writes the inline ATTACH. | done |
 | 7 | Drafts sync | Client Sync Add/Change of Email in the Drafts folder (To/Cc/email2:Bcc/Subject/Body, email2:IsDraft flag on server→client items); email2:Send inside Add/Change submits the draft. | done |
 | 8 | SmartForward Forwardees | composemail:Forwardees(Forwardee(Name,Email)) — 16.x SmartForward without a MIME body. | done |
 | 9 | MeetingResponse 16.x | SendResponse (16.0: whether/with what body to send the iTIP reply); ProposedStartTime/EndTime (16.1: counter-proposal). | tolerated — the elements decode and are accepted, but the iTIP reply is ALWAYS sent (pre-16 behavior) and proposals are not relayed |

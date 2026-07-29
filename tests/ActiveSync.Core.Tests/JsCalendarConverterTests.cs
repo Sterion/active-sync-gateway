@@ -1,9 +1,9 @@
 using System.Text.Json;
 using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Backends.Jmap;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol.Wbxml;
 
 namespace ActiveSync.Core.Tests;

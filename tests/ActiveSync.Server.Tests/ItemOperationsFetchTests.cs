@@ -1,7 +1,7 @@
 using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.State;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using ActiveSync.Server.Eas.Handlers;

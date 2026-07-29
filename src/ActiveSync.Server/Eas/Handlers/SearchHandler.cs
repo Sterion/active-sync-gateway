@@ -1,15 +1,19 @@
 using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using ActiveSync.Server.Eas.Content;
+using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Server.Eas.Handlers;
 
 /// <summary>Search (MS-ASCMD 2.2.1.16): Mailbox and GAL stores.</summary>
-public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> logger) : IEasCommandHandler
+public sealed class SearchHandler(
+	FolderService folders, IOptionsSnapshot<ActiveSyncOptions> options, ILogger<SearchHandler> logger)
+	: IEasCommandHandler
 {
 	private static readonly XNamespace S = EasNamespaces.Search;
 	private static readonly XNamespace AS = EasNamespaces.AirSync;
@@ -77,7 +81,7 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 				string? collectionId = query?.Descendants(AS + "CollectionId").FirstOrDefault()?.Value;
 				UserFolder? searchFolder = null;
 				IContentStore mailStore = context.Session.Mail;
-				ContentAdapter adapter = ContentAdapter.For(context.Session, mailStore);
+				ContentAdapter adapter = ContentAdapter.For(context.Session, mailStore, options.Value.Eas);
 				if (collectionId is not null)
 				{
 					(UserFolder Folder, ContentAdapter Store)? resolved = await folders.ResolveCollectionAsync(

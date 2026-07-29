@@ -65,7 +65,7 @@ public sealed class CardDavStore(
 			{
 				if (results.Count >= maxResults)
 					return results;
-				GalEntry? gal = ContactConverter.BuildGalEntry(
+				GalEntry? gal = ContactPayload.BuildGalEntry(
 					vcf, query, photos is not null, photos?.MaxSizeBytes,
 					photosGranted >= (photos?.MaxCount ?? int.MaxValue), out bool granted);
 				if (gal is null)
@@ -175,7 +175,7 @@ public sealed class CardDavStore(
 
 	protected override string? ExtractUid(string content)
 	{
-		return ContactConverter.ExtractUid(content);
+		return ContactPayload.ExtractUid(content);
 	}
 
 	protected override XElement BuildUidQueryBody(string uid)

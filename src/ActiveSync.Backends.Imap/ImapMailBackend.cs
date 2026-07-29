@@ -152,7 +152,7 @@ public sealed partial class ImapMailBackend(
 			{
 				Rfc822 = rfc822,
 				Flags = FlagsOf(flags, summaries[0].Keywords),
-				Categories = MailConverter.CategoryKeywords(summaries[0].Keywords),
+				Categories = MailKeywords.CategoryKeywords(summaries[0].Keywords),
 				Received = summaries[0].InternalDate
 			};
 		}, ct);
@@ -222,7 +222,7 @@ public sealed partial class ImapMailBackend(
 						.FetchAsync([uid], MessageSummaryItems.UniqueId | MessageSummaryItems.Flags, ct)
 						.ConfigureAwait(false);
 					IReadOnlyList<string> existing =
-						MailConverter.CategoryKeywords(current.FirstOrDefault()?.Keywords);
+						MailKeywords.CategoryKeywords(current.FirstOrDefault()?.Keywords);
 					HashSet<string> toAdd = wanted
 						.Where(k => !existing.Contains(k, StringComparer.OrdinalIgnoreCase))
 						.ToHashSet();
@@ -609,7 +609,7 @@ public sealed partial class ImapMailBackend(
 	{
 		string digits =
 			$"{((flags & MessageFlags.Seen) != 0 ? 1 : 0)}{((flags & MessageFlags.Flagged) != 0 ? 1 : 0)}{((flags & MessageFlags.Answered) != 0 ? 1 : 0)}";
-		IReadOnlyList<string> categories = MailConverter.CategoryKeywords(keywords);
+		IReadOnlyList<string> categories = MailKeywords.CategoryKeywords(keywords);
 		return categories.Count == 0 ? digits : $"{digits}|{string.Join(',', categories)}";
 	}
 

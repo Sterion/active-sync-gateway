@@ -2,9 +2,14 @@ using ActiveSync.Contracts;
 using Ical.Net;
 using Ical.Net.Serialization;
 
-namespace ActiveSync.Backends.Common.Converters;
+namespace ActiveSync.Contracts.Interop;
 
-/// <summary>Ical.Net load/serialize boilerplate shared by the calendar, task and note converters.</summary>
+/// <summary>
+///   Ical.Net load/serialize boilerplate, shared by both halves of the store boundary: the
+///   host's EAS conversion emits iCalendar through it, and a backend that stores or reads a
+///   payload does too. It is the reason this assembly exists — the quirk handling is the same
+///   on either side, and a plugin author should not have to rediscover it.
+/// </summary>
 public static class IcalHelpers
 {
 	/// <summary>
@@ -30,7 +35,7 @@ public static class IcalHelpers
 	///   Serializes to iCalendar text with RFC 5545 §3.1 CRLF line endings, throwing if the
 	///   library produces none. Ical.Net's serializer emits <see cref="Environment.NewLine" /> —
 	///   CRLF on Windows but bare <c>LF</c> on the Linux containers this ships in — so the output is
-	///   normalized explicitly rather than trusting the platform. Every iCalendar this assembly
+	///   normalized explicitly rather than trusting the platform. Every iCalendar the gateway
 	///   emits — DAV PUTs and iTIP mail alike — goes through here, so the guarantee holds once.
 	/// </summary>
 	public static string Serialize(Calendar calendar)

@@ -1,4 +1,5 @@
 using ActiveSync.Contracts;
+using ActiveSync.Contracts.Interop;
 using Ical.Net;
 using Ical.Net.CalendarComponents;
 using Ical.Net.DataTypes;
@@ -47,7 +48,7 @@ internal static class NoteJournalMapper
 		Journal journal;
 		if (existingIcs is not null)
 		{
-			calendar = Backends.Common.Converters.IcalHelpers.Load(existingIcs);
+			calendar = IcalHelpers.Load(existingIcs);
 			journal = calendar.Journals.FirstOrDefault() ?? AddNewJournal(calendar);
 		}
 		else
@@ -63,7 +64,7 @@ internal static class NoteJournalMapper
 
 		journal.DtStart ??= new CalDateTime(DateTime.UtcNow, "UTC");
 		journal.LastModified = new CalDateTime(note.LastModified?.UtcDateTime ?? DateTime.UtcNow, "UTC");
-		return Backends.Common.Converters.IcalHelpers.Serialize(calendar);
+		return IcalHelpers.Serialize(calendar);
 	}
 
 	public static string? ExtractUid(string ics)

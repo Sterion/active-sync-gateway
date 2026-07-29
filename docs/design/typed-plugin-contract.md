@@ -10,14 +10,16 @@
 > scope in § 7, the per-unit converter-split specification in § 7.1, and a batch of signature
 > fixes.*
 >
-> **Implementation progress: Phases 1–3 landed on `plugin-restructure` (contract version 1.6).**
+> **Implementation progress: Phases 1–4 landed on `plugin-restructure` (contract version 1.7).**
 > Phase 3 is two commits per the § 9 execution model: the 3a checkpoint (exemplars + host seam +
 > the completed contract surface) and the 3b completion (every remaining provider converted —
 > `dav`, `jmap`, `smtp`; `sieve` needed nothing — plus the test-suite port). Recorded deviations:
 > `BodyPreference.Eas16` survived until Phase 3 (§ 5.1 — the whole record is now host-side); the
 > read-only revert marker reaches `CollectionDiff` as a `forceChanged` set rather than through
 > the snapshot entry type, because `ActiveSync.Protocol` cannot see a Contracts type (§ 5.2);
-> plus the Phase 3a/3b notes in § 5.5, § 6.3 and the Phase 3 section. Phases 4–5 are not started.
+> plus the Phase 3a/3b notes in § 5.5, § 6.3 and the Phase 3 section; Phase 4's own notes are in
+> its § 9 section (the class names on the backend side of the converter split, the interop
+> project's early birth, and the calendar-attachment knob decision). Phase 5 is not started.
 >
 > **Authority rules.** `AGENTS.md` and `docs/plugins.md` describe the contract **as it exists
 > today** — they are the authority on current behaviour only, and nothing more. The moment
@@ -1468,6 +1470,56 @@ this phase are different code: the semantics concentrate in 3a, the tokens in 3b
   the owner: Phase 3's CI run already validated every stack on the new seam, and this phase
   relocates code along it); `DependencyRuleTests` extended with
   `EasConversion_DoesNotReferenceCore` and a check that Core still carries no domain library.
+
+**Phase 4 implementation notes (recorded at completion; § 5's deviation rule):**
+
+- **The backend side of each split converter was RENAMED, not left sharing its old name.**
+  `CalendarConverter`/`ContactConverter`/`TasksConverter` keep their names in
+  `ActiveSync.Eas.Conversion` (they are the converters); what stays in `Backends.Common` became
+  `CalendarPayload` (ExtractUid, SetPartStat, ExtractAttachment, ParseFreeBusy,
+  BusyPeriodsFromEvents), `ContactPayload` (ExtractUid, BuildGalEntry) and `TaskPayload`
+  (ExtractUid), with `MailConverter.CategoryKeywords` becoming `MailKeywords.CategoryKeywords`.
+  Reason, found in the code: `ContentAdapter` calls BOTH halves for calendar, tasks and contacts
+  (`…Payload.ExtractUid` to name the merge's UID, `…Converter.FromApplicationData` to build it),
+  so two same-named types in two namespaces would have forced alias usings at the one seam that
+  most needs to be readable. The names also stopped being true — nothing left on the backend side
+  converts to EAS. `DependencyRuleTests.ConverterTypes_UseTheCommonAssemblyRootNamespace` names a
+  payload type as its example now, and a new `EasConversion_OwnsTheEasHalfOfTheConverters` pins
+  the whole split by type name in both assemblies.
+- **`ActiveSync.Contracts.Interop` is created HERE, not in Phase 5**, because § 7.1's `IcalHelpers`
+  row targets it and both halves of the split need those helpers immediately (the host's
+  conversion, `CalendarPayload.SetPartStat`, and `Backends.Local`'s VJOURNAL mapper). It ships
+  nothing yet: no `IsPackable`, no version properties, no Contracts pin — Phase 5's line item is
+  unchanged and now means "publish it, and add the MimeKit/Ical.Net/FolkerKinzel extension
+  methods", not "create it".
+- **The knob inventory came out at exactly one knob.** Of the four settings the caldav provider
+  opts into, `CalendarAttachments` alone governs CONVERTER behaviour and moved to the host as
+  **`ActiveSync:Eas:CalendarAttachments`** (Auto/On/Off, live, validated in
+  `ActiveSyncOptionsValidator` and catalogued in `SettingKeys`); `SendInvitations` (a property of
+  the DAV server's own scheduling), `SharedCollections` and `TaskFolder` are store behaviour and
+  stay provider-owned. No other provider has one. Two consequences stated plainly: the config key
+  `Backends:Calendar:CalendarAttachments` is a **break** (it is gone, not aliased — pre-production,
+  and leaving a dead key that silently does nothing is worse), and the setting is now **global
+  where it used to be per-user overridable**, which is the price of the host not reading
+  provider-owned config. The `Eas16Tests` attachment round-trip covers the new path; the WebUi
+  portal tests that used this key as their example of a self-service provider field now use
+  `SendInvitations`, which has the same shape.
+- **`Backends.Common` shed the EAS half as predicted and kept the domain libraries.**
+  `EasNamespaces` usage went 18 → **0** and `EasDateTime` 37 → **1 call site**: the free-busy
+  parser, kept deliberately because an iCalendar UTC date-time is byte-identical to the EAS
+  compact form and swapping in a second parser during a relocation would risk a behaviour change
+  for no gain. The explicit Protocol reference therefore stays (and its test with it), now for
+  `WireLog` plus that one parse.
+- **The contract surface did NOT move this phase.** Nothing public in `ActiveSync.Contracts` or
+  `ActiveSync.Protocol` changed; the minor still went 1.6 → **1.7** because § 9's preamble makes
+  the bump a per-phase rule, and the approval snapshot simply records another version line (its
+  only textual delta is the assembly version embedded in one `Deconstruct` signature). Phase 5
+  bumps again as its own line item says.
+- **XML-doc cref guard:** the relocation orphaned **no** cref (`GenerateDocumentationFile=true`
+  over the solution reports zero new CS1574). One stale cref inside the moved
+  `ContactConverter` was fixed in passing. Thirteen pre-existing dangling crefs survive in
+  files this phase does not touch (Core, Crypto, Server, tests) — deliberately left, since
+  fixing them is a separate cleanup rather than phase work.
 
 ### Phase 5 — packaging, licensing, documentation
 

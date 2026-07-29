@@ -28,7 +28,7 @@
 	     non-surface fixes (docs, comments), and the loader ignores it. -->
 	<PropertyGroup>
 		<ContractVersionMajor>1</ContractVersionMajor>
-		<ContractVersionMinor>6</ContractVersionMinor>
+		<ContractVersionMinor>7</ContractVersionMinor>
 		<ContractVersionPatch>0</ContractVersionPatch>
 		<ContractVersion>$(ContractVersionMajor).$(ContractVersionMinor).$(ContractVersionPatch)</ContractVersion>
 	</PropertyGroup>

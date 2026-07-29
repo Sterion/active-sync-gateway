@@ -1,10 +1,12 @@
 using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
+using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using ActiveSync.Server.Eas.Content;
+using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Server.Eas.Handlers;
 
@@ -14,7 +16,9 @@ namespace ActiveSync.Server.Eas.Handlers;
 ///   (SearchId echo, Result with Preview/HasAttachments for mail, GAL properties incl.
 ///   photos for people).
 /// </summary>
-public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logger) : IEasCommandHandler
+public sealed class FindHandler(
+	FolderService folders, IOptionsSnapshot<ActiveSyncOptions> options, ILogger<FindHandler> logger)
+	: IEasCommandHandler
 {
 	private const int MaxFetch = 500;
 	private static readonly XNamespace F = EasNamespaces.Find;
@@ -99,7 +103,7 @@ public sealed class FindHandler(FolderService folders, ILogger<FindHandler> logg
 				folderBackendKey = new FolderKey(resolved.Value.Folder.BackendKey);
 		}
 
-		ContentAdapter adapter = ContentAdapter.For(context.Session, context.Session.Mail);
+		ContentAdapter adapter = ContentAdapter.For(context.Session, context.Session.Mail, options.Value.Eas);
 		IReadOnlyList<SearchHit> hits =
 			await context.Session.Mailbox.SearchAsync(folderBackendKey, freeText, null, fetch, ct);
 

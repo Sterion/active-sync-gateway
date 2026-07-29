@@ -2,6 +2,7 @@ using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol.Wbxml;
 using MimeKit;
 
@@ -27,7 +28,7 @@ public class MailConverterCategoryTests
 
 	/// <summary>
 	///   The store now classifies the backend's keywords into user categories
-	///   (<see cref="MailConverter.CategoryKeywords" /> is the shared, backend-side helper) and
+	///   (<see cref="MailKeywords.CategoryKeywords" /> is the shared, backend-side helper) and
 	///   hands the RESULT across the contract; the converter renders what it is given. Driving the
 	///   raw keywords through that same helper here keeps the assertion on the end-to-end
 	///   keywords → Categories behaviour rather than on either half alone.
@@ -37,7 +38,7 @@ public class MailConverterCategoryTests
 		return MailConverter.ToApplicationData(
 			Message(),
 			new MailFlags { Seen = true },
-			MailConverter.CategoryKeywords(keywords),
+			MailKeywords.CategoryKeywords(keywords),
 			new BodyPreference { Type = BodyType.PlainText },
 			_ => "ref");
 	}
@@ -70,7 +71,7 @@ public class MailConverterCategoryTests
 	[Fact]
 	public void CategoryKeywords_FilterIsCaseInsensitive_AndOrderStable()
 	{
-		IReadOnlyList<string> filtered = MailConverter.CategoryKeywords(
+		IReadOnlyList<string> filtered = MailKeywords.CategoryKeywords(
 			["b-tag", "JUNK", "$forwarded", "A-tag", "\\Recent"]);
 
 		// Sorted output keeps revision strings stable regardless of server keyword order.

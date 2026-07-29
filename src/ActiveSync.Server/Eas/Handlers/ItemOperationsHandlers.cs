@@ -1,8 +1,8 @@
 using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using ActiveSync.Server.Eas.Content;
@@ -128,11 +128,13 @@ public sealed class ItemOperationsHandler(
 			IContentStore? searchStore = context.Session.GetStoreForKey(new FolderKey(parts[0]));
 			if (searchStore is null)
 				return Failure("6");
-			ContentAdapter adapter = ContentAdapter.For(context.Session, searchStore);
-			BodyPreference options = ParseBodyPreference(
+			ContentAdapter adapter = ContentAdapter.For(context.Session, searchStore, options.Value.Eas);
+			BodyPreference longIdPreference = ParseBodyPreference(
 				fetch.Element(IO + "Options"), context.Version >= EasVersion.V160);
 			object? found = await adapter.GetItemAsync(parts[0], parts[1], ct);
-			List<XElement>? rendered = found is null ? null : adapter.Render(found, options, parts[0], parts[1]);
+			List<XElement>? rendered = found is null
+				? null
+				: adapter.Render(found, longIdPreference, parts[0], parts[1]);
 			if (rendered is null)
 				return Failure("6");
 			return new XElement(IO + "Fetch",

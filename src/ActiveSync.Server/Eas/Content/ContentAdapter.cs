@@ -2,6 +2,8 @@ using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Core.Options;
+using ActiveSync.Eas.Conversion;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using MimeKit;
@@ -32,10 +34,12 @@ public sealed class ContentAdapter
 	private static readonly XNamespace AirSyncBase = EasNamespaces.AirSyncBase;
 
 	private readonly IBackendSession _session;
+	private readonly EasOptions _eas;
 
-	private ContentAdapter(IBackendSession session, IContentStore store)
+	private ContentAdapter(IBackendSession session, IContentStore store, EasOptions eas)
 	{
 		_session = session;
+		_eas = eas;
 		Store = store;
 		EasClass = session.EasClassOf(store);
 	}
@@ -46,9 +50,14 @@ public sealed class ContentAdapter
 	/// <summary>The store's EAS content class, derived from its alias interface.</summary>
 	public string EasClass { get; }
 
-	public static ContentAdapter For(IBackendSession session, IContentStore store)
+	/// <summary>
+	///   Wraps a store for one request. <paramref name="eas" /> is read live from the options
+	///   monitor by the caller, not captured once, so a settings change applies on the next
+	///   request like every other live host option.
+	/// </summary>
+	public static ContentAdapter For(IBackendSession session, IContentStore store, EasOptions eas)
 	{
-		return new ContentAdapter(session, store);
+		return new ContentAdapter(session, store, eas);
 	}
 
 	/// <summary>The acting user's scheduling identity (organizer/PARTSTAT matching): mail address, else login.</summary>
@@ -404,23 +413,23 @@ public sealed class ContentAdapter
 
 	private string MergeCalendar(XElement applicationData, string? existingIcs)
 	{
-		string uid = TryExtractUid(existingIcs, CalendarConverter.ExtractUid) ?? Guid.NewGuid().ToString();
-		// Attachment cap: Auto semantics (1 MiB) for every backend while conversion is host-side —
-		// the provider-owned CalendarAttachments knob is Phase 4's knob-inventory item (recorded
-		// as a Phase 3 deviation in the design document).
+		string uid = TryExtractUid(existingIcs, CalendarPayload.ExtractUid) ?? Guid.NewGuid().ToString();
+		// Attachment cap: the host option, since the cap governs what THIS merge writes into the
+		// iCalendar. It was a caldav provider setting while the converters lived backend-side.
 		return CalendarConverter.FromApplicationData(
-			applicationData, uid, existingIcs, CalendarAttachmentPolicy.CapBytes(null), ActingIdentity);
+			applicationData, uid, existingIcs,
+			CalendarAttachmentPolicy.CapBytes(_eas.CalendarAttachments), ActingIdentity);
 	}
 
 	private static string MergeTask(XElement applicationData, string? existingIcs)
 	{
-		string uid = TryExtractUid(existingIcs, TasksConverter.ExtractUid) ?? Guid.NewGuid().ToString();
+		string uid = TryExtractUid(existingIcs, TaskPayload.ExtractUid) ?? Guid.NewGuid().ToString();
 		return TasksConverter.FromApplicationData(applicationData, uid, existingIcs);
 	}
 
 	private static string MergeContact(XElement applicationData, string? existingVcard)
 	{
-		string uid = TryExtractUid(existingVcard, ContactConverter.ExtractUid) ?? Guid.NewGuid().ToString();
+		string uid = TryExtractUid(existingVcard, ContactPayload.ExtractUid) ?? Guid.NewGuid().ToString();
 		return ContactConverter.FromApplicationData(applicationData, uid, existingVcard);
 	}
 

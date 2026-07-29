@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+	  OPTIONAL ergonomics beside the plugin contract: the load/serialize quirk handling both
+	  halves of the seam need when they touch an interchange payload. It carries the domain
+	  libraries (today Ical.Net) so ActiveSync.Contracts itself never has to — a plugin that
+	  only implements INotesStore references the contract alone and inherits nothing.
+	  Deliberately NOT referenced by ActiveSync.Contracts, and deliberately not loader ABI: a
+	  domain-library major bump moves this assembly and leaves the contract version still.
+	  Publishing (IsPackable, the release-tag version, the exact Contracts pin) is the packaging
+	  phase's line item; for now it is an in-repo assembly consumed by the host's conversion
+	  layer and by Backends.Common/Backends.Local.
+	-->
+	<PropertyGroup>
+		<RootNamespace>ActiveSync.Contracts.Interop</RootNamespace>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\ActiveSync.Contracts\ActiveSync.Contracts.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Ical.Net" />
+	</ItemGroup>
+
+</Project>

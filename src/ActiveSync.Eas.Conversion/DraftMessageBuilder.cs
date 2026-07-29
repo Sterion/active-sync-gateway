@@ -5,7 +5,7 @@ using ActiveSync.Protocol.Wbxml;
 using MimeKit;
 using MimeKit.Text;
 
-namespace ActiveSync.Backends.Common.Converters;
+namespace ActiveSync.Eas.Conversion;
 
 /// <summary>
 ///   Builds a MIME message from EAS 16.x draft ApplicationData (Sync Add/Change in the

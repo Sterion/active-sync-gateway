@@ -85,7 +85,7 @@ public sealed class CalDavStore(
 		// partStatIdentity = the user's mail address (falls back to the gateway login) —
 		// Credentials.UserName is the DAV backend login, which need not match any attendee.
 		// MeetingResponseKind's values are the MS-ASCMD UserResponse wire values the converter takes.
-		string? updated = CalendarConverter.SetPartStat(existing.Value.Content, (int)response, partStatIdentity);
+		string? updated = CalendarPayload.SetPartStat(existing.Value.Content, (int)response, partStatIdentity);
 		if (updated is not null)
 			await Dav.PutAsync(href, updated, "text/calendar", existing.Value.ETag, false, ct)
 				.ConfigureAwait(false);
@@ -173,7 +173,7 @@ public sealed class CalDavStore(
 		FolderKey folder, ItemKey item, int index, CancellationToken ct)
 	{
 		(string Content, string? ETag)? fetched = await Dav.GetAsync(item.Value, ct).ConfigureAwait(false);
-		return fetched is null ? null : CalendarConverter.ExtractAttachment(fetched.Value.Content, index);
+		return fetched is null ? null : CalendarPayload.ExtractAttachment(fetched.Value.Content, index);
 	}
 
 	/// <summary>
@@ -241,7 +241,7 @@ public sealed class CalDavStore(
 			if (ics is null)
 				continue;
 			anyData = true;
-			result.AddRange(CalendarConverter.ParseFreeBusy(ics));
+			result.AddRange(CalendarPayload.ParseFreeBusy(ics));
 		}
 
 		return anyData ? result : null;
@@ -249,7 +249,7 @@ public sealed class CalDavStore(
 
 	protected override string? ExtractUid(string content)
 	{
-		return CalendarConverter.ExtractUid(content);
+		return CalendarPayload.ExtractUid(content);
 	}
 
 	protected override XElement BuildUidQueryBody(string uid)

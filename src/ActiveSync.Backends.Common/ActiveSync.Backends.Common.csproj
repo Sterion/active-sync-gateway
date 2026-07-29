@@ -1,23 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-	<!-- Shared backend building blocks: the MIME/iCalendar/vCard <-> EAS converters plus the
-	     TLS/wire-logging helpers every network provider reuses. Carries the heavy converter
-	     package dependencies so Core stays free of them. In-repo only, NOT published (packed
-	     until 1.1.2) — a plugin brings its own converters. -->
+	<!-- Shared backend building blocks: the TLS/wire-logging and HTTP helpers every network
+	     provider reuses, the shared backend-options bases and config schema fields, and the
+	     payload helpers a STORE needs for its own data (UID extraction, PARTSTAT, inline
+	     attachments, free/busy, mail keyword classification). It keeps Ical.Net and
+	     FolkerKinzel.VCards for those; the EAS half of the old converters is host-side, in
+	     ActiveSync.Eas.Conversion. In-repo only, NOT published (packed until 1.1.2). -->
 
 	<ItemGroup>
 		<ProjectReference Include="..\ActiveSync.Contracts\ActiveSync.Contracts.csproj" />
-		<!-- EXPLICIT since the contract severed its own Protocol reference: the EAS namespaces,
-		     the compact date format and the wire-log payload cap are used directly here (this is
-		     Protocol's heaviest consumer), and they no longer arrive transitively via Contracts. -->
+		<!-- EXPLICIT since the contract severed its own Protocol reference. Now a single call
+		     deep: an iCalendar UTC date-time is byte-identical to the EAS compact form, so the
+		     free-busy parser still reads them with EasDateTime. -->
 		<ProjectReference Include="..\ActiveSync.Protocol\ActiveSync.Protocol.csproj" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<!-- Lets Core.Tests exercise TimeZoneBlob.WriteName directly with a real surrogate
-		     pair, which TimeZoneInfo.CreateCustomTimeZone itself sanitizes away before it ever
-		     reaches the field-write code — same grant pattern the Imap/Smtp/Jmap/Dav csprojs use. -->
-		<InternalsVisibleTo Include="ActiveSync.Core.Tests" />
+		<!-- The iCalendar load/serialize quirk handling, shared with the host's conversion layer. -->
+		<ProjectReference Include="..\ActiveSync.Contracts.Interop\ActiveSync.Contracts.Interop.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

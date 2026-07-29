@@ -94,7 +94,7 @@ public sealed class PortalBackendEditingTests
 		HttpResponseMessage response = await client.PutAsJsonAsync("/user/api/backends/Calendar", new
 		{
 			userName = "bob.dav",
-			settings = new Dictionary<string, string?> { ["CalendarAttachments"] = "Off" }
+			settings = new Dictionary<string, string?> { ["SendInvitations"] = "Off" }
 		});
 
 		Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -102,7 +102,7 @@ public sealed class PortalBackendEditingTests
 		UserOptions? stored = await store.GetAsync("bob", CancellationToken.None);
 		BackendRoleOverride role = stored!.Backends!["Calendar"];
 		Assert.Equal("bob.dav", role.UserName);
-		Assert.Equal("Off", role.Settings!["CalendarAttachments"]);
+		Assert.Equal("Off", role.Settings!["SendInvitations"]);
 	}
 
 	[Fact]
@@ -131,14 +131,14 @@ public sealed class PortalBackendEditingTests
 		using HttpClient client = await host.SignInAsync("bob", admin: false);
 		HttpResponseMessage response = await client.PutAsJsonAsync("/user/api/backends/Calendar", new
 		{
-			settings = new Dictionary<string, string?> { ["CalendarAttachments"] = "Off" }
+			settings = new Dictionary<string, string?> { ["SendInvitations"] = "Off" }
 		});
 		Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
 		UserOptions? stored = await store.GetAsync("bob", CancellationToken.None);
 		Dictionary<string, string?> settings = stored!.Backends!["Calendar"].Settings!;
 		Assert.Equal("/dav/bob/", settings["HomeSetPath"]);
-		Assert.Equal("Off", settings["CalendarAttachments"]);
+		Assert.Equal("Off", settings["SendInvitations"]);
 	}
 
 	[Fact]
@@ -155,7 +155,7 @@ public sealed class PortalBackendEditingTests
 
 		Assert.DoesNotContain("BaseUrl", names);
 		Assert.DoesNotContain("AllowInvalidCertificates", names);
-		Assert.Contains("CalendarAttachments", names);
+		Assert.Contains("SendInvitations", names);
 	}
 
 	[Fact]
@@ -198,7 +198,7 @@ public sealed class PortalBackendEditingTests
 		// A second save that only touches Settings (never resends userName) must NOT clear it.
 		HttpResponseMessage second = await client.PutAsJsonAsync("/user/api/backends/Calendar", new
 		{
-			settings = new Dictionary<string, string?> { ["CalendarAttachments"] = "Off" },
+			settings = new Dictionary<string, string?> { ["SendInvitations"] = "Off" },
 		});
 		Assert.Equal(HttpStatusCode.OK, second.StatusCode);
 

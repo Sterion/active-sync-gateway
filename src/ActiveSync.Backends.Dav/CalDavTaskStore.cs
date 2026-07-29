@@ -49,7 +49,7 @@ public sealed class CalDavTaskStore(
 
 	protected override string? ExtractUid(string content)
 	{
-		return TasksConverter.ExtractUid(content);
+		return TaskPayload.ExtractUid(content);
 	}
 
 	protected override XElement BuildUidQueryBody(string uid)
