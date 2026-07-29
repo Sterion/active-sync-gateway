@@ -22,6 +22,7 @@
 		<Project Path="tests/ActiveSync.Cli.Tests/ActiveSync.Cli.Tests.csproj" />
 		<Project Path="tests/ActiveSync.Core.Tests/ActiveSync.Core.Tests.csproj" />
 		<Project Path="tests/ActiveSync.Integration.Tests/ActiveSync.Integration.Tests.csproj" />
+		<Project Path="tests/ActiveSync.Plugin.Local/ActiveSync.Plugin.Local.csproj" />
 		<Project Path="tests/ActiveSync.Protocol.Tests/ActiveSync.Protocol.Tests.csproj" />
 		<Project Path="tests/ActiveSync.Server.Tests/ActiveSync.Server.Tests.csproj" />
 		<Project Path="tests/ActiveSync.TestPlugin/ActiveSync.TestPlugin.csproj" />

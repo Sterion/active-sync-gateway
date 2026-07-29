@@ -7,10 +7,17 @@ ordinary providers registered at startup; an **out-of-repo plugin** is the same 
 shipped as a separate assembly the gateway loads from a directory. Nothing about a plugin
 provider is second-class — config assigns it to a role by name exactly like a built-in.
 
-Two references worth opening beside this page:
+Three references worth opening beside this page:
 
 - `tests/ActiveSync.TestPlugin` — the smallest COMPLETE plugin: an entry point, a provider and
   a working `INotesStore`, built against `ActiveSync.Contracts` and nothing else.
+- `tests/ActiveSync.Plugin.Local` — a plugin that serves **every** role except Oof (mail,
+  submission, calendar, tasks, contacts, notes) out of a directory tree, one file per item in
+  its native format. Also against `ActiveSync.Contracts` alone, so it doubles as the worked
+  example for the harder parts: the mail store with `IMailboxOperations`, folder types, a change
+  watcher, a config schema, and the key/revision rules below. Point a gateway at it and you have
+  a fully functional server with no external backend at all — sends loop back to the sender's
+  own Inbox.
 - `src/ActiveSync.Backends.Jmap` — a multi-role HTTP backend (mail, calendar, contacts,
   submission and out-of-office over one session), for the shape of a real one.
 
@@ -256,10 +263,16 @@ binds nothing: it only knows the shapes you declare.
 ```csharp
 public IReadOnlyList<BackendConfigField> DescribeConfiguration(BackendRole role) =>
 [
-    new BackendConfigField("Endpoint", "Endpoint", BackendFieldType.Url, Required: true,
-        Help: "Absolute https URL of the notes service."),
-    new BackendConfigField("Mode", "Sync mode", BackendFieldType.Enum, Default: "Auto",
-        EnumValues: ["Auto", "Push", "Poll"], SelfServiceEditable: true)
+    new BackendConfigField
+    {
+        Name = "Endpoint", Label = "Endpoint", Type = BackendFieldType.Url, Required = true,
+        Help = "Absolute https URL of the notes service."
+    },
+    new BackendConfigField
+    {
+        Name = "Mode", Label = "Sync mode", Type = BackendFieldType.Enum, Default = "Auto",
+        EnumValues = ["Auto", "Push", "Poll"], SelfServiceEditable = true
+    }
 ];
 ```
 

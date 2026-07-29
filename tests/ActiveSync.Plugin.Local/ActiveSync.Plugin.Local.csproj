@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- A WORKING out-of-repo-style backend plugin: it serves MailStore, MailSubmit, Calendar,
+	     Tasks, Contacts and Notes out of a directory tree on disk, one file per item in its native
+	     format (RFC822 / iCalendar / vCard / JSON). Where ActiveSync.TestPlugin proves the loader
+	     works with the smallest possible store, this one proves the WHOLE store surface — mail
+	     included — can be served by a plugin, and gives the suite a gateway that needs no external
+	     backend at all.
+
+	     Of the gateway's assemblies it references ActiveSync.Contracts ONLY (the published plugin
+	     contract): no Core, no Crypto, no EF Core, and no MIME/iCalendar/vCard library — the
+	     payload classes are stored verbatim, exactly as the contract hands them over.
+	     Microsoft.Extensions.Logging.Abstractions is not a gateway assembly and is HOST-owned by
+	     the plugin load context (Microsoft.Extensions.* always resolves from the host, because
+	     those types appear in the contract's own signatures), so it must NOT be shipped in the
+	     plugin folder. Not packable and not a test project itself. -->
+	<PropertyGroup>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\src\ActiveSync.Contracts\ActiveSync.Contracts.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+	</ItemGroup>
+
+	<!-- Every plugin entry assembly must declare the contract it supports. An out-of-repo plugin
+	     writes `[assembly: SupportedGatewayContract(2, 0)]` in source; this in-repo plugin takes
+	     the value from the same property the host is built from, so it can never go stale when the
+	     contract version is raised. -->
+	<ItemGroup>
+		<AssemblyAttribute Include="ActiveSync.Contracts.SupportedGatewayContractAttribute">
+			<_Parameter1>$(ContractVersionMajor)</_Parameter1>
+			<_Parameter1_TypeName>System.Int32</_Parameter1_TypeName>
+			<_Parameter2>$(ContractVersionMinor)</_Parameter2>
+			<_Parameter2_TypeName>System.Int32</_Parameter2_TypeName>
+		</AssemblyAttribute>
+	</ItemGroup>
+
+</Project>

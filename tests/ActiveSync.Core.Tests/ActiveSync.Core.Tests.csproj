@@ -35,6 +35,10 @@
 		     runtime; the AfterBuild target below stages its DLL under testplugin/. -->
 		<ProjectReference Include="..\ActiveSync.TestPlugin\ActiveSync.TestPlugin.csproj"
 		                  ReferenceOutputAssembly="false" />
+		<!-- Likewise for the filesystem plugin, which LocalFilesPluginConformanceTests loads through
+		     the real loader and runs the conformance kit against. -->
+		<ProjectReference Include="..\ActiveSync.Plugin.Local\ActiveSync.Plugin.Local.csproj"
+		                  ReferenceOutputAssembly="false" />
 		<!-- Referenced NORMALLY, unlike the plugin itself: the host must have its own copy loadable
 		     from the default context, so PluginLoaderTests can prove the plugin binds to the copy
 		     in its own folder instead (K41). -->
@@ -47,6 +51,14 @@
 	<Target Name="StageTestPlugin" AfterTargets="Build">
 		<Copy SourceFiles="$(MSBuildThisFileDirectory)..\ActiveSync.TestPlugin\bin\$(Configuration)\$(TargetFramework)\ActiveSync.TestPlugin.dll;$(MSBuildThisFileDirectory)..\ActiveSync.TestPlugin\bin\$(Configuration)\$(TargetFramework)\PluginPrivateLib.dll"
 		      DestinationFolder="$(OutDir)testplugin" SkipUnchangedFiles="true" />
+	</Target>
+
+	<!-- Only the ENTRY assembly is staged: Microsoft.Extensions.Logging.Abstractions must resolve
+	     from the host (the loader shares Microsoft.Extensions.* by design), and the loader checks
+	     every DLL beneath a plugin directory against the host's contract version. -->
+	<Target Name="StageLocalFilesPlugin" AfterTargets="Build">
+		<Copy SourceFiles="$(MSBuildThisFileDirectory)..\ActiveSync.Plugin.Local\bin\$(Configuration)\$(TargetFramework)\ActiveSync.Plugin.Local.dll"
+		      DestinationFolder="$(OutDir)localfilesplugin" SkipUnchangedFiles="true" />
 	</Target>
 
 </Project>

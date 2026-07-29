@@ -18,7 +18,7 @@
 	</ItemGroup>
 
 	<!-- Every plugin entry assembly must declare the contract it supports. An out-of-repo plugin
-	     writes `[assembly: SupportedGatewayContract(1, 0)]` in source; this in-repo fixture takes
+	     writes `[assembly: SupportedGatewayContract(2, 0)]` in source; this in-repo fixture takes
 	     the value from the same property the host is built from, so it can never go stale when the
 	     contract version is raised. -->
 	<ItemGroup>

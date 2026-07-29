@@ -18,6 +18,18 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\..\src\ActiveSync.Server\ActiveSync.Server.csproj" />
+		<!-- Built (not referenced) so LocalFilesPluginTests can load it from a plugins directory at
+		     runtime, exactly as the gateway would load an out-of-repo plugin. -->
+		<ProjectReference Include="..\ActiveSync.Plugin.Local\ActiveSync.Plugin.Local.csproj"
+		                  ReferenceOutputAssembly="false" />
 	</ItemGroup>
+
+	<!-- Only the ENTRY assembly is staged: Microsoft.Extensions.Logging.Abstractions must resolve
+	     from the host (the loader shares Microsoft.Extensions.* by design), and the loader checks
+	     every DLL beneath a plugin directory against the host's contract version. -->
+	<Target Name="StageLocalFilesPlugin" AfterTargets="Build">
+		<Copy SourceFiles="$(MSBuildThisFileDirectory)..\ActiveSync.Plugin.Local\bin\$(Configuration)\$(TargetFramework)\ActiveSync.Plugin.Local.dll"
+		      DestinationFolder="$(OutDir)localfilesplugin" SkipUnchangedFiles="true" />
+	</Target>
 
 </Project>

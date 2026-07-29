@@ -284,6 +284,18 @@ tests/ActiveSync.TestPlugin/       the fixture out-of-repo plugin: a working INo
                                    PluginLoaderTests. Beside it, tests/PluginPrivateLib stands in for
                                    a plugin's PRIVATE dependency (the copy the plugin ships must win
                                    over the host's).
+tests/ActiveSync.Plugin.Local/     the FULL-SURFACE plugin, also Contracts-only: MailStore (+ the
+                                   mandatory IMailboxOperations, IItemMoveOperations,
+                                   IFolderOperations), MailSubmit, Calendar, Tasks, Contacts and
+                                   Notes over a directory tree — one file per item in its native
+                                   format (.eml/.ics/.vcf/.json), mail flags+categories carried in
+                                   the FILE NAME (no sidecar; a minted fixed-width key at the front,
+                                   because a name-derived key collides and blows the 64-char
+                                   ServerId cap — unrecognised files are adopted by one rename).
+                                   Sends loop back into the sender's own Inbox, so a gateway with
+                                   NO external backend is fully functional. Loaded through the real
+                                   PluginLoader by Core.Tests (conformance kit over all five stores)
+                                   and driven end-to-end by Integration.Tests' only docker-free lane.
 tests/ActiveSync.Server.Tests/     handler-level tests (has InternalsVisibleTo into Server)
 tests/ActiveSync.WebUi.Tests/      web UI unit tests (key repository, OIDC decision matrix)
 tests/ActiveSync.Integration.Tests/  real-backend E2E tests (see "Integration tests" below)
