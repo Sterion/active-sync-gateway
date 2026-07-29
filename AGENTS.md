@@ -762,7 +762,8 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   host-only assembly carries no license/authors at all. `tests/ActiveSync.TestPlugin` is the in-repo
   proof the one package suffices: a real `INotesStore` (Contracts + BCL only), loaded through the
   loader and run against the published conformance kit in `PluginConformanceTests`. See
-  docs/plugins.md (contract NOT ABI-stable pre-2.0).
+  docs/plugins.md (contract 2.0 = the typed-contract baseline, declared 2026-07-29 over the
+  finished redesign; the loader still gates exact major.minor).
 - > ### ⛔ CHANGING THE CONTRACT SURFACE? RAISE `ContractVersionMinor` FIRST.
   >
   > **If you add, remove, rename or retype ANY public member of `ActiveSync.Contracts`, you MUST

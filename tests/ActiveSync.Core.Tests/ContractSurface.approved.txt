@@ -7,7 +7,7 @@
 # The history below is APPEND-ONLY: each line pins the surface a contract version
 # shipped with. Editing an existing line defeats the guard that a surface change
 # must come with a version bump.
-# Current contract version: 1.8
+# Current contract version: 2.0
 
 === VERSION HISTORY (append-only) ===
 1.0  6985799512ffa341b07b1eb951c0bf0e4975c4c14a1541db6c341ac23f9abddd
@@ -19,6 +19,7 @@
 1.6  77dbad75d37005e7c7ec1b9dbed5011767651e64a61e2be1e24ae25742eea8e1
 1.7  f7edd9c8a65c7e3d5eaebfe0cc19775151b7b7b8b5da95ab61feb10d5786aaae
 1.8  bcf42fa6f05c1b2f1f207ff315cf097c7934c1e52bdfe60e6eb2861471c6783e
+2.0  bcf42fa6f05c1b2f1f207ff315cf097c7934c1e52bdfe60e6eb2861471c6783e
 
 === SURFACE ===
 assembly ActiveSync.Contracts

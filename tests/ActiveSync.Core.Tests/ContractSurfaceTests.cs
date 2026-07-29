@@ -42,13 +42,17 @@ public sealed class ContractSurfaceTests
 	[Fact]
 	public void ContractVersion_IsTheExpectedSurfaceVersion()
 	{
-		// The typed-contract redesign's fifth and final step (packaging, licensing, documentation):
-		// ActiveSync.Protocol stopped being published — host-only, PolyForm, back on the release
+		// 2.0: the owner's deliberate stability declaration over the FINISHED typed-contract
+		// surface (design doc § 10 decision 14) — raised manually after all five phases landed
+		// and were verified, not by any phase. The surface is identical to 1.8's; the major is
+		// the statement that this is the baseline plugins can build against.
+		// (History below: 1.8 was the redesign's fifth and final step — packaging, licensing,
+		// documentation: ActiveSync.Protocol stopped being published — host-only, PolyForm, back on the release
 		// version — and the two optional packages beside the contract were shipped
 		// (ActiveSync.Contracts.Interop, ActiveSync.Contracts.Conformance), each pinning the
 		// contract as an exact dependency range. The contract's own C# surface did not move; the
-		// SNAPSHOT did, because Protocol left it, and the bump is the redesign's per-phase rule.
-		Assert.Equal(new Version(1, 8), ContractVersion.Current);
+		// SNAPSHOT did, because Protocol left it, and the bump was the redesign's per-phase rule.)
+		Assert.Equal(new Version(2, 0), ContractVersion.Current);
 	}
 
 	// BackendItemNotFoundException derived straight from Exception, so the codebase-wide

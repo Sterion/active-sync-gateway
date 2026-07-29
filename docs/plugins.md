@@ -39,7 +39,7 @@ Two **optional** packages sit beside the contract. Neither is needed to write a 
 | `ActiveSync.Contracts.Conformance` | Runs your store against the obligations this page states in prose and returns a report. References only `ActiveSync.Contracts` — no test framework, no domain library. |
 
 Both track the **gateway release version** rather than the contract version, and each pins the
-contract it was built against as an exact dependency (`[1.8.0]`). Pick the release that shipped
+contract it was built against as an exact dependency (`[2.0.0]`). Pick the release that shipped
 your contract version and the versions line up by construction. Neither is part of the
 loader's compatibility gate, so a MimeKit or Ical.Net major bump can move them without refusing
 a single plugin.
@@ -54,7 +54,7 @@ using ActiveSync.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-[assembly: SupportedGatewayContract(1, 8)]   // see Versioning; mandatory
+[assembly: SupportedGatewayContract(2, 0)]   // see Versioning; mandatory
 
 public sealed class MyPlugin : IGatewayPlugin
 {
@@ -399,13 +399,14 @@ loaded.
 
 ## Versioning
 
-The backend contract is **not ABI-stable before 2.0** — the stores and their neighbours still
-evolve with new EAS features.
+**Contract 2.0 is the typed-contract baseline** — the deliberate stability declaration over the
+completed payload-currency redesign. Earlier 1.x versions were explicitly not ABI-stable; 2.0 is
+the surface plugins are expected to build against.
 
 **Declare the contract you support.** Every plugin entry assembly must carry:
 
 ```csharp
-[assembly: SupportedGatewayContract(1, 8)] // must equal ActiveSync.Contracts.ContractVersion.Major/Minor
+[assembly: SupportedGatewayContract(2, 0)] // must equal ActiveSync.Contracts.ContractVersion.Major/Minor
 ```
 
 The loader reads that declaration from metadata *before loading anything* and refuses the
@@ -414,10 +415,11 @@ purpose: your plugin's own version is your business (a plugin at 3.7.2 may suppo
 1.0), and the package version you happened to compile against says nothing about which
 contract you actually verified against. Only you know that.
 
-**Both components are breaking.** Major *and* minor must match — a plugin declaring 1.7 will
-not load on a 1.8 host. That is deliberate while the contract is pre-2.0: it lets an
-incompatible change ship as a minor bump instead of inflating the major into a meaningless
-counter. The patch component is not part of the declaration and never gates anything.
+**Both components still gate exactly.** Major *and* minor must match — a plugin declaring 2.0
+will not load on a 2.1 host. The loader's gate is unchanged by the 2.0 declaration: a minor
+bump still signals a surface change you must rebuild and re-verify against, rather than a
+compatibility the loader would have to take on faith. The patch component is not part of the
+declaration and never gates anything.
 
 **The contract version is not the gateway version.** It is the version of
 `ActiveSync.Contracts` alone, and it moves only when that surface changes, so it stays put
@@ -427,7 +429,7 @@ contract, not the release. You can read the host's value at runtime as
 `ActiveSync.Contracts.ContractVersion.Current` (`Major.Minor`).
 
 The optional packages are the other way round: they carry the release version and pin their
-contract exactly, so `ActiveSync.Contracts.Interop 1.6.0` depends on `[1.8.0]` of the contract
+contract exactly, so `ActiveSync.Contracts.Interop 1.6.0` depends on `[2.0.0]` of the contract
 and simply will not restore beside a different one. That is intentional — a floor range would
 promise a compatibility that contract minors do not have.
 

@@ -33,8 +33,8 @@
 	     are NOT loader ABI and do not take this version — they ride the release tag and pin the
 	     contract they were built against as an exact dependency range. -->
 	<PropertyGroup>
-		<ContractVersionMajor>1</ContractVersionMajor>
-		<ContractVersionMinor>8</ContractVersionMinor>
+		<ContractVersionMajor>2</ContractVersionMajor>
+		<ContractVersionMinor>0</ContractVersionMinor>
 		<ContractVersionPatch>0</ContractVersionPatch>
 		<ContractVersion>$(ContractVersionMajor).$(ContractVersionMinor).$(ContractVersionPatch)</ContractVersion>
 	</PropertyGroup>
