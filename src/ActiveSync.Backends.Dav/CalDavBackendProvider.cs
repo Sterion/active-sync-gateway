@@ -50,7 +50,7 @@ public sealed class CalDavBackendProvider(
 			"Auto", "On", "Off");
 		BackendSettingsValidation.CaPath(options.CaCertificatePath, context, failures);
 		foreach (string entry in options.SharedCollections ?? [])
-			if (SharedCollection.Validate(entry, options.BaseUrl) is { } sharedFailure)
+			if (SharedCollectionEntry.Validate(entry, options.BaseUrl) is { } sharedFailure)
 				failures.Add($"{context}: SharedCollections: {sharedFailure}");
 	}
 
@@ -171,7 +171,7 @@ public sealed class CalDavBackendProvider(
 					throw new InvalidOperationException($"caldav cannot serve the {role.Role} role.");
 			}
 
-		return Task.FromResult<IBackendConnection>(new BackendConnection(stores, ownedResources: [client]));
+		return Task.FromResult<IBackendConnection>(new BackendConnection(stores, ownedResources: [OwnedResource.OfSync(client)]));
 	}
 
 	/// <summary>
@@ -203,7 +203,7 @@ public sealed class CalDavBackendProvider(
 		DavServerOptions options, BackendConnectionContext context)
 	{
 		List<SharedCollection> merged = (options.SharedCollections ?? [])
-			.Select(SharedCollection.Parse)
+			.Select(SharedCollectionEntry.Parse)
 			.ToList();
 		foreach (SharedCollection grant in context.SharedCollections)
 		{

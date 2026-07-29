@@ -114,7 +114,7 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 					break;
 			}
 
-		return Task.FromResult<IBackendConnection>(new BackendConnection(stores, submit, oof, ownedResources: [client]));
+		return Task.FromResult<IBackendConnection>(new BackendConnection(stores, submit, oof, ownedResources: [OwnedResource.OfSync(client)]));
 	}
 
 	public async Task<bool> VerifyCredentialsAsync(ResolvedRole role, CancellationToken ct)

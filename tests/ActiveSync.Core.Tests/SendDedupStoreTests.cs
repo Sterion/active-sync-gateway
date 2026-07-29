@@ -143,8 +143,8 @@ public sealed class SendDedupStoreTests : IDisposable
 		await using (SqliteSyncDbContext seed = StateTestSupport.NewContext(_connection))
 		{
 			CollectionState c = new() { DeviceKey = device.Id, CollectionId = "5", SyncKey = 2 };
-			SyncStateService.WriteSnapshot(c, new Dictionary<string, string>());
-			SyncStateService.WritePreviousSnapshot(c, new Dictionary<string, string>());
+			SyncStateService.WriteSnapshot(c, new Dictionary<string, SnapshotEntry>());
+			SyncStateService.WritePreviousSnapshot(c, new Dictionary<string, SnapshotEntry>());
 			await seed.CollectionStates.AddAsync(c, CancellationToken.None);
 			await seed.SaveChangesAsync(CancellationToken.None);
 		}
@@ -157,7 +157,7 @@ public sealed class SendDedupStoreTests : IDisposable
 			await _service.ValidateSyncKeyAsync(device, "5", "1", CancellationToken.None);
 		Assert.Equal(SyncKeyValidation.Replay, validation);
 		int keyAfterReplay = await _service.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string>(), 0, SyncKeyValidation.Replay, CancellationToken.None);
+			state!, new Dictionary<string, SnapshotEntry>(), 0, SyncKeyValidation.Replay, CancellationToken.None);
 		Assert.Equal(2, keyAfterReplay); // Replay does not advance the key
 
 		SendClaimOutcome secondReplayClaimAttempt =

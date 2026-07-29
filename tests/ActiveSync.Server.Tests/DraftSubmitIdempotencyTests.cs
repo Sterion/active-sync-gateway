@@ -58,7 +58,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 
 		XElement? result = await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, command,
-			new Dictionary<string, string>(StringComparer.Ordinal),
+			new Dictionary<string, SnapshotEntry>(StringComparer.Ordinal),
 			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ledger, syncKeyForClaim: 1,
 			CancellationToken.None);
 
@@ -105,7 +105,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		// under a round that never committed would.
 		await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, CommandFor("c1"),
-			new Dictionary<string, string>(StringComparer.Ordinal),
+			new Dictionary<string, SnapshotEntry>(StringComparer.Ordinal),
 			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ClientCommandLedger.Empty(),
 			syncKeyForClaim: 1, CancellationToken.None);
 
@@ -114,7 +114,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 		// a FRESH, empty ledger exactly like the first attempt's.
 		await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, CommandFor("c1"),
-			new Dictionary<string, string>(StringComparer.Ordinal),
+			new Dictionary<string, SnapshotEntry>(StringComparer.Ordinal),
 			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ClientCommandLedger.Empty(),
 			syncKeyForClaim: 1, CancellationToken.None);
 
@@ -156,7 +156,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 
 		await Assert.ThrowsAsync<BackendException>(() => handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, CommandFor("c1"),
-			new Dictionary<string, string>(StringComparer.Ordinal),
+			new Dictionary<string, SnapshotEntry>(StringComparer.Ordinal),
 			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ClientCommandLedger.Empty(),
 			syncKeyForClaim: 1, CancellationToken.None));
 
@@ -169,7 +169,7 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 
 		XElement? result = await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, CommandFor("c1"),
-			new Dictionary<string, string>(StringComparer.Ordinal),
+			new Dictionary<string, SnapshotEntry>(StringComparer.Ordinal),
 			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ClientCommandLedger.Empty(),
 			syncKeyForClaim: 1, CancellationToken.None);
 
@@ -209,13 +209,13 @@ public sealed class DraftSubmitIdempotencyTests : IDisposable
 
 		await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, CommandFor(),
-			new Dictionary<string, string>(StringComparer.Ordinal),
+			new Dictionary<string, SnapshotEntry>(StringComparer.Ordinal),
 			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ClientCommandLedger.Empty(),
 			syncKeyForClaim: 1, CancellationToken.None);
 
 		await handler.ApplyClientCommandAsync(
 			context, drafts, _harness.Session.Store, CommandFor(),
-			new Dictionary<string, string>(StringComparer.Ordinal),
+			new Dictionary<string, SnapshotEntry>(StringComparer.Ordinal),
 			new BodyPreference { Type = BodyType.PlainText }, deletesAsMoves: true, ClientCommandLedger.Empty(),
 			syncKeyForClaim: 1, CancellationToken.None);
 

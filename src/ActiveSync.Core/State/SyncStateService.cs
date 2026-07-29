@@ -140,12 +140,12 @@ public sealed class SyncStateService(
 		Device device, string collectionId, string clientSyncKey, CancellationToken ct)
 		=> _collections.ValidateSyncKeyAsync(device, collectionId, clientSyncKey, ct);
 
-	public Task<(SyncKeyValidation Validation, Dictionary<string, string> Snapshot, int FilterType)>
+	public Task<(SyncKeyValidation Validation, Dictionary<string, SnapshotEntry> Snapshot, int FilterType)>
 		PeekSyncKeyAsync(Device device, string collectionId, string clientSyncKey, CancellationToken ct)
 		=> _collections.PeekSyncKeyAsync(device, collectionId, clientSyncKey, ct);
 
 	public async Task<int> CommitCollectionStateAsync(
-		CollectionState state, Dictionary<string, string> newSnapshot, int filterType,
+		CollectionState state, Dictionary<string, SnapshotEntry> newSnapshot, int filterType,
 		SyncKeyValidation validation, CancellationToken ct,
 		Dictionary<string, AppliedClientAdd>? appliedAdds = null,
 		Dictionary<string, AppliedClientChange>? appliedChanges = null)
@@ -195,20 +195,27 @@ public sealed class SyncStateService(
 	public Task<CollectionState?> GetCollectionStateAsync(Device device, string collectionId, CancellationToken ct)
 		=> _collections.GetCollectionStateAsync(device, collectionId, ct);
 
-	/// <summary>The item snapshot persisted on a <see cref="CollectionState" />.</summary>
-	public static Dictionary<string, string> ReadSnapshot(CollectionState state)
+	/// <summary>
+	///   The item snapshot persisted on a <see cref="CollectionState" />, or <c>null</c> when the
+	///   stored blob predates the current snapshot shape (or is corrupt) — the caller must then
+	///   treat the client's sync key as invalid rather than diff against an empty snapshot.
+	/// </summary>
+	public static Dictionary<string, SnapshotEntry>? ReadSnapshot(CollectionState state)
 		=> CollectionStateStore.ReadSnapshot(state);
 
 	/// <summary>Writes an item snapshot onto a <see cref="CollectionState" /> (stored gzipped).</summary>
-	public static void WriteSnapshot(CollectionState state, Dictionary<string, string> snapshot)
+	public static void WriteSnapshot(CollectionState state, Dictionary<string, SnapshotEntry> snapshot)
 		=> CollectionStateStore.WriteSnapshot(state, snapshot);
 
-	/// <summary>The one-generation-old snapshot (SyncKey-1) — empty when there is no replay generation.</summary>
-	public static Dictionary<string, string> ReadPreviousSnapshot(CollectionState state)
+	/// <summary>
+	///   The one-generation-old snapshot (SyncKey-1) — empty when there is no replay generation,
+	///   <c>null</c> when the stored blob is not readable (see <see cref="ReadSnapshot" />).
+	/// </summary>
+	public static Dictionary<string, SnapshotEntry>? ReadPreviousSnapshot(CollectionState state)
 		=> CollectionStateStore.ReadPreviousSnapshot(state);
 
 	/// <summary>Writes the previous-generation snapshot onto a <see cref="CollectionState" /> (stored gzipped).</summary>
-	public static void WritePreviousSnapshot(CollectionState state, Dictionary<string, string> snapshot)
+	public static void WritePreviousSnapshot(CollectionState state, Dictionary<string, SnapshotEntry> snapshot)
 		=> CollectionStateStore.WritePreviousSnapshot(state, snapshot);
 
 	/// <summary>The applied-Add map of the generation that produced the current SyncKey.</summary>

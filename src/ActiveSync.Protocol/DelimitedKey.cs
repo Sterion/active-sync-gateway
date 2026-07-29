@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ruben Andersen
 // SPDX-License-Identifier: MIT
 
-namespace ActiveSync.Contracts;
+namespace ActiveSync.Protocol;
 
 /// <summary>
 ///   Encodes a composite identifier (e.g. an attachment FileReference or a Search LongId)
@@ -9,6 +9,11 @@ namespace ActiveSync.Contracts;
 ///   a component (legal in IMAP mailbox names) can never be confused with the delimiter —
 ///   unlike escaping the already-joined string, where the delimiter and the data escape
 ///   identically.
+///   <para>
+///     It lives with the other EAS wire encodings rather than in the plugin contract: FileReference
+///     and LongId are values the CLIENT sees, and once no delimited key crosses the store boundary
+///     a plugin has no use for the encoder — its presence there would only invite one.
+///   </para>
 /// </summary>
 public static class DelimitedKey
 {

@@ -60,7 +60,7 @@ public sealed class GetItemEstimateHandler(
 			(UserFolder folder, IContentStore store) = resolved.Value;
 			// GetItemEstimate is a query — peek at the sync key without mutating state
 			// (ValidateSyncKeyAsync, used by Sync, would reset the snapshot on key 0).
-			(SyncKeyValidation validation, Dictionary<string, string> snapshot, int stateFilterType) =
+			(SyncKeyValidation validation, Dictionary<string, SnapshotEntry> snapshot, int stateFilterType) =
 				await context.State.PeekSyncKeyAsync(context.Device, collectionId, syncKey, ct);
 			// MS-ASCMD's GetItemEstimate Status element is its own table, distinct from Sync's —
 			// 3 is SYNCSTATENOTPRIMED (the collection has never completed a Sync round) and 4 is
@@ -95,7 +95,9 @@ public sealed class GetItemEstimateHandler(
 				continue;
 			}
 
-			CollectionChanges diff = CollectionDiff.Compute(snapshot, current, int.MaxValue);
+			// Through CollectionSnapshot so an item still owing a read-only revert is counted as the
+			// Change the next Sync round will send, exactly as the diff there will see it.
+			(CollectionChanges diff, _) = CollectionSnapshot.Diff(snapshot, current, int.MaxValue);
 			responses.Add(Response("1", diff.Adds.Count + diff.Changes.Count + diff.Deletes.Count, store));
 		}
 

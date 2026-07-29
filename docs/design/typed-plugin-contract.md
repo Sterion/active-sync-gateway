@@ -10,9 +10,11 @@
 > scope in § 7, the per-unit converter-split specification in § 7.1, and a batch of signature
 > fixes.*
 >
-> **Implementation progress: Phase 1 landed on `plugin-restructure` (contract version 1.4), with
-> one recorded deviation — `BodyPreference.Eas16` survives until Phase 3 (§ 5.1).** Phases 2–5
-> are not started.
+> **Implementation progress: Phases 1–2 landed on `plugin-restructure` (contract version 1.5).**
+> Recorded deviations: `BodyPreference.Eas16` survives until Phase 3 (§ 5.1); the read-only revert
+> marker reaches `CollectionDiff` as a `forceChanged` set rather than through the snapshot entry
+> type, because `ActiveSync.Protocol` cannot see a Contracts type (§ 5.2). Phases 3–5 are not
+> started.
 >
 > **Authority rules.** `AGENTS.md` and `docs/plugins.md` describe the contract **as it exists
 > today** — they are the authority on current behaviour only, and nothing more. The moment
@@ -351,6 +353,42 @@ Encoding these onto the wire becomes host-owned, and two existing Contracts type
 host currently pokes the sentinel `"!ro"` into the revision *value space* for read-only silent
 revert (`AGENTS.md` § *Sync model*), which is exactly the kind of hidden coupling this design
 removes. Read-only poisoning should move to a host-side field beside the revision, never inside it.
+
+> **Implementation deviation, recorded in Phase 2 (per § 5's own rule).** The snapshot entry IS
+> `(ItemRevision Revision, bool PendingReadOnlyRevert)` as specified — `ActiveSync.Core.State
+> .SnapshotEntry`, a `readonly record struct` — but **`CollectionDiff` does not see that type**.
+> Reason, found in the code: the diff lives in `ActiveSync.Protocol`, which references no other
+> project (Protocol and Contracts are two INDEPENDENT roots; `DependencyRuleTests
+> .CollectionDiff_MovedFromCoreToProtocol` pins the location and its "nothing but BCL types"
+> rationale), so it cannot name `ItemRevision`. Giving Protocol a Contracts reference, or minting a
+> second entry type inside Protocol, both cost more than the seam is worth. Instead
+> `CollectionDiff.Compute` gained an optional **`IReadOnlySet<string>? forceChanged`** — ids to
+> report as Changes even when the revision matches — and `CollectionSnapshot.Diff` (Core) is the
+> single place the two shapes meet: it projects the typed snapshot to id → revision plus the
+> pending set, and re-marries the flags with the diff's result (the marker clears only for items
+> actually charged to the window). The property this phase was for is intact and is now stronger
+> than the design's own sketch: no sentinel exists in the revision value space at all, not even
+> transiently, and the diff states the host's intent as its own parameter instead of inferring it
+> from a magic value. Consequence for Phase 3: when `GetItemRevisionsAsync` starts returning
+> `IReadOnlyDictionary<ItemKey, ItemRevision>`, that projection is where the unwrapping belongs —
+> `CollectionDiff` stays BCL-only.
+>
+> Two smaller decisions the code forced, both recorded here rather than left implicit:
+>
+> - **The forced resync is made real, not left to chance.** The persisted snapshot is a VERSIONED
+>   gzipped document (`v`, the flat `items` map — the same bulk as before — and a `pendingReverts`
+>   sidecar written only when non-empty, so the typed entry costs nothing per item on disk). A blob
+>   in any other shape reads as `null`, and the caller answers Sync **Status 3** (GetItemEstimate
+>   Status 4), so the device restarts that collection from SyncKey 0. Deserializing an old blob
+>   into the new shape would otherwise have yielded an EMPTY snapshot — silently re-Adding every
+>   item the device already holds, which is a worse outcome than the announced resync.
+> - **`DelimitedKey` landed in `ActiveSync.Protocol`, not Core.** § 5.2 says only "out of Contracts
+>   into the host". Core is not reachable: `Backends.Common`'s `DraftMessageBuilder` decodes
+>   FileReferences and `Backends.Common` must not reference Core (test-enforced). Protocol is the
+>   assembly it already references explicitly, and FileReference/LongId are EAS wire values, so the
+>   encoder sits with the other wire encodings. Likewise `SharedCollection.Parse`/`Validate` became
+>   `ActiveSync.Backends.Dav.SharedCollectionEntry` — the "href|ro" string is a config syntax, and
+>   the caldav provider is the only thing that reads it.
 
 ### 5.3 Folders
 
@@ -1199,12 +1237,23 @@ the phase number:**
 ### Phase 2 — structural cleanups
 
 - `FolderKey` / `ItemKey` / `ItemRevision`. (No `AttachmentReference` — the composite wire
-  references `FileReference`/`LongId` stay host-internal encodings, § 5.2/§ 5.8.)
+  references `FileReference`/`LongId` stay host-internal encodings, § 5.2/§ 5.8.) *Introduced as
+  the three positional newtypes; `ItemRevision` gets its first consumer here (the snapshot entry
+  below), `FolderKey`/`ItemKey` land with the store retype in Phase 3.*
 - Type `BackendConnection`'s `ownedResources` disposal list (§ 5.7). **Leave capability discovery
-  alone** — `is`-testing providers and stores is correct as it stands.
+  alone** — `is`-testing providers and stores is correct as it stands. *Landed as
+  `OwnedResource.OfAsync`/`OfSync`; the disposal-identity check compares the wrapped resource, so
+  a store listed as its own owned resource is still disposed exactly once.*
 - Move `DelimitedKey` out of Contracts; strip `Parse`/`Validate` from `SharedCollection` (§ 5.2).
+  *Landed in `ActiveSync.Protocol` and `ActiveSync.Backends.Dav.SharedCollectionEntry`
+  respectively — see the deviation note in § 5.2 for why neither could go to Core.*
 - Move the read-only `"!ro"` sentinel out of the revision value space: the snapshot entry becomes
   `(ItemRevision Revision, bool PendingReadOnlyRevert)`. Five call sites, all in `SyncHandler`.
+  *Landed as `ActiveSync.Core.State.SnapshotEntry` + `CollectionSnapshot`, with the marker
+  reaching the (BCL-only, Protocol-resident) diff as a `forceChanged` set — see the recorded
+  deviation in § 5.2. The conflict/read-only sites in `SyncHandler.ClientCommands`, the
+  render-failure restore in `SyncHandler.Collection`, `MoveItemsHandler` and
+  `PendingChangeDetector` all move with it.*
 - **A forced resync is a CHOICE here, not a consequence — make it deliberately.** Snapshots
   persist as JSON in `CollectionState`; a shape change invalidates every stored snapshot and each
   device restarts from SyncKey 0. But it is avoidable if wanted: `ItemRevision` can serialize
@@ -1212,7 +1261,11 @@ the phase number:**
   sidecar key-set serialized only when non-empty — old snapshots stay readable. Pre-production,
   the clean break is the simpler code and is precedented (the schema reinit that removed
   `LegacyAccountJson`); this phase takes the break, but as an announced decision line, with the
-  compatible-serialization alternative recorded so the choice is visible.
+  compatible-serialization alternative recorded so the choice is visible. *Taken as written, and
+  made explicit rather than incidental: the stored blob is version-stamped, and an older one is
+  refused (Sync Status 3) instead of read as empty — § 5.2's deviation note has the reasoning.
+  Note the sidecar idea was adopted for the ON-DISK shape anyway, purely so the snapshot's bulk
+  stays a flat id → revision map; it does not make the old blobs readable.*
 - **Verification:** unit suite; one integration stack (`stalwart`) via `scripts/test-fast`.
 
 ### Phase 3 — item currency (the substantial one)

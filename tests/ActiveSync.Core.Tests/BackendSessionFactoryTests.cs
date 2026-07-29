@@ -503,7 +503,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 		{
 			LastResource = new FakeResource();
 			return Task.FromResult<IBackendConnection>(
-				new BackendConnection([new FakeMailStore()], new FakeSubmit(), ownedResources: [LastResource]));
+				new BackendConnection([new FakeMailStore()], new FakeSubmit(), ownedResources: [OwnedResource.OfAsync(LastResource)]));
 		}
 	}
 
@@ -640,7 +640,7 @@ public sealed class BackendSessionFactoryTests : IDisposable
 			if (Interlocked.Increment(ref _attempts) == 1)
 				throw new InvalidOperationException("simulated transient backend outage");
 			return Task.FromResult<IBackendConnection>(
-				new BackendConnection([new FakeMailStore()], new FakeSubmit(), ownedResources: [new FakeResource()]));
+				new BackendConnection([new FakeMailStore()], new FakeSubmit(), ownedResources: [OwnedResource.OfAsync(new FakeResource())]));
 		}
 	}
 

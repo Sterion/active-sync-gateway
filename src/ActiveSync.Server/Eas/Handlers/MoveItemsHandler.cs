@@ -151,15 +151,19 @@ public sealed class MoveItemsHandler(
 		if (state is null || state.SyncKey == 0)
 			return false;
 
-		Dictionary<string, string> snapshot = SyncStateService.ReadSnapshot(state);
+		// An unreadable stored snapshot (an older shape, or corrupt) has nothing to patch — the next
+		// Sync answers Status 3 for that collection and the device resynchronizes it from scratch,
+		// which supersedes any echo suppression this patch would have provided.
+		if (SyncStateService.ReadSnapshot(state) is not { } snapshot)
+			return false;
 		Apply(snapshot, edits);
 		SyncStateService.WriteSnapshot(state, snapshot);
 
 		// The previous (replay) generation must carry the same edits, or a client resending the
 		// N-1 key would replay against a snapshot that still holds the moved item and re-Add it.
-		if (state.PreviousSnapshotCompressed is not null)
+		if (state.PreviousSnapshotCompressed is not null &&
+		    SyncStateService.ReadPreviousSnapshot(state) is { } previous)
 		{
-			Dictionary<string, string> previous = SyncStateService.ReadPreviousSnapshot(state);
 			Apply(previous, edits);
 			SyncStateService.WritePreviousSnapshot(state, previous);
 		}
@@ -167,13 +171,13 @@ public sealed class MoveItemsHandler(
 		return true;
 	}
 
-	private static void Apply(Dictionary<string, string> snapshot, IReadOnlyList<SnapshotEdit> edits)
+	private static void Apply(Dictionary<string, SnapshotEntry> snapshot, IReadOnlyList<SnapshotEdit> edits)
 	{
 		foreach (SnapshotEdit edit in edits)
 			if (edit.Remove)
 				snapshot.Remove(edit.ItemKey);
 			else
-				snapshot[edit.ItemKey] = edit.Revision ?? "";
+				snapshot[edit.ItemKey] = new SnapshotEntry(edit.Revision ?? "");
 	}
 
 	/// <summary>One pending edit to a collection's snapshot: remove a key, or set it to a revision.</summary>

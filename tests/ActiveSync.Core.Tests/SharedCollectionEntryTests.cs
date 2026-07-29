@@ -1,10 +1,14 @@
+using ActiveSync.Backends.Dav;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
 
 namespace ActiveSync.Core.Tests;
 
-/// <summary>Shared-calendar entry parsing ("href|ro") and config validation.</summary>
-public class SharedCollectionTests
+/// <summary>
+///   Shared-calendar entry parsing ("href|ro") and config validation — the syntax lives with the
+///   caldav provider that reads the setting, never in the plugin contract, which carries only the
+///   typed <see cref="SharedCollection" /> result.
+/// </summary>
+public class SharedCollectionEntryTests
 {
 	[Theory]
 	[InlineData("/dav/cal/team/", "/dav/cal/team/", false)]
@@ -13,7 +17,7 @@ public class SharedCollectionTests
 	[InlineData("https://dav.example.com/cal/y/|rw", "https://dav.example.com/cal/y/", false)]
 	public void Parse_SplitsHrefAndMode(string entry, string expectedHref, bool expectedReadOnly)
 	{
-		SharedCollection parsed = SharedCollection.Parse(entry);
+		SharedCollection parsed = SharedCollectionEntry.Parse(entry);
 		Assert.Equal(expectedHref, parsed.Href);
 		Assert.Equal(expectedReadOnly, parsed.ReadOnly);
 	}
@@ -24,7 +28,7 @@ public class SharedCollectionTests
 	[InlineData("https://dav.example.com/cal/y/")]
 	public void Validate_AcceptsPathsAndSameHostUrls(string entry)
 	{
-		Assert.Null(SharedCollection.Validate(entry, "https://dav.example.com"));
+		Assert.Null(SharedCollectionEntry.Validate(entry, "https://dav.example.com"));
 	}
 
 	[Theory]
@@ -34,7 +38,7 @@ public class SharedCollectionTests
 	[InlineData("/cal/x|banana")] // unknown mode suffix
 	public void Validate_RejectsUnusableEntries(string entry)
 	{
-		Assert.NotNull(SharedCollection.Validate(entry, "https://dav.example.com"));
+		Assert.NotNull(SharedCollectionEntry.Validate(entry, "https://dav.example.com"));
 	}
 
 	// The unknown-mode-suffix error told the operator "|ro" is the only recognized suffix,
@@ -43,7 +47,7 @@ public class SharedCollectionTests
 	[Fact]
 	public void Validate_UnknownModeSuffix_MentionsBothRecognizedSuffixes()
 	{
-		string? message = SharedCollection.Validate("/cal/x|rww", "https://dav.example.com");
+		string? message = SharedCollectionEntry.Validate("/cal/x|rww", "https://dav.example.com");
 
 		Assert.NotNull(message);
 		Assert.Contains("\"|ro\"", message);
@@ -61,7 +65,7 @@ public class SharedCollectionTests
 	[InlineData("/cal/team/|RO")]
 	public void Parse_RecognizedReadOnlySuffix_FailsClosedAsReadOnly(string entry)
 	{
-		Assert.True(SharedCollection.Parse(entry).ReadOnly);
+		Assert.True(SharedCollectionEntry.Parse(entry).ReadOnly);
 	}
 
 	// Behaviour change (replaces an earlier, narrower version of this test): a trailing "|xxx" segment is a
@@ -77,7 +81,7 @@ public class SharedCollectionTests
 	[InlineData("/cal/team/|")]
 	public void Parse_UnrecognizedTrailingSegment_IsKeptAsLiteralHref(string entry)
 	{
-		SharedCollection parsed = SharedCollection.Parse(entry);
+		SharedCollection parsed = SharedCollectionEntry.Parse(entry);
 		Assert.Equal(entry, parsed.Href);
 		Assert.False(parsed.ReadOnly);
 	}
@@ -91,7 +95,7 @@ public class SharedCollectionTests
 	[InlineData("https://dav.example.com/cal/x|y/", "https://dav.example.com/cal/x|y/", false)]
 	public void Parse_HrefContainingPipe_IsNotTruncated(string entry, string expectedHref, bool expectedReadOnly)
 	{
-		SharedCollection parsed = SharedCollection.Parse(entry);
+		SharedCollection parsed = SharedCollectionEntry.Parse(entry);
 		Assert.Equal(expectedHref, parsed.Href);
 		Assert.Equal(expectedReadOnly, parsed.ReadOnly);
 	}
@@ -106,7 +110,7 @@ public class SharedCollectionTests
 	[InlineData("https://evil.example.com/cal/", "dav.example.com")] // no scheme → not absolute
 	public void Validate_AbsoluteUrl_WithUnparseableBaseUrl_IsRejected(string entry, string baseUrl)
 	{
-		Assert.NotNull(SharedCollection.Validate(entry, baseUrl));
+		Assert.NotNull(SharedCollectionEntry.Validate(entry, baseUrl));
 	}
 
 	// Guard: a same-host absolute URL against a parseable BaseUrl must still validate — the
@@ -114,6 +118,6 @@ public class SharedCollectionTests
 	[Fact]
 	public void Validate_AbsoluteSameHostUrl_WithParseableBaseUrl_IsAccepted()
 	{
-		Assert.Null(SharedCollection.Validate("https://dav.example.com/cal/", "https://dav.example.com/dav/"));
+		Assert.Null(SharedCollectionEntry.Validate("https://dav.example.com/cal/", "https://dav.example.com/dav/"));
 	}
 }

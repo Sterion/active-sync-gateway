@@ -1,4 +1,5 @@
 using ActiveSync.Contracts;
+using ActiveSync.Protocol;
 using MimeKit;
 
 namespace ActiveSync.Backends.Jmap;

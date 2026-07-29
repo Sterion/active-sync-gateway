@@ -1,5 +1,5 @@
-using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
+using ActiveSync.Protocol;
 
 namespace ActiveSync.Core.Tests;
 

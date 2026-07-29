@@ -42,13 +42,12 @@ public sealed class ContractSurfaceTests
 	[Fact]
 	public void ContractVersion_IsTheExpectedSurfaceVersion()
 	{
-		// The typed-contract redesign's first step: the FolderType/BodyType/BusyKind enums
-		// replace the wire int/char primitives, every instant crossing the boundary is a
-		// DateTimeOffset, ContentFilter keeps only its Since value (the FilterType-to-window
-		// maps moved host-side, which was the last use of ActiveSync.Protocol inside
-		// Contracts), and every contract model is an init-only property record instead of a
-		// positional one.
-		Assert.Equal(new Version(1, 4), ContractVersion.Current);
+		// The typed-contract redesign's second step (structural cleanups): the FolderKey /
+		// ItemKey / ItemRevision newtypes arrive, BackendConnection's disposal list is typed
+		// (OwnedResource) instead of IReadOnlyList<object>, DelimitedKey leaves for
+		// ActiveSync.Protocol, and SharedCollection sheds its "href|ro" Parse/Validate to the
+		// caldav provider that reads the setting.
+		Assert.Equal(new Version(1, 5), ContractVersion.Current);
 	}
 
 	// BackendItemNotFoundException derived straight from Exception, so the codebase-wide

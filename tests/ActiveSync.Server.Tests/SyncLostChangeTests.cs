@@ -71,7 +71,7 @@ public sealed class SyncLostChangeTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["10"] = "old10", ["20"] = "old20" }, 0,
+			state!, new Dictionary<string, SnapshotEntry> { ["10"] = new SnapshotEntry("old10"), ["20"] = new SnapshotEntry("old20") }, 0,
 			SyncKeyValidation.Initial, CancellationToken.None);
 
 		// Both items changed on the backend this round; "20"'s render fails (VanishedKeys stands in
@@ -119,7 +119,7 @@ public sealed class SyncLostChangeTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string>(), 0, SyncKeyValidation.Initial, CancellationToken.None);
+			state!, new Dictionary<string, SnapshotEntry>(), 0, SyncKeyValidation.Initial, CancellationToken.None);
 
 		// The backend reports one new item whose render permanently fails: the round has nothing to
 		// report (no payload) AND an item was skipped.

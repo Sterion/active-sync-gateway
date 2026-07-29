@@ -46,7 +46,7 @@ public sealed partial class SyncHandler
 	/// <summary>Applies one client command; returns a Responses child (null when success is implicit).</summary>
 	internal async Task<XElement?> ApplyClientCommandAsync(
 		EasContext context, UserFolder folder, IContentStore store, XElement command,
-		Dictionary<string, string> snapshot, BodyPreference bodyPreference, bool deletesAsMoves,
+		Dictionary<string, SnapshotEntry> snapshot, BodyPreference bodyPreference, bool deletesAsMoves,
 		ClientCommandLedger ledger, int syncKeyForClaim, CancellationToken ct,
 		IReadOnlyDictionary<string, string>? conflictRevisions = null, bool serverWinsOnConflict = true)
 	{
@@ -78,7 +78,7 @@ public sealed partial class SyncHandler
 						return new XElement(AS + "Add",
 							new XElement(AS + "ClientId", clientId),
 							new XElement(AS + "Status", "1"));
-					snapshot[replayed.ItemKey] = replayed.Revision ?? "";
+					snapshot[replayed.ItemKey] = new SnapshotEntry(replayed.Revision ?? "");
 					string replayedServerId = await folders.ComposeServerIdAsync(folder, store, replayed.ItemKey, ct);
 					return new XElement(AS + "Add",
 						new XElement(AS + "ClientId", clientId),
@@ -133,7 +133,7 @@ public sealed partial class SyncHandler
 				}
 
 				(string itemKey, string revision) = await store.CreateItemAsync(folder.BackendKey, appData, ct);
-				snapshot[itemKey] = revision;
+				snapshot[itemKey] = new SnapshotEntry(revision);
 				if (clientId.Length > 0)
 					ledger.RecordAdd(clientId, new AppliedClientAdd(itemKey, revision));
 				if (IsCalendarClass(store))
@@ -158,7 +158,7 @@ public sealed partial class SyncHandler
 					if (replayedChange!.ItemKey is not null)
 					{
 						if (replayedChange.Revision is not null)
-							snapshot[replayedChange.ItemKey] = replayedChange.Revision;
+							snapshot[replayedChange.ItemKey] = new SnapshotEntry(replayedChange.Revision);
 						else
 							snapshot.Remove(replayedChange.ItemKey); // draft submitted and removed
 					}
@@ -172,33 +172,35 @@ public sealed partial class SyncHandler
 					return ClientCommandStatus(command, "6");
 				if (readOnly)
 				{
-					// Silent revert: poison the snapshot revision so the next diff pushes
-					// the server's version back to the client.
+					// Silent revert: mark the snapshot entry as owing a revert so the next diff
+					// pushes the server's version back to the client.
 					logger.LogInformation(
 						"Read-only: reverting change ({What}) on {Noun} {ServerId} in \"{Folder}\" for {User}",
 						DescribeChange(store, appData), NounFor(store), serverId,
 						folder.DisplayName, context.UserName);
-					snapshot[itemKey] = ReadOnlyRevertRevision;
+					CollectionSnapshot.MarkPendingRevert(snapshot, itemKey);
 					return null;
 				}
 
 				// Conflict detection. When the backend's current revision of this item differs
 				// from the one the client last acked (snapshot[itemKey]), someone else changed it in
 				// the meantime. Server-wins (the default and MS-ASCMD Conflict != 0) rejects the
-				// client's Change with Status 7 and poisons the snapshot so the next diff re-pushes
-				// the server's version — the same revert mechanism read-only mode uses. Client-wins
-				// (Conflict == 0) falls through and overwrites, the historical behaviour.
+				// client's Change with Status 7 and marks the snapshot entry so the next diff
+				// re-pushes the server's version — the same revert mechanism read-only mode uses.
+				// Client-wins (Conflict == 0) falls through and overwrites, the historical behaviour.
+				// An entry already owing a revert is skipped: its acked revision is whatever the
+				// client last saw, so comparing it to the backend would report a phantom conflict.
 				if (conflictRevisions is not null && serverWinsOnConflict &&
-				    snapshot.TryGetValue(itemKey, out string? acked) &&
-				    acked != ReadOnlyRevertRevision &&
+				    snapshot.TryGetValue(itemKey, out SnapshotEntry acked) &&
+				    !acked.PendingReadOnlyRevert &&
 				    conflictRevisions.TryGetValue(itemKey, out string? backendNow) &&
-				    !string.Equals(acked, backendNow, StringComparison.Ordinal))
+				    !string.Equals(acked.Revision.Value, backendNow, StringComparison.Ordinal))
 				{
 					logger.LogInformation(
 						"Conflict on {Noun} {ServerId} in \"{Folder}\" for {User}: backend moved on since " +
 						"the client last synced — server wins (Status 7)",
 						NounFor(store), serverId, folder.DisplayName, context.UserName);
-					snapshot[itemKey] = ReadOnlyRevertRevision;
+					CollectionSnapshot.MarkPendingRevert(snapshot, itemKey);
 					return ClientCommandStatus(command, "7");
 				}
 
@@ -252,7 +254,7 @@ public sealed partial class SyncHandler
 					? await MeetingInvitationService.CaptureIcsAsync(store, folder.BackendKey, itemKey, logger, ct)
 					: null;
 				string revision = await store.UpdateItemAsync(folder.BackendKey, itemKey, appData, ct);
-				snapshot[itemKey] = revision;
+				snapshot[itemKey] = new SnapshotEntry(revision);
 				ledger.RecordChange(serverId, new AppliedClientChange(itemKey, revision));
 				if (IsCalendarClass(store))
 					await invitations.AfterChangeAsync(
@@ -278,7 +280,7 @@ public sealed partial class SyncHandler
 					{
 						ledger.RecordChange(occurrenceKey, replayedCancel!);
 						if (replayedCancel!.ItemKey is not null && replayedCancel.Revision is not null)
-							snapshot[replayedCancel.ItemKey] = replayedCancel.Revision;
+							snapshot[replayedCancel.ItemKey] = new SnapshotEntry(replayedCancel.Revision);
 						return null;
 					}
 
@@ -315,7 +317,7 @@ public sealed partial class SyncHandler
 					// succeeded — see the Add path above for why this narrow residual window (a
 					// single DB write between the mail landing and this call) is acceptable.
 					await context.State.MarkSendCompletedAsync(context.Device, folder.ServerId, syncKeyForClaim, occurrenceClaimKey, ct);
-					snapshot[itemKey] = occurrenceRevision;
+					snapshot[itemKey] = new SnapshotEntry(occurrenceRevision);
 					ledger.RecordChange(occurrenceKey, new AppliedClientChange(itemKey, occurrenceRevision));
 					return null;
 				}

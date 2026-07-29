@@ -7,7 +7,7 @@
 # The history below is APPEND-ONLY: each line pins the surface a contract version
 # shipped with. Editing an existing line defeats the guard that a surface change
 # must come with a version bump.
-# Current contract version: 1.4
+# Current contract version: 1.5
 
 === VERSION HISTORY (append-only) ===
 1.0  6985799512ffa341b07b1eb951c0bf0e4975c4c14a1541db6c341ac23f9abddd
@@ -15,6 +15,7 @@
 1.2  18125a915c4d7c4edfddd9d6374913494903961359dc309d4788d9de415f1671
 1.3  2ded1138ca645958ae27b922b50e0fde9727e353b4e21b1879a2f56658ba2a9e
 1.4  be9ee060f4263f4a1605db4910094e3454282e7728b97707334956e798d598ed
+1.5  ff55dd25edac51cf1bacb539b9f38db760256faef29bbb6d2933920c3e7cec27
 
 === SURFACE ===
 assembly ActiveSync.Contracts
@@ -47,7 +48,7 @@ assembly ActiveSync.Contracts
     property System.String Label { get;set; }
     property System.String Name { get;set; }
   class ActiveSync.Contracts.BackendConnection implements ActiveSync.Contracts.IBackendConnection, System.IAsyncDisposable
-    ctor (System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.IContentStore> stores, ActiveSync.Contracts.IMailSubmitOperations mailSubmit, ActiveSync.Contracts.IOofBackend oof, System.Collections.Generic.IReadOnlyList<System.Object> ownedResources)
+    ctor (System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.IContentStore> stores, ActiveSync.Contracts.IMailSubmitOperations mailSubmit, ActiveSync.Contracts.IOofBackend oof, System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.OwnedResource> ownedResources)
     method System.Threading.Tasks.ValueTask DisposeAsync()
     property ActiveSync.Contracts.IMailSubmitOperations MailSubmit { get; }
     property ActiveSync.Contracts.IOofBackend Oof { get; }
@@ -166,9 +167,16 @@ assembly ActiveSync.Contracts
     property System.Int32 Major { get; }
     property System.Int32 Minor { get; }
     property System.Version Current { get; }
-  class ActiveSync.Contracts.DelimitedKey
-    method System.String Encode(System.String[] parts)
-    method System.String[] Decode(System.String value, System.Int32 expectedParts)
+  struct ActiveSync.Contracts.FolderKey implements System.IEquatable<ActiveSync.Contracts.FolderKey>
+    ctor (System.String Value)
+    method System.Boolean Equals(ActiveSync.Contracts.FolderKey other)
+    method System.Boolean Equals(System.Object obj)
+    method System.Boolean op_Equality(ActiveSync.Contracts.FolderKey left, ActiveSync.Contracts.FolderKey right)
+    method System.Boolean op_Inequality(ActiveSync.Contracts.FolderKey left, ActiveSync.Contracts.FolderKey right)
+    method System.Int32 GetHashCode()
+    method System.String ToString()
+    method System.Void Deconstruct(System.String& Value)
+    property System.String Value { get;set; }
   enum ActiveSync.Contracts.FolderType implements System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable
     field ActiveSync.Contracts.FolderType Calendar = 8
     field ActiveSync.Contracts.FolderType Contacts = 9
@@ -259,6 +267,26 @@ assembly ActiveSync.Contracts
     method System.Threading.Tasks.Task<System.Boolean> ProbeReadinessAsync(ActiveSync.Contracts.ProviderSettings settings, System.Threading.CancellationToken ct)
   interface ActiveSync.Contracts.IWatcherDiagnostics
     method System.Collections.Generic.IReadOnlyList<ActiveSync.Contracts.WatcherInfo> SnapshotWatchers()
+  struct ActiveSync.Contracts.ItemKey implements System.IEquatable<ActiveSync.Contracts.ItemKey>
+    ctor (System.String Value)
+    method System.Boolean Equals(ActiveSync.Contracts.ItemKey other)
+    method System.Boolean Equals(System.Object obj)
+    method System.Boolean op_Equality(ActiveSync.Contracts.ItemKey left, ActiveSync.Contracts.ItemKey right)
+    method System.Boolean op_Inequality(ActiveSync.Contracts.ItemKey left, ActiveSync.Contracts.ItemKey right)
+    method System.Int32 GetHashCode()
+    method System.String ToString()
+    method System.Void Deconstruct(System.String& Value)
+    property System.String Value { get;set; }
+  struct ActiveSync.Contracts.ItemRevision implements System.IEquatable<ActiveSync.Contracts.ItemRevision>
+    ctor (System.String Value)
+    method System.Boolean Equals(ActiveSync.Contracts.ItemRevision other)
+    method System.Boolean Equals(System.Object obj)
+    method System.Boolean op_Equality(ActiveSync.Contracts.ItemRevision left, ActiveSync.Contracts.ItemRevision right)
+    method System.Boolean op_Inequality(ActiveSync.Contracts.ItemRevision left, ActiveSync.Contracts.ItemRevision right)
+    method System.Int32 GetHashCode()
+    method System.String ToString()
+    method System.Void Deconstruct(System.String& Value)
+    property System.String Value { get;set; }
   class ActiveSync.Contracts.OofReply implements System.IEquatable<ActiveSync.Contracts.OofReply>
     ctor ()
     method System.Boolean Equals(ActiveSync.Contracts.OofReply other)
@@ -271,6 +299,9 @@ assembly ActiveSync.Contracts
     property System.Nullable<System.DateTimeOffset> End { get;set; }
     property System.Nullable<System.DateTimeOffset> Start { get;set; }
     property System.String BodyText { get;set; }
+  class ActiveSync.Contracts.OwnedResource
+    method ActiveSync.Contracts.OwnedResource OfAsync(System.IAsyncDisposable resource)
+    method ActiveSync.Contracts.OwnedResource OfSync(System.IDisposable resource)
   class ActiveSync.Contracts.ProviderSettings
     ctor (Microsoft.Extensions.Configuration.IConfigurationSection section)
     method ActiveSync.Contracts.ProviderSettings FromFlat(System.Collections.Generic.IReadOnlyDictionary<System.String, System.String> flat)
@@ -291,14 +322,12 @@ assembly ActiveSync.Contracts
     property System.String ProviderName { get;set; }
   class ActiveSync.Contracts.SharedCollection implements System.IEquatable<ActiveSync.Contracts.SharedCollection>
     ctor ()
-    method ActiveSync.Contracts.SharedCollection Parse(System.String entry)
     method System.Boolean Equals(ActiveSync.Contracts.SharedCollection other)
     method System.Boolean Equals(System.Object obj)
     method System.Boolean op_Equality(ActiveSync.Contracts.SharedCollection left, ActiveSync.Contracts.SharedCollection right)
     method System.Boolean op_Inequality(ActiveSync.Contracts.SharedCollection left, ActiveSync.Contracts.SharedCollection right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.String Validate(System.String entry, System.String baseUrl)
     property System.Boolean ReadOnly { get;set; }
     property System.String Href { get;set; }
   class ActiveSync.Contracts.SupportedGatewayContractAttribute : System.Attribute
@@ -323,6 +352,9 @@ assembly ActiveSync.Contracts
     property System.String Resource { get;set; }
     property System.String User { get;set; }
 assembly ActiveSync.Protocol
+  class ActiveSync.Protocol.DelimitedKey
+    method System.String Encode(System.String[] parts)
+    method System.String[] Decode(System.String value, System.Int32 expectedParts)
   class ActiveSync.Protocol.EasClass
     field System.String Calendar = Calendar
     field System.String Contacts = Contacts
@@ -407,14 +439,14 @@ assembly ActiveSync.Protocol
     method System.Boolean op_Inequality(ActiveSync.Protocol.Sync.CollectionChanges left, ActiveSync.Protocol.Sync.CollectionChanges right)
     method System.Int32 GetHashCode()
     method System.String ToString()
-    method System.Void Deconstruct(System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.4.0.0, Culture=neutral, PublicKeyToken=null]]& Adds, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.4.0.0, Culture=neutral, PublicKeyToken=null]]& Changes, System.Collections.Generic.IReadOnlyList`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& Deletes, System.Boolean& MoreAvailable, System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& NewSnapshot)
+    method System.Void Deconstruct(System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.5.0.0, Culture=neutral, PublicKeyToken=null]]& Adds, System.Collections.Generic.IReadOnlyList`1[[ActiveSync.Protocol.Sync.ItemChange, ActiveSync.Protocol, Version=1.5.0.0, Culture=neutral, PublicKeyToken=null]]& Changes, System.Collections.Generic.IReadOnlyList`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& Deletes, System.Boolean& MoreAvailable, System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]& NewSnapshot)
     property System.Boolean MoreAvailable { get;set; }
     property System.Collections.Generic.Dictionary<System.String, System.String> NewSnapshot { get;set; }
     property System.Collections.Generic.IReadOnlyList<ActiveSync.Protocol.Sync.ItemChange> Adds { get;set; }
     property System.Collections.Generic.IReadOnlyList<ActiveSync.Protocol.Sync.ItemChange> Changes { get;set; }
     property System.Collections.Generic.IReadOnlyList<System.String> Deletes { get;set; }
   class ActiveSync.Protocol.Sync.CollectionDiff
-    method ActiveSync.Protocol.Sync.CollectionChanges Compute(System.Collections.Generic.IReadOnlyDictionary<System.String, System.String> snapshot, System.Collections.Generic.IReadOnlyDictionary<System.String, System.String> current, System.Int32 windowSize)
+    method ActiveSync.Protocol.Sync.CollectionChanges Compute(System.Collections.Generic.IReadOnlyDictionary<System.String, System.String> snapshot, System.Collections.Generic.IReadOnlyDictionary<System.String, System.String> current, System.Int32 windowSize, System.Collections.Generic.IReadOnlySet<System.String> forceChanged)
   class ActiveSync.Protocol.Sync.ItemChange implements System.IEquatable<ActiveSync.Protocol.Sync.ItemChange>
     ctor (System.String ServerId, System.String Revision)
     method System.Boolean Equals(ActiveSync.Protocol.Sync.ItemChange other)

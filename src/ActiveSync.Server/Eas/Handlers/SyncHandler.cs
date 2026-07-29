@@ -25,12 +25,6 @@ public sealed partial class SyncHandler(
 	MeetingInvitationService invitations,
 	ILogger<SyncHandler> logger) : IEasCommandHandler
 {
-	/// <summary>
-	///   Bogus revision written to the snapshot for suppressed read-only writes: it never
-	///   matches a real backend revision, so the next diff re-sends the server's version.
-	/// </summary>
-	private const string ReadOnlyRevertRevision = "!ro";
-
 	private static readonly XNamespace AS = EasNamespaces.AirSync;
 	private static readonly XNamespace ASB = EasNamespaces.AirSyncBase;
 	private static readonly XNamespace Cal = EasNamespaces.Calendar;

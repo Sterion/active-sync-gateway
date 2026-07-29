@@ -172,7 +172,7 @@ public class BackendProviderTests
 			return Task.FromResult<IBackendConnection>(new BackendConnection(
 				stores,
 				context.Roles.Any(r => r.Role == BackendRole.MailSubmit) ? new FakeSubmit() : null,
-				ownedResources: [LastResource]));
+				ownedResources: [OwnedResource.OfAsync(LastResource)]));
 		}
 	}
 

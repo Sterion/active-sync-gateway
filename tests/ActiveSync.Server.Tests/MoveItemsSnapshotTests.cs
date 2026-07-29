@@ -43,10 +43,10 @@ public sealed class MoveItemsSnapshotTests : IDisposable
 		(_, CollectionState? state) = await _harness.State.ValidateSyncKeyAsync(
 			device, inbox.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["10"] = "x" }, 0, SyncKeyValidation.Initial,
+			state!, new Dictionary<string, SnapshotEntry> { ["10"] = new SnapshotEntry("x") }, 0, SyncKeyValidation.Initial,
 			CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			state!, new Dictionary<string, string> { ["10"] = "x" }, 0, SyncKeyValidation.Current,
+			state!, new Dictionary<string, SnapshotEntry> { ["10"] = new SnapshotEntry("x") }, 0, SyncKeyValidation.Current,
 			CancellationToken.None);
 
 		MoveItemsHandler handler = new(
@@ -100,7 +100,7 @@ public sealed class MoveItemsSnapshotTests : IDisposable
 		(_, CollectionState? destState) = await _harness.State.ValidateSyncKeyAsync(
 			device, archive.ServerId, "0", CancellationToken.None);
 		await _harness.State.CommitCollectionStateAsync(
-			destState!, new Dictionary<string, string>(), 0, SyncKeyValidation.Initial, CancellationToken.None);
+			destState!, new Dictionary<string, SnapshotEntry>(), 0, SyncKeyValidation.Initial, CancellationToken.None);
 
 		MoveItemsHandler handler = new(
 			_harness.Folders, TestOptionsMonitor.SnapshotOf(_harness.Options),
@@ -122,6 +122,12 @@ public sealed class MoveItemsSnapshotTests : IDisposable
 		Assert.Equal("101", destSnapshot["10"]);
 	}
 
+	/// <summary>
+	///   Reads the persisted snapshot column the way the state store writes it — gzipped JSON of
+	///   the versioned document, whose <c>items</c> member is the id → revision map. Deliberately
+	///   hand-rolled rather than calling the (internal) codec: this test is about what actually
+	///   lands in the column.
+	/// </summary>
 	private static Dictionary<string, string> Decompress(byte[]? compressed)
 	{
 		if (compressed is null || compressed.Length == 0)
@@ -130,8 +136,8 @@ public sealed class MoveItemsSnapshotTests : IDisposable
 		using GZipStream gzip = new(input, CompressionMode.Decompress);
 		using MemoryStream output = new();
 		gzip.CopyTo(output);
-		return JsonSerializer.Deserialize<Dictionary<string, string>>(
-			output.ToArray(), new JsonSerializerOptions(JsonSerializerDefaults.Web))
-			?? new Dictionary<string, string>();
+		using JsonDocument document = JsonDocument.Parse(output.ToArray());
+		return document.RootElement.GetProperty("items").Deserialize<Dictionary<string, string>>(
+			new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? new Dictionary<string, string>();
 	}
 }

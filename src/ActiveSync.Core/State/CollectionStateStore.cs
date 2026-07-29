@@ -78,7 +78,7 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 	///   (unlike <see cref="ValidateSyncKeyAsync" />, which is the Sync write path). A query
 	///   must never reset a client's SyncKey/snapshot.
 	/// </summary>
-	public async Task<(SyncKeyValidation Validation, Dictionary<string, string> Snapshot, int FilterType)>
+	public async Task<(SyncKeyValidation Validation, Dictionary<string, SnapshotEntry> Snapshot, int FilterType)>
 		PeekSyncKeyAsync(Device device, string collectionId, string clientSyncKey, CancellationToken ct)
 	{
 		CollectionState? state = await db.CollectionStates.AsNoTracking()
@@ -86,35 +86,45 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 			.ConfigureAwait(false);
 
 		if (clientSyncKey == "0")
-			return (SyncKeyValidation.Initial, [], state?.FilterType ?? 0);
+			return (SyncKeyValidation.Initial, CollectionSnapshot.Empty(), state?.FilterType ?? 0);
 		if (state is null || !int.TryParse(clientSyncKey, out int key))
-			return (SyncKeyValidation.Invalid, [], state?.FilterType ?? 0);
+			return (SyncKeyValidation.Invalid, CollectionSnapshot.Empty(), state?.FilterType ?? 0);
+		// An unreadable stored snapshot (written in an older shape, or corrupt) is Invalid, never
+		// "empty": diffing against empty would report every item the device already holds as an Add.
 		if (key == state.SyncKey)
-			return (SyncKeyValidation.Current, ReadSnapshot(state), state.FilterType);
+			return ReadSnapshot(state) is { } snapshot
+				? (SyncKeyValidation.Current, snapshot, state.FilterType)
+				: (SyncKeyValidation.Invalid, CollectionSnapshot.Empty(), state.FilterType);
 		if (key == state.SyncKey - 1 && state.PreviousSnapshotCompressed is not null)
-			return (SyncKeyValidation.Replay, SnapshotCodec.Decompress(state.PreviousSnapshotCompressed), state.FilterType);
-		return (SyncKeyValidation.Invalid, [], state.FilterType);
+			return SnapshotCodec.Decompress(state.PreviousSnapshotCompressed) is { } previous
+				? (SyncKeyValidation.Replay, previous, state.FilterType)
+				: (SyncKeyValidation.Invalid, CollectionSnapshot.Empty(), state.FilterType);
+		return (SyncKeyValidation.Invalid, CollectionSnapshot.Empty(), state.FilterType);
 	}
 
-	public static Dictionary<string, string> ReadSnapshot(CollectionState state)
+	/// <summary>The acknowledged snapshot, or <c>null</c> when the stored blob is not readable.</summary>
+	public static Dictionary<string, SnapshotEntry>? ReadSnapshot(CollectionState state)
 	{
 		return SnapshotCodec.Decompress(state.SnapshotCompressed);
 	}
 
 	/// <summary>Persists <paramref name="snapshot" /> onto the state's snapshot column (gzipped).</summary>
-	public static void WriteSnapshot(CollectionState state, Dictionary<string, string> snapshot)
+	public static void WriteSnapshot(CollectionState state, Dictionary<string, SnapshotEntry> snapshot)
 	{
 		state.SnapshotCompressed = SnapshotCodec.Compress(snapshot);
 	}
 
-	/// <summary>The one-generation-old snapshot (SyncKey-1), or empty when there is no replay generation.</summary>
-	public static Dictionary<string, string> ReadPreviousSnapshot(CollectionState state)
+	/// <summary>
+	///   The one-generation-old snapshot (SyncKey-1) — empty when there is no replay generation,
+	///   <c>null</c> when the stored blob is not readable.
+	/// </summary>
+	public static Dictionary<string, SnapshotEntry>? ReadPreviousSnapshot(CollectionState state)
 	{
 		return SnapshotCodec.Decompress(state.PreviousSnapshotCompressed);
 	}
 
 	/// <summary>Persists <paramref name="snapshot" /> onto the state's previous-snapshot column (gzipped).</summary>
-	public static void WritePreviousSnapshot(CollectionState state, Dictionary<string, string> snapshot)
+	public static void WritePreviousSnapshot(CollectionState state, Dictionary<string, SnapshotEntry> snapshot)
 	{
 		state.PreviousSnapshotCompressed = SnapshotCodec.Compress(snapshot);
 	}
@@ -137,7 +147,7 @@ internal sealed class CollectionStateStore(SyncDbContext db)
 	}
 
 	public async Task<int> CommitCollectionStateAsync(
-		CollectionState state, Dictionary<string, string> newSnapshot, int filterType,
+		CollectionState state, Dictionary<string, SnapshotEntry> newSnapshot, int filterType,
 		SyncKeyValidation validation, CancellationToken ct,
 		Dictionary<string, AppliedClientAdd>? appliedAdds = null,
 		Dictionary<string, AppliedClientChange>? appliedChanges = null)

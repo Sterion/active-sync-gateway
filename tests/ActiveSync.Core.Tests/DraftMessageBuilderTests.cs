@@ -2,6 +2,7 @@ using System.Text;
 using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
+using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
 using MimeKit;
 using MimeKit.Text;

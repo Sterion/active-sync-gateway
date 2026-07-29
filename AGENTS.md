@@ -114,13 +114,17 @@ docker compose -f docker/docker-compose.ci.yml run --rm tests        # full suit
 ## Solution layout and dependency rule
 
 ```
-src/ActiveSync.Protocol/    WBXML codec, code pages, MS-ASHTTP query parser, EAS constants.
-                            Depends on NOTHING project-wise. No ASP.NET, no MailKit.
+src/ActiveSync.Protocol/    WBXML codec, code pages, MS-ASHTTP query parser, EAS constants, and the
+                            composite-key encoder the wire-facing FileReference/LongId values use
+                            (DelimitedKey — host-side, since no delimited key crosses the store
+                            boundary). Depends on NOTHING project-wise. No ASP.NET, no MailKit.
 src/ActiveSync.Contracts/   The PLUGIN CONTRACT: the interfaces/records a backend provider
                             implements + uses (IBackendProvider, IBackendConnection, IContentStore
                             & the capability interfaces, IGatewayPlugin, BackendRole,
-                            ProviderSettings, BackendConfigField, SharedCollection, the Backend
-                            Models records, DelimitedKey). Namespace ActiveSync.Contracts.
+                            ProviderSettings, BackendConfigField, SharedCollection (the typed grant
+                            only — the "href|ro" entry syntax is the caldav provider's), the
+                            FolderKey/ItemKey/ItemRevision newtypes, OwnedResource, the Backend
+                            Models records). Namespace ActiveSync.Contracts.
                             Depends on NO other project (Protocol included — the EAS wire encodings
                             that needed it, the FilterType→date-window maps, are host-side in
                             Core/Backend/ContentFilters; DependencyRuleTests pins the csproj clean),
@@ -345,7 +349,11 @@ licence is held.
   Sync Status 13 (client resends the full request).
 - **Read-only mode** (`ActiveSync.ReadOnly`) uses **silent revert** at the handler level
   (never inside backend stores — the revert needs snapshot access): a suppressed `Change`
-  poisons the snapshot revision with `"!ro"` so the next diff re-sends the server version;
+  marks the snapshot entry `PendingReadOnlyRevert` (`CollectionSnapshot.MarkPendingRevert`) so
+  the next diff re-sends the server version — the marker rides BESIDE the revision, never inside
+  it (a `"!ro"` sentinel revision was the old mechanism), and `CollectionSnapshot.Diff` feeds the
+  pending ids to `CollectionDiff.Compute` as its `forceChanged` set, clearing the marker only for
+  the items actually charged to the window. Server-wins conflict resolution uses the same marker;
   a suppressed `Delete` removes the item from the snapshot so it is re-Added; `Add` gets
   per-item Status 6; MoveItems reports Status 5 *and* drops the item from the source
   snapshot so the client converges; sends return ComposeMail Status 120; folder ops
@@ -448,8 +456,14 @@ read or write the column except through the local stores, which decrypt/encrypt 
 Gateway-global sealed rows (the TLS certificate) use the reserved sentinel
 `LocalContentProtector.GatewayUserId` (0), which no real user can ever hold.
 JSON blobs (snapshots, cached options, ping params, cached sync requests) use
-`System.Text.Json`. Use `SyncStateService.PersistAsync` to save mutations on tracked
-entities — do not repurpose `SaveDeviceInfoAsync` as a generic save.
+`System.Text.Json`. The collection snapshot columns are the one **versioned** blob
+(`SnapshotCodec`, gzipped): a document carrying `v`, the flat `items` map (id → revision, the
+same bulk as before) and a `pendingReverts` sidecar written only when non-empty. A blob in any
+other shape is deliberately NOT converted — it reads as `null` and the caller answers Sync
+Status 3 / GetItemEstimate Status 4, so that device restarts the collection from SyncKey 0
+rather than diffing against an empty snapshot and re-Adding everything it already holds. Use
+`SyncStateService.PersistAsync` to save mutations on tracked entities — do not repurpose
+`SaveDeviceInfoAsync` as a generic save.
 
 Design-time factories (`SqliteSyncDbContextFactory` / `NpgsqlSyncDbContextFactory`) exist
 only so `dotnet ef` can instantiate the contexts; their connection strings are placeholders.

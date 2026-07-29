@@ -60,7 +60,7 @@ public sealed partial class SyncHandler
 		{
 			state.OptionsJson = collectionOptions.ToJson();
 			int initialKey = await context.State.CommitCollectionStateAsync(
-				state, [], collectionOptions.FilterType, SyncKeyValidation.Initial, ct);
+				state, CollectionSnapshot.Empty(), collectionOptions.FilterType, SyncKeyValidation.Initial, ct);
 			XElement initial = new(AS + "Collection",
 				new XElement(AS + "SyncKey", initialKey.ToString()),
 				new XElement(AS + "CollectionId", collectionId),
@@ -89,9 +89,20 @@ public sealed partial class SyncHandler
 		// On a Replay the entity is NOT rolled back until this collection's own commit, so the
 		// snapshot to diff against is the previous generation, read explicitly here (mirrors
 		// PeekSyncKeyAsync). Current diffs against the live snapshot.
-		Dictionary<string, string> snapshot = validation == SyncKeyValidation.Replay
-			? SyncStateService.ReadPreviousSnapshot(state)
-			: SyncStateService.ReadSnapshot(state);
+		if ((validation == SyncKeyValidation.Replay
+			    ? SyncStateService.ReadPreviousSnapshot(state)
+			    : SyncStateService.ReadSnapshot(state)) is not { } snapshot)
+		{
+			// The stored snapshot is not in the current shape (written before the read-only revert
+			// marker moved out of the revision value space, or corrupt). Diffing against an empty
+			// snapshot would re-Add every item the device already holds, so send Status 3 and let the
+			// client restart this collection from SyncKey 0 — the announced cost of the shape change.
+			logger.LogWarning(
+				"Stored snapshot for {CollectionId} is not readable in the current format; asking {User} " +
+				"to resynchronize the collection from scratch", collectionId, context.UserName);
+			return new CollectionResult(Error("3"), true, null);
+		}
+
 		List<XElement> clientResponses = new();
 		bool snapshotDirty = false;
 
@@ -162,7 +173,7 @@ public sealed partial class SyncHandler
 		// ---- server → client changes ----
 		List<XElement> serverCommands = new();
 		bool moreAvailable = false;
-		Dictionary<string, string> newSnapshot = snapshot;
+		Dictionary<string, SnapshotEntry> newSnapshot = snapshot;
 		// Set when an Add or Change was skipped this round (its render failed). Backend state
 		// genuinely differs from the (rolled-back) persisted snapshot for that item, so offering this
 		// collection to the long-poll wait would have the watchdog re-check spin against the same
@@ -182,9 +193,13 @@ public sealed partial class SyncHandler
 				return new CollectionResult(Error("5"), true, null);
 			}
 
-			CollectionChanges diff = CollectionDiff.Compute(snapshot, current, windowSize);
+			// The snapshot carries the read-only revert marker beside each revision, so the diff is
+			// driven through CollectionSnapshot: it hands CollectionDiff plain revisions plus the set
+			// of items owing a revert, and re-marries the flags with the resulting snapshot.
+			(CollectionChanges diff, Dictionary<string, SnapshotEntry> diffSnapshot) =
+				CollectionSnapshot.Diff(snapshot, current, windowSize);
 			moreAvailable = diff.MoreAvailable;
-			newSnapshot = diff.NewSnapshot;
+			newSnapshot = diffSnapshot;
 
 			// MS-ASCMD: an item that merely slid out of the FilterType window is still on the
 			// server and must be reported as SoftDelete; Delete means "gone for good". The two
@@ -262,12 +277,14 @@ public sealed partial class SyncHandler
 				{
 					// CollectionDiff.Compute already wrote the NEW backend revision into
 					// newSnapshot when it charged this item to the window. Mirror the Add loop above:
-					// revert to the revision the client last acked (or the sentinel that never matches
-					// a real backend revision) so the round does NOT record this Change as delivered —
-					// the next diff must re-offer it, exactly as the contract's null convention promises.
-					newSnapshot[change.ServerId] = snapshot.TryGetValue(change.ServerId, out string? old)
+					// restore the entry the client last acked — including its pending-revert marker, so
+					// a revert whose render failed is still owed — so the round does NOT record this
+					// Change as delivered; the next diff must re-offer it, exactly as the contract's
+					// null convention promises. With no acked entry to restore, the marker alone forces
+					// the re-offer (it does not depend on the revision value).
+					newSnapshot[change.ServerId] = snapshot.TryGetValue(change.ServerId, out SnapshotEntry old)
 						? old
-						: ReadOnlyRevertRevision;
+						: new SnapshotEntry(new ItemRevision(change.Revision), true);
 					anyItemSkipped = true;
 				}
 			}

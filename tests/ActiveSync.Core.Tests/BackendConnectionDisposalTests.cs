@@ -15,7 +15,7 @@ public class BackendConnectionDisposalTests
 	{
 		Tracker throwing = new(throwOnDispose: true);
 		Tracker survivor = new();
-		BackendConnection connection = new([], ownedResources: [throwing, survivor]);
+		BackendConnection connection = new([], ownedResources: [OwnedResource.OfAsync(throwing), OwnedResource.OfAsync(survivor)]);
 
 		AggregateException ex =
 			await Assert.ThrowsAsync<AggregateException>(async () => await connection.DisposeAsync());
@@ -29,7 +29,7 @@ public class BackendConnectionDisposalTests
 	public async Task Dispose_IsIdempotent()
 	{
 		Tracker resource = new();
-		BackendConnection connection = new([], ownedResources: [resource]);
+		BackendConnection connection = new([], ownedResources: [OwnedResource.OfAsync(resource)]);
 
 		await connection.DisposeAsync();
 		await connection.DisposeAsync();
@@ -49,7 +49,7 @@ public class BackendConnectionDisposalTests
 		for (int trial = 0; trial < 200; trial++)
 		{
 			Tracker resource = new();
-			BackendConnection connection = new([], ownedResources: [resource]);
+			BackendConnection connection = new([], ownedResources: [OwnedResource.OfAsync(resource)]);
 
 			using SemaphoreSlim gate = new(0, int.MaxValue);
 			Task[] racers = [.. Enumerable.Range(0, 16).Select(_ => Task.Run(async () =>
@@ -74,6 +74,43 @@ public class BackendConnectionDisposalTests
 		await connection.DisposeAsync();
 
 		Assert.Equal(1, store.DisposeCount);
+	}
+
+	// The disposal list is a typed OwnedResource handle rather than IReadOnlyList<object>, and the
+	// two disposal shapes it spans (WebDavClient/JmapClient are IDisposable, ImapSession is
+	// IAsyncDisposable) are named by the caller — so a sync-only resource must still be disposed.
+	[Fact]
+	public async Task Dispose_DisposesASynchronousOwnedResource()
+	{
+		SyncTracker resource = new();
+		BackendConnection connection = new([], ownedResources: [OwnedResource.OfSync(resource)]);
+
+		await connection.DisposeAsync();
+
+		Assert.Equal(1, resource.DisposeCount);
+	}
+
+	// A store handed over BOTH as a store and as an owned resource is disposed exactly once — the
+	// identity check compares the wrapped resource, not the handle around it.
+	[Fact]
+	public async Task Dispose_AStoreListedAsAnOwnedResource_IsDisposedOnce()
+	{
+		DisposableStore store = new();
+		BackendConnection connection = new([store], ownedResources: [OwnedResource.OfAsync(store)]);
+
+		await connection.DisposeAsync();
+
+		Assert.Equal(1, store.DisposeCount);
+	}
+
+	private sealed class SyncTracker : IDisposable
+	{
+		public int DisposeCount { get; private set; }
+
+		public void Dispose()
+		{
+			DisposeCount++;
+		}
 	}
 
 	private sealed class Tracker(bool throwOnDispose = false) : IAsyncDisposable

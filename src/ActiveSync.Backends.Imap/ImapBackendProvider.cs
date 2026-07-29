@@ -109,7 +109,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 		}
 
 		ImapMailBackend backend = new(session, context.MailAddress, WatcherProvider, _logger, PollerProvider);
-		return Task.FromResult<IBackendConnection>(new BackendConnection([backend], ownedResources: [session]));
+		return Task.FromResult<IBackendConnection>(new BackendConnection([backend], ownedResources: [OwnedResource.OfAsync(session)]));
 	}
 
 	public async Task<bool> VerifyCredentialsAsync(ResolvedRole role, CancellationToken ct)

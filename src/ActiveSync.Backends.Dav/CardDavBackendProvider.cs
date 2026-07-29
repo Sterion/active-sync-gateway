@@ -70,6 +70,6 @@ public sealed class CardDavBackendProvider(
 			options.AllowInvalidCertificates, options.CaCertificatePath, _wireLogger, options.CheckRevocation);
 		CardDavStore store = new(client, options, role.Credentials, _logger,
 			hostOptions.CurrentValue.Eas.DavPollSeconds);
-		return Task.FromResult<IBackendConnection>(new BackendConnection([store], ownedResources: [client]));
+		return Task.FromResult<IBackendConnection>(new BackendConnection([store], ownedResources: [OwnedResource.OfSync(client)]));
 	}
 }

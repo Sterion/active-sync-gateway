@@ -25,7 +25,10 @@ public static class PendingChangeDetector
 		if (state is null || state.SyncKey == 0)
 			return false; // never completed a sync — nothing to compare against
 
-		Dictionary<string, string> snapshot = SyncStateService.ReadSnapshot(state);
+		// An unreadable snapshot (an older shape, or corrupt) means the next Sync will make the
+		// device resynchronize the collection anyway, so there is nothing to wake the wait for.
+		if (SyncStateService.ReadSnapshot(state) is not { } snapshot)
+			return false;
 		ContentFilter filter = ContentFilters.ForClass(store.EasClass, state.FilterType);
 
 		IReadOnlyDictionary<string, string> current;
@@ -47,7 +50,11 @@ public static class PendingChangeDetector
 		if (current.Count != snapshot.Count)
 			return true;
 		foreach ((string key, string revision) in current)
-			if (!snapshot.TryGetValue(key, out string? known) || known != revision)
+			if (!snapshot.TryGetValue(key, out SnapshotEntry known) ||
+			    known.PendingReadOnlyRevert ||
+			    known.Revision.Value != revision)
+				// A suppressed client write still owing the device its revert IS a pending change,
+				// even though the backend itself has not moved — the next Sync round sends it.
 				return true;
 		return false;
 	}
