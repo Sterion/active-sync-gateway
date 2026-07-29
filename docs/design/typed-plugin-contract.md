@@ -1403,6 +1403,15 @@ this phase are different code: the semantics concentrate in 3a, the tokens in 3b
   FolkerKinzel — the same split the shared contact converter keeps.
 - **JMAP GAL** reports the typed `GalPictureStatus.None` when photos are requested (the bridge
   reads no `media` member), preserving the explicit wire status 173 the old projection emitted.
+- **Process correction: a bare branch push does NOT trigger the pipeline** — `build.yaml` fires
+  on `main` pushes, tags and pull requests only, so § 9's "the branch push's Actions run" was
+  executed as a `workflow_dispatch` of `build.yaml` against the `plugin-restructure` ref (the
+  same mechanism release.yaml uses). Run 30439195463: `test` + all SIX integration legs
+  (stalwart, mailserver, baikal, james, axigen, cyrus) green. Publish-safety caveat sharpened:
+  the NuGet pack and release steps skipped as designed, but the multi-arch image step pushes on
+  any non-PR event, so the run published a branch-tagged container
+  (`ghcr.io/…:plugin-restructure`) — a Phase 5 candidate if branch dispatches should stop doing
+  that.
 
 **Phase 3b — one Opus subagent (spawned by the session) implements, and does NOT commit:**
 
