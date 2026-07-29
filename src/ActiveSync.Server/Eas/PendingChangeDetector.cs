@@ -29,12 +29,12 @@ public static class PendingChangeDetector
 		// device resynchronize the collection anyway, so there is nothing to wake the wait for.
 		if (SyncStateService.ReadSnapshot(state) is not { } snapshot)
 			return false;
-		ContentFilter filter = ContentFilters.ForClass(store.EasClass, state.FilterType);
+		ContentFilter filter = ContentFilters.ForClass(folder.EasClass, state.FilterType);
 
-		IReadOnlyDictionary<string, string> current;
+		IReadOnlyDictionary<ItemKey, ItemRevision> current;
 		try
 		{
-			current = await store.GetItemRevisionsAsync(folder.BackendKey, filter, ct);
+			current = await store.GetItemRevisionsAsync(new FolderKey(folder.BackendKey), filter, ct);
 		}
 		catch (OperationCanceledException) when (ct.IsCancellationRequested)
 		{
@@ -49,10 +49,10 @@ public static class PendingChangeDetector
 
 		if (current.Count != snapshot.Count)
 			return true;
-		foreach ((string key, string revision) in current)
-			if (!snapshot.TryGetValue(key, out SnapshotEntry known) ||
+		foreach ((ItemKey key, ItemRevision revision) in current)
+			if (!snapshot.TryGetValue(key.Value, out SnapshotEntry known) ||
 			    known.PendingReadOnlyRevert ||
-			    known.Revision.Value != revision)
+			    known.Revision != revision)
 				// A suppressed client write still owing the device its revert IS a pending change,
 				// even though the backend itself has not moved — the next Sync round sends it.
 				return true;

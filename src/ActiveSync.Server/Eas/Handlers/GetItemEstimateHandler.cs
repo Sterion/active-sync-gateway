@@ -5,6 +5,7 @@ using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Sync;
 using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Server.Eas.Content;
 
 namespace ActiveSync.Server.Eas.Handlers;
 
@@ -34,7 +35,7 @@ public sealed class GetItemEstimateHandler(
 			                 ?? collection.Element(GIE + "SyncKey")?.Value ?? "0";
 			string? filterType = collection.Descendants(AS + "FilterType").FirstOrDefault()?.Value;
 
-			XElement Response(string status, int? estimate, IContentStore? resolvedStore = null)
+			XElement Response(string status, int? estimate, ContentAdapter? resolvedStore = null)
 			{
 				XElement collectionElement = new(GIE + "Collection",
 					new XElement(GIE + "CollectionId", collectionId),
@@ -49,7 +50,7 @@ public sealed class GetItemEstimateHandler(
 					collectionElement);
 			}
 
-			(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
+			(UserFolder Folder, ContentAdapter Store)? resolved = await folders.ResolveCollectionAsync(
 				context.Session, context.UserId, collectionId, ct);
 			if (resolved is null)
 			{
@@ -57,7 +58,7 @@ public sealed class GetItemEstimateHandler(
 				continue;
 			}
 
-			(UserFolder folder, IContentStore store) = resolved.Value;
+			(UserFolder folder, ContentAdapter store) = resolved.Value;
 			// GetItemEstimate is a query — peek at the sync key without mutating state
 			// (ValidateSyncKeyAsync, used by Sync, would reset the snapshot on key 0).
 			(SyncKeyValidation validation, Dictionary<string, SnapshotEntry> snapshot, int stateFilterType) =
@@ -81,10 +82,10 @@ public sealed class GetItemEstimateHandler(
 			int ft = int.TryParse(filterType, out int f) ? f : stateFilterType;
 			ContentFilter filter = ContentFilters.ForClass(store.EasClass, ft);
 
-			IReadOnlyDictionary<string, string> current;
+			IReadOnlyDictionary<ItemKey, ItemRevision> current;
 			try
 			{
-				current = await store.GetItemRevisionsAsync(folder.BackendKey, filter, ct);
+				current = await store.Store.GetItemRevisionsAsync(new FolderKey(folder.BackendKey), filter, ct);
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException)
 			{

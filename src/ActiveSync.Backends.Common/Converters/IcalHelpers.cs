@@ -5,7 +5,7 @@ using Ical.Net.Serialization;
 namespace ActiveSync.Backends.Common.Converters;
 
 /// <summary>Ical.Net load/serialize boilerplate shared by the calendar, task and note converters.</summary>
-internal static class IcalHelpers
+public static class IcalHelpers
 {
 	/// <summary>
 	///   Loads an iCalendar document. Empty/null content produces a fresh empty calendar (the

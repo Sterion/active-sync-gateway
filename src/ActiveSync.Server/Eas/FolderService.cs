@@ -2,59 +2,66 @@ using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
+using ActiveSync.Server.Eas.Content;
 
 namespace ActiveSync.Server.Eas;
 
 /// <summary>
 ///   Aggregates folders from every backend store and keeps the per-user folder registry current.
 ///   Also translates between EAS item ServerIds ("collectionId:sub") and backend item keys.
+///   Content classes come from the host: a store's class is derived from its alias interface at
+///   listing time and stamped onto the registry row (a resolved <see cref="UserFolder" /> then
+///   carries it, so ServerId composition needs no store at all).
 /// </summary>
 public sealed class FolderService(SyncStateService state, ILogger<FolderService> logger)
 {
 	public async Task<List<UserFolder>> RefreshAsync(IBackendSession session, int userId, CancellationToken ct)
 	{
-		List<BackendFolder> all = new();
+		List<RegistryFolder> all = new();
 		// The stored registry is fetched lazily and AT MOST ONCE: when several DAV stores
 		// are down at the same time — the common correlated case — re-reading the whole registry
 		// inside each store's catch was N identical full-table queries during an already-degraded
 		// request. The registry does not change while we iterate, so one read serves every fallback.
 		List<UserFolder>? existing = null;
 		foreach (IContentStore store in session.Stores)
+		{
+			string easClass = session.EasClassOf(store);
 			try
 			{
-				all.AddRange(await store.ListFoldersAsync(ct));
+				all.AddRange((await store.ListFoldersAsync(ct))
+					.Select(folder => new RegistryFolder(folder, easClass)));
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException)
 			{
 				// A dead DAV server must not break mail sync: skip that store's folders
 				// (existing registry rows survive because we merge, not replace-all).
-				logger.LogWarning(ex, "Listing folders failed for store {Class}", store.EasClass);
+				logger.LogWarning(ex, "Listing folders failed for store {Class}", easClass);
 				existing ??= await state.GetFoldersAsync(userId, ct);
 				all.AddRange(existing
-					.Where(f => f.EasClass == store.EasClass)
-					.Select(f => new BackendFolder
+					.Where(f => f.EasClass == easClass)
+					.Select(f => new RegistryFolder(new BackendFolder
 					{
-						BackendKey = f.BackendKey,
+						Key = new FolderKey(f.BackendKey),
 						DisplayName = f.DisplayName,
-						ParentBackendKey = f.ParentBackendKey,
+						ParentKey = f.ParentBackendKey is { } parent ? new FolderKey(parent) : null,
 						// The registry column is the wire integer the store's FolderType was
 						// stored as; this is the same value coming back the other way.
-						Type = (FolderType)f.Type,
-						EasClass = f.EasClass
-					}));
+						Type = (FolderType)f.Type
+					}, f.EasClass)));
 			}
+		}
 
 		return await state.RefreshFolderRegistryAsync(userId, all, ct);
 	}
 
-	public async Task<(UserFolder Folder, IContentStore Store)?> ResolveCollectionAsync(
+	public async Task<(UserFolder Folder, ContentAdapter Store)?> ResolveCollectionAsync(
 		IBackendSession session, int userId, string collectionId, CancellationToken ct)
 	{
 		UserFolder? folder = await state.GetFolderByServerIdAsync(userId, collectionId, ct);
 		if (folder is null)
 			return null;
-		IContentStore? store = session.GetStoreForBackendKey(folder.BackendKey);
-		return store is null ? null : (folder, store);
+		IContentStore? store = session.GetStoreForKey(new FolderKey(folder.BackendKey));
+		return store is null ? null : (folder, ContentAdapter.For(session, store));
 	}
 
 	/// <summary>
@@ -74,9 +81,9 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 	///   collections (their sub IS the UID — no map) and for an empty window.
 	/// </summary>
 	public async Task<IReadOnlyDictionary<string, string>?> PreResolveDavItemIdsAsync(
-		UserFolder folder, IContentStore store, IReadOnlyCollection<string> itemKeys, CancellationToken ct)
+		UserFolder folder, IReadOnlyCollection<string> itemKeys, CancellationToken ct)
 	{
-		if (store.EasClass == EasClass.Email || itemKeys.Count == 0)
+		if (folder.EasClass == EasClass.Email || itemKeys.Count == 0)
 			return null;
 		return await state.GetOrAddDavItemIdsAsync(folder, itemKeys, ct);
 	}
@@ -87,10 +94,10 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 	///   holds the key the composition costs no database round trip.
 	/// </param>
 	public async Task<string> ComposeServerIdAsync(
-		UserFolder folder, IContentStore store, string itemKey, CancellationToken ct,
+		UserFolder folder, string itemKey, CancellationToken ct,
 		IReadOnlyDictionary<string, string>? davIdCache = null)
 	{
-		string sub = store.EasClass == EasClass.Email
+		string sub = folder.EasClass == EasClass.Email
 			? itemKey
 			: davIdCache is not null && davIdCache.TryGetValue(itemKey, out string? cached)
 				? cached
@@ -100,7 +107,7 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 
 	/// <summary>Resolves an item ServerId back to the backend item key.</summary>
 	public async Task<string?> ResolveItemKeyAsync(
-		UserFolder folder, IContentStore store, string serverId, CancellationToken ct)
+		UserFolder folder, string serverId, CancellationToken ct)
 	{
 		int colon = serverId.IndexOf(':');
 		// A ServerId prefix must match the collection it is being applied in — a mismatched
@@ -108,7 +115,7 @@ public sealed class FolderService(SyncStateService state, ILogger<FolderService>
 		if (colon >= 0 && serverId[..colon] != folder.ServerId)
 			return null;
 		string sub = colon >= 0 ? serverId[(colon + 1)..] : serverId;
-		if (store.EasClass == EasClass.Email)
+		if (folder.EasClass == EasClass.Email)
 			return sub;
 		return await state.ResolveDavHrefAsync(folder, sub, ct);
 	}

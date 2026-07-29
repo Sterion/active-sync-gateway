@@ -1,35 +1,31 @@
 using System.Collections.Concurrent;
-using System.Xml.Linq;
 using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
-using ActiveSync.Protocol;
-using ActiveSync.Protocol.Wbxml;
 using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Search;
 using Microsoft.Extensions.Logging;
 using MimeKit;
 
+// MailKit also declares an IMailStore; the contract's store interface is the one this backend implements.
+using IMailStore = ActiveSync.Contracts.IMailStore;
+
 namespace ActiveSync.Backends.Imap;
 
 /// <summary>
-///   Email content store + mail-store side-operations over IMAP (submission lives in
+///   The mail store + mailbox side-operations over IMAP (submission lives in
 ///   <c>SmtpSubmitBackend</c>). Item keys are UIDVALIDITY-qualified IMAP UIDs (per folder,
-///   see <see cref="ToItemKey" />); revisions encode the sync-relevant flags.
+///   see <see cref="ToItemKey" />); revisions encode the sync-relevant flags. The store trades
+///   in raw RFC822 bytes and typed flags — it neither reads nor writes EAS XML (the host owns
+///   that conversion).
 /// </summary>
 public sealed partial class ImapMailBackend(
 	ImapSession session,
-	string? mailAddress,
 	Func<string, ImapIdleWatcher?> idleWatcherProvider,
 	ILogger logger,
 	Func<ImapStatusPoller?>? statusPollerProvider = null)
-	: IContentStore, IMailStoreOperations, IItemMoveOperations, IFolderOperations
+	: IMailStore, IMailboxOperations, IItemMoveOperations, IFolderOperations
 {
-	private static readonly XNamespace Email = EasNamespaces.Email;
-	private static readonly XNamespace Email2 = EasNamespaces.Email2;
-	private static readonly XNamespace AirSyncBase = EasNamespaces.AirSyncBase;
-
 	private static readonly string[] SentNames = ["Sent", "Sent Items", "Sent Messages", "INBOX.Sent"];
 	private static readonly string[] TrashNames = ["Trash", "Deleted Items", "Deleted Messages", "INBOX.Trash"];
 	private static readonly string[] DraftsNames = ["Drafts", "INBOX.Drafts"];
@@ -43,13 +39,11 @@ public sealed partial class ImapMailBackend(
 	/// </summary>
 	private readonly ConcurrentDictionary<SpecialFolder, (ImapClient Client, IMailFolder? Folder)> _specialFolderCache = new();
 
-	public string EasClass => Protocol.EasClass.Email;
-
 	// ---------- IContentStore ----------
 
-	public bool OwnsBackendKey(string backendKey)
+	public bool OwnsKey(FolderKey key)
 	{
-		return backendKey.StartsWith(ImapSession.KeyPrefix, StringComparison.Ordinal);
+		return key.Value.StartsWith(ImapSession.KeyPrefix, StringComparison.Ordinal);
 	}
 
 	public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
@@ -77,16 +71,15 @@ public sealed partial class ImapMailBackend(
 				if (folder.Attributes.HasFlag(FolderAttributes.NonExistent))
 					continue;
 				FolderType type = ClassifyFolder(folder);
-				string? parentKey = folder.ParentFolder is { } parent && !string.IsNullOrEmpty(parent.FullName)
-					? ImapSession.ToBackendKey(parent.FullName)
+				FolderKey? parentKey = folder.ParentFolder is { } parent && !string.IsNullOrEmpty(parent.FullName)
+					? new FolderKey(ImapSession.ToBackendKey(parent.FullName))
 					: null;
 				result.Add(new BackendFolder
 				{
-					BackendKey = ImapSession.ToBackendKey(folder.FullName),
+					Key = new FolderKey(ImapSession.ToBackendKey(folder.FullName)),
 					DisplayName = folder.Name,
-					ParentBackendKey = parentKey,
-					Type = type,
-					EasClass = Protocol.EasClass.Email
+					ParentKey = parentKey,
+					Type = type
 				});
 			}
 
@@ -94,12 +87,12 @@ public sealed partial class ImapMailBackend(
 		}, ct);
 	}
 
-	public Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-		string folderBackendKey, ContentFilter filter, CancellationToken ct)
+	public Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+		FolderKey folderKey, ContentFilter filter, CancellationToken ct)
 	{
-		return session.RunAsync<IReadOnlyDictionary<string, string>>(async client =>
+		return session.RunAsync<IReadOnlyDictionary<ItemKey, ItemRevision>>(async client =>
 		{
-			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadOnly, ct)
+			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderKey.Value, FolderAccess.ReadOnly, ct)
 				.ConfigureAwait(false);
 			// A folder that stays selected between calls keeps a FROZEN view: servers
 			// only announce newly delivered messages (EXISTS) when given the chance
@@ -112,7 +105,7 @@ public sealed partial class ImapMailBackend(
 				: SearchQuery.All;
 			IList<UniqueId> uids = await folder.SearchAsync(query, ct).ConfigureAwait(false);
 			if (uids.Count == 0)
-				return new Dictionary<string, string>();
+				return new Dictionary<ItemKey, ItemRevision>();
 			// Unlike JMAP's Email/get (bounded by maxObjectsInGet, which forces its own
 			// page-at-500 mitigation), IMAP has no per-command object cap, and this FETCH asks
 			// only for UID+Flags — no bodies — so even a large mailbox is cheap. Splitting it
@@ -127,154 +120,102 @@ public sealed partial class ImapMailBackend(
 			IList<IMessageSummary> summaries = await folder
 				.FetchAsync(uids, MessageSummaryItems.UniqueId | MessageSummaryItems.Flags, ct)
 				.ConfigureAwait(false);
-			Dictionary<string, string> map = new(summaries.Count, StringComparer.Ordinal);
+			Dictionary<ItemKey, ItemRevision> map = new(summaries.Count);
 			foreach (IMessageSummary summary in summaries)
-				map[ToItemKey(folder, summary.UniqueId)] =
-					RevisionOf(summary.Flags ?? MessageFlags.None, summary.Keywords);
+				map[new ItemKey(ToItemKey(folder, summary.UniqueId))] =
+					new ItemRevision(RevisionOf(summary.Flags ?? MessageFlags.None, summary.Keywords));
 			return map;
 		}, ct);
 	}
 
-	public Task<BackendItem?> GetItemAsync(
-		string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct)
+	// ---------- IMailStore ----------
+
+	public Task<MailItem?> GetItemAsync(
+		FolderKey folderKey, ItemKey itemKey, MailFetchOptions options, CancellationToken ct)
 	{
-		return session.RunAsync<BackendItem?>(async client =>
+		return session.RunAsync<MailItem?>(async client =>
 		{
-			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadOnly, ct)
+			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderKey.Value, FolderAccess.ReadOnly, ct)
 				.ConfigureAwait(false);
-			UniqueId uid = ParseUid(folder, itemKey);
+			UniqueId uid = ParseUid(folder, itemKey.Value);
 			IList<IMessageSummary> summaries = await folder
 				.FetchAsync([uid], MessageSummaryItems.UniqueId | MessageSummaryItems.Flags | MessageSummaryItems.InternalDate, ct)
 				.ConfigureAwait(false);
 			if (summaries.Count == 0)
 				return null;
-			MimeMessage message;
-			try
-			{
-				message = await folder.GetMessageAsync(uid, ct).ConfigureAwait(false);
-			}
-			catch (MessageNotFoundException)
-			{
+			byte[]? rfc822 = await ReadRawMessageAsync(folder, uid, ct).ConfigureAwait(false);
+			if (rfc822 is null)
 				return null;
-			}
 
 			MessageFlags flags = summaries[0].Flags ?? MessageFlags.None;
-			MailConverter.MessageFlags converterFlags = new(
-				(flags & MessageFlags.Seen) != 0,
-				(flags & MessageFlags.Flagged) != 0,
-				(flags & MessageFlags.Answered) != 0,
-				summaries[0].Keywords?.Contains("$Forwarded") == true,
-				summaries[0].Keywords);
-			List<XElement> data = MailConverter.ToApplicationData(
-				message, converterFlags, bodyPreference,
-				idx => MakeFileReference(folderBackendKey, itemKey, idx), summaries[0].InternalDate);
-			return new BackendItem { ApplicationData = data };
+			return new MailItem
+			{
+				Rfc822 = rfc822,
+				Flags = FlagsOf(flags, summaries[0].Keywords),
+				Categories = MailConverter.CategoryKeywords(summaries[0].Keywords),
+				Received = summaries[0].InternalDate
+			};
 		}, ct);
 	}
 
-	public Task<(string ItemKey, string Revision)> CreateItemAsync(
-		string folderBackendKey, XElement applicationData, CancellationToken ct)
+	public Task<(ItemKey Key, ItemRevision Revision)> CreateDraftAsync(
+		FolderKey folderKey, MailItem item, CancellationToken ct)
 	{
 		// EAS 16.x drafts: the only mail class a client may create via Sync. Anything but
 		// the Drafts folder keeps the historical refusal (per-item Status 6 upstream).
 		return session.RunAsync(async client =>
 		{
-			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadWrite, ct)
+			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderKey.Value, FolderAccess.ReadWrite, ct)
 				.ConfigureAwait(false);
 			if (!IsDraftsFolder(folder))
 				throw new BackendException("Creating mail items via Sync is only supported in the Drafts folder.");
 
-			MimeMessage draft = DraftMessageBuilder.Build(applicationData, null, mailAddress);
+			MimeMessage draft = await LoadMessageAsync(item.Rfc822, ct).ConfigureAwait(false);
 			UniqueId? uid = await folder.AppendAsync(draft, MessageFlags.Draft, ct).ConfigureAwait(false);
 			if (uid is null)
 				throw new BackendException("The IMAP server did not report a UID for the appended draft.");
-			return (ToItemKey(folder, uid.Value), RevisionOf(MessageFlags.None));
+			return (new ItemKey(ToItemKey(folder, uid.Value)), new ItemRevision(RevisionOf(MessageFlags.None)));
 		}, ct, idempotent: false); // APPEND: a replay would duplicate the draft
 	}
 
-	public Task<string> UpdateItemAsync(
-		string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct)
+	public Task<ItemRevision> UpdateFlagsAsync(
+		FolderKey folderKey, ItemKey itemKey, MailFlagsPatch patch, ItemRevision? expected, CancellationToken ct)
 	{
+		// `expected` is deliberately ignored: IMAP has no If-Match for a STORE, so this store
+		// cannot honour the precondition — which the contract says is conforming.
 		return session.RunAsync(async client =>
 		{
-			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadWrite, ct)
+			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderKey.Value, FolderAccess.ReadWrite, ct)
 				.ConfigureAwait(false);
-			UniqueId uid = ParseUid(folder, itemKey);
+			UniqueId uid = ParseUid(folder, itemKey.Value);
 
-			// A content-bearing Change outside Drafts must be refused, mirroring
-			// CreateItemAsync's explicit refusal of the analogous case (AGENTS.md: Sync Add/Change
-			// of Email is allowed ONLY in the Drafts folder). Falling through to the Read/Flag/
-			// Categories handling below would silently discard the edit while still returning
-			// Status 1 (applied) to the client.
-			if (!IsDraftsFolder(folder) && HasDraftContent(applicationData))
-				throw new BackendException("Changing mail content via Sync is only supported in the Drafts folder.");
-
-			// EAS 16.x draft edit: content-bearing changes in the Drafts folder rewrite the
-			// message (append merged draft, expunge the old one). The old UID vanishes and
-			// the new one appears — the snapshot diff turns that into Delete+Add for the
-			// client, which is the standard EAS re-identification flow.
-			if (IsDraftsFolder(folder) && HasDraftContent(applicationData))
+			if (patch.Read.HasValue)
 			{
-				MimeMessage? original = null;
-				try
-				{
-					original = await folder.GetMessageAsync(uid, ct).ConfigureAwait(false);
-				}
-				catch (MessageNotFoundException)
-				{
-					// merge-from-nothing is fine — the payload becomes the whole draft
-				}
-
-				// Build the merged content in memory FIRST (the GetMessageAsync fetch above is
-				// non-mutating, so it is always safe to run before touching the old message), then
-				// delete the OLD uid before appending the new one — the reverse of the historical
-				// append-then-delete order. A fault after the fetch/build has no I/O to undo; a
-				// fault after the delete but before the append LOSES the edit (the old message is
-				// simply gone) instead of DUPLICATING it. The old order left a mid-fault mailbox
-				// with BOTH the original (still addressable by the client's stale item key) and
-				// the freshly-appended copy, so a client retry re-executed the whole rewrite and
-				// appended a SECOND stray on every subsequent retry — unbounded duplication. With
-				// delete-first, a retry against an already-deleted uid gets MessageNotFoundException
-				// (caught below, merge-from-nothing), so it converges to exactly one final copy no
-				// matter how many times the delete-but-not-append window is hit.
-				MimeMessage merged = DraftMessageBuilder.Build(applicationData, original, mailAddress);
-				await folder.AddFlagsAsync(uid, MessageFlags.Deleted, true, ct).ConfigureAwait(false);
-				await ExpungeUidAsync(folder, uid, ct).ConfigureAwait(false);
-				await folder.AppendAsync(merged, MessageFlags.Draft, ct).ConfigureAwait(false);
-				return RevisionOf(MessageFlags.None);
-			}
-
-			string? read = applicationData.Element(Email + "Read")?.Value;
-			if (read is not null)
-			{
-				if (read == "1")
+				if (patch.Read.Value)
 					await folder.AddFlagsAsync(uid, MessageFlags.Seen, true, ct).ConfigureAwait(false);
 				else
 					await folder.RemoveFlagsAsync(uid, MessageFlags.Seen, true, ct).ConfigureAwait(false);
 			}
 
-			XElement? flagElement = applicationData.Element(Email + "Flag");
-			if (flagElement is not null)
+			if (patch.Flagged.HasValue)
 			{
-				string? status = flagElement.Element(Email + "Status")?.Value;
-				if (status == "2")
+				if (patch.Flagged.Value)
 					await folder.AddFlagsAsync(uid, MessageFlags.Flagged, true, ct).ConfigureAwait(false);
 				else
 					await folder.RemoveFlagsAsync(uid, MessageFlags.Flagged, true, ct).ConfigureAwait(false);
 			}
 
-			// Presence-guarded like Read/Flag: only an explicit Categories element touches
-			// the message's custom keywords — and only the category-relevant subset, so a
-			// client clearing its categories can never strip $Forwarded or other system
-			// keywords. Servers without custom-keyword support are skipped (same tolerant
-			// stance as the $Forwarded write in SetAnsweredAsync).
-			XElement? categoriesElement = applicationData.Element(Email + "Categories");
-			if (categoriesElement is not null)
+			// Presence-guarded like Read/Flagged: only a supplied category list touches the
+			// message's custom keywords — and only the category-relevant subset, so a client
+			// clearing its categories can never strip $Forwarded or other system keywords.
+			// Servers without custom-keyword support are skipped (same tolerant stance as the
+			// $Forwarded write in SetAnsweredAsync).
+			if (patch.Categories.HasValue)
 			{
 				if ((folder.PermanentFlags & MessageFlags.UserDefined) != 0)
 				{
-					HashSet<string> wanted = categoriesElement.Elements(Email + "Category")
-						.Select(c => SanitizeKeyword(c.Value))
+					HashSet<string> wanted = patch.Categories.Value
+						.Select(SanitizeKeyword)
 						.Where(k => k.Length > 0)
 						.ToHashSet(StringComparer.OrdinalIgnoreCase);
 					IList<IMessageSummary> current = await folder
@@ -302,37 +243,56 @@ public sealed partial class ImapMailBackend(
 			IList<IMessageSummary> summaries = await folder
 				.FetchAsync([uid], MessageSummaryItems.UniqueId | MessageSummaryItems.Flags, ct)
 				.ConfigureAwait(false);
-			return summaries.Count > 0
+			return new ItemRevision(summaries.Count > 0
 				? RevisionOf(summaries[0].Flags ?? MessageFlags.None, summaries[0].Keywords)
-				: "000";
-			// A content-bearing draft edit does append+delete+expunge and is not replayable; a
-			// pure flag change (Read/Flag/Categories) is idempotent and retries normally.
-		}, ct, idempotent: !HasDraftContent(applicationData));
+				: "000");
+		}, ct); // pure flag changes are idempotent and retry normally
 	}
 
-	private static bool IsDraftsFolder(IMailFolder folder)
+	public Task<(ItemKey Key, ItemRevision Revision)> ReplaceDraftAsync(
+		FolderKey folderKey, ItemKey itemKey, MailItem value, CancellationToken ct)
 	{
-		return MatchesSpecialFolder(folder, FolderAttributes.Drafts, DraftsNames);
+		// EAS 16.x draft edit: the host merged the client's partial data into the stored draft
+		// and hands over the complete replacement. The old UID vanishes and the new one appears —
+		// the snapshot diff turns that into Delete+Add for the client, which is the standard EAS
+		// re-identification flow (the returned key is informational and must NOT be
+		// echo-suppressed into the snapshot).
+		return session.RunAsync(async client =>
+		{
+			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderKey.Value, FolderAccess.ReadWrite, ct)
+				.ConfigureAwait(false);
+			if (!IsDraftsFolder(folder))
+				throw new BackendException("Changing mail content via Sync is only supported in the Drafts folder.");
+
+			MimeMessage merged = await LoadMessageAsync(value.Rfc822, ct).ConfigureAwait(false);
+
+			// Delete the OLD uid before appending the new one. A fault after the delete but
+			// before the append LOSES the edit (the old message is simply gone) instead of
+			// DUPLICATING it — the reverse order left a mid-fault mailbox with BOTH the original
+			// (still addressable by the client's stale item key) and the freshly-appended copy,
+			// so a client retry re-executed the whole rewrite and appended a SECOND stray on
+			// every subsequent retry. With delete-first, a retry against an already-deleted uid
+			// finds nothing to remove (the host's merge-from-nothing already rebuilt the draft
+			// from the client's data alone), so it converges to exactly one final copy no matter
+			// how many times the delete-but-not-append window is hit. An old uid from an earlier
+			// UIDVALIDITY generation is reported as item-gone by ParseUid upstream of any I/O.
+			await folder.AddFlagsAsync(ParseUid(folder, itemKey.Value), MessageFlags.Deleted, true, ct)
+				.ConfigureAwait(false);
+			await ExpungeUidAsync(folder, ParseUid(folder, itemKey.Value), ct).ConfigureAwait(false);
+			UniqueId? uid = await folder.AppendAsync(merged, MessageFlags.Draft, ct).ConfigureAwait(false);
+			if (uid is null)
+				throw new BackendException("The IMAP server did not report a UID for the rewritten draft.");
+			return (new ItemKey(ToItemKey(folder, uid.Value)), new ItemRevision(RevisionOf(MessageFlags.None)));
+		}, ct, idempotent: false); // delete+append is not replayable
 	}
 
-	/// <summary>Draft-content elements, as opposed to a pure flag change (Read/Flag).</summary>
-	private static bool HasDraftContent(XElement applicationData)
-	{
-		return applicationData.Element(Email + "To") is not null ||
-		       applicationData.Element(Email + "Cc") is not null ||
-		       applicationData.Element(Email2 + "Bcc") is not null ||
-		       applicationData.Element(Email + "Subject") is not null ||
-		       applicationData.Element(AirSyncBase + "Body") is not null ||
-		       applicationData.Element(AirSyncBase + "Attachments") is not null;
-	}
-
-	public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
+	public Task DeleteItemAsync(FolderKey folderKey, ItemKey itemKey, bool permanent, CancellationToken ct)
 	{
 		return session.RunAsync(async client =>
 		{
-			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadWrite, ct)
+			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderKey.Value, FolderAccess.ReadWrite, ct)
 				.ConfigureAwait(false);
-			UniqueId uid = ParseUid(folder, itemKey);
+			UniqueId uid = ParseUid(folder, itemKey.Value);
 			// DeletesAsMoves=0 (permanent), or already in Trash, or no Trash folder → expunge;
 			// otherwise the default move-to-Trash.
 			IMailFolder? trash = permanent
@@ -367,16 +327,16 @@ public sealed partial class ImapMailBackend(
 		return folder.ExpungeAsync([uid], ct);
 	}
 
-	public Task<(string ItemKey, string Revision)> MoveItemAsync(
-		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
+	public Task<(ItemKey Key, ItemRevision Revision)> MoveItemAsync(
+		FolderKey sourceKey, ItemKey itemKey, FolderKey destinationKey, CancellationToken ct)
 	{
 		return session.RunAsync(async client =>
 		{
-			IMailFolder source = await ImapSession.OpenFolderAsync(client, sourceFolderBackendKey, FolderAccess.ReadWrite, ct)
+			IMailFolder source = await ImapSession.OpenFolderAsync(client, sourceKey.Value, FolderAccess.ReadWrite, ct)
 				.ConfigureAwait(false);
 			IMailFolder destination = await client.GetFolderAsync(
-				ImapSession.FromBackendKey(destinationFolderBackendKey), ct).ConfigureAwait(false);
-			UniqueId uid = ParseUid(source, itemKey);
+				ImapSession.FromBackendKey(destinationKey.Value), ct).ConfigureAwait(false);
+			UniqueId uid = ParseUid(source, itemKey.Value);
 			UniqueId? newUid = await source.MoveToAsync(uid, destination, ct).ConfigureAwait(false);
 			if (newUid is null)
 				throw new BackendException("IMAP server did not report the moved message's new UID (no UIDPLUS).");
@@ -401,31 +361,31 @@ public sealed partial class ImapMailBackend(
 				? RevisionOf(summaries[0].Flags ?? MessageFlags.None, summaries[0].Keywords)
 				: RevisionOf(MessageFlags.None);
 
-			return ($"{validity}:{newUid.Value.Id}", revision);
+			return (new ItemKey($"{validity}:{newUid.Value.Id}"), new ItemRevision(revision));
 		}, ct);
 	}
 
-	public Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct)
+	public Task<FolderKey> CreateFolderAsync(FolderKey? parentKey, string displayName, CancellationToken ct)
 	{
 		return session.RunAsync(async client =>
 		{
-			IMailFolder parent = parentBackendKey is not null
-				? await client.GetFolderAsync(ImapSession.FromBackendKey(parentBackendKey), ct).ConfigureAwait(false)
+			IMailFolder parent = parentKey is { } parentFolderKey
+				? await client.GetFolderAsync(ImapSession.FromBackendKey(parentFolderKey.Value), ct).ConfigureAwait(false)
 				: client.PersonalNamespaces.Count > 0
 					? client.GetFolder(client.PersonalNamespaces[0])
 					: client.Inbox;
 			IMailFolder created = await parent.CreateAsync(displayName, true, ct).ConfigureAwait(false)
 			                      ?? throw new BackendException("IMAP server did not return the created folder.");
-			return ImapSession.ToBackendKey(created.FullName);
+			return new FolderKey(ImapSession.ToBackendKey(created.FullName));
 		}, ct);
 	}
 
-	public Task RenameFolderAsync(string backendKey, string newDisplayName, CancellationToken ct)
+	public Task RenameFolderAsync(FolderKey folderKey, string newDisplayName, CancellationToken ct)
 	{
 		return session.RunAsync(async client =>
 		{
 			IMailFolder folder =
-				await client.GetFolderAsync(ImapSession.FromBackendKey(backendKey), ct).ConfigureAwait(false);
+				await client.GetFolderAsync(ImapSession.FromBackendKey(folderKey.Value), ct).ConfigureAwait(false);
 			IMailFolder parent = folder.ParentFolder
 			                     ?? throw new BackendException("Cannot rename a namespace root folder.");
 			await folder.RenameAsync(parent, newDisplayName, ct).ConfigureAwait(false);
@@ -433,97 +393,50 @@ public sealed partial class ImapMailBackend(
 		}, ct);
 	}
 
-	public Task DeleteFolderAsync(string backendKey, CancellationToken ct)
+	public Task DeleteFolderAsync(FolderKey folderKey, CancellationToken ct)
 	{
 		return session.RunAsync(async client =>
 		{
 			IMailFolder folder =
-				await client.GetFolderAsync(ImapSession.FromBackendKey(backendKey), ct).ConfigureAwait(false);
+				await client.GetFolderAsync(ImapSession.FromBackendKey(folderKey.Value), ct).ConfigureAwait(false);
 			await folder.DeleteAsync(ct).ConfigureAwait(false);
 			return true;
 		}, ct);
 	}
 
-	// ---------- IMailStoreOperations ----------
+	// ---------- IMailboxOperations ----------
 
-	public Task SaveToSentAsync(byte[] mime, CancellationToken ct)
+	public Task SaveToSentAsync(ReadOnlyMemory<byte> rfc822, CancellationToken ct)
 	{
 		return session.RunAsync(async client =>
 		{
 			IMailFolder? sent = await FindSpecialFolderAsync(client, SpecialFolder.Sent, SentNames, ct).ConfigureAwait(false);
 			if (sent is null)
 				return false;
-			using MemoryStream stream = new(mime);
-			MimeMessage message = await MimeMessage.LoadAsync(stream, ct).ConfigureAwait(false);
+			MimeMessage message = await LoadMessageAsync(rfc822, ct).ConfigureAwait(false);
 			await sent.AppendAsync(message, MessageFlags.Seen, ct).ConfigureAwait(false);
 			return true;
 		}, ct, idempotent: false); // APPEND to Sent: a replay would duplicate the sent copy
 	}
 
-	public Task<byte[]?> GetRawMessageAsync(string folderBackendKey, string itemKey, CancellationToken ct)
+	public Task<ReadOnlyMemory<byte>?> GetRawMessageAsync(FolderKey folderKey, ItemKey itemKey, CancellationToken ct)
 	{
-		return session.RunAsync<byte[]?>(async client =>
+		return session.RunAsync<ReadOnlyMemory<byte>?>(async client =>
 		{
-			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadOnly, ct)
+			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderKey.Value, FolderAccess.ReadOnly, ct)
 				.ConfigureAwait(false);
-			try
-			{
-				MimeMessage message = await folder.GetMessageAsync(ParseUid(folder, itemKey), ct).ConfigureAwait(false);
-				using MemoryStream ms = new();
-				await message.WriteToAsync(ms, ct).ConfigureAwait(false);
-				return ms.ToArray();
-			}
-			catch (MessageNotFoundException)
-			{
-				return null;
-			}
+			byte[]? raw = await ReadRawMessageAsync(folder, ParseUid(folder, itemKey.Value), ct).ConfigureAwait(false);
+			return raw is null ? null : (ReadOnlyMemory<byte>?)raw;
 		}, ct);
 	}
 
-	public Task<BackendAttachment?> GetAttachmentAsync(string fileReference, CancellationToken ct)
-	{
-		string folderKey, itemKey;
-		int index;
-		try
-		{
-			(folderKey, itemKey, index) = ParseFileReference(fileReference);
-		}
-		catch (BackendException)
-		{
-			// Hand-crafted reference: same answer as an attachment that no longer exists.
-			return Task.FromResult<BackendAttachment?>(null);
-		}
-
-		return session.RunAsync<BackendAttachment?>(async client =>
-		{
-			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderKey, FolderAccess.ReadOnly, ct)
-				.ConfigureAwait(false);
-			MimeMessage message;
-			try
-			{
-				message = await folder.GetMessageAsync(ParseUid(folder, itemKey), ct).ConfigureAwait(false);
-			}
-			catch (MessageNotFoundException)
-			{
-				return null;
-			}
-
-			MimeEntity? attachment = message.Attachments.Skip(index).FirstOrDefault();
-			if (attachment is not MimePart { Content: not null } part)
-				return null;
-			using MemoryStream ms = new();
-			await part.Content.DecodeToAsync(ms, ct).ConfigureAwait(false);
-			return new BackendAttachment { ContentType = part.ContentType.MimeType, Content = ms.ToArray() };
-		}, ct);
-	}
-
-	public Task SetAnsweredAsync(string folderBackendKey, string itemKey, bool forwarded, CancellationToken ct)
+	public Task SetAnsweredAsync(FolderKey folderKey, ItemKey itemKey, bool forwarded, CancellationToken ct)
 	{
 		return session.RunAsync(async client =>
 		{
-			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadWrite, ct)
+			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderKey.Value, FolderAccess.ReadWrite, ct)
 				.ConfigureAwait(false);
-			UniqueId uid = ParseUid(folder, itemKey);
+			UniqueId uid = ParseUid(folder, itemKey.Value);
 			if (forwarded)
 				try
 				{
@@ -541,13 +454,13 @@ public sealed partial class ImapMailBackend(
 		}, ct);
 	}
 
-	public Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
-		string? folderBackendKey, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct)
+	public Task<IReadOnlyList<SearchHit>> SearchAsync(
+		FolderKey? folderKey, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct)
 	{
-		return session.RunAsync<IReadOnlyList<(string, string)>>(async client =>
+		return session.RunAsync<IReadOnlyList<SearchHit>>(async client =>
 		{
-			string folderKey = folderBackendKey ?? ImapSession.ToBackendKey(client.Inbox.FullName);
-			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderKey, FolderAccess.ReadOnly, ct)
+			FolderKey searchKey = folderKey ?? new FolderKey(ImapSession.ToBackendKey(client.Inbox.FullName));
+			IMailFolder folder = await ImapSession.OpenFolderAsync(client, searchKey.Value, FolderAccess.ReadOnly, ct)
 				.ConfigureAwait(false);
 			await client.NoOpAsync(ct).ConfigureAwait(false); // refresh the selected-folder view
 			SearchQuery query = SearchQuery.SubjectContains(freeText)
@@ -560,16 +473,16 @@ public sealed partial class ImapMailBackend(
 			return uids
 				.OrderByDescending(u => u.Id)
 				.Take(maxResults)
-				.Select(u => (folderKey, ToItemKey(folder, u)))
+				.Select(u => new SearchHit { Folder = searchKey, Item = new ItemKey(ToItemKey(folder, u)) })
 				.ToList();
 		}, ct);
 	}
 
-	public Task EmptyFolderAsync(string folderBackendKey, CancellationToken ct)
+	public Task EmptyFolderAsync(FolderKey folderKey, CancellationToken ct)
 	{
 		return session.RunAsync(async client =>
 		{
-			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderBackendKey, FolderAccess.ReadWrite, ct)
+			IMailFolder folder = await ImapSession.OpenFolderAsync(client, folderKey.Value, FolderAccess.ReadWrite, ct)
 				.ConfigureAwait(false);
 			// folder.Count is only as fresh as the last EXISTS this connection happened to see,
 			// and a folder that stays selected between requests is never told about new mail
@@ -587,6 +500,13 @@ public sealed partial class ImapMailBackend(
 
 			return true;
 		}, ct);
+	}
+
+	// ---------- helpers ----------
+
+	private static bool IsDraftsFolder(IMailFolder folder)
+	{
+		return MatchesSpecialFolder(folder, FolderAttributes.Drafts, DraftsNames);
 	}
 
 	private static FolderType ClassifyFolder(IMailFolder folder)
@@ -637,6 +557,46 @@ public sealed partial class ImapMailBackend(
 		return sinceUtc.AddDays(-1).Date;
 	}
 
+	/// <summary>The typed contract flags for a message's IMAP flags + keywords.</summary>
+	private static MailFlags FlagsOf(MessageFlags flags, IReadOnlyCollection<string>? keywords)
+	{
+		return new MailFlags
+		{
+			Seen = (flags & MessageFlags.Seen) != 0,
+			Flagged = (flags & MessageFlags.Flagged) != 0,
+			Answered = (flags & MessageFlags.Answered) != 0,
+			Forwarded = keywords?.Contains("$Forwarded") == true,
+			Draft = (flags & MessageFlags.Draft) != 0
+		};
+	}
+
+	/// <summary>
+	///   The exact message bytes as stored on the server (<c>BODY[]</c>), with no parse/serialize
+	///   round-trip in between — the contract's currency is the raw RFC822, and re-serializing a
+	///   parsed message could silently normalize bytes. Null when the message vanished.
+	/// </summary>
+	private static async Task<byte[]?> ReadRawMessageAsync(IMailFolder folder, UniqueId uid, CancellationToken ct)
+	{
+		try
+		{
+			using Stream stream = await folder.GetStreamAsync(uid, ct).ConfigureAwait(false);
+			using MemoryStream buffer = new();
+			await stream.CopyToAsync(buffer, ct).ConfigureAwait(false);
+			return buffer.ToArray();
+		}
+		catch (MessageNotFoundException)
+		{
+			return null;
+		}
+	}
+
+	/// <summary>Parses contract message bytes into MailKit's model for APPEND.</summary>
+	private static async Task<MimeMessage> LoadMessageAsync(ReadOnlyMemory<byte> rfc822, CancellationToken ct)
+	{
+		using MemoryStream stream = new(rfc822.ToArray());
+		return await MimeMessage.LoadAsync(stream, ct).ConfigureAwait(false);
+	}
+
 	// A mail item's "revision" is a 3-digit string encoding the sync-relevant flags in a
 	// fixed order: seen, flagged, answered (e.g. "101" = seen, not flagged, answered),
 	// followed by "|kw1,kw2" ONLY when the message carries category-relevant keywords —
@@ -671,20 +631,6 @@ public sealed partial class ImapMailBackend(
 				return string.Empty;
 
 		return category;
-	}
-
-	public static string MakeFileReference(string folderBackendKey, string itemKey, int attachmentIndex)
-	{
-		// Per-component escaping so a '|' inside the folder key/name cannot be mis-parsed.
-		return DelimitedKey.Encode(folderBackendKey, itemKey, attachmentIndex.ToString());
-	}
-
-	public static (string FolderBackendKey, string ItemKey, int AttachmentIndex) ParseFileReference(string fileReference)
-	{
-		string[]? parts = DelimitedKey.Decode(fileReference, 3);
-		if (parts is null || !int.TryParse(parts[2], out int index) || index < 0)
-			throw new BackendException("Malformed file reference.");
-		return (parts[0], parts[1], index);
 	}
 
 	/// <summary>

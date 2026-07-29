@@ -1,8 +1,6 @@
 // Copyright (c) 2026 Ruben Andersen
 // SPDX-License-Identifier: MIT
 
-using System.Xml.Linq;
-
 namespace ActiveSync.Contracts;
 
 /// <summary>A username/password pair as presented to (or resolved for) a backend connection.</summary>
@@ -32,47 +30,25 @@ public sealed record BackendCredentials
 }
 
 /// <summary>A folder/collection as reported by a backend store.</summary>
+/// <remarks>
+///   No content-class member: a store serves exactly one class (it implements exactly one class
+///   alias interface), so every folder it lists is that class — a per-folder class field could
+///   only agree with the owning store or be a bug. The host tags folders with the store's class
+///   itself.
+/// </remarks>
 public sealed record BackendFolder
 {
-	/// <summary>Stable backend identifier, e.g. "imap:INBOX/Sub" or "caldav:/user/cal1/".</summary>
-	public required string BackendKey { get; init; }
+	/// <summary>Stable store-defined key, e.g. "imap:INBOX/Sub" or "caldav:/user/cal1/".</summary>
+	public required FolderKey Key { get; init; }
 
 	/// <summary>The folder's name as shown to the client.</summary>
 	public required string DisplayName { get; init; }
 
-	/// <summary>The parent folder's backend key, or <c>null</c> for a root-level folder.</summary>
-	public string? ParentBackendKey { get; init; }
+	/// <summary>The parent folder's key, or <c>null</c> for a root-level folder.</summary>
+	public FolderKey? ParentKey { get; init; }
 
 	/// <summary>What kind of folder this is (Inbox, Calendar, a user-created mail folder, …).</summary>
 	public required FolderType Type { get; init; }
-
-	/// <summary>EAS content class value served by the owning store ("Email", "Calendar", …).</summary>
-	public required string EasClass { get; init; }
-}
-
-/// <summary>
-///   The client's body preference plus the negotiated-protocol flag converters need:
-///   <see cref="Eas16" /> selects the 16.x shapes (airsyncbase:Location instead of
-///   calendar:Location, draft/attachment metadata) without threading a version type
-///   through every store signature.
-/// </summary>
-public sealed record BodyPreference
-{
-	/// <summary>The body shape the client asked for.</summary>
-	public required BodyType Type { get; init; }
-
-	/// <summary>Truncate the body at this many bytes; <c>null</c> means "no truncation".</summary>
-	public long? TruncationSize { get; init; }
-
-	/// <summary>Whether the client asked for the whole body or none of it (AirSyncBase AllOrNone).</summary>
-	public bool AllOrNone { get; init; }
-
-	/// <summary>Whether the negotiated protocol is 16.x, selecting the 16.x element shapes.</summary>
-	public bool Eas16 { get; init; }
-
-	/// <summary>Convenience default: plain text, truncated at 32 KB, AllOrNone false, pre-16.x shapes.</summary>
-	public static readonly BodyPreference PlainText =
-		new() { Type = BodyType.PlainText, TruncationSize = 32 * 1024 };
 }
 
 /// <summary>
@@ -89,21 +65,14 @@ public sealed record ContentFilter
 	public static readonly ContentFilter All = new();
 }
 
-/// <summary>Content of a fetched item, as EAS ApplicationData child elements.</summary>
-public sealed record BackendItem
-{
-	/// <summary>The item's EAS ApplicationData child elements.</summary>
-	public required IReadOnlyList<XElement> ApplicationData { get; init; }
-}
-
 /// <summary>An attachment payload fetched from a backend.</summary>
 public sealed record BackendAttachment
 {
 	/// <summary>The attachment's MIME content type.</summary>
 	public required string ContentType { get; init; }
 
-	/// <summary>The attachment's bytes.</summary>
-	public required byte[] Content { get; init; }
+	/// <summary>The attachment's bytes (ownership rule: a dedicated, never-mutated buffer).</summary>
+	public required ReadOnlyMemory<byte> Content { get; init; }
 }
 
 /// <summary>
@@ -134,3 +103,15 @@ public class BackendException : Exception
 ///   <see cref="Exception" /> and item-gone errors slipped past every backend-error handler.
 /// </summary>
 public sealed class BackendItemNotFoundException(string message) : BackendException(message);
+
+/// <summary>
+///   Thrown by a store that CAN check an update's <c>expected</c> revision precondition
+///   (DAV If-Match, JMAP ifInState, a local row version) when the item's current revision
+///   differs — a typed signal, so the host can distinguish "the item moved underneath the
+///   merge" from any other backend error. The host's response: drop its cached payload,
+///   re-fetch, re-merge the client's partial data onto the fresh payload, and retry ONCE with
+///   the new revision; a second failure surfaces as the ordinary per-item conflict status.
+///   A store that cannot check the precondition never throws this — it ignores
+///   <c>expected</c> and applies the write, which is conforming.
+/// </summary>
+public sealed class BackendPreconditionFailedException(string message) : BackendException(message);

@@ -28,7 +28,8 @@ internal static class WritePermission
 	/// <summary>True when a client write into this folder must be refused.</summary>
 	public static bool IsBlocked(EasContext context, ActiveSyncOptions options, string folderBackendKey)
 	{
-		return options.ReadOnly || context.Session.IsReadOnlyFolder(folderBackendKey);
+		return options.ReadOnly ||
+		       context.Session.IsReadOnlyFolder(new Contracts.FolderKey(folderBackendKey));
 	}
 
 	/// <summary>True when a client write into this folder must be refused.</summary>

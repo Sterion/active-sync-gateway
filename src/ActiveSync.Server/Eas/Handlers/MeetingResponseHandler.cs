@@ -74,7 +74,7 @@ public sealed class MeetingResponseHandler(
 				int userResponse = parsedUserResponse.Value;
 
 				// An InstanceId scopes the response to ONE occurrence, but RespondToMeetingAsync
-				// (ICalendarOperations) has no occurrence-level entry point — only a whole-series UID.
+				// (IMeetingOperations) has no occurrence-level entry point — only a whole-series UID.
 				// Silently responding for the whole series (writing PARTSTAT on the master and mailing
 				// the organizer a series-wide REPLY) when the client asked to respond to a single
 				// occurrence would be wrong, and extending the store contract to carry an occurrence is
@@ -85,7 +85,7 @@ public sealed class MeetingResponseHandler(
 					continue;
 				}
 
-				(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
+				(UserFolder Folder, Content.ContentAdapter Store)? resolved = await folders.ResolveCollectionAsync(
 					context.Session, context.UserId, collectionId, ct);
 				if (resolved is null)
 				{
@@ -94,15 +94,14 @@ public sealed class MeetingResponseHandler(
 				}
 
 				// Load the invite mail, extract the iCalendar payload.
-				string? itemKey = await folders.ResolveItemKeyAsync(
-					resolved.Value.Folder, resolved.Value.Store, requestId, ct);
+				string? itemKey = await folders.ResolveItemKeyAsync(resolved.Value.Folder, requestId, ct);
 				if (itemKey is null)
 				{
 					results.Add(Result("2"));
 					continue;
 				}
 
-				(UserFolder folder, IContentStore store) = resolved.Value;
+				(UserFolder folder, Content.ContentAdapter store) = resolved.Value;
 
 				// The CollectionId may name either the Inbox message carrying the invite (mail path)
 				// OR the calendar collection holding an already-filed event (calendar path). Branch
@@ -116,7 +115,7 @@ public sealed class MeetingResponseHandler(
 				if (store.EasClass == EasClass.Calendar)
 				{
 					string? rawEvent = await MeetingInvitationService.CaptureIcsAsync(
-						store, folder.BackendKey, itemKey, logger, ct);
+						store.Store, folder.BackendKey, itemKey, logger, ct);
 					if (rawEvent is null)
 					{
 						results.Add(Result("2"));
@@ -131,15 +130,15 @@ public sealed class MeetingResponseHandler(
 				}
 				else
 				{
-					byte[]? raw = await context.Session.MailStore.GetRawMessageAsync(
-						folder.BackendKey, itemKey, ct);
+					ReadOnlyMemory<byte>? raw = await context.Session.Mailbox.GetRawMessageAsync(
+						new FolderKey(folder.BackendKey), new ItemKey(itemKey), ct);
 					if (raw is null)
 					{
 						results.Add(Result("2"));
 						continue;
 					}
 
-					using MemoryStream stream = new(raw);
+					using MemoryStream stream = new(raw.Value.ToArray());
 					MimeMessage message = await MimeMessage.LoadAsync(stream, ct);
 					MimePart? calendarPart = message.BodyParts.OfType<MimePart>()
 						.FirstOrDefault(p => p.ContentType.IsMimeType("text", "calendar"));
@@ -176,13 +175,10 @@ public sealed class MeetingResponseHandler(
 
 				if (uid is not null && calendarFolder is not null && context.Session.Calendar is not null)
 				{
-					string? href = await context.Session.Calendar.RespondToMeetingAsync(
-						calendarFolder.BackendKey, uid, userResponse, ct);
-					if (href is not null)
-					{
-						IContentStore calendarStore = context.Session.GetStoreForClass(EasClass.Calendar)!;
-						calendarId = await folders.ComposeServerIdAsync(calendarFolder, calendarStore, href, ct);
-					}
+					ItemKey? href = await context.Session.Calendar.RespondToMeetingAsync(
+						new FolderKey(calendarFolder.BackendKey), uid, (MeetingResponseKind)userResponse, ct);
+					if (href is { } calendarItem)
+						calendarId = await folders.ComposeServerIdAsync(calendarFolder, calendarItem.Value, ct);
 				}
 
 				// Send the iTIP reply to the organizer. This is the point of no return: the REPLY
@@ -219,7 +215,7 @@ public sealed class MeetingResponseHandler(
 				try
 				{
 					if (store.EasClass == EasClass.Email)
-						await store.DeleteItemAsync(folder.BackendKey, itemKey, permanent: false, ct);
+						await store.DeleteItemAsync(folder.BackendKey, itemKey, false, ct);
 				}
 				catch (Exception ex)
 				{

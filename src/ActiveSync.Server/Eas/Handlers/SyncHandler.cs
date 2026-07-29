@@ -1,10 +1,10 @@
 using System.Text.Json;
 using System.Xml.Linq;
-using ActiveSync.Contracts;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Server.Eas.Content;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Server.Eas.Handlers;
@@ -210,8 +210,8 @@ public sealed partial class SyncHandler(
 	}
 }
 
-/// <summary>A collection awaiting the long-poll wait: its request element, folder and store.</summary>
-internal readonly record struct WaitableCollection(XElement Element, UserFolder Folder, IContentStore Store);
+/// <summary>A collection awaiting the long-poll wait: its request element, folder and store adapter.</summary>
+internal readonly record struct WaitableCollection(XElement Element, UserFolder Folder, ContentAdapter Store);
 
 /// <summary>
 ///   The outcome of processing one &lt;Collection&gt;: the response element to emit (null when the

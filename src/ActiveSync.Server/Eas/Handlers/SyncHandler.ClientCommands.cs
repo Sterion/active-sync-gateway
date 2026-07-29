@@ -1,17 +1,21 @@
 using System.Xml.Linq;
+using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Server.Eas.Content;
 
 namespace ActiveSync.Server.Eas.Handlers;
 
 // Client → server command application (Add/Change/Delete/Fetch), including the read-only
-// silent-revert path, the 16.x draft-submit shortcut, and the replay ledger reuse.
+// silent-revert path, the 16.x draft-submit shortcut, and the replay ledger reuse. The EAS
+// ApplicationData → payload conversion (and the ghosting merge) happens in ContentAdapter —
+// stores only ever see complete typed payloads.
 public sealed partial class SyncHandler
 {
 	/// <summary>Log-friendly noun for the collection's content class.</summary>
-	private static string NounFor(IContentStore store)
+	private static string NounFor(ContentAdapter store)
 	{
 		return store.EasClass switch
 		{
@@ -25,7 +29,7 @@ public sealed partial class SyncHandler
 	}
 
 	/// <summary>Headline for a client Change, derived from the payload (mail flag flips mostly).</summary>
-	private static string DescribeChange(IContentStore store, XElement? appData)
+	private static string DescribeChange(ContentAdapter store, XElement? appData)
 	{
 		if (store.EasClass == EasClass.Email && appData is not null)
 		{
@@ -45,10 +49,10 @@ public sealed partial class SyncHandler
 
 	/// <summary>Applies one client command; returns a Responses child (null when success is implicit).</summary>
 	internal async Task<XElement?> ApplyClientCommandAsync(
-		EasContext context, UserFolder folder, IContentStore store, XElement command,
+		EasContext context, UserFolder folder, ContentAdapter store, XElement command,
 		Dictionary<string, SnapshotEntry> snapshot, BodyPreference bodyPreference, bool deletesAsMoves,
 		ClientCommandLedger ledger, int syncKeyForClaim, CancellationToken ct,
-		IReadOnlyDictionary<string, string>? conflictRevisions = null, bool serverWinsOnConflict = true)
+		IReadOnlyDictionary<ItemKey, ItemRevision>? conflictRevisions = null, bool serverWinsOnConflict = true)
 	{
 		// Global ReadOnly mode and per-folder read-only shared-calendar grants share the
 		// same enforcement: reject Adds, silently revert Changes/Deletes.
@@ -79,7 +83,7 @@ public sealed partial class SyncHandler
 							new XElement(AS + "ClientId", clientId),
 							new XElement(AS + "Status", "1"));
 					snapshot[replayed.ItemKey] = new SnapshotEntry(replayed.Revision ?? "");
-					string replayedServerId = await folders.ComposeServerIdAsync(folder, store, replayed.ItemKey, ct);
+					string replayedServerId = await folders.ComposeServerIdAsync(folder, replayed.ItemKey, ct);
 					return new XElement(AS + "Add",
 						new XElement(AS + "ClientId", clientId),
 						new XElement(AS + "ServerId", replayedServerId),
@@ -137,8 +141,8 @@ public sealed partial class SyncHandler
 				if (clientId.Length > 0)
 					ledger.RecordAdd(clientId, new AppliedClientAdd(itemKey, revision));
 				if (IsCalendarClass(store))
-					await invitations.AfterCreateAsync(context, store, folder.BackendKey, itemKey, ct);
-				string serverId = await folders.ComposeServerIdAsync(folder, store, itemKey, ct);
+					await invitations.AfterCreateAsync(context, store.Store, folder.BackendKey, itemKey, ct);
+				string serverId = await folders.ComposeServerIdAsync(folder, itemKey, ct);
 				return new XElement(AS + "Add",
 					new XElement(AS + "ClientId", clientId),
 					new XElement(AS + "ServerId", serverId),
@@ -166,7 +170,7 @@ public sealed partial class SyncHandler
 					return null; // implicit success, as the lost response reported
 				}
 
-				string itemKey = await folders.ResolveItemKeyAsync(folder, store, serverId, ct)
+				string itemKey = await folders.ResolveItemKeyAsync(folder, serverId, ct)
 				                 ?? throw new BackendItemNotFoundException(serverId);
 				if (appData is null)
 					return ClientCommandStatus(command, "6");
@@ -193,8 +197,8 @@ public sealed partial class SyncHandler
 				if (conflictRevisions is not null && serverWinsOnConflict &&
 				    snapshot.TryGetValue(itemKey, out SnapshotEntry acked) &&
 				    !acked.PendingReadOnlyRevert &&
-				    conflictRevisions.TryGetValue(itemKey, out string? backendNow) &&
-				    !string.Equals(acked.Revision.Value, backendNow, StringComparison.Ordinal))
+				    conflictRevisions.TryGetValue(new ItemKey(itemKey), out ItemRevision backendNow) &&
+				    acked.Revision != backendNow)
 				{
 					logger.LogInformation(
 						"Conflict on {Noun} {ServerId} in \"{Folder}\" for {User}: backend moved on since " +
@@ -251,20 +255,45 @@ public sealed partial class SyncHandler
 				// Meetings: the pre-change ICS feeds the invitation diff (what changed, who
 				// was removed) — captured only for the calendar class.
 				string? previousIcs = IsCalendarClass(store)
-					? await MeetingInvitationService.CaptureIcsAsync(store, folder.BackendKey, itemKey, logger, ct)
+					? await MeetingInvitationService.CaptureIcsAsync(store.Store, folder.BackendKey, itemKey, logger, ct)
 					: null;
-				string revision = await store.UpdateItemAsync(folder.BackendKey, itemKey, appData, ct);
+				// The revision the client last acknowledged keys the payload-cache merge basis and
+				// the store's optional precondition. An entry owing a revert carries a value the
+				// backend never issued for the current state — pass nothing rather than a stale pin.
+				string? ackedRevision =
+					snapshot.TryGetValue(itemKey, out SnapshotEntry known) && !known.PendingReadOnlyRevert
+						? known.Revision.Value
+						: null;
+				string revision;
+				try
+				{
+					revision = await store.UpdateItemAsync(
+						folder.BackendKey, itemKey, appData, ackedRevision,
+						folder.Type == EasFolderType.Drafts, ct);
+				}
+				catch (BackendPreconditionFailedException)
+				{
+					// The adapter already spent its bounded re-merge; a store still reporting a
+					// precondition failure means the item keeps moving underneath the client —
+					// answer it as the ordinary conflict (server wins, revert owed).
+					logger.LogInformation(
+						"Precondition failed twice on {Noun} {ServerId} in \"{Folder}\" for {User} — server wins (Status 7)",
+						NounFor(store), serverId, folder.DisplayName, context.UserName);
+					CollectionSnapshot.MarkPendingRevert(snapshot, itemKey);
+					return ClientCommandStatus(command, "7");
+				}
+
 				snapshot[itemKey] = new SnapshotEntry(revision);
 				ledger.RecordChange(serverId, new AppliedClientChange(itemKey, revision));
 				if (IsCalendarClass(store))
 					await invitations.AfterChangeAsync(
-						context, store, folder.BackendKey, itemKey, previousIcs, ct);
+						context, store.Store, folder.BackendKey, itemKey, previousIcs, ct);
 				return null; // implicit success
 			}
 			case "Delete":
 			{
 				string serverId = command.Element(AS + "ServerId")?.Value ?? "";
-				string? itemKey = await folders.ResolveItemKeyAsync(folder, store, serverId, ct);
+				string? itemKey = await folders.ResolveItemKeyAsync(folder, serverId, ct);
 
 				// 16.x occurrence delete: an InstanceId turns "delete the event" into
 				// "cancel this one occurrence". Synthesized as a deleted exception so it
@@ -309,10 +338,14 @@ public sealed partial class SyncHandler
 								new XElement(Cal + "Deleted", "1"),
 								new XElement(Cal + "ExceptionStartTime",
 									EasDateTime.ToCompact(occurrence)))));
-					string occurrenceRevision =
-						await store.UpdateItemAsync(folder.BackendKey, itemKey, occurrenceDelete, ct);
+					string? occurrenceAcked =
+						snapshot.TryGetValue(itemKey, out SnapshotEntry ackedEntry) && !ackedEntry.PendingReadOnlyRevert
+							? ackedEntry.Revision.Value
+							: null;
+					string occurrenceRevision = await store.UpdateItemAsync(
+						folder.BackendKey, itemKey, occurrenceDelete, occurrenceAcked, false, ct);
 					await invitations.AfterOccurrenceCancelAsync(
-						context, store, folder.BackendKey, itemKey, occurrence, ct);
+						context, store.Store, folder.BackendKey, itemKey, occurrence, ct);
 					// Mark completion only once BOTH the backend write and the iTIP mail have
 					// succeeded — see the Add path above for why this narrow residual window (a
 					// single DB write between the mail landing and this call) is acceptable.
@@ -336,12 +369,12 @@ public sealed partial class SyncHandler
 
 					// Meetings: the ICS must be read BEFORE the delete for the CANCEL mail.
 					string? deletedIcs = IsCalendarClass(store)
-						? await MeetingInvitationService.CaptureIcsAsync(store, folder.BackendKey, itemKey, logger, ct)
+						? await MeetingInvitationService.CaptureIcsAsync(store.Store, folder.BackendKey, itemKey, logger, ct)
 						: null;
 					await store.DeleteItemAsync(folder.BackendKey, itemKey, !deletesAsMoves, ct);
 					snapshot.Remove(itemKey);
 					if (deletedIcs is not null)
-						await invitations.AfterDeleteAsync(context, store, deletedIcs, ct);
+						await invitations.AfterDeleteAsync(context, store.Store, deletedIcs, ct);
 				}
 
 				return null; // deletes are only reported on failure
@@ -349,22 +382,24 @@ public sealed partial class SyncHandler
 			case "Fetch":
 			{
 				string serverId = command.Element(AS + "ServerId")?.Value ?? "";
-				string itemKey = await folders.ResolveItemKeyAsync(folder, store, serverId, ct)
+				string itemKey = await folders.ResolveItemKeyAsync(folder, serverId, ct)
 				                 ?? throw new BackendItemNotFoundException(serverId);
 				BodyPreference full = bodyPreference with { TruncationSize = null, AllOrNone = false };
-				BackendItem item = await store.GetItemAsync(folder.BackendKey, itemKey, full, ct)
-				                   ?? throw new BackendItemNotFoundException(serverId);
+				object item = await store.GetItemAsync(folder.BackendKey, itemKey, ct)
+				              ?? throw new BackendItemNotFoundException(serverId);
+				List<XElement> rendered = store.Render(item, full, folder.BackendKey, itemKey)
+				                          ?? throw new BackendException($"Item {serverId} could not be converted.");
 				return new XElement(AS + "Fetch",
 					new XElement(AS + "ServerId", serverId),
 					new XElement(AS + "Status", "1"),
-					new XElement(AS + "ApplicationData", item.ApplicationData));
+					new XElement(AS + "ApplicationData", rendered));
 			}
 			default:
 				return ClientCommandStatus(command, "4");
 		}
 	}
 
-	private static bool IsCalendarClass(IContentStore store)
+	private static bool IsCalendarClass(ContentAdapter store)
 	{
 		return store.EasClass.Equals(EasClass.Calendar, StringComparison.OrdinalIgnoreCase);
 	}
@@ -383,16 +418,16 @@ public sealed partial class SyncHandler
 		MimeKit.MimeMessage? original = null;
 		if (folderBackendKey is not null && itemKey is not null)
 		{
-			byte[]? raw = await context.Session.MailStore.GetRawMessageAsync(folderBackendKey, itemKey, ct);
-			if (raw is not null)
+			ReadOnlyMemory<byte>? raw = await context.Session.Mailbox.GetRawMessageAsync(
+				new FolderKey(folderBackendKey), new ItemKey(itemKey), ct);
+			if (raw is { } rawBytes)
 			{
-				using MemoryStream rawStream = new(raw);
+				using MemoryStream rawStream = new(rawBytes.ToArray());
 				original = await MimeKit.MimeMessage.LoadAsync(rawStream, ct);
 			}
 		}
 
-		MimeKit.MimeMessage message =
-			ActiveSync.Backends.Common.Converters.DraftMessageBuilder.Build(appData, original, context.Session.MailAddress);
+		MimeKit.MimeMessage message = DraftMessageBuilder.Build(appData, original, context.Session.MailAddress);
 		using MemoryStream buffer = new();
 		await message.WriteToAsync(buffer, ct);
 		byte[] mime = buffer.ToArray();
@@ -405,7 +440,7 @@ public sealed partial class SyncHandler
 		Core.Observability.GatewayMetrics.RecordMailSent(context.UserName, "draft_submit");
 		try
 		{
-			await context.Session.MailStore.SaveToSentAsync(mime, ct);
+			await context.Session.Mailbox.SaveToSentAsync(mime, ct);
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{

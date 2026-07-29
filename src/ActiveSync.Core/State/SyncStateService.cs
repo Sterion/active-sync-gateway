@@ -117,7 +117,7 @@ public sealed class SyncStateService(
 	// ---------- Folder registry & hierarchy sync ----------
 
 	public Task<List<UserFolder>> RefreshFolderRegistryAsync(
-		int userId, IReadOnlyList<BackendFolder> backendFolders, CancellationToken ct)
+		int userId, IReadOnlyList<RegistryFolder> backendFolders, CancellationToken ct)
 		=> _folders.RefreshFolderRegistryAsync(userId, backendFolders, ct);
 
 	public Task<UserFolder?> GetFolderByServerIdAsync(int userId, string serverId, CancellationToken ct)

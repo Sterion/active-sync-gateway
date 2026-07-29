@@ -1,9 +1,11 @@
 using System.Xml.Linq;
+using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Sync;
+using ActiveSync.Server.Eas.Content;
 
 namespace ActiveSync.Server.Eas.Handlers;
 
@@ -17,7 +19,7 @@ public sealed partial class SyncHandler
 	///   CollectionId alone identifies the collection — so it is emitted only for &lt;= 12.1 to keep
 	///   the 14.1 wire form byte-identical.
 	/// </summary>
-	private static void EchoClassIfLegacy(XElement collection, EasContext context, IContentStore store)
+	private static void EchoClassIfLegacy(XElement collection, EasContext context, ContentAdapter store)
 	{
 		if (context.Version <= EasVersion.V121)
 			collection.AddFirst(new XElement(AS + "Class", store.EasClass));
@@ -41,12 +43,12 @@ public sealed partial class SyncHandler
 				new XElement(AS + "Status", status));
 		}
 
-		(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
+		(UserFolder Folder, ContentAdapter Store)? resolved = await folders.ResolveCollectionAsync(
 			context.Session, context.UserId, collectionId, ct);
 		if (resolved is null)
 			return new CollectionResult(Error("12"), true, null); // folder hierarchy out of date
 
-		(UserFolder folder, IContentStore store) = resolved.Value;
+		(UserFolder folder, ContentAdapter store) = resolved.Value;
 		(SyncKeyValidation validation, CollectionState? state) = await context.State.ValidateSyncKeyAsync(
 			context.Device, collectionId, clientSyncKey, ct);
 		if (validation == SyncKeyValidation.Invalid || state is null)
@@ -122,12 +124,13 @@ public sealed partial class SyncHandler
 		// only when the client actually sent Change commands, and only for conflict comparison —
 		// NOT for the diff, which must fetch AFTER the client commands land so echo suppression
 		// works. A fetch failure degrades to "no conflict detection" (the historical overwrite).
-		IReadOnlyDictionary<string, string>? conflictRevisions = null;
+		IReadOnlyDictionary<ItemKey, ItemRevision>? conflictRevisions = null;
 		bool hasChangeCommands = commands?.Elements(AS + "Change").Any() == true;
 		if (hasChangeCommands && collectionOptions.ServerWinsOnConflict)
 			try
 			{
-				conflictRevisions = await store.GetItemRevisionsAsync(folder.BackendKey, filter, ct);
+				conflictRevisions = await store.Store.GetItemRevisionsAsync(
+					new FolderKey(folder.BackendKey), filter, ct);
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException)
 			{
@@ -182,10 +185,10 @@ public sealed partial class SyncHandler
 
 		if (getChanges)
 		{
-			IReadOnlyDictionary<string, string> current;
+			IReadOnlyDictionary<ItemKey, ItemRevision> current;
 			try
 			{
-				current = await store.GetItemRevisionsAsync(folder.BackendKey, filter, ct);
+				current = await store.Store.GetItemRevisionsAsync(new FolderKey(folder.BackendKey), filter, ct);
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException)
 			{
@@ -210,10 +213,11 @@ public sealed partial class SyncHandler
 			if (diff.Deletes.Count > 0 && filter.Since is not null)
 				try
 				{
-					IReadOnlyDictionary<string, string> unfiltered =
-						await store.GetItemRevisionsAsync(folder.BackendKey, ContentFilter.All, ct);
+					IReadOnlyDictionary<ItemKey, ItemRevision> unfiltered =
+						await store.Store.GetItemRevisionsAsync(
+							new FolderKey(folder.BackendKey), ContentFilter.All, ct);
 					foreach (string deletedKey in diff.Deletes)
-						if (unfiltered.ContainsKey(deletedKey))
+						if (unfiltered.ContainsKey(new ItemKey(deletedKey)))
 							agedOut.Add(deletedKey);
 				}
 				catch (Exception ex) when (ex is not OperationCanceledException)
@@ -232,21 +236,21 @@ public sealed partial class SyncHandler
 			windowKeys.AddRange(diff.Changes.Select(c => c.ServerId));
 			windowKeys.AddRange(diff.Deletes);
 			IReadOnlyDictionary<string, string>? davIds =
-				await folders.PreResolveDavItemIdsAsync(folder, store, windowKeys, ct);
+				await folders.PreResolveDavItemIdsAsync(folder, windowKeys, ct);
 
-			// Fetch every Add/Change item's body in ONE batched round instead of one backend
+			// Fetch every Add/Change item's payload in ONE batched round instead of one backend
 			// round trip (and, for IMAP, one per-user gate acquisition) per item. The default
 			// GetItemsAsync loops GetItemAsync so behaviour is unchanged; a store override batches
 			// at the protocol level. A batch-level failure degrades to per-item fetch inside
 			// BuildItemElementAsync (empty prefetch map), preserving the old resilience.
-			IReadOnlyDictionary<string, BackendItem?>? prefetched = null;
+			IReadOnlyDictionary<string, object?>? prefetched = null;
 			List<string> fetchKeys = new(diff.Adds.Count + diff.Changes.Count);
 			fetchKeys.AddRange(diff.Adds.Select(a => a.ServerId));
 			fetchKeys.AddRange(diff.Changes.Select(c => c.ServerId));
 			if (fetchKeys.Count > 0)
 				try
 				{
-					prefetched = await store.GetItemsAsync(folder.BackendKey, fetchKeys, bodyPreference, ct);
+					prefetched = await store.GetItemsAsync(folder.BackendKey, fetchKeys, ct);
 				}
 				catch (Exception ex) when (ex is not OperationCanceledException)
 				{
@@ -257,7 +261,8 @@ public sealed partial class SyncHandler
 			foreach (ItemChange add in diff.Adds)
 			{
 				XElement? element = await BuildItemElementAsync(
-					AS + "Add", context, folder, store, add.ServerId, bodyPreference, ct, davIds, prefetched);
+					AS + "Add", context, folder, store, add.ServerId, bodyPreference, ct, davIds, prefetched,
+					add.Revision);
 				if (element is not null)
 					serverCommands.Add(element);
 				else
@@ -270,7 +275,8 @@ public sealed partial class SyncHandler
 			foreach (ItemChange change in diff.Changes)
 			{
 				XElement? element = await BuildItemElementAsync(
-					AS + "Change", context, folder, store, change.ServerId, bodyPreference, ct, davIds, prefetched);
+					AS + "Change", context, folder, store, change.ServerId, bodyPreference, ct, davIds, prefetched,
+					change.Revision);
 				if (element is not null)
 					serverCommands.Add(element);
 				else
@@ -291,7 +297,7 @@ public sealed partial class SyncHandler
 
 			foreach (string deletedKey in diff.Deletes)
 			{
-				string serverId = await folders.ComposeServerIdAsync(folder, store, deletedKey, ct, davIds);
+				string serverId = await folders.ComposeServerIdAsync(folder, deletedKey, ct, davIds);
 				serverCommands.Add(new XElement(AS + (agedOut.Contains(deletedKey) ? "SoftDelete" : "Delete"),
 					new XElement(AS + "ServerId", serverId)));
 			}

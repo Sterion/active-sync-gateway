@@ -401,32 +401,34 @@ public static class ContactConverter
 		return dot >= 0 ? name[(dot + 1)..] : name;
 	}
 
-	/// <summary>Matches a vCard against a GAL query; returns Gal-namespace properties if it matches.</summary>
-	public static List<XElement>? ToGalEntry(string vcf, string query)
-	{
-		return Vcf.Parse(vcf).FirstOrDefault() is { } vcard ? ToGalEntry(vcard, query) : null;
-	}
-
 	/// <summary>
-	///   Parses the vCard ONCE and produces the GAL entry plus (optionally) its photo, so a
-	///   matching contact is not parsed three times (ToGalEntry + AppendGalPicture each used to
-	///   re-parse). Returns null when the card is unparsable or does not match the query.
+	///   Parses the vCard ONCE and produces the typed GAL entry plus (optionally) its photo
+	///   outcome. Returns null when the card is unparsable or does not match the query. The store
+	///   enforces the photo limits here (it holds the request and counts grants across the whole
+	///   result set); the HOST maps <see cref="GalPictureStatus" /> to the MS-ASCMD wire statuses.
+	///   Returns the entry with <see cref="GalEntry.Picture" /> null when
+	///   <paramref name="wantPhoto" /> is false (the client did not request pictures at all).
 	/// </summary>
-	public static List<XElement>? BuildGalEntry(
+	public static GalEntry? BuildGalEntry(
 		string vcf, string query, bool wantPhoto, int? maxPhotoBytes, bool photoLimitReached, out bool photoGranted)
 	{
 		photoGranted = false;
 		if (Vcf.Parse(vcf).FirstOrDefault() is not { } vcard)
 			return null;
-		List<XElement>? entry = ToGalEntry(vcard, query);
+		GalEntry? entry = ToGalEntry(vcard, query);
 		if (entry is null)
 			return null;
 		if (wantPhoto)
-			photoGranted = AppendGalPicture(entry, vcard, maxPhotoBytes, photoLimitReached);
+		{
+			GalPictureResult picture = BuildGalPicture(vcard, maxPhotoBytes, photoLimitReached);
+			photoGranted = picture.Status == GalPictureStatus.Available;
+			entry = entry with { Picture = picture };
+		}
+
 		return entry;
 	}
 
-	private static List<XElement>? ToGalEntry(VCard vcard, string query)
+	private static GalEntry? ToGalEntry(VCard vcard, string query)
 	{
 		string display = vcard.DisplayNames?.FirstOrDefault(d => d is not null)?.Value ?? "";
 		string email = vcard.EMails.OrderByPref().FirstOrDefault(e => e?.Value is not null)?.Value ?? "";
@@ -439,58 +441,53 @@ public static class ContactConverter
 		if (!matches)
 			return null;
 
-		List<XElement> entry = new() { new XElement(Gal + "DisplayName", display) };
-		if (!string.IsNullOrEmpty(email))
-			entry.Add(new XElement(Gal + "EmailAddress", email));
-		if (!string.IsNullOrEmpty(first))
-			entry.Add(new XElement(Gal + "FirstName", first));
-		if (!string.IsNullOrEmpty(last))
-			entry.Add(new XElement(Gal + "LastName", last));
 		string? phone = vcard.Phones.OrderByPref().FirstOrDefault(p => p?.Value is not null)?.Value;
-		if (phone is not null)
-			entry.Add(new XElement(Gal + "Phone", phone));
 		string? company = vcard.Organizations?.FirstOrDefault(o => o is not null)?.Value?.Name;
-		if (company is not null)
-			entry.Add(new XElement(Gal + "Company", company));
-		return entry;
+		return new GalEntry
+		{
+			DisplayName = display,
+			EmailAddress = string.IsNullOrEmpty(email) ? null : email,
+			FirstName = string.IsNullOrEmpty(first) ? null : first,
+			LastName = string.IsNullOrEmpty(last) ? null : last,
+			Phone = phone,
+			Company = company
+		};
 	}
 
 	/// <summary>
-	///   Appends the gal:Picture element per the MS-ASCMD photo rules (status 1 + data,
-	///   173 no photo, 174 over MaxSize, 175 count limit reached across the result set).
-	///   Returns true when actual photo data was included, so the caller can count toward
-	///   MaxPictures.
+	///   The photo outcome per the MS-ASCMD photo rules, typed: the count limit outranks
+	///   everything (the request's budget is spent), then "no photo", then the size limit —
+	///   data is carried exactly when the status says so.
 	/// </summary>
-	public static bool AppendGalPicture(List<XElement> entry, string vcf, int? maxSizeBytes, bool limitReached)
-	{
-		return AppendGalPicture(entry, Vcf.Parse(vcf).FirstOrDefault(), maxSizeBytes, limitReached);
-	}
-
-	private static bool AppendGalPicture(List<XElement> entry, VCard? vcard, int? maxSizeBytes, bool limitReached)
+	private static GalPictureResult BuildGalPicture(VCard? vcard, int? maxSizeBytes, bool limitReached)
 	{
 		if (limitReached)
-		{
-			entry.Add(new XElement(Gal + "Picture", new XElement(Gal + "Status", "175")));
-			return false;
-		}
+			return new GalPictureResult { Status = GalPictureStatus.OverCountLimit };
 
 		byte[]? photo = vcard?.Photos?.FirstOrDefault(p => p is not null)?.Value?.Bytes;
 		if (photo is not { Length: > 0 })
-		{
-			entry.Add(new XElement(Gal + "Picture", new XElement(Gal + "Status", "173")));
-			return false;
-		}
+			return new GalPictureResult { Status = GalPictureStatus.None };
 
 		if (maxSizeBytes is { } maxSize && photo.Length > maxSize)
-		{
-			entry.Add(new XElement(Gal + "Picture", new XElement(Gal + "Status", "174")));
-			return false;
-		}
+			return new GalPictureResult { Status = GalPictureStatus.OverSizeLimit };
 
-		entry.Add(new XElement(Gal + "Picture",
-			new XElement(Gal + "Status", "1"),
-			new XElement(Gal + "Data", Convert.ToBase64String(photo))));
-		return true;
+		return new GalPictureResult
+		{
+			Status = GalPictureStatus.Available,
+			Picture = new GalPicture { Data = photo, ContentType = SniffImageContentType(photo) }
+		};
+	}
+
+	/// <summary>Cheap magic-byte sniff for the photo's MIME type (vCard PHOTO carries no reliable one).</summary>
+	private static string SniffImageContentType(ReadOnlySpan<byte> bytes)
+	{
+		return bytes switch
+		{
+			[0xFF, 0xD8, ..] => "image/jpeg",
+			[0x89, 0x50, 0x4E, 0x47, ..] => "image/png",
+			[0x47, 0x49, 0x46, ..] => "image/gif",
+			_ => "application/octet-stream"
+		};
 	}
 
 	private static string? StripEmailDisplay(string? value)

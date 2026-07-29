@@ -94,11 +94,12 @@ public sealed class PingHandler(
 			return;
 		}
 
-		// Resolve folders to stores.
+		// Resolve folders to stores (the raw contract stores — grouping and waiting dispatch on
+		// store identity, and the wait API is the store's own).
 		Dictionary<IContentStore, List<(string CollectionId, UserFolder Folder)>> byStore = new();
 		foreach (string collectionId in parameters.FolderIds)
 		{
-			(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
+			(UserFolder Folder, Content.ContentAdapter Store)? resolved = await folders.ResolveCollectionAsync(
 				context.Session, context.UserId, collectionId, ct);
 			if (resolved is null)
 			{
@@ -107,11 +108,11 @@ public sealed class PingHandler(
 			}
 
 			List<(string CollectionId, UserFolder Folder)> list =
-				byStore.TryGetValue(resolved.Value.Store, out List<(string CollectionId, UserFolder Folder)>? existing)
+				byStore.TryGetValue(resolved.Value.Store.Store, out List<(string CollectionId, UserFolder Folder)>? existing)
 					? existing
 					: [];
 			list.Add((collectionId, resolved.Value.Folder));
-			byStore[resolved.Value.Store] = list;
+			byStore[resolved.Value.Store.Store] = list;
 		}
 
 		logger.LogDebug("Ping: watching {Count} folders for {User} (heartbeat {Heartbeat}s)",
@@ -171,13 +172,13 @@ public sealed class PingHandler(
 		List<Task<List<string>>> watchers = byStore
 			.Select(async kv =>
 			{
-				IReadOnlyList<string> changedKeys = await kv.Key.WaitForChangesAsync(
-					kv.Value.Select(v => v.Folder.BackendKey).Distinct().ToList(), timeout, cts.Token);
+				IReadOnlyList<FolderKey> changedKeys = await kv.Key.WaitForChangesAsync(
+					kv.Value.Select(v => new FolderKey(v.Folder.BackendKey)).Distinct().ToList(), timeout, cts.Token);
 				if (changedKeys.Count == 0)
 					return new List<string>();
 
 				List<string> mapped = changedKeys
-					.SelectMany(key => kv.Value.Where(v => v.Folder.BackendKey == key))
+					.SelectMany(key => kv.Value.Where(v => v.Folder.BackendKey == key.Value))
 					.Select(v => v.CollectionId)
 					.Distinct()
 					.ToList();

@@ -1,9 +1,10 @@
 using System.Xml.Linq;
+using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Server.Eas.Content;
 
 namespace ActiveSync.Server.Eas.Handlers;
 
@@ -59,67 +60,72 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 							: null
 					};
 
-				IContactOperations? contacts = context.Session.Contacts;
-				IReadOnlyList<IReadOnlyList<XElement>> hits = contacts is null
+				IDirectoryOperations? contacts = context.Session.Contacts;
+				IReadOnlyList<GalEntry> hits = contacts is null
 					? []
 					: await contacts.SearchGalAsync(freeText, fetch, photos, ct);
+				// The store hands over typed entries (it enforced the photo limits); the host owns
+				// the gal:-namespace wire shape, statuses included.
 				List<XElement> results = hits.Skip(start).Take(pageSize)
-					.Select(properties => new XElement(S + "Result",
-						new XElement(S + "Properties", properties))).ToList();
+					.Select(entry => new XElement(S + "Result",
+						new XElement(S + "Properties", GalXml.ToGalProperties(entry)))).ToList();
 				await WriteAsync(context, "1", results, start, hits.Count);
 			}
 			else // Mailbox
 			{
-				string? folderBackendKey = null;
+				FolderKey? folderBackendKey = null;
 				string? collectionId = query?.Descendants(AS + "CollectionId").FirstOrDefault()?.Value;
 				UserFolder? searchFolder = null;
-				IContentStore? mailStore = context.Session.GetStoreForClass(EasClass.Email);
+				IContentStore mailStore = context.Session.Mail;
+				ContentAdapter adapter = ContentAdapter.For(context.Session, mailStore);
 				if (collectionId is not null)
 				{
-					(UserFolder Folder, IContentStore Store)? resolved = await folders.ResolveCollectionAsync(
+					(UserFolder Folder, ContentAdapter Store)? resolved = await folders.ResolveCollectionAsync(
 						context.Session, context.UserId, collectionId, ct);
 					if (resolved is not null)
 					{
 						searchFolder = resolved.Value.Folder;
-						folderBackendKey = resolved.Value.Folder.BackendKey;
+						folderBackendKey = new FolderKey(resolved.Value.Folder.BackendKey);
 					}
 				}
 
-				IReadOnlyList<(string FolderBackendKey, string ItemKey)> hits =
-					await context.Session.MailStore.SearchAsync(folderBackendKey, freeText, null, fetch, ct);
+				IReadOnlyList<SearchHit> hits =
+					await context.Session.Mailbox.SearchAsync(folderBackendKey, freeText, null, fetch, ct);
 				// Skip the requested offset, then fetch the page's bodies in ONE batched call per
 				// folder instead of a sequential GetItemAsync per hit.
-				List<(string FolderKey, string ItemKey)> page =
-					hits.Skip(start).Take(pageSize).ToList();
-				Dictionary<(string, string), BackendItem?> fetched = new();
-				foreach (IGrouping<string, (string FolderKey, string ItemKey)> group in page.GroupBy(h => h.FolderKey))
+				List<SearchHit> page = hits.Skip(start).Take(pageSize).ToList();
+				// eas16 must ride the same way it does through Sync/ItemOperations — a
+				// hard-coded false silently drops 16.x-only shapes from Search results too.
+				BodyPreference preview = new()
 				{
-					IReadOnlyList<string> keys = group.Select(h => h.ItemKey).ToList();
-					// eas16 must ride the same way it does through Sync/ItemOperations — a
-					// hard-coded false silently drops 16.x-only shapes from Search results too.
-					IReadOnlyDictionary<string, BackendItem?> items = await mailStore!.GetItemsAsync(
-						group.Key, keys,
-						new BodyPreference
-						{
-							Type = BodyType.PlainText,
-							TruncationSize = 1024,
-							Eas16 = context.Version >= EasVersion.V160
-						}, ct);
-					foreach ((string folderKey, string itemKey) in group)
-						fetched[(folderKey, itemKey)] = items.GetValueOrDefault(itemKey);
+					Type = BodyType.PlainText,
+					TruncationSize = 1024,
+					Eas16 = context.Version >= EasVersion.V160
+				};
+				Dictionary<(string, string), object?> fetched = new();
+				foreach (IGrouping<FolderKey, SearchHit> group in page.GroupBy(h => h.Folder))
+				{
+					IReadOnlyList<string> keys = group.Select(h => h.Item.Value).ToList();
+					IReadOnlyDictionary<string, object?> items =
+						await adapter.GetItemsAsync(group.Key.Value, keys, ct);
+					foreach (SearchHit hit in group)
+						fetched[(hit.Folder.Value, hit.Item.Value)] = items.GetValueOrDefault(hit.Item.Value);
 				}
 
 				List<XElement> results = new();
-				foreach ((string hitFolderKey, string itemKey) in page)
+				foreach (SearchHit hit in page)
 				{
-					BackendItem? item = fetched.GetValueOrDefault((hitFolderKey, itemKey));
-					if (item is null)
+					object? item = fetched.GetValueOrDefault((hit.Folder.Value, hit.Item.Value));
+					List<XElement>? rendered = item is null
+						? null
+						: adapter.Render(item, preview, hit.Folder.Value, hit.Item.Value);
+					if (rendered is null)
 						continue;
-					string longId = DelimitedKey.Encode(hitFolderKey, itemKey);
+					string longId = DelimitedKey.Encode(hit.Folder.Value, hit.Item.Value);
 					XElement result = new(S + "Result",
 						new XElement(AS + "Class", EasClass.Email),
 						new XElement(S + "LongId", longId),
-						new XElement(S + "Properties", item.ApplicationData));
+						new XElement(S + "Properties", rendered));
 					if (searchFolder is not null)
 						result.Add(new XElement(AS + "CollectionId", searchFolder.ServerId));
 					results.Add(result);

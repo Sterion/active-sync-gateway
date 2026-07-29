@@ -108,7 +108,7 @@ public sealed class ImapBackendProvider : IBackendProvider, ICredentialVerifier,
 			return GetOrCreatePoller(gatewayLogin, options, role.Credentials);
 		}
 
-		ImapMailBackend backend = new(session, context.MailAddress, WatcherProvider, _logger, PollerProvider);
+		ImapMailBackend backend = new(session, WatcherProvider, _logger, PollerProvider);
 		return Task.FromResult<IBackendConnection>(new BackendConnection([backend], ownedResources: [OwnedResource.OfAsync(session)]));
 	}
 

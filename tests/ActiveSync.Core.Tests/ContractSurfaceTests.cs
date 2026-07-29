@@ -42,12 +42,14 @@ public sealed class ContractSurfaceTests
 	[Fact]
 	public void ContractVersion_IsTheExpectedSurfaceVersion()
 	{
-		// The typed-contract redesign's second step (structural cleanups): the FolderKey /
-		// ItemKey / ItemRevision newtypes arrive, BackendConnection's disposal list is typed
-		// (OwnedResource) instead of IReadOnlyList<object>, DelimitedKey leaves for
-		// ActiveSync.Protocol, and SharedCollection sheds its "href|ro" Parse/Validate to the
-		// caldav provider that reads the setting.
-		Assert.Equal(new Version(1, 5), ContractVersion.Current);
+		// The typed-contract redesign's third step (the item currency): typed payload records
+		// (MailItem/CalendarItem/TaskItem/ContactItem/NoteItem), the store split into
+		// IContentStore<TItem> aliases plus the hand-written IMailStore (flags patch + draft
+		// paths), the § 5.8 side-operation sweep (IMailboxOperations/IMeetingOperations/
+		// IDirectoryOperations, typed keys, GalEntry, SearchHit), and
+		// BackendPreconditionFailedException. BodyPreference/BackendItem leave the contract —
+		// EAS conversion is host-side now.
+		Assert.Equal(new Version(1, 6), ContractVersion.Current);
 	}
 
 	// BackendItemNotFoundException derived straight from Exception, so the codebase-wide

@@ -4,17 +4,20 @@ using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using ActiveSync.Protocol;
 using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Server.Eas.Content;
 
 namespace ActiveSync.Server.Eas.Handlers;
 
 /// <summary>
 ///   ResolveRecipients (MS-ASCMD 2.2.1.15): CardDAV-backed lookup with optional contact
-///   photos and free/busy (Availability → MergedFreeBusy); no certificate retrieval.
+///   photos and free/busy (Availability → MergedFreeBusy); no certificate retrieval. The
+///   directory store hands over typed <see cref="GalEntry" /> records; this handler owns the
+///   RR-namespace wire shape (the Search command's gal: shape lives in <see cref="GalXml" /> —
+///   keep the two projections in sync).
 /// </summary>
 public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> logger) : IEasCommandHandler
 {
 	private static readonly XNamespace RR = EasNamespaces.ResolveRecipients;
-	private static readonly XNamespace GAL = EasNamespaces.Gal;
 
 	public string Command => "ResolveRecipients";
 
@@ -72,7 +75,7 @@ public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> l
 		int galHits = 0;
 		if (context.Session.Contacts is not null)
 		{
-			IReadOnlyList<IReadOnlyList<XElement>> hits =
+			IReadOnlyList<GalEntry> hits =
 				await context.Session.Contacts.SearchGalAsync(to, maxAmbiguous, photos, ct);
 			galHits = hits.Count;
 
@@ -82,24 +85,25 @@ public sealed class ResolveRecipientsHandler(ILogger<ResolveRecipientsHandler> l
 			// Certificates, Picture — Picture is held aside and appended AFTER Availability below,
 			// rather than added here where it would land ahead of it (WBXML is order-sensitive).
 			List<(XElement Recipient, string Email, XElement? Picture)> built = new();
-			foreach (IReadOnlyList<XElement> hit in hits)
+			foreach (GalEntry hit in hits)
 			{
-				string display = hit.FirstOrDefault(e => e.Name == GAL + "DisplayName")?.Value ?? to;
-				string? email = hit.FirstOrDefault(e => e.Name == GAL + "EmailAddress")?.Value;
+				string display = hit.DisplayName.Length > 0 ? hit.DisplayName : to;
+				string? email = hit.EmailAddress;
 				if (email is null)
 					continue;
 				XElement recipient = new(RR + "Recipient",
 					new XElement(RR + "Type", "2"),
 					new XElement(RR + "DisplayName", display),
 					new XElement(RR + "EmailAddress", email));
-				// The GAL photo element translates into the RR-namespace shape.
+				// The typed photo outcome projects into the RR-namespace shape; the wire status
+				// mapping is shared with the Search command's gal: projection.
 				XElement? rrPicture = null;
-				if (hit.FirstOrDefault(e => e.Name == GAL + "Picture") is XElement galPicture)
+				if (hit.Picture is { } picture)
 				{
 					rrPicture = new XElement(RR + "Picture",
-						new XElement(RR + "Status", galPicture.Element(GAL + "Status")?.Value ?? "173"));
-					if (galPicture.Element(GAL + "Data") is XElement data)
-						rrPicture.Add(new XElement(RR + "Data", data.Value));
+						new XElement(RR + "Status", GalXml.WireStatus(picture.Status)));
+					if (picture is { Status: GalPictureStatus.Available, Picture: { } photo })
+						rrPicture.Add(new XElement(RR + "Data", Convert.ToBase64String(photo.Data.Span)));
 				}
 
 				built.Add((recipient, email, rrPicture));

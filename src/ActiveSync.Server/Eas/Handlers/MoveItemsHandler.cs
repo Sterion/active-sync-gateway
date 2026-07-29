@@ -1,9 +1,9 @@
 using System.Xml.Linq;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
 using ActiveSync.Core.Options;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol.Wbxml;
+using ActiveSync.Server.Eas.Content;
 using Microsoft.Extensions.Options;
 
 namespace ActiveSync.Server.Eas.Handlers;
@@ -56,9 +56,9 @@ public sealed class MoveItemsHandler(
 
 			try
 			{
-				(UserFolder Folder, IContentStore Store)? source = await folders.ResolveCollectionAsync(
+				(UserFolder Folder, ContentAdapter Store)? source = await folders.ResolveCollectionAsync(
 					context.Session, context.UserId, srcFldId, ct);
-				(UserFolder Folder, IContentStore Store)? destination = await folders.ResolveCollectionAsync(
+				(UserFolder Folder, ContentAdapter Store)? destination = await folders.ResolveCollectionAsync(
 					context.Session, context.UserId, dstFldId, ct);
 				if (source is null)
 				{
@@ -66,7 +66,7 @@ public sealed class MoveItemsHandler(
 					continue;
 				}
 
-				if (destination is null || destination.Value.Store != source.Value.Store)
+				if (destination is null || destination.Value.Store.Store != source.Value.Store.Store)
 				{
 					responses.Add(Response("2"));
 					continue;
@@ -78,8 +78,7 @@ public sealed class MoveItemsHandler(
 					continue;
 				}
 
-				string? itemKey = await folders.ResolveItemKeyAsync(
-					source.Value.Folder, source.Value.Store, srcMsgId, ct);
+				string? itemKey = await folders.ResolveItemKeyAsync(source.Value.Folder, srcMsgId, ct);
 				if (itemKey is null)
 				{
 					responses.Add(Response("1"));
@@ -103,16 +102,17 @@ public sealed class MoveItemsHandler(
 
 				// Item move is an optional capability. A store without it (local, DAV) reports
 				// Status 5 (move failed) — the same answer its "not supported" throw used to produce.
-				if (source.Value.Store is not IItemMoveOperations mover)
+				if (source.Value.Store.Store is not IItemMoveOperations mover)
 				{
 					responses.Add(Response("5"));
 					continue;
 				}
 
-				(string newItemKey, string newRevision) = await mover.MoveItemAsync(
-					source.Value.Folder.BackendKey, itemKey, destination.Value.Folder.BackendKey, ct);
+				(ItemKey newItemKey, ItemRevision newRevision) = await mover.MoveItemAsync(
+					new FolderKey(source.Value.Folder.BackendKey), new ItemKey(itemKey),
+					new FolderKey(destination.Value.Folder.BackendKey), ct);
 				string dstMsgId = await folders.ComposeServerIdAsync(
-					destination.Value.Folder, destination.Value.Store, newItemKey, ct);
+					destination.Value.Folder, newItemKey.Value, ct);
 
 				// Patch snapshots so the move is not echoed back on the next Sync. The
 				// destination side must record the item's REAL revision — a manufactured value
@@ -120,7 +120,7 @@ public sealed class MoveItemsHandler(
 				// reports, so the destination diff would see a spurious Change for an item the
 				// client already has.
 				QueueEdit(srcFldId, itemKey, true, null);
-				QueueEdit(dstFldId, newItemKey, false, newRevision);
+				QueueEdit(dstFldId, newItemKey.Value, false, newRevision.Value);
 
 				logger.LogInformation("Moved {SrcMsgId} from \"{Source}\" to \"{Destination}\" for {User}",
 					srcMsgId, source.Value.Folder.DisplayName,

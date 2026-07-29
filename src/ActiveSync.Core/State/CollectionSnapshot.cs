@@ -68,7 +68,7 @@ public static class CollectionSnapshot
 	/// <returns>The diff, and the (mutable) snapshot to persist once the round is rendered.</returns>
 	public static (CollectionChanges Changes, Dictionary<string, SnapshotEntry> NewSnapshot) Diff(
 		IReadOnlyDictionary<string, SnapshotEntry> snapshot,
-		IReadOnlyDictionary<string, string> current,
+		IReadOnlyDictionary<ItemKey, ItemRevision> current,
 		int windowSize)
 	{
 		Dictionary<string, string> revisions = new(snapshot.Count, StringComparer.Ordinal);
@@ -80,7 +80,13 @@ public static class CollectionSnapshot
 				(pendingReverts ??= new HashSet<string>(StringComparer.Ordinal)).Add(itemKey);
 		}
 
-		CollectionChanges changes = CollectionDiff.Compute(revisions, current, windowSize, pendingReverts);
+		// The one place the contract's typed keys meet the BCL-only diff: project the store's
+		// typed map to the plain strings CollectionDiff trades in (see the type-level remarks).
+		Dictionary<string, string> currentRevisions = new(current.Count, StringComparer.Ordinal);
+		foreach ((ItemKey itemKey, ItemRevision revision) in current)
+			currentRevisions[itemKey.Value] = revision.Value;
+
+		CollectionChanges changes = CollectionDiff.Compute(revisions, currentRevisions, windowSize, pendingReverts);
 
 		HashSet<string>? sentChanges = pendingReverts is null
 			? null

@@ -27,7 +27,8 @@ public static class MailConverter
 	/// </param>
 	public static List<XElement> ToApplicationData(
 		MimeMessage message,
-		MessageFlags flags,
+		MailFlags flags,
+		IReadOnlyList<string> categories,
 		BodyPreference bodyPreference,
 		Func<int, string> fileReferenceForAttachment,
 		DateTimeOffset? receivedUtc = null)
@@ -48,7 +49,7 @@ public static class MailConverter
 				MessagePriority.NonUrgent => "0",
 				_ => "1"
 			}),
-			new XElement(Email + "Read", flags.Read ? "1" : "0")
+			new XElement(Email + "Read", flags.Seen ? "1" : "0")
 		};
 
 		if (message.Cc.Count > 0)
@@ -87,8 +88,7 @@ public static class MailConverter
 
 		data.Add(flag);
 
-		// User categories = the message's custom IMAP keywords, minus the system ones.
-		IReadOnlyList<string> categories = CategoryKeywords(flags.Keywords);
+		// User categories = the store's already-classified list (custom keywords minus system ones).
 		if (categories.Count > 0)
 			data.Add(new XElement(Email + "Categories",
 				categories.Select(c => new XElement(Email + "Category", c))));
@@ -502,7 +502,7 @@ public static class MailConverter
 			.ToList();
 	}
 
-	public sealed record MessageFlags(
-		bool Read, bool Flagged, bool Answered, bool Forwarded,
-		IReadOnlyCollection<string>? Keywords = null);
+	// The converter's own MessageFlags record is gone: the contract's typed MailFlags (plus the
+	// store-classified category list) is what crosses the boundary now, and this converter reads
+	// it directly.
 }

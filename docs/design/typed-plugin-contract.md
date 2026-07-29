@@ -10,11 +10,16 @@
 > scope in § 7, the per-unit converter-split specification in § 7.1, and a batch of signature
 > fixes.*
 >
-> **Implementation progress: Phases 1–2 landed on `plugin-restructure` (contract version 1.5).**
-> Recorded deviations: `BodyPreference.Eas16` survives until Phase 3 (§ 5.1); the read-only revert
-> marker reaches `CollectionDiff` as a `forceChanged` set rather than through the snapshot entry
-> type, because `ActiveSync.Protocol` cannot see a Contracts type (§ 5.2). Phases 3–5 are not
-> started.
+> **Implementation progress: Phases 1–2 landed on `plugin-restructure` (contract version 1.5);
+> the Phase 3a checkpoint is committed (contract version 1.6) and awaits the operator's go-ahead
+> for 3b.** The 3a commit is the plan's one deliberately-red intermediate state: Contracts,
+> Protocol, Crypto, Core, Backends.Common, the `imap` and `local` exemplars, WebUi and the
+> Server host layer all build at 0 warnings; `dav`, `jmap`, `sieve` and `smtp` do not compile
+> against the new seam — their compile errors ARE 3b's work list. Recorded deviations:
+> `BodyPreference.Eas16` survived until Phase 3 (§ 5.1 — the whole record is now host-side); the
+> read-only revert marker reaches `CollectionDiff` as a `forceChanged` set rather than through
+> the snapshot entry type, because `ActiveSync.Protocol` cannot see a Contracts type (§ 5.2);
+> plus the 3a notes in § 5.5, § 6.3 and the Phase 3 section. Phases 4–5 are not started.
 >
 > **Authority rules.** `AGENTS.md` and `docs/plugins.md` describe the contract **as it exists
 > today** — they are the authority on current behaviour only, and nothing more. The moment
@@ -558,6 +563,14 @@ public sealed record TextBody
 purpose: they are the extension point if a class later needs metadata beside the payload (as mail
 already does), and they make the generic store aliases type-distinct.
 
+> **Implementation deviation, recorded in Phase 3a (per § 5's own rule).** `Optional<T>` gained a
+> named factory, `public static Optional<T> Of(T value)`, beside the sketched implicit operator.
+> Reason, found by the compiler: C# never applies a user-defined conversion whose operand type is
+> an interface, so for `Optional<IReadOnlyList<string>>` — the `MailFlagsPatch.Categories` shape
+> this section itself specifies — the implicit operator can never fire and there was no way to
+> mark the field as sent. The operator stays for the concrete-typed fields (`Optional<bool>`);
+> `Of` is the interface-typed escape hatch.
+
 Two fidelity notes, stated so nobody "fixes" them later: EAS's mail `Flag` is really a follow-up
 flag with `Status` 0/1/2, a type and dates — `bool Flagged` matches today's deliberately lossy
 mapping (`Status == 2` → flagged, anything else → clear) and stays that way; richer follow-up
@@ -997,6 +1010,18 @@ folds into work already scheduled.
 partial data itself. It would push EAS ghosting semantics back into plugins, split the semantics
 across two code paths, and reintroduce exactly the untyped surface this design removes.
 
+> **Implementation deviation, recorded in Phase 3a (per § 5's own rule).** Mitigation 2's retry
+> runs with **no precondition** rather than "the new revision": the contract has no
+> revision-returning single-item fetch, so after a failed precondition the host re-fetches the
+> payload, re-merges, and writes unconditionally — merging onto the freshest payload IS the
+> conflict resolution, and the write is still bounded to one retry by construction. (A second
+> `BackendPreconditionFailedException` can therefore only come from a store that races again on
+> its own concurrency check — e.g. the local store's row-version guard — and the handler answers
+> it as the ordinary per-item conflict, Status 7 + pending revert, exactly as specified.) The
+> conditional first attempt fires only on a payload-cache hit, where the cached revision IS the
+> merge basis; a cache miss merges onto a fresh fetch, where an `expected` pin from an older
+> generation would only produce false conflicts.
+
 ---
 
 ## 7. What moves where
@@ -1316,6 +1341,42 @@ this phase are different code: the semantics concentrate in 3a, the tokens in 3b
 - **The 3a checkpoint commit — the plan's one exception to the green rule.** The unconverted
   providers (`dav`, `jmap`, `sieve`, `smtp`) will not compile against the new seam; that is
   expected, and their compile errors ARE 3b's work list. This commit is never pushed alone.
+
+**Phase 3a implementation notes (recorded at the checkpoint; § 5's deviation rule):**
+
+- **The host conversion seam landed as `ActiveSync.Server/Eas/Content/`** — `ContentAdapter`
+  (typed fetch/render/merge/cache/precondition retry, wrapping the typed keys at the string-keyed
+  handler boundary), `NotesXml` (the XML half of the old notes converter), `GalXml` (typed
+  `GalEntry` → gal:-namespace shape + the wire photo statuses; ResolveRecipients projects the RR
+  shape from the same record), and `MailFileReference` (the "{folder}|{item}|{index}" encoding,
+  now entirely host-internal — ItemOperations/GetAttachment fetch the raw message and extract the
+  part with the host's MimeKit). This is the Phase-3 home; Phase 4 relocates the converters
+  themselves into `ActiveSync.Eas.Conversion` and this seam shrinks to calling them.
+- **`BodyPreference` (with `Eas16`) moved to `Backends.Common.Converters`,** where the converters
+  it parameterizes live until Phase 4 moves both together. Stores never see it.
+- **Two § 7.1 rows were pulled forward from Phase 4 because the seam change forced them:** the
+  notes converter split (`NoteItem` ⇄ VJOURNAL became `Backends.Local.NoteJournalMapper`, private;
+  the XML half became Server's `NotesXml`; `Backends.Common/Converters/NotesConverter.cs` is
+  deleted), and `MailConverter.MessageFlags` (deleted — `ToApplicationData` now takes the
+  contract's `MailFlags` plus the store-classified category list). `ContactConverter`'s GAL
+  projection likewise now returns the typed `GalEntry` (the § 7.1 split, host shaping separated).
+  `IcalHelpers` became `public` (its R3 destiny is the published interop surface; the local notes
+  mapper needs it today).
+- **`BackendAttachment.Content` is `ReadOnlyMemory<byte>`** (was `byte[]`) — the § 4.2 ownership
+  rule applied uniformly to every byte payload on the surface.
+- **The `Backends:Calendar:CalendarAttachments` knob is pinned to Auto semantics (1 MiB cap) for
+  every backend while conversion is host-side.** The knob is provider-owned config the host must
+  not read; § 9's Phase 4 knob inventory (which names this exact knob) restores operator control
+  as a host option.
+- **`ImapMailBackend` no longer takes `mailAddress`** — draft composition (its only consumer)
+  is host-side.
+- **Draft-rewrite echo suppression:** the host records the store's returned revision under the
+  OLD item key (never the returned key), preserving the Delete+Add re-identification exactly as
+  § 5.4's caution specifies.
+- **The 3a surface snapshot was regenerated by a standalone copy of the approval test's
+  generator** (byte-identical output), because `Core.Tests` references the deliberately-red
+  provider assemblies and cannot run at the checkpoint; the 3b run's own
+  `ContractSurfaceApprovalTests` execution verifies it.
 
 **Phase 3b — one Opus subagent (spawned by the session) implements, and does NOT commit:**
 
