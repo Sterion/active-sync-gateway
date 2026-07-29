@@ -64,7 +64,7 @@ public sealed class CalDavTaskStoreTests
 		IReadOnlyList<BackendFolder> folders = await store.ListFoldersAsync(CancellationToken.None);
 
 		BackendFolder def = Assert.Single(folders, f => f.Type == FolderType.Tasks);
-		Assert.Equal("/dav/cal/a/Tasks/", def.BackendKey[CalDavTaskStore.KeyPrefix.Length..]);
+		Assert.Equal("/dav/cal/a/Tasks/", def.Key.Value[CalDavTaskStore.KeyPrefix.Length..]);
 	}
 
 	private static HttpResponseMessage Xml(string body)

@@ -32,10 +32,10 @@ public class MailConverterDisplayToTests
 	public void BareAddress_WithNoDisplayName_StillProducesADisplayTo()
 	{
 		MimeMessage message = MessageTo("bob@example.com");
-		MailConverter.MessageFlags flags = new(false, false, false, false);
+		MailFlags flags = new();
 
 		List<XElement> data = MailConverter.ToApplicationData(
-			message, flags, BodyPreference.PlainText, _ => "ref");
+			message, flags, [], BodyPreference.PlainText, _ => "ref");
 
 		string displayTo = data.Single(e => e.Name == Email + "DisplayTo").Value;
 		Assert.Equal("bob@example.com", displayTo);
@@ -51,10 +51,10 @@ public class MailConverterDisplayToTests
 		message.Subject = "mix";
 		message.Date = DateTimeOffset.UtcNow;
 		message.Body = new TextPart("plain") { Text = "body" };
-		MailConverter.MessageFlags flags = new(false, false, false, false);
+		MailFlags flags = new();
 
 		List<XElement> data = MailConverter.ToApplicationData(
-			message, flags, BodyPreference.PlainText, _ => "ref");
+			message, flags, [], BodyPreference.PlainText, _ => "ref");
 
 		string displayTo = data.Single(e => e.Name == Email + "DisplayTo").Value;
 		Assert.Equal("Alice; bob@example.com", displayTo);

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ActiveSync.Contracts;
 
 namespace ActiveSync.Backends.Jmap;
 
@@ -6,13 +7,14 @@ namespace ActiveSync.Backends.Jmap;
 // single request the same way GetItemRevisionsAsync's paging does.
 public sealed partial class JmapMailStore
 {
-	public async Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
-		string? folderBackendKey, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<IReadOnlyList<SearchHit>> SearchAsync(
+		FolderKey? folder, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		Dictionary<string, object?> filter = new() { ["text"] = freeText };
-		if (folderBackendKey is not null)
-			filter["inMailbox"] = FromKey(folderBackendKey);
+		if (folder is { } folderKey)
+			filter["inMailbox"] = FromKey(folderKey.Value);
 		if (since is { } sinceValue)
 			filter["after"] = JmapDate.ToUtc(sinceValue.UtcDateTime);
 
@@ -31,13 +33,13 @@ public sealed partial class JmapMailStore
 		}, "1");
 
 		using JmapResponse response = await client.InvokeAsync(CapMail, [query, get], ct).ConfigureAwait(false);
-		List<(string, string)> hits = new();
+		List<SearchHit> hits = new();
 		foreach (JsonElement email in response.Arguments("1").GetProperty("list").EnumerateArray())
 		{
 			string id = email.GetProperty("id").GetString()!;
-			string folderKey = folderBackendKey ?? FirstMailbox(email);
-			if (folderKey.Length > 0)
-				hits.Add((folderKey, id));
+			string hitFolder = folder?.Value ?? FirstMailbox(email);
+			if (hitFolder.Length > 0)
+				hits.Add(new SearchHit { Folder = new FolderKey(hitFolder), Item = new ItemKey(id) });
 		}
 
 		return hits;

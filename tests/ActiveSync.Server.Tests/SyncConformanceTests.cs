@@ -51,7 +51,7 @@ public sealed class SyncConformanceTests : IDisposable
 	private async Task<UserFolder> RegisterInboxAsync()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
-			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 		return folders.Single(f => f.BackendKey == "imap:INBOX");
 	}
 

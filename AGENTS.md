@@ -19,19 +19,27 @@ wipe and `eas block` are the levers), S/MIME (`ValidateCert`), the SMS class. (N
 **is** implemented — a local-only `LocalNotesStore` — see the Backend layer notes.)
 
 **EAS 16.1 is implemented** (see docs/eas16-checklist.md for the audited token diff and
-per-delta status). Invariants: version gating rides `BodyPreference.Eas16` (set from
-`context.Version >= EasVersion.V160`) so store signatures stay version-free; 14.1
+per-delta status). Invariants: version gating rides the HOST-side `BodyPreference.Eas16`
+(`Backends.Common.Converters`, set from `context.Version >= EasVersion.V160`) — under the typed
+plugin contract stores hand over full payloads and all EAS conversion happens host-side
+(`Server/Eas/Content/ContentAdapter`), so store signatures carry no version or body
+preference at all; 14.1
 responses must stay byte-identical (a 14.1 observer device asserts this in Eas16Tests).
 calendar:Location is ≤14.1-only — 16.x emits/reads airsyncbase:Location(DisplayName);
 exception dates MERGE (never clear) because 16.x sends only the new exception; Sync
 Delete + airsyncbase:InstanceId becomes a synthesized deleted exception through the
 normal partial-merge path. Drafts: Sync Add/Change of Email is allowed ONLY in the
-Drafts folder (`DraftMessageBuilder` merges fields; a rewrite changes the IMAP UID and
-the snapshot diff re-identifies as Delete+Add); email2:Send submits instead of storing.
-Event attachments live INLINE in the iCal (base64 ATTACH; `Backends:Calendar:CalendarAttachments`
-Auto/On/Off caps them) with FileReferences "calatt::<serverId>::<index>" — the converter
+Drafts folder (the HOST merges fields via `DraftMessageBuilder` and hands the store a
+complete draft through `CreateDraftAsync`/`ReplaceDraftAsync`; a rewrite changes the IMAP
+UID and the snapshot diff re-identifies as Delete+Add — the store's returned key is never
+echo-suppressed into the snapshot); email2:Send submits instead of storing.
+Event attachments live INLINE in the iCal (base64 ATTACH; the
+`Backends:Calendar:CalendarAttachments` Auto/On/Off knob is PINNED to Auto semantics while
+conversion is host-side — Phase 4 of the typed-contract plan restores it as a host option)
+with FileReferences "calatt::<serverId>::<index>" — the converter
 emits the index and SyncHandler stamps the ServerId; ItemOperations resolves them via
-`ICalendarAttachmentSource`. Account-only wipe: `Device.PendingAccountWipe` → 449 herds
+`ICalendarAttachmentSource.GetEventAttachmentAsync(FolderKey, ItemKey, index)`, where the
+index is normatively the Nth ATTACH property of the payload the store handed over. Account-only wipe: `Device.PendingAccountWipe` → 449 herds
 into Provision → directive → ack auto-blocks the partnership (`CompleteAccountWipeAsync`);
 MeetingResponse tolerates 16.x SendResponse/proposals but always sends the iTIP reply
 (pre-16 behavior).
@@ -75,11 +83,14 @@ null), so `CalendarConverter.ParseFreeBusy` parses the unfolded lines itself; do
 "simplify" it back to Ical.Net without checking that bug is fixed. A free/busy failure
 must never fail the whole ResolveRecipients.
 
-**GAL photos**: `SearchGalAsync` takes an optional `GalPhotoRequest(MaxSizeBytes, MaxCount)`;
-`ContactConverter.AppendGalPicture` implements the MS-ASCMD statuses (1+Data / 173 no
-photo / 174 over MaxSize / 175 count limit) and the stores count granted photos across
-the whole result set. ResolveRecipients translates the gal:Picture element into its own
-RR-namespace Picture shape — keep the two in sync.
+**GAL photos**: `IDirectoryOperations.SearchGalAsync` takes an optional
+`GalPhotoRequest(MaxSizeBytes, MaxCount)` and returns typed `GalEntry` records whose
+`GalPictureResult` carries a typed status — the STORES enforce the limits and count granted
+photos across the whole result set (`ContactConverter.BuildGalEntry` for vCard-backed stores);
+the HOST maps the statuses to the MS-ASCMD wire values (Available → 1+Data, None → 173,
+OverSizeLimit → 174, OverCountLimit → 175) in `Server/Eas/Content/GalXml`, and
+ResolveRecipients projects the same records into its own RR-namespace Picture shape — keep
+the two projections in sync.
 
 **Autodiscover** is implemented (`AutodiscoverEndpoint`): `POST /autodiscover/autodiscover.xml`
 (and `.json`) returns the EAS URL in the Outlook MobileSync schema. It shares Basic-auth
@@ -119,12 +130,20 @@ src/ActiveSync.Protocol/    WBXML codec, code pages, MS-ASHTTP query parser, EAS
                             (DelimitedKey — host-side, since no delimited key crosses the store
                             boundary). Depends on NOTHING project-wise. No ASP.NET, no MailKit.
 src/ActiveSync.Contracts/   The PLUGIN CONTRACT: the interfaces/records a backend provider
-                            implements + uses (IBackendProvider, IBackendConnection, IContentStore
-                            & the capability interfaces, IGatewayPlugin, BackendRole,
-                            ProviderSettings, BackendConfigField, SharedCollection (the typed grant
+                            implements + uses (IBackendProvider, IBackendConnection, the split
+                            content stores — IContentStore + IContentStore<TItem> with the class
+                            aliases IMailStore/ICalendarStore/ITaskStore/IContactStore/INotesStore
+                            — the typed item records (MailItem/CalendarItem/TaskItem/ContactItem/
+                            NoteItem, MailFlagsPatch + Optional<T>), the side operations
+                            (IMailboxOperations, IMailSubmitOperations, IMeetingOperations,
+                            IDirectoryOperations + GalEntry, IOofBackend) & the capability
+                            interfaces, IGatewayPlugin, BackendRole, ProviderSettings,
+                            BackendConfigField, SharedCollection (the typed grant
                             only — the "href|ro" entry syntax is the caldav provider's), the
                             FolderKey/ItemKey/ItemRevision newtypes, OwnedResource, the Backend
-                            Models records). Namespace ActiveSync.Contracts.
+                            Models records). NO EAS XML crosses the store boundary: stores trade
+                            in raw RFC822 bytes / iCalendar / vCard payloads and typed records;
+                            the host owns all EAS conversion. Namespace ActiveSync.Contracts.
                             Depends on NO other project (Protocol included — the EAS wire encodings
                             that needed it, the FilterType→date-window maps, are host-side in
                             Core/Backend/ContentFilters; DependencyRuleTests pins the csproj clean),
@@ -707,13 +726,16 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   with idle eviction; auth verdicts are cached ~5 minutes. Content roles are optional —
   when a role has no configured provider it falls back to the **local store** (below), so
   `Session.Contacts` / `Session.Calendar` are always non-null.
-- **Local stores** (`Backends/Local/`): `IContentStore` over the `LocalItems` table when
+- **Local stores** (`Backends/Local/`): typed content stores over the `LocalItems` table when
   no DAV backend is configured, plus `LocalNotesStore` which is **always** present (no
   DAV backend carries notes) and `LocalTaskStore` when no CalDAV tasks collection is
-  configured. One fixed folder per class; content is vCard / iCalendar VEVENT / VTODO /
-  VJOURNAL text (same converters as the DAV stores — `NotesConverter` maps Notes to
-  VJOURNAL, `TasksConverter` maps Tasks to VTODO); item key = row id, revision = a
-  per-row version counter.
+  configured. One fixed folder per class; stored content is vCard / iCalendar VEVENT /
+  VTODO text — for the payload classes the stored text IS the contract payload, verbatim
+  (round-trip fidelity). Notes are the typed exception: the payload is `NoteItem` and the
+  VJOURNAL at-rest shape is the store's PRIVATE convention (`NoteJournalMapper` — kept so
+  existing sealed rows need no migration; no other backend ever sees it). Item key = row id,
+  revision = a per-row version counter — which is why the local stores can honour the
+  `expected` update precondition (`BackendPreconditionFailedException`).
   They cannot hold the request-scoped DbContext (sessions outlive requests) — they open
   short-lived contexts via `ISyncDbContextFactory`. `WaitForChangesAsync` awaits the
   in-process `LocalChangeNotifier` (instant cross-device push, single-instance only —
@@ -740,15 +762,22 @@ login-if-it-contains-'@') — never derive an address from a login with `Contain
   per-user connection caps `ImapIdleWatcher`'s auth-retry budget exists to survive. Steady
   state is 3 connections per user: session + IDLE + poll); DAV collections poll
   ctag/sync-token every `DavPollSeconds`. `Eas.UseImapIdle=false` disables IDLE entirely.
-- Attachment `FileReference` format: `UrlEncode("{imapBackendKey}|{uid}|{attachmentIndex}")`
-  where index is the position in `MimeMessage.Attachments`. Search `LongId` format:
-  `UrlEncode("{folderBackendKey}|{itemKey}")`. Both round-trip through ItemOperations.
+- Attachment `FileReference` format: `UrlEncode("{folderBackendKey}|{itemKey}|{attachmentIndex}")`
+  where index is the position in `MimeMessage.Attachments` — ENTIRELY host-internal since the
+  typed contract (`Server/Eas/Content/MailFileReference`): the host emits it when rendering,
+  parses it back in ItemOperations/GetAttachment, fetches the raw message via
+  `IMailboxOperations.GetRawMessageAsync` and extracts the part with its own MimeKit. A store
+  never sees a FileReference. Search `LongId` format: `UrlEncode("{folderBackendKey}|{itemKey}")`
+  (host-internal likewise). Both round-trip through ItemOperations.
 - Folder backend keys are prefixed: `imap:`, `caldav:`, `caldav-tasks:`, `carddav:`,
-  `local:` — each store claims its keys via `IContentStore.OwnsBackendKey` and the
+  `local:` — each store claims its keys via `IContentStore.OwnsKey(FolderKey)` and the
   session dispatches on the first claimant, so key spaces must stay disjoint (the colon
   keeps `caldav:` from matching `caldav-tasks:` keys; local stores match their single
-  folder key exactly). Read-only folders route the same way: the owning store opts in
-  via `IReadOnlyCollectionSource`.
+  folder key exactly). A store's CONTENT CLASS is derived from which alias interface it
+  implements (`IMailStore`/`ICalendarStore`/`ITaskStore`/`IContactStore`/`INotesStore` —
+  exactly one; `Core/Backend/ContentStoreClasses` enforces it at session build) and stamped
+  onto the folder registry, so a resolved `UserFolder` carries its class. Read-only folders
+  route the same way: the owning store opts in via `IReadOnlyCollectionSource`.
 - **Tasks over CalDAV** (`CalDavTaskStore`, the `Tasks` role on the `caldav` provider):
   VTODOs in the home-set collection named by the Tasks role's `TaskFolder` setting
   (default "Tasks", Axigen's layout; the Tasks section inherits the Calendar section's

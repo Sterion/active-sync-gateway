@@ -51,8 +51,8 @@ public sealed class SyncLongPollDrainTests : IDisposable
 		_harness.Session.SecondaryStore = calendar;
 
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email },
-			new BackendFolder { BackendKey = "caldav:Cal", DisplayName = "Calendar", Type = FolderType.UserCalendar, EasClass = EasClass.Calendar });
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email),
+			EasHandlerHarness.Folder("caldav:Cal", "Calendar", FolderType.UserCalendar, EasClass.Calendar));
 		UserFolder inbox = registry.Single(f => f.BackendKey == "imap:INBOX");
 		UserFolder cal = registry.Single(f => f.BackendKey == "caldav:Cal");
 

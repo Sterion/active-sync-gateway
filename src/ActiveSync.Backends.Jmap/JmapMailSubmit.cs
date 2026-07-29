@@ -24,13 +24,14 @@ public sealed class JmapMailSubmit(
 	private string? _account;
 	private string? _submissionAccount;
 
-	public async Task SendAsync(byte[] mime, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task SendAsync(ReadOnlyMemory<byte> rfc822, CancellationToken ct)
 	{
 		string accountId = await AccountAsync(ct).ConfigureAwait(false);
 		// Fail fast with a named error if the server does not advertise submission, rather
 		// than sending a request it cannot honour and surfacing the opaque "400" back.
 		string submissionAccountId = await SubmissionAccountAsync(ct).ConfigureAwait(false);
-		using MemoryStream input = new(mime);
+		using MemoryStream input = new(rfc822.ToArray());
 		MimeMessage message = await MimeMessage.LoadAsync(input, ct).ConfigureAwait(false);
 
 		string from = message.From.Mailboxes.FirstOrDefault()?.Address ?? mailAddress

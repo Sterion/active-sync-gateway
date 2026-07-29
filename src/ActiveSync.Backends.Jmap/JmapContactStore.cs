@@ -1,25 +1,21 @@
 using System.Text.Json;
-using System.Xml.Linq;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
-using ActiveSync.Protocol;
-using ActiveSync.Protocol.Wbxml;
 
 namespace ActiveSync.Backends.Jmap;
 
 /// <summary>
 ///   Contacts content store over JMAP (RFC 9610 / JSContact RFC 9553). Folder keys are
 ///   <c>jmap-contact:{addressBookId}</c>; item keys are ContactCard ids. Item revisions hash
-///   the card JSON (JMAP exposes no per-card ETag). Also serves GAL search for
-///   ResolveRecipients/Search.
+///   the card JSON (JMAP exposes no per-card ETag). The contract's currency is vCard, so cards
+///   bridge JSContact ⇄ vCard (<see cref="JsContactConverter" />) — the EAS half is the host's.
+///   Also serves GAL search for ResolveRecipients/Search.
 /// </summary>
 public sealed class JmapContactStore(JmapClient client, int pollSeconds)
-	: IContentStore, IContactOperations, IItemMoveOperations
+	: IContactStore, IDirectoryOperations, IItemMoveOperations
 {
 	public const string KeyPrefix = "jmap-contact:";
 
 	private static readonly string[] Cap = [JmapCapabilities.Core, JmapCapabilities.Contacts];
-	private static readonly XNamespace Gal = EasNamespaces.Gal;
 
 	private string? _account;
 
@@ -30,10 +26,10 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 	private List<JsonElement>? _cachedCards;
 	private string? _cachedCardsState;
 
-	public string EasClass => Protocol.EasClass.Contacts;
+	/// <inheritdoc />
+	public bool OwnsKey(FolderKey key) => key.Value.StartsWith(KeyPrefix, StringComparison.Ordinal);
 
-	public bool OwnsBackendKey(string backendKey) => backendKey.StartsWith(KeyPrefix, StringComparison.Ordinal);
-
+	/// <inheritdoc />
 	public async Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
@@ -51,21 +47,21 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 			bool isDefault = book.TryGetProperty("isDefault", out JsonElement d) && d.ValueKind == JsonValueKind.True;
 			result.Add(new BackendFolder
 			{
-				BackendKey = KeyPrefix + id,
+				Key = new FolderKey(KeyPrefix + id),
 				DisplayName = book.TryGetProperty("name", out JsonElement n) ? n.GetString() ?? id : id,
-				Type = isDefault ? FolderType.Contacts : FolderType.UserContacts,
-				EasClass = Protocol.EasClass.Contacts
+				Type = isDefault ? FolderType.Contacts : FolderType.UserContacts
 			});
 		}
 
 		return result;
 	}
 
-	public async Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-		string folderBackendKey, ContentFilter filter, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+		FolderKey folder, ContentFilter filter, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		string bookId = FromKey(folderBackendKey);
+		string bookId = FromKey(folder.Value);
 		// Contacts have no EAS FilterType, so ContentFilter.ForClass(Contacts, …) is always
 		// ContentFilter.All — there is no date window to apply here (CardDavStore likewise doesn't
 		// filter contacts). Only the JMAP calendar store gained a filter.
@@ -75,24 +71,24 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		// filters the full get by addressBookIds client-side instead.
 		List<JsonElement> cards = await AllCardsAsync(account, ct).ConfigureAwait(false);
 		return cards.Where(c => InBook(c, bookId))
-			.ToDictionary(c => c.GetProperty("id").GetString()!, Revision, StringComparer.Ordinal);
+			.ToDictionary(c => new ItemKey(c.GetProperty("id").GetString()!), c => new ItemRevision(Revision(c)));
 	}
 
-	public async Task<BackendItem?> GetItemAsync(
-		string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<ContactItem?> GetItemAsync(FolderKey folder, ItemKey item, CancellationToken ct)
 	{
-		JsonElement? card = await GetCardAsync(itemKey, ct).ConfigureAwait(false);
-		return card is { } c
-			? new BackendItem { ApplicationData = JsContactConverter.ToApplicationData(c, bodyPreference) }
-			: null;
+		JsonElement? card = await GetCardAsync(item.Value, ct).ConfigureAwait(false);
+		return card is { } c ? new ContactItem { VCard = JsContactConverter.ToVCard(c) } : null;
 	}
 
-	public async Task<(string ItemKey, string Revision)> CreateItemAsync(
-		string folderBackendKey, XElement applicationData, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<(ItemKey Key, ItemRevision Revision)> CreateItemAsync(
+		FolderKey folder, ContactItem item, CancellationToken ct)
 	{
+		// The host already built the COMPLETE vCard; this only bridges it to JSContact.
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		Dictionary<string, object?> card = JsContactConverter.FromApplicationData(applicationData, null);
-		card["addressBookIds"] = new Dictionary<string, object?> { [FromKey(folderBackendKey)] = true };
+		Dictionary<string, object?> card = JsContactConverter.FromVCard(item.VCard, null);
+		card["addressBookIds"] = new Dictionary<string, object?> { [FromKey(folder.Value)] = true };
 		using JmapResponse response = await client.CallAsync(Cap, "ContactCard/set", new Dictionary<string, object?>
 		{
 			["accountId"] = account,
@@ -103,39 +99,52 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 			throw new BackendException("JMAP ContactCard/set did not report the created card.");
 		string id = made.GetProperty("id").GetString()!;
 		JsonElement? full = await GetCardAsync(id, ct).ConfigureAwait(false);
-		return (id, full is { } f ? Revision(f) : "0");
+		return (new ItemKey(id), new ItemRevision(full is { } f ? Revision(f) : "0"));
 	}
 
-	public async Task<string> UpdateItemAsync(
-		string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<ItemRevision> UpdateItemAsync(
+		FolderKey folder, ItemKey item, ContactItem value, ItemRevision? expected, CancellationToken ct)
 	{
+		// The host merged already — `value` is the COMPLETE vCard. The existing card is still
+		// fetched, but only to preserve the JSContact members the vCard bridge cannot express.
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		JsonElement? existing = await GetCardAsync(itemKey, ct).ConfigureAwait(false);
-		Dictionary<string, object?> card = JsContactConverter.FromApplicationData(applicationData, existing);
+		JsonElement? existing = await GetCardAsync(item.Value, ct).ConfigureAwait(false);
+		// The `expected` precondition is honoured because the read above already paid for it: a
+		// mismatch means the card moved underneath the host's merge basis, and the host re-fetches,
+		// re-merges and retries once.
+		if (expected is { } expectedRevision && existing is { } current &&
+		    !string.Equals(Revision(current), expectedRevision.Value, StringComparison.Ordinal))
+			throw new BackendPreconditionFailedException(
+				$"JMAP ContactCard {item.Value} is no longer at the expected revision.");
+
+		Dictionary<string, object?> card = JsContactConverter.FromVCard(value.VCard, existing);
 		using JmapResponse response = await client.CallAsync(Cap, "ContactCard/set", new Dictionary<string, object?>
 		{
 			["accountId"] = account,
-			["update"] = new Dictionary<string, object?> { [itemKey] = card }
+			["update"] = new Dictionary<string, object?> { [item.Value] = card }
 		}, ct).ConfigureAwait(false);
-		EnsureNotIn(response.Arguments("0"), "notUpdated", itemKey);
-		JsonElement? full = await GetCardAsync(itemKey, ct).ConfigureAwait(false);
-		return full is { } f ? Revision(f) : "0";
+		EnsureNotIn(response.Arguments("0"), "notUpdated", item.Value);
+		JsonElement? full = await GetCardAsync(item.Value, ct).ConfigureAwait(false);
+		return new ItemRevision(full is { } f ? Revision(f) : "0");
 	}
 
+	/// <inheritdoc />
 	public async Task DeleteItemAsync(
-		string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
+		FolderKey folder, ItemKey item, bool permanent, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		using JmapResponse response = await client.CallAsync(Cap, "ContactCard/set", new Dictionary<string, object?>
 		{
 			["accountId"] = account,
-			["destroy"] = new[] { itemKey }
+			["destroy"] = new[] { item.Value }
 		}, ct).ConfigureAwait(false);
-		EnsureNotIn(response.Arguments("0"), "notDestroyed", itemKey);
+		EnsureNotIn(response.Arguments("0"), "notDestroyed", item.Value);
 	}
 
-	public async Task<(string ItemKey, string Revision)> MoveItemAsync(
-		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<(ItemKey Key, ItemRevision Revision)> MoveItemAsync(
+		FolderKey source, ItemKey item, FolderKey destination, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		using JmapResponse response = await client.CallAsync(Cap, "ContactCard/set", new Dictionary<string, object?>
@@ -143,27 +152,28 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 			["accountId"] = account,
 			["update"] = new Dictionary<string, object?>
 			{
-				[itemKey] = new Dictionary<string, object?>
+				[item.Value] = new Dictionary<string, object?>
 				{
-					["addressBookIds"] = new Dictionary<string, object?> { [FromKey(destinationFolderBackendKey)] = true }
+					["addressBookIds"] = new Dictionary<string, object?> { [FromKey(destination.Value)] = true }
 				}
 			}
 		}, ct).ConfigureAwait(false);
-		EnsureNotIn(response.Arguments("0"), "notUpdated", itemKey);
+		EnsureNotIn(response.Arguments("0"), "notUpdated", item.Value);
 		// Report the item's REAL revision at the destination, not a placeholder the caller
 		// would otherwise have to invent (see UpdateItemAsync above for the identical shape).
-		JsonElement? full = await GetCardAsync(itemKey, ct).ConfigureAwait(false);
-		return (itemKey, full is { } f ? Revision(f) : "0");
+		JsonElement? full = await GetCardAsync(item.Value, ct).ConfigureAwait(false);
+		return (item, new ItemRevision(full is { } f ? Revision(f) : "0"));
 	}
 
 	// JMAP address-book folder mutation over ActiveSync is not supported, so this store does
 	// not implement IFolderOperations (it does support item move — IItemMoveOperations above).
 
-	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
-		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<IReadOnlyList<FolderKey>> WaitForChangesAsync(
+		IReadOnlyList<FolderKey> folders, TimeSpan timeout, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		Dictionary<string, string> baseline = await TokensAsync(account, folderBackendKeys, ct).ConfigureAwait(false);
+		Dictionary<FolderKey, string> baseline = await TokensAsync(account, folders, ct).ConfigureAwait(false);
 		DateTime deadline = DateTime.UtcNow + timeout;
 		int delaySeconds = 1;
 		int ceiling = Math.Max(1, pollSeconds);
@@ -175,8 +185,8 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 			if (delay > TimeSpan.Zero) await Task.Delay(delay, ct).ConfigureAwait(false);
 			delaySeconds = Math.Min(delaySeconds * 2, ceiling);
 
-			Dictionary<string, string> current = await TokensAsync(account, folderBackendKeys, ct).ConfigureAwait(false);
-			List<string> changed = folderBackendKeys
+			Dictionary<FolderKey, string> current = await TokensAsync(account, folders, ct).ConfigureAwait(false);
+			List<FolderKey> changed = folders
 				.Where(k => baseline.GetValueOrDefault(k) != current.GetValueOrDefault(k))
 				.ToList();
 			if (changed.Count > 0)
@@ -186,9 +196,18 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		return [];
 	}
 
-	// ---------- IContactOperations (GAL) ----------
+	// ---------- IDirectoryOperations (GAL) ----------
 
-	public async Task<IReadOnlyList<IReadOnlyList<XElement>>> SearchGalAsync(
+	/// <summary>
+	///   Searches every address book and returns typed GAL entries, matched client-side against
+	///   the cached full listing.
+	/// </summary>
+	/// <param name="query">The free-text query to match entries against.</param>
+	/// <param name="maxResults">The most entries to return.</param>
+	/// <param name="photos">The photo request, or <c>null</c> when pictures were not requested.</param>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
+	/// <returns>The matching entries.</returns>
+	public async Task<IReadOnlyList<GalEntry>> SearchGalAsync(
 		string query, int maxResults, GalPhotoRequest? photos, CancellationToken ct)
 	{
 		// ContactCard/query is FTS-backed and eventually-consistent; GAL matches the full
@@ -196,22 +215,22 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		// "serverUnavailable").
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		List<JsonElement> cards = await AllCardsAsync(account, ct).ConfigureAwait(false);
-		List<IReadOnlyList<XElement>> results = new();
+		List<GalEntry> results = new();
 		foreach (JsonElement card in cards)
 		{
-			List<XElement> entry = GalEntry(card);
-			bool matches = entry.Any(e => e.Value.Contains(query, StringComparison.OrdinalIgnoreCase));
+			GalEntry entry = JsContactConverter.ToGalEntry(card);
+			bool matches = new[] { entry.DisplayName, entry.EmailAddress, entry.FirstName, entry.LastName,
+					entry.Phone, entry.Company }
+				.Any(v => v is not null && v.Contains(query, StringComparison.OrdinalIgnoreCase));
 			if (matches)
 			{
-				// Every other GAL implementation routes through
-				// ContactConverter.AppendGalPicture, which emits the MS-ASCMD photo status (173 no
-				// photo / 174 over MaxSize / 175 count limit) even when it grants no data. This
-				// bridge never reads a JSContact "media" member into a picture at all, so a
-				// requested photo is always "no photo" — but the client asked and must get an
-				// explicit status element, not silence.
-				if (photos is not null)
-					entry.Add(new XElement(Gal + "Picture", new XElement(Gal + "Status", "173")));
-				results.Add(entry);
+				// This bridge never reads a JSContact "media" member into a picture, so a requested
+				// photo is always "has none" — the client asked, and the host must still emit an
+				// explicit MS-ASCMD status (173) rather than silence, which is what the typed
+				// None status carries.
+				results.Add(photos is null
+					? entry
+					: entry with { Picture = new GalPictureResult { Status = GalPictureStatus.None } });
 			}
 
 			if (results.Count >= maxResults)
@@ -219,25 +238,6 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		}
 
 		return results;
-	}
-
-	private static List<XElement> GalEntry(JsonElement card)
-	{
-		List<XElement> data = JsContactConverter.ToApplicationData(card, BodyPreference.PlainText);
-
-		string? First(string local) =>
-			data.FirstOrDefault(e => e.Name.LocalName == local)?.Value;
-
-		List<XElement> entry = new();
-		string display = First("FileAs")
-			?? string.Join(" ", new[] { First("FirstName"), First("LastName") }.Where(v => !string.IsNullOrEmpty(v)));
-		entry.Add(new XElement(Gal + "DisplayName", display));
-		if (First("Email1Address") is { } email) entry.Add(new XElement(Gal + "EmailAddress", email));
-		if (First("FirstName") is { } first) entry.Add(new XElement(Gal + "FirstName", first));
-		if (First("LastName") is { } last) entry.Add(new XElement(Gal + "LastName", last));
-		if (First("MobilePhoneNumber") is { } phone) entry.Add(new XElement(Gal + "Phone", phone));
-		if (First("CompanyName") is { } company) entry.Add(new XElement(Gal + "Company", company));
-		return entry;
 	}
 
 	// ---------- helpers ----------
@@ -259,8 +259,8 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		return list.GetArrayLength() == 0 ? null : list[0].Clone();
 	}
 
-	private async Task<Dictionary<string, string>> TokensAsync(
-		string account, IReadOnlyList<string> folderBackendKeys, CancellationToken ct)
+	private async Task<Dictionary<FolderKey, string>> TokensAsync(
+		string account, IReadOnlyList<FolderKey> folders, CancellationToken ct)
 	{
 		// The wait token is the account-level ContactCard state instead of a SHA-256 over the
 		// full body of every card, which used to be re-downloaded on every poll tick. The state is
@@ -268,9 +268,9 @@ public sealed class JmapContactStore(JmapClient client, int pollSeconds)
 		// wait over-notifies rather than misses (the safe direction). Mirrors the mail store's own
 		// state-token wait.
 		string state = await StateAsync(account, ct).ConfigureAwait(false);
-		Dictionary<string, string> tokens = new(StringComparer.Ordinal);
-		foreach (string folderKey in folderBackendKeys)
-			tokens[folderKey] = state;
+		Dictionary<FolderKey, string> tokens = new();
+		foreach (FolderKey folder in folders)
+			tokens[folder] = state;
 		return tokens;
 	}
 

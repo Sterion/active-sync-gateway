@@ -1,9 +1,7 @@
-using System.Xml.Linq;
 using ActiveSync.Backends.Local;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Security;
 using ActiveSync.Core.State;
-using ActiveSync.Protocol.Wbxml;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -57,8 +55,7 @@ public sealed class LocalStoreResilienceTests : IDisposable
 
 		LocalContactStore store = new(_factory, new LocalChangeNotifier(), _userId, _protector, NullLogger.Instance);
 
-		IReadOnlyList<IReadOnlyList<XElement>> results =
-			await store.SearchGalAsync("Alice", 25, null, CancellationToken.None);
+		IReadOnlyList<GalEntry> results = await store.SearchGalAsync("Alice", 25, null, CancellationToken.None);
 
 		Assert.Equal(2, results.Count);
 	}
@@ -92,13 +89,15 @@ public sealed class LocalStoreResilienceTests : IDisposable
 	}
 
 	/// <summary>
-	///   LocalCalendarStore's read sites (RespondToMeetingAsync, GetRawEventAsync,
+	///   LocalCalendarStore's read sites (RespondToMeetingAsync, the ordinary payload fetch,
 	///   GetEventAttachmentAsync) hard-coded the AAD collection literal instead of using
 	///   <c>Collection</c>, duplicating the write side's own value. COVERAGE, not red-first proof:
 	///   the literal and <c>Collection</c> agree today, so nothing observably breaks before the
 	///   fix — the defect is fragility to a FUTURE typo/rename, not a current behaviour bug. This
-	///   pins that all three read sites decrypt content sealed by the store's own write path
+	///   pins that the read path decrypts content sealed by the store's own write path
 	///   (CreateItemAsync, which already used <c>Collection</c>) under a REAL encrypting protector.
+	///   The dedicated raw-event read is gone with the typed currency: the ordinary fetch IS the
+	///   raw read now, so it is what this asserts.
 	/// </summary>
 	[Fact]
 	public async Task CalendarStore_ReadSites_DecryptContentSealedByTheStoresOwnWritePath()
@@ -107,16 +106,29 @@ public sealed class LocalStoreResilienceTests : IDisposable
 			_factory, new LocalChangeNotifier(), _userId, _protector, "u@example.com", "u@example.com",
 			NullLogger.Instance);
 
-		XNamespace cal = EasNamespaces.Calendar;
-		XElement appData = new("ApplicationData",
-			new XElement(cal + "Subject", "Planning"),
-			new XElement(cal + "StartTime", "20260801T090000Z"),
-			new XElement(cal + "EndTime", "20260801T100000Z"));
-		(string itemKey, string _) = await store.CreateItemAsync(store.FolderBackendKey, appData, CancellationToken.None);
+		FolderKey folder = new(store.FolderBackendKey);
+		CalendarItem item = new()
+		{
+			ICalendar = """
+			            BEGIN:VCALENDAR
+			            VERSION:2.0
+			            BEGIN:VEVENT
+			            UID:evt-sealed
+			            DTSTART:20260801T090000Z
+			            DTEND:20260801T100000Z
+			            SUMMARY:Planning
+			            END:VEVENT
+			            END:VCALENDAR
+			            """.ReplaceLineEndings("\r\n")
+		};
+		(ItemKey itemKey, ItemRevision _) = await store.CreateItemAsync(folder, item, CancellationToken.None);
 
-		string? raw = await store.GetRawEventAsync(store.FolderBackendKey, itemKey, CancellationToken.None);
-		Assert.NotNull(raw);
-		Assert.Contains("BEGIN:VEVENT", raw);
+		CalendarItem? read = await store.GetItemAsync(folder, itemKey, CancellationToken.None);
+
+		Assert.NotNull(read);
+		Assert.Contains("BEGIN:VEVENT", read!.ICalendar);
+		// Round-trip fidelity: what the host handed over is exactly what it gets back.
+		Assert.Equal(item.ICalendar, read.ICalendar);
 	}
 
 	private void SeedContact(string vcf)

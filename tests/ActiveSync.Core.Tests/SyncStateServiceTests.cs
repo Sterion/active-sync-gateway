@@ -31,6 +31,17 @@ public sealed class SyncStateServiceTests : IDisposable
 		_connection.Dispose();
 	}
 
+	/// <summary>
+	///   One registry folder: the store's typed <see cref="BackendFolder" /> plus the EAS class
+	///   the HOST derives from the owning store's alias interface (the contract's folder record
+	///   carries no class of its own).
+	/// </summary>
+	private static RegistryFolder F(string key, string displayName, FolderType type, string easClass)
+	{
+		return new RegistryFolder(
+			new BackendFolder { Key = new FolderKey(key), DisplayName = displayName, Type = type }, easClass);
+	}
+
 	/// <summary>Get-or-create the identity row for a login (rows are keyed by UserId now).</summary>
 	private async Task<int> UserAsync(string login)
 	{
@@ -264,10 +275,10 @@ public sealed class SyncStateServiceTests : IDisposable
 	[Fact]
 	public async Task FolderRegistry_AssignsStableServerIds_AndSoftDeletes()
 	{
-		List<BackendFolder> folders = new()
+		List<RegistryFolder> folders = new()
 		{
-			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = "Email" },
-			new BackendFolder { BackendKey = "imap:Sent", DisplayName = "Sent", Type = FolderType.SentItems, EasClass = "Email" }
+			F("imap:INBOX", "Inbox", FolderType.Inbox, "Email"),
+			F("imap:Sent", "Sent", FolderType.SentItems, "Email")
 		};
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"), folders, CancellationToken.None);
 		Assert.Equal(2, registry.Count);
@@ -299,7 +310,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		faults.ThrowOnNextSave(new DbUpdateException("dup",
 			new SqliteException("UNIQUE constraint failed", 19, 2067)));
 		await service.RefreshFolderRegistryAsync(await UserAsync("u@a1"),
-			[new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = "Email" }], CancellationToken.None);
+			[F("imap:INBOX", "Inbox", FolderType.Inbox, "Email")], CancellationToken.None);
 
 		await using SqliteSyncDbContext verify = StateTestSupport.NewContext(_connection);
 		Device saved = await verify.Devices.FirstAsync(d => d.DeviceId == "DEV1");
@@ -311,10 +322,10 @@ public sealed class SyncStateServiceTests : IDisposable
 	{
 		// The retention sweep can only reclaim a folder whose DeletedUtc is set, and the clock must
 		// start when it first vanished, not reset every sync; a reappearance clears it.
-		List<BackendFolder> both =
+		List<RegistryFolder> both =
 		[
-			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = "Email" },
-			new BackendFolder { BackendKey = "imap:Old", DisplayName = "Old", Type = FolderType.UserMail, EasClass = "Email" }
+			F("imap:INBOX", "Inbox", FolderType.Inbox, "Email"),
+			F("imap:Old", "Old", FolderType.UserMail, "Email")
 		];
 		await _service.RefreshFolderRegistryAsync(await UserAsync("u@a35s"), both, CancellationToken.None);
 
@@ -347,10 +358,10 @@ public sealed class SyncStateServiceTests : IDisposable
 		// must make this a no-op instead.
 		Device device = await _service.GetOrCreateDeviceAsync(
 			await UserAsync("u@a9dup"), "DEV1", "Phone", CancellationToken.None);
-		List<BackendFolder> folders =
+		List<RegistryFolder> folders =
 		[
-			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = "Email" },
-			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox (duplicate)", Type = FolderType.Inbox, EasClass = "Email" },
+			F("imap:INBOX", "Inbox", FolderType.Inbox, "Email"),
+			F("imap:INBOX", "Inbox (duplicate)", FolderType.Inbox, "Email"),
 		];
 
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(
@@ -364,7 +375,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	public async Task FolderDiff_ReportsAddsUpdatesDeletes()
 	{
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@x"), "DEV1", "Phone", CancellationToken.None);
-		List<BackendFolder> folders = new() { new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = "Email" } };
+		List<RegistryFolder> folders = new() { F("imap:INBOX", "Inbox", FolderType.Inbox, "Email") };
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"), folders, CancellationToken.None);
 
 		FolderHierarchyDiff diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
@@ -377,7 +388,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		Assert.Empty(diff.Deletes);
 
 		// Rename → update
-		folders = [new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Postboks", Type = FolderType.Inbox, EasClass = "Email" }];
+		folders = [F("imap:INBOX", "Postboks", FolderType.Inbox, "Email")];
 		registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"), folders, CancellationToken.None);
 		diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
 		Assert.Single(diff.Updates);
@@ -392,7 +403,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// writer off the stale generation must be rejected, not silently applied.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a6"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a6"),
-			[new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = "Email" }], CancellationToken.None);
+			[F("imap:INBOX", "Inbox", FolderType.Inbox, "Email")], CancellationToken.None);
 
 		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
 		SyncStateService service2 = new(db2);
@@ -417,7 +428,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		// CollectionStateStore.CommitCollectionStateAsync's reload-before-rethrow.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a5"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a5"),
-			[new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = "Email" }], CancellationToken.None);
+			[F("imap:INBOX", "Inbox", FolderType.Inbox, "Email")], CancellationToken.None);
 
 		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
 		SyncStateService service2 = new(db2);
@@ -443,8 +454,8 @@ public sealed class SyncStateServiceTests : IDisposable
 		// tracking them is pure overhead on the request-scoped context.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a19"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a19"),
-			[new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = "Email" },
-			 new BackendFolder { BackendKey = "imap:Sent", DisplayName = "Sent", Type = FolderType.SentItems, EasClass = "Email" }], CancellationToken.None);
+			[F("imap:INBOX", "Inbox", FolderType.Inbox, "Email"),
+			 F("imap:Sent", "Sent", FolderType.SentItems, "Email")], CancellationToken.None);
 		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
 
 		await using SqliteSyncDbContext db2 = StateTestSupport.NewContext(_connection);
@@ -465,11 +476,11 @@ public sealed class SyncStateServiceTests : IDisposable
 		// forever.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a8"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a8"),
-			[new BackendFolder { BackendKey = "imap:Archive", DisplayName = "Archive", Type = FolderType.UserMail, EasClass = "Email" }], CancellationToken.None);
+			[F("imap:Archive", "Archive", FolderType.UserMail, "Email")], CancellationToken.None);
 		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
 
 		registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a8"),
-			[new BackendFolder { BackendKey = "imap:Archive", DisplayName = "Archive", Type = FolderType.SentItems, EasClass = "Email" }], CancellationToken.None);
+			[F("imap:Archive", "Archive", FolderType.SentItems, "Email")], CancellationToken.None);
 		FolderHierarchyDiff diff = await _service.ComputeFolderDiffAsync(device, registry, CancellationToken.None);
 
 		Assert.Empty(diff.Adds);
@@ -485,8 +496,8 @@ public sealed class SyncStateServiceTests : IDisposable
 		// leave the existing rows untouched.
 		Device device = await _service.GetOrCreateDeviceAsync(await UserAsync("u@a7"), "DEV1", "Phone", CancellationToken.None);
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@a7"),
-			[new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = "Email" },
-			 new BackendFolder { BackendKey = "imap:Sent", DisplayName = "Sent", Type = FolderType.SentItems, EasClass = "Email" }], CancellationToken.None);
+			[F("imap:INBOX", "Inbox", FolderType.Inbox, "Email"),
+			 F("imap:Sent", "Sent", FolderType.SentItems, "Email")], CancellationToken.None);
 		await _service.CommitFolderHierarchyAsync(device, registry, CancellationToken.None);
 
 		// DeviceFolder is keyed by (DeviceKey, ServerId) now, so "the same rows survived" is
@@ -656,7 +667,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		SyncStateService service = new(_db, factory);
 
 		List<UserFolder> registry = await service.RefreshFolderRegistryAsync(await UserAsync("u@a10"),
-			[new BackendFolder { BackendKey = "carddav:/ab/", DisplayName = "Contacts", Type = FolderType.Contacts, EasClass = "Contacts" }], CancellationToken.None);
+			[F("carddav:/ab/", "Contacts", FolderType.Contacts, "Contacts")], CancellationToken.None);
 		UserFolder folder = registry[0];
 		Device device = await service.GetOrCreateDeviceAsync(await UserAsync("u@a10"), "DEV1", "Phone", CancellationToken.None);
 		(_, CollectionState? state) =
@@ -726,7 +737,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		CountingDbContextFactory factory = new(_connection, counter);
 		SyncStateService service = new(_db, factory);
 		List<UserFolder> registry = await service.RefreshFolderRegistryAsync(await UserAsync("u@a3"),
-			[new BackendFolder { BackendKey = "carddav:/ab/", DisplayName = "Contacts", Type = FolderType.Contacts, EasClass = "Contacts" }], CancellationToken.None);
+			[F("carddav:/ab/", "Contacts", FolderType.Contacts, "Contacts")], CancellationToken.None);
 		UserFolder folder = registry[0];
 
 		// Baseline: the per-item path flushes once per new href — the N+1 the finding quantifies.
@@ -759,7 +770,7 @@ public sealed class SyncStateServiceTests : IDisposable
 	public async Task DavItemMap_RoundTripsHrefs()
 	{
 		List<UserFolder> registry = await _service.RefreshFolderRegistryAsync(await UserAsync("u@x"),
-			[new BackendFolder { BackendKey = "carddav:/ab/", DisplayName = "Contacts", Type = FolderType.Contacts, EasClass = "Contacts" }], CancellationToken.None);
+			[F("carddav:/ab/", "Contacts", FolderType.Contacts, "Contacts")], CancellationToken.None);
 		UserFolder folder = registry[0];
 
 		string id1 = await _service.GetOrAddDavItemIdAsync(folder, "/ab/x.vcf", CancellationToken.None);
@@ -785,7 +796,7 @@ public sealed class SyncStateServiceTests : IDisposable
 		await using SqliteSyncDbContext db = StateTestSupport.NewContext(_connection, faults);
 		SyncStateService service = new(db);
 		List<UserFolder> registry = await service.RefreshFolderRegistryAsync(await UserAsync("u@a2"),
-			[new BackendFolder { BackendKey = "carddav:/ab/", DisplayName = "Contacts", Type = FolderType.Contacts, EasClass = "Contacts" }], CancellationToken.None);
+			[F("carddav:/ab/", "Contacts", FolderType.Contacts, "Contacts")], CancellationToken.None);
 		UserFolder folder = registry[0];
 
 		string[] hrefs = ["/ab/one.vcf", "/ab/two.vcf", "/ab/three.vcf"];

@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using System.Xml.Linq;
 using ActiveSync.Backends.Jmap;
 using ActiveSync.Contracts;
 
@@ -50,10 +49,10 @@ public sealed class JmapContactStoreTests
 		JmapClient client = new(Base, new HttpClient(stub));
 		JmapContactStore store = new(client, pollSeconds: 1);
 
-		IReadOnlyList<string> changed = await store.WaitForChangesAsync(
-			["jmap-contact:B1"], TimeSpan.FromSeconds(4), CancellationToken.None);
+		IReadOnlyList<FolderKey> changed = await store.WaitForChangesAsync(
+			[new FolderKey("jmap-contact:B1")], TimeSpan.FromSeconds(4), CancellationToken.None);
 
-		Assert.Contains("jmap-contact:B1", changed);
+		Assert.Contains(new FolderKey("jmap-contact:B1"), changed);
 		Assert.False(sawFullFetch);
 	}
 
@@ -77,10 +76,11 @@ public sealed class JmapContactStoreTests
 	}
 
 	// SearchGalAsync silently ignored the GalPhotoRequest parameter — a client that asked for
-	// photos got neither photo data nor the MS-ASCMD "no photo" (173) status element, unlike every
-	// other GAL implementation (which routes through ContactConverter.AppendGalPicture).
+	// photos got no photo outcome at all, so the host had nothing to turn into the MS-ASCMD "no
+	// photo" (173) status element every other GAL implementation emits. This bridge reads no
+	// JSContact "media" member, so the outcome is always the typed None status — never silence.
 	[Fact]
-	public async Task SearchGal_WithPhotoRequest_EmitsNoPhotoStatus()
+	public async Task SearchGal_WithPhotoRequest_ReportsTheNoPhotoStatus()
 	{
 		StubHandler stub = new(request =>
 		{
@@ -95,13 +95,13 @@ public sealed class JmapContactStoreTests
 		JmapClient client = new(Base, new HttpClient(stub));
 		JmapContactStore store = new(client, pollSeconds: 1);
 
-		IReadOnlyList<IReadOnlyList<XElement>> results = await store.SearchGalAsync(
+		IReadOnlyList<GalEntry> results = await store.SearchGalAsync(
 			"Jane", maxResults: 10, new GalPhotoRequest { MaxSizeBytes = null, MaxCount = null }, CancellationToken.None);
 
-		Assert.Single(results);
-		XElement? picture = results[0].FirstOrDefault(e => e.Name.LocalName == "Picture");
-		Assert.NotNull(picture);
-		Assert.Equal("173", picture!.Elements().FirstOrDefault(e => e.Name.LocalName == "Status")?.Value);
+		GalEntry entry = Assert.Single(results);
+		Assert.Equal("Jane Doe", entry.DisplayName);
+		Assert.NotNull(entry.Picture);
+		Assert.Equal(GalPictureStatus.None, entry.Picture!.Status);
 	}
 
 	// GetItemRevisionsAsync is invoked once PER address book within one Sync round; it used to
@@ -131,8 +131,8 @@ public sealed class JmapContactStoreTests
 		JmapClient client = new(Base, new HttpClient(stub));
 		JmapContactStore store = new(client, pollSeconds: 1);
 
-		await store.GetItemRevisionsAsync("jmap-contact:B1", ContentFilter.All, CancellationToken.None);
-		await store.GetItemRevisionsAsync("jmap-contact:B2", ContentFilter.All, CancellationToken.None);
+		await store.GetItemRevisionsAsync(new FolderKey("jmap-contact:B1"), ContentFilter.All, CancellationToken.None);
+		await store.GetItemRevisionsAsync(new FolderKey("jmap-contact:B2"), ContentFilter.All, CancellationToken.None);
 
 		Assert.Equal(1, fullDownloads);
 	}
@@ -195,8 +195,8 @@ public sealed class JmapContactStoreTests
 		JmapClient client = new(Base, new HttpClient(stub));
 		JmapContactStore store = new(client, pollSeconds: 1);
 
-		IReadOnlyDictionary<string, string> revs = await store.GetItemRevisionsAsync(
-			"jmap-contact:B1", ContentFilter.All, CancellationToken.None);
+		IReadOnlyDictionary<ItemKey, ItemRevision> revs = await store.GetItemRevisionsAsync(
+			new FolderKey("jmap-contact:B1"), ContentFilter.All, CancellationToken.None);
 
 		Assert.True(queryCalls > 0, "a server that declares a finite maxObjectsInGet must be paged via ContactCard/query");
 		Assert.False(sawUnboundedGet, "must not send a blind ids:null get once a finite maxObjectsInGet is declared");
@@ -214,9 +214,9 @@ public sealed class JmapContactStoreTests
 		});
 		JmapClient client = new(Base, new HttpClient(stub));
 		JmapContactStore store = new(client, pollSeconds: 1);
-		IReadOnlyDictionary<string, string> revs = await store.GetItemRevisionsAsync(
-			"jmap-contact:B1", ContentFilter.All, CancellationToken.None);
-		return revs["K1"];
+		IReadOnlyDictionary<ItemKey, ItemRevision> revs = await store.GetItemRevisionsAsync(
+			new FolderKey("jmap-contact:B1"), ContentFilter.All, CancellationToken.None);
+		return revs[new ItemKey("K1")].Value;
 	}
 
 	private static HttpResponseMessage Json(string body)

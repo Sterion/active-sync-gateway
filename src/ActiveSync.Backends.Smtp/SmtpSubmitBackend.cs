@@ -19,9 +19,9 @@ public sealed class SmtpSubmitBackend(
 	ILogger logger,
 	ILogger? wireLogger = null) : IMailSubmitOperations
 {
-	public async Task SendAsync(byte[] mime, CancellationToken ct)
+	public async Task SendAsync(ReadOnlyMemory<byte> rfc822, CancellationToken ct)
 	{
-		using MemoryStream stream = new(mime);
+		using MemoryStream stream = new(rfc822.ToArray());
 		MimeMessage message = await MimeMessage.LoadAsync(stream, ct).ConfigureAwait(false);
 
 		if (options.ForceFrom && mailAddress is not null)
@@ -70,7 +70,7 @@ public sealed class SmtpSubmitBackend(
 		// distinct, non-retryable BackendException carrying the size hint; at the EAS layer this maps
 		// to ComposeMail Status 120 (permanent), which is correct — a too-big message never succeeds
 		// on retry, and the DATA transfer is spared.
-		// Measure what will ACTUALLY be transmitted, not the caller-supplied `mime` bytes —
+		// Measure what will ACTUALLY be transmitted, not the caller-supplied `rfc822` bytes —
 		// smtp.SendAsync below re-serializes `message`, which differs from the input whenever
 		// ForceFrom rewrote the headers (above) or MimeKit re-encoded a part. A stale length can
 		// wrongly pass a message the server will reject, or wrongly fail one that would have fit.

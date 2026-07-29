@@ -485,8 +485,13 @@ public sealed class WebDavClient : IDisposable
 		if (response.IsSuccessStatusCode)
 			return;
 		Core.Observability.GatewayMetrics.RecordBackendError("dav");
+		// Typed, so the host can tell "the item moved underneath the merge" from any other backend
+		// error: an update-PUT carrying the contract's `expected` revision as If-Match answers 412
+		// exactly when that precondition failed, and the host then re-fetches, re-merges and retries
+		// once. BackendPreconditionFailedException derives from BackendException, so every existing
+		// `catch (BackendException)` guard still funnels it.
 		if (response.StatusCode == HttpStatusCode.PreconditionFailed)
-			throw new BackendException($"DAV {method} {href}: precondition failed (ETag conflict).");
+			throw new BackendPreconditionFailedException($"DAV {method} {href}: precondition failed (ETag conflict).");
 		// Body omitted from the message — it may contain PII and this reaches the logs.
 		throw new BackendException(
 			$"DAV {method} {href} failed: {(int)response.StatusCode} {response.ReasonPhrase}.");

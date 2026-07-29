@@ -271,7 +271,11 @@ public sealed class ItemOperationsHandler(
 			new XElement(AS + "CollectionId", collectionId));
 	}
 
-	private static BodyPreference ParseBodyPreference(XElement? options, bool eas16)
+	/// <summary>
+	///   The body preference a Fetch renders with. Internal (not private) so the version gate
+	///   below — the one a hard-coded false used to break — is directly assertable.
+	/// </summary>
+	internal static BodyPreference ParseBodyPreference(XElement? options, bool eas16)
 	{
 		// AirSyncBase body Type codes (MS-ASAIRS): 1 = plain text, 2 = HTML, 3 = RTF,
 		// 4 = MIME. Default to 2 (HTML) when the client sends no preference.

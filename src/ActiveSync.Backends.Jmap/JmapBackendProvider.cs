@@ -98,7 +98,8 @@ public sealed class JmapBackendProvider : IBackendProvider, ICredentialVerifier,
 			switch (role.Role)
 			{
 				case BackendRole.MailStore:
-					stores.Add(new JmapMailStore(client, context.MailAddress, _options.CurrentValue.Eas.DavPollSeconds, waitForPush));
+					// No mail address: draft composition (its only consumer) is host-side now.
+					stores.Add(new JmapMailStore(client, _options.CurrentValue.Eas.DavPollSeconds, waitForPush));
 					break;
 				case BackendRole.MailSubmit:
 					submit = new JmapMailSubmit(client, context.MailAddress, _logger);

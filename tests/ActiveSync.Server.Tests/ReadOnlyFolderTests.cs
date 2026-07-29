@@ -181,8 +181,8 @@ public sealed class ReadOnlyFolderTests : IDisposable
 	private async Task<(UserFolder Shared, UserFolder Inbox)> TwoFoldersAsync()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder { BackendKey = "imap:Shared", DisplayName = "Shared", Type = FolderType.UserMail, EasClass = EasClass.Email },
-			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
+			EasHandlerHarness.Folder("imap:Shared", "Shared", FolderType.UserMail, EasClass.Email),
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 		return (registry.Single(f => f.BackendKey == "imap:Shared"),
 			registry.Single(f => f.BackendKey == "imap:INBOX"));
 	}

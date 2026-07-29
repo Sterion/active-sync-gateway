@@ -30,8 +30,8 @@ public sealed class MoveItemsSnapshotTests : IDisposable
 	public async Task Move_AlsoPatchesPreviousSnapshot()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
-			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email },
-			new BackendFolder { BackendKey = "imap:Archive", DisplayName = "Archive", Type = FolderType.UserMail, EasClass = EasClass.Email });
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email),
+			EasHandlerHarness.Folder("imap:Archive", "Archive", FolderType.UserMail, EasClass.Email));
 		UserFolder inbox = folders.Single(f => f.BackendKey == "imap:INBOX");
 		UserFolder archive = folders.Single(f => f.BackendKey == "imap:Archive");
 
@@ -83,8 +83,8 @@ public sealed class MoveItemsSnapshotTests : IDisposable
 	public async Task Move_StoresTheBackendsRealDestinationRevision()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
-			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email },
-			new BackendFolder { BackendKey = "imap:Archive", DisplayName = "Archive", Type = FolderType.UserMail, EasClass = EasClass.Email });
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email),
+			EasHandlerHarness.Folder("imap:Archive", "Archive", FolderType.UserMail, EasClass.Email));
 		UserFolder inbox = folders.Single(f => f.BackendKey == "imap:INBOX");
 		UserFolder archive = folders.Single(f => f.BackendKey == "imap:Archive");
 

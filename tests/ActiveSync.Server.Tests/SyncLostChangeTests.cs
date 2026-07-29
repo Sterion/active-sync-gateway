@@ -41,7 +41,7 @@ public sealed class SyncLostChangeTests : IDisposable
 	private async Task<UserFolder> RegisterInboxAsync()
 	{
 		List<UserFolder> folders = await _harness.RegisterFoldersAsync(
-			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 		return folders.Single(f => f.BackendKey == "imap:INBOX");
 	}
 
@@ -59,11 +59,6 @@ public sealed class SyncLostChangeTests : IDisposable
 	public async Task ChangeRenderFailure_IsReofferedOnNextRound_NotLostForever()
 	{
 		UserFolder inbox = await RegisterInboxAsync();
-		// The default ItemApplicationData (an airsync:Subject) has no WBXML token and is deliberately
-		// unencodable (see EasHandlerHarness); this test round-trips the response through WBXML, so
-		// it needs an encodable body.
-		_harness.Session.Store.ItemApplicationData = _ =>
-			[new XElement(ASB + "Body", new XElement(ASB + "Type", "1"), new XElement(ASB + "Data", "preview"))];
 		SyncHandler handler = NewSyncHandler();
 
 		Device device = await _harness.State.GetOrCreateDeviceAsync(

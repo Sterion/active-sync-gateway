@@ -208,8 +208,12 @@ public sealed class DependencyRuleTests
 			"Expected JmapMailStore.Search.cs (the Email/query + Email/get search path) to exist as its own partial.");
 		Assert.True(File.Exists(Path.Combine(dir, "JmapMailStore.Watch.cs")),
 			"Expected JmapMailStore.Watch.cs (WaitForChangesAsync + folder-token polling) to exist as its own partial.");
-		Assert.True(File.Exists(Path.Combine(dir, "JmapMailStore.Attachments.cs")),
-			"Expected JmapMailStore.Attachments.cs (attachment fetch + file-reference codec) to exist as its own partial.");
+		// The attachment partial is deliberately GONE: the store-side attachment fetch and the
+		// FileReference codec are host-internal now (the host extracts the part from the raw
+		// RFC822 it already fetches), so a store that still carried them would be re-importing
+		// out-of-band knowledge the contract removed.
+		Assert.False(File.Exists(Path.Combine(dir, "JmapMailStore.Attachments.cs")),
+			"JmapMailStore.Attachments.cs must not come back: attachment extraction is host-side now.");
 	}
 
 	// S2: CalendarConverter.cs and TasksConverter.cs each carried a file-wide

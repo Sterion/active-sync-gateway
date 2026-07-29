@@ -3,13 +3,12 @@ using System.Net.Sockets;
 using System.Text;
 using ActiveSync.Backends.Imap;
 using ActiveSync.Contracts;
-using ActiveSync.Protocol.Wbxml;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ActiveSync.Core.Tests;
 
 /// <summary>
-///   <c>ImapMailBackend.UpdateItemAsync</c>'s Drafts content-rewrite is APPEND-then-DELETE
+///   <c>ImapMailBackend.ReplaceDraftAsync</c>'s Drafts content-rewrite is APPEND-then-DELETE
 ///   (append the merged draft, then flag+expunge the original). A fault landing between the two
 ///   leaves BOTH the original and the freshly-appended copy in the mailbox, under the ORIGINAL's
 ///   still-valid item key — so a client retry (using that same stale key, exactly the "snapshot
@@ -30,18 +29,24 @@ public sealed class ImapDraftUpdateOrderingTests
 	{
 		await using FakeImapServer server = new();
 		CancellationToken ct = CancellationToken.None;
-		System.Xml.Linq.XElement contentChange = new("ApplicationData",
-			new System.Xml.Linq.XElement(EasNamespaces.Email + "Subject", "g9-edited-subject"));
-		string folderKey = ImapSession.ToBackendKey("Drafts");
-		string itemKey = "1000:1"; // the pre-seeded original, uid 1
+		// The host merges the client's partial Change into the stored draft and hands the store a
+		// COMPLETE replacement message — so the rewrite the store performs is exactly this.
+		MailItem replacement = new()
+		{
+			Rfc822 = Encoding.ASCII.GetBytes(
+				"From: user@example.test\r\nSubject: g9-edited-subject\r\n\r\nbody\r\n"),
+			Flags = new MailFlags { Draft = true }
+		};
+		FolderKey folderKey = new(ImapSession.ToBackendKey("Drafts"));
+		ItemKey itemKey = new("1000:1"); // the pre-seeded original, uid 1
 
 		bool firstAttemptFailed;
 		await using (ImapSession session1 = new(Options(server.Port), Credentials, NullLogger.Instance))
 		{
-			ImapMailBackend backend1 = new(session1, null, _ => null, NullLogger.Instance);
+			ImapMailBackend backend1 = new(session1, _ => null, NullLogger.Instance);
 			try
 			{
-				await backend1.UpdateItemAsync(folderKey, itemKey, contentChange, ct);
+				await backend1.ReplaceDraftAsync(folderKey, itemKey, replacement, ct);
 				firstAttemptFailed = false;
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException)
@@ -61,8 +66,8 @@ public sealed class ImapDraftUpdateOrderingTests
 		if (firstAttemptFailed)
 		{
 			await using ImapSession session2 = new(Options(server.Port), Credentials, NullLogger.Instance);
-			ImapMailBackend backend2 = new(session2, null, _ => null, NullLogger.Instance);
-			await backend2.UpdateItemAsync(folderKey, itemKey, contentChange, ct);
+			ImapMailBackend backend2 = new(session2, _ => null, NullLogger.Instance);
+			await backend2.ReplaceDraftAsync(folderKey, itemKey, replacement, ct);
 		}
 
 		// Exactly one draft must remain: the original, replaced by the edit -- never both the

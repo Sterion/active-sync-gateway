@@ -1,17 +1,21 @@
 using System.Text.Json;
+using ActiveSync.Contracts;
 
 namespace ActiveSync.Backends.Jmap;
 
 // The push/watch engine: WaitForChangesAsync races the shared per-user JMAP EventSource push
 // (when available) against polling folder/account state tokens — Mailbox counts plus the
-// account-wide Email state — to detect backend changes during a Ping/Sync long-poll.
+// account-wide Email state — to detect backend changes during a Ping/Sync long-poll. The token
+// plumbing keeps its internal string mailbox ids; the contract's typed keys are wrapped at the
+// boundary (the ImapMailBackend.Watch.cs pattern).
 public sealed partial class JmapMailStore
 {
-	public async Task<IReadOnlyList<string>> WaitForChangesAsync(
-		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<IReadOnlyList<FolderKey>> WaitForChangesAsync(
+		IReadOnlyList<FolderKey> folders, TimeSpan timeout, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		string[] ids = folderBackendKeys.Select(FromKey).ToArray();
+		string[] ids = folders.Select(f => FromKey(f.Value)).ToArray();
 		Dictionary<string, string> baseline = await FolderTokensAsync(account, ids, ct).ConfigureAwait(false);
 		DateTime deadline = DateTime.UtcNow + timeout;
 		int delaySeconds = 1;
@@ -42,8 +46,9 @@ public sealed partial class JmapMailStore
 			delaySeconds = Math.Min(delaySeconds * 2, ceiling);
 
 			Dictionary<string, string> current = await FolderTokensAsync(account, ids, ct).ConfigureAwait(false);
-			List<string> changed = folderBackendKeys
-				.Where(key => baseline.GetValueOrDefault(FromKey(key)) != current.GetValueOrDefault(FromKey(key)))
+			List<FolderKey> changed = folders
+				.Where(key => baseline.GetValueOrDefault(FromKey(key.Value)) !=
+				              current.GetValueOrDefault(FromKey(key.Value)))
 				.ToList();
 			if (changed.Count > 0)
 				return changed;

@@ -40,11 +40,11 @@ public class MailConverterAttachmentSizeTests
 		message.Date = DateTimeOffset.UtcNow;
 		message.Body = multipart;
 
-		MailConverter.MessageFlags flags = new(false, false, false, false);
+		MailFlags flags = new();
 
 		GC.Collect();
 		long before = GC.GetAllocatedBytesForCurrentThread();
-		List<XElement> data = MailConverter.ToApplicationData(message, flags, BodyPreference.PlainText, _ => "ref");
+		List<XElement> data = MailConverter.ToApplicationData(message, flags, [], BodyPreference.PlainText, _ => "ref");
 		long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
 		XElement attachmentsElement = data.Single(e => e.Name == AirSyncBase + "Attachments");

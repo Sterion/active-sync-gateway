@@ -1,4 +1,3 @@
-using System.Xml.Linq;
 using ActiveSync.Contracts;
 
 namespace ActiveSync.Core.Tests;
@@ -142,32 +141,19 @@ public class BackendConnectionDisposalTests
 			return ValueTask.CompletedTask;
 		}
 
-		public string EasClass => "Email";
-		public bool OwnsBackendKey(string backendKey) => false;
+		public bool OwnsKey(FolderKey key) => false;
 
 		public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-			string folderBackendKey, ContentFilter filter, CancellationToken ct) => throw new NotSupportedException();
+		public Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+			FolderKey folder, ContentFilter filter, CancellationToken ct) => throw new NotSupportedException();
 
-		public Task<BackendItem?> GetItemAsync(
-			string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct) =>
+		public Task DeleteItemAsync(FolderKey folder, ItemKey item, bool permanent, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<(string ItemKey, string Revision)> CreateItemAsync(
-			string folderBackendKey, XElement applicationData, CancellationToken ct) => throw new NotSupportedException();
-
-		public Task<string> UpdateItemAsync(
-			string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct) =>
-			throw new NotSupportedException();
-
-		public Task DeleteItemAsync(
-			string folderBackendKey, string itemKey, bool permanent, CancellationToken ct) =>
-			throw new NotSupportedException();
-
-		public Task<IReadOnlyList<string>> WaitForChangesAsync(
-			IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct) =>
+		public Task<IReadOnlyList<FolderKey>> WaitForChangesAsync(
+			IReadOnlyList<FolderKey> folders, TimeSpan timeout, CancellationToken ct) =>
 			throw new NotSupportedException();
 	}
 }

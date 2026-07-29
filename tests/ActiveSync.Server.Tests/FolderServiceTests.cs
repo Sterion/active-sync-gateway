@@ -40,48 +40,12 @@ public sealed class FolderServiceTests : IDisposable
 		{
 			Id = 7, UserId = 1, BackendKey = "imap:INBOX", DisplayName = "Inbox", EasClass = EasClass.Email
 		};
-		MailStoreStub store = new();
-
 		// Correct prefix (or no prefix) → resolves to the raw mail UID.
-		Assert.Equal("123", await _service.ResolveItemKeyAsync(folder, store, "7:123", CancellationToken.None));
-		Assert.Equal("123", await _service.ResolveItemKeyAsync(folder, store, "123", CancellationToken.None));
+		Assert.Equal("123", await _service.ResolveItemKeyAsync(folder, "7:123", CancellationToken.None));
+		Assert.Equal("123", await _service.ResolveItemKeyAsync(folder, "123", CancellationToken.None));
 
 		// Prefix names a different collection → refuse (would otherwise operate on UID 123
 		// inside folder 7 regardless of what the client actually addressed).
-		Assert.Null(await _service.ResolveItemKeyAsync(folder, store, "9:123", CancellationToken.None));
-	}
-
-	private sealed class MailStoreStub : IContentStore
-	{
-		public string EasClass => Protocol.EasClass.Email;
-
-		public bool OwnsBackendKey(string backendKey) =>
-			backendKey.StartsWith("imap:", StringComparison.Ordinal);
-
-		public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct) =>
-			throw new NotSupportedException();
-
-		public Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-			string folderBackendKey, ContentFilter filter, CancellationToken ct) => throw new NotSupportedException();
-
-		public Task<BackendItem?> GetItemAsync(
-			string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct) =>
-			throw new NotSupportedException();
-
-		public Task<(string ItemKey, string Revision)> CreateItemAsync(
-			string folderBackendKey, XElement applicationData, CancellationToken ct) => throw new NotSupportedException();
-
-		public Task<string> UpdateItemAsync(
-			string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct) =>
-			throw new NotSupportedException();
-
-		public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct) =>
-			throw new NotSupportedException();
-
-		// Item move and folder mutation are optional capabilities; this stub implements neither.
-
-		public Task<IReadOnlyList<string>> WaitForChangesAsync(
-			IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct) =>
-			throw new NotSupportedException();
+		Assert.Null(await _service.ResolveItemKeyAsync(folder, "9:123", CancellationToken.None));
 	}
 }

@@ -1,4 +1,3 @@
-using System.Xml.Linq;
 using ActiveSync.Contracts;
 using ActiveSync.Core.Backend;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -54,15 +53,16 @@ public class BackendProviderTests
 		Assert.Equal([BackendRole.Calendar, BackendRole.Contacts], rest.LastAssignedRoles);
 
 		Assert.Equal(3, session.Stores.Count); // MailSubmit contributes no store
-		Assert.NotNull(session.MailStore);
+		Assert.NotNull(session.Mail);
 		Assert.NotNull(session.MailSubmit);
-		Assert.Equal("Calendar", session.GetStoreForClass("Calendar")!.EasClass);
+		// The store's class is DERIVED from its alias interface, never declared.
+		Assert.Equal("Calendar", session.EasClassOf(session.GetStoreForClass("Calendar")!));
 
-		// Key dispatch goes through OwnsBackendKey; read-only routes to the owning store.
-		Assert.Equal("Email", session.GetStoreForBackendKey("mail-MailStore:INBOX")!.EasClass);
-		Assert.Null(session.GetStoreForBackendKey("jmap:INBOX"));
-		Assert.True(session.IsReadOnlyFolder("rest-Calendar:shared"));
-		Assert.False(session.IsReadOnlyFolder("rest-Calendar:own"));
+		// Key dispatch goes through OwnsKey; read-only routes to the owning store.
+		Assert.Equal("Email", session.EasClassOf(session.GetStoreForKey(new FolderKey("mail-MailStore:INBOX"))!));
+		Assert.Null(session.GetStoreForKey(new FolderKey("jmap:INBOX")));
+		Assert.True(session.IsReadOnlyFolder(new FolderKey("rest-Calendar:shared")));
+		Assert.False(session.IsReadOnlyFolder(new FolderKey("rest-Calendar:own")));
 	}
 
 	[Fact]
@@ -167,7 +167,13 @@ public class BackendProviderTests
 			LastResource = new FakeResource(throwOnDispose);
 			List<IContentStore> stores = context.Roles
 				.Where(r => r.Role is not (BackendRole.MailSubmit or BackendRole.Oof))
-				.Select(IContentStore (r) => new FakeStore($"{name}-{r.Role}", r.Role.ToString()))
+				.Select(IContentStore (r) => r.Role switch
+				{
+					BackendRole.MailStore => new FakeMailStore($"{name}-{r.Role}"),
+					BackendRole.Calendar => new FakeCalendarStore($"{name}-{r.Role}"),
+					BackendRole.Contacts => new FakeContactStore($"{name}-{r.Role}"),
+					_ => throw new NotSupportedException($"No stub store for the {r.Role} role.")
+				})
 				.ToList();
 			return Task.FromResult<IBackendConnection>(new BackendConnection(
 				stores,
@@ -191,79 +197,103 @@ public class BackendProviderTests
 
 	private sealed class FakeSubmit : IMailSubmitOperations
 	{
-		public Task SendAsync(byte[] mime, CancellationToken ct) => Task.CompletedTask;
+		public Task SendAsync(ReadOnlyMemory<byte> rfc822, CancellationToken ct) => Task.CompletedTask;
 	}
 
-	/// <summary>Store with a "{prefix}:" key space; the MailStore one also does mail-store ops.</summary>
-	private sealed class FakeStore(string prefix, string role) : IContentStore, IMailStoreOperations,
-		ICalendarOperations, IReadOnlyCollectionSource
+	/// <summary>
+	///   The class-agnostic half of a stub store with a "{prefix}:" key space. A store's content
+	///   class is DERIVED from which alias interface it implements, so each class gets its own
+	///   subclass rather than one type claiming several.
+	/// </summary>
+	private abstract class FakeStore(string prefix) : IContentStore
 	{
-		public string EasClass => role switch
-		{
-			"MailStore" => "Email",
-			"Calendar" => "Calendar",
-			"Contacts" => "Contacts",
-			_ => role
-		};
-
-		public bool OwnsBackendKey(string backendKey) =>
-			backendKey.StartsWith(prefix + ":", StringComparison.Ordinal);
-
-		public bool IsReadOnlyCollection(string folderBackendKey) => folderBackendKey.EndsWith(":shared");
+		public bool OwnsKey(FolderKey key) =>
+			key.Value.StartsWith(prefix + ":", StringComparison.Ordinal);
 
 		public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-			string folderBackendKey, ContentFilter filter, CancellationToken ct) => throw new NotSupportedException();
+		public Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+			FolderKey folder, ContentFilter filter, CancellationToken ct) => throw new NotSupportedException();
 
-		public Task<BackendItem?> GetItemAsync(
-			string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct) =>
+		public Task DeleteItemAsync(FolderKey folder, ItemKey item, bool permanent, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<(string ItemKey, string Revision)> CreateItemAsync(
-			string folderBackendKey, XElement applicationData, CancellationToken ct) =>
+		// Item move and folder mutation are optional capabilities; these stubs implement neither.
+
+		public Task<IReadOnlyList<FolderKey>> WaitForChangesAsync(
+			IReadOnlyList<FolderKey> folders, TimeSpan timeout, CancellationToken ct) =>
+			throw new NotSupportedException();
+	}
+
+	/// <summary>The mail stub: the mailbox side-operations are mandatory alongside the mail store.</summary>
+	private sealed class FakeMailStore(string prefix) : FakeStore(prefix), IMailStore, IMailboxOperations
+	{
+		public Task<MailItem?> GetItemAsync(
+			FolderKey folder, ItemKey item, MailFetchOptions options, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<string> UpdateItemAsync(
-			string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct) =>
+		public Task<(ItemKey Key, ItemRevision Revision)> CreateDraftAsync(
+			FolderKey folder, MailItem item, CancellationToken ct) => throw new NotSupportedException();
+
+		public Task<ItemRevision> UpdateFlagsAsync(
+			FolderKey folder, ItemKey item, MailFlagsPatch patch, ItemRevision? expected, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task DeleteItemAsync(
-			string folderBackendKey, string itemKey, bool permanent, CancellationToken ct) =>
+		public Task<(ItemKey Key, ItemRevision Revision)> ReplaceDraftAsync(
+			FolderKey folder, ItemKey item, MailItem value, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		// Item move and folder mutation are optional capabilities; this aggregation double
-		// implements neither.
-
-		public Task<IReadOnlyList<string>> WaitForChangesAsync(
-			IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct) =>
+		public Task SaveToSentAsync(ReadOnlyMemory<byte> rfc822, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task SaveToSentAsync(byte[] mime, CancellationToken ct) => throw new NotSupportedException();
-
-		public Task<byte[]?> GetRawMessageAsync(string folderBackendKey, string itemKey, CancellationToken ct) =>
+		public Task<ReadOnlyMemory<byte>?> GetRawMessageAsync(FolderKey folder, ItemKey item, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<BackendAttachment?> GetAttachmentAsync(string fileReference, CancellationToken ct) =>
+		public Task SetAnsweredAsync(FolderKey folder, ItemKey item, bool forwarded, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task SetAnsweredAsync(string folderBackendKey, string itemKey, bool forwarded, CancellationToken ct) =>
+		public Task<IReadOnlyList<SearchHit>> SearchAsync(
+			FolderKey? folder, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
-			string? folderBackendKey, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct) =>
+		public Task EmptyFolderAsync(FolderKey folder, CancellationToken ct) => throw new NotSupportedException();
+	}
+
+	/// <summary>The calendar stub: also the read-only-grant source the dispatch test exercises.</summary>
+	private sealed class FakeCalendarStore(string prefix)
+		: FakeStore(prefix), ICalendarStore, IMeetingOperations, IReadOnlyCollectionSource
+	{
+		public bool IsReadOnlyCollection(FolderKey folder) => folder.Value.EndsWith(":shared");
+
+		public Task<CalendarItem?> GetItemAsync(FolderKey folder, ItemKey item, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task EmptyFolderAsync(string folderBackendKey, CancellationToken ct) => throw new NotSupportedException();
+		public Task<(ItemKey Key, ItemRevision Revision)> CreateItemAsync(
+			FolderKey folder, CalendarItem item, CancellationToken ct) => throw new NotSupportedException();
 
-		public Task<string?> RespondToMeetingAsync(
-			string calendarFolderBackendKey, string eventUid, int userResponse, CancellationToken ct) =>
+		public Task<ItemRevision> UpdateItemAsync(
+			FolderKey folder, ItemKey item, CalendarItem value, ItemRevision? expected, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<string?> GetRawEventAsync(string folderBackendKey, string itemKey, CancellationToken ct) =>
+		public Task<ItemKey?> RespondToMeetingAsync(
+			FolderKey calendar, string eventUid, MeetingResponseKind response, CancellationToken ct) =>
 			throw new NotSupportedException();
 
 		public Task<bool> ShouldSendInvitationsAsync(CancellationToken ct) => throw new NotSupportedException();
+	}
+
+	/// <summary>The contacts stub.</summary>
+	private sealed class FakeContactStore(string prefix) : FakeStore(prefix), IContactStore
+	{
+		public Task<ContactItem?> GetItemAsync(FolderKey folder, ItemKey item, CancellationToken ct) =>
+			throw new NotSupportedException();
+
+		public Task<(ItemKey Key, ItemRevision Revision)> CreateItemAsync(
+			FolderKey folder, ContactItem item, CancellationToken ct) => throw new NotSupportedException();
+
+		public Task<ItemRevision> UpdateItemAsync(
+			FolderKey folder, ItemKey item, ContactItem value, ItemRevision? expected, CancellationToken ct) =>
+			throw new NotSupportedException();
 	}
 }

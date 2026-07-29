@@ -25,11 +25,19 @@ public class MailConverterCategoryTests
 		return message;
 	}
 
+	/// <summary>
+	///   The store now classifies the backend's keywords into user categories
+	///   (<see cref="MailConverter.CategoryKeywords" /> is the shared, backend-side helper) and
+	///   hands the RESULT across the contract; the converter renders what it is given. Driving the
+	///   raw keywords through that same helper here keeps the assertion on the end-to-end
+	///   keywords → Categories behaviour rather than on either half alone.
+	/// </summary>
 	private static List<XElement> Convert(IReadOnlyCollection<string>? keywords)
 	{
 		return MailConverter.ToApplicationData(
 			Message(),
-			new MailConverter.MessageFlags(true, false, false, false, keywords),
+			new MailFlags { Seen = true },
+			MailConverter.CategoryKeywords(keywords),
 			new BodyPreference { Type = BodyType.PlainText },
 			_ => "ref");
 	}

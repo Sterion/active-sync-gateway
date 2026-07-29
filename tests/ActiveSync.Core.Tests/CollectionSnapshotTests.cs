@@ -13,8 +13,9 @@ namespace ActiveSync.Core.Tests;
 /// </summary>
 public class CollectionSnapshotTests
 {
-	private static Dictionary<string, string> Current(params (string Id, string Rev)[] items) =>
-		items.ToDictionary(i => i.Id, i => i.Rev, StringComparer.Ordinal);
+	/// <summary>The backend's current revision map, in the store contract's typed key space.</summary>
+	private static Dictionary<ItemKey, ItemRevision> Current(params (string Id, string Rev)[] items) =>
+		items.ToDictionary(i => new ItemKey(i.Id), i => new ItemRevision(i.Rev));
 
 	[Fact]
 	public void PendingRevert_ForcesAChange_WhenTheBackendHasNotMoved()

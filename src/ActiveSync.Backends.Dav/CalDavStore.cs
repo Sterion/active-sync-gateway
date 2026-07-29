@@ -7,7 +7,11 @@ using Microsoft.Extensions.Logging;
 
 namespace ActiveSync.Backends.Dav;
 
-/// <summary>Calendar content store over CalDAV. Item keys are server hrefs; revisions are ETags.</summary>
+/// <summary>
+///   Calendar content store over CalDAV. Item keys are server hrefs; revisions are ETags. The
+///   payload is the stored iCalendar document verbatim — the store neither reads nor writes EAS
+///   XML (the host owns that conversion and hands over complete documents).
+/// </summary>
 public sealed class CalDavStore(
 	WebDavClient dav,
 	DavServerOptions options,
@@ -16,17 +20,19 @@ public sealed class CalDavStore(
 	ILogger logger,
 	int pollSeconds,
 	IReadOnlyList<SharedCollection>? sharedCollections = null)
-	: DavStoreBase(dav, options, credentials, logger, pollSeconds),
-		ICalendarOperations, ICalendarAttachmentSource, IFreeBusySource, IReadOnlyCollectionSource
+	: DavStoreBase<CalendarItem>(dav, options, credentials, logger, pollSeconds),
+		ICalendarStore, IMeetingOperations, ICalendarAttachmentSource, IFreeBusySource, IReadOnlyCollectionSource
 {
 	public const string KeyPrefix = "caldav:";
 
 	private readonly IReadOnlyList<SharedCollection> _sharedCollections = sharedCollections ?? [];
 
 	/// <summary>Whether a folder maps to a shared collection granted read-only.</summary>
-	public bool IsReadOnlyCollection(string folderBackendKey)
+	/// <param name="folder">The folder to test.</param>
+	/// <returns><c>true</c> when the folder is granted read-only.</returns>
+	public bool IsReadOnlyCollection(FolderKey folder)
 	{
-		string href = FromBackendKey(folderBackendKey);
+		string href = FromBackendKey(folder.Value);
 		return _sharedCollections.Any(c => c.ReadOnly && SharedHrefEquals(c.Href, href));
 	}
 
@@ -41,7 +47,6 @@ public sealed class CalDavStore(
 	}
 
 	protected override string Prefix => KeyPrefix;
-	public override string EasClass => Protocol.EasClass.Calendar;
 	protected override string MediaType => "text/calendar";
 	protected override string FileExtension => ".ics";
 	protected override string WellKnownPath => "/.well-known/caldav";
@@ -53,13 +58,22 @@ public sealed class CalDavStore(
 	protected override string CollectionKindPlural => "calendars";
 	protected override string CtagLabel => "CalDAV";
 
-	// ---------- ICalendarOperations ----------
+	// ---------- IMeetingOperations ----------
 
-	public async Task<string?> RespondToMeetingAsync(
-		string calendarFolderBackendKey, string eventUid, int userResponse, CancellationToken ct)
+	/// <summary>
+	///   Updates the acting user's PARTSTAT on the stored event and reports the calendar item that
+	///   holds it (the gateway mails the iTIP reply itself).
+	/// </summary>
+	/// <param name="calendar">The calendar folder holding the event.</param>
+	/// <param name="eventUid">The event's iCalendar UID.</param>
+	/// <param name="response">The user's answer.</param>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
+	/// <returns>The calendar item holding the event, or <c>null</c> when none was found.</returns>
+	public async Task<ItemKey?> RespondToMeetingAsync(
+		FolderKey calendar, string eventUid, MeetingResponseKind response, CancellationToken ct)
 	{
 		// Locate the event by UID in the calendar collection.
-		string collection = FromBackendKey(calendarFolderBackendKey);
+		string collection = FromBackendKey(calendar.Value);
 		string? href = (await FindByUidAsync(collection, eventUid, ct).ConfigureAwait(false))?.Href;
 		if (href is null)
 			return null;
@@ -70,20 +84,23 @@ public sealed class CalDavStore(
 
 		// partStatIdentity = the user's mail address (falls back to the gateway login) —
 		// Credentials.UserName is the DAV backend login, which need not match any attendee.
-		string? updated = CalendarConverter.SetPartStat(existing.Value.Content, userResponse, partStatIdentity);
+		// MeetingResponseKind's values are the MS-ASCMD UserResponse wire values the converter takes.
+		string? updated = CalendarConverter.SetPartStat(existing.Value.Content, (int)response, partStatIdentity);
 		if (updated is not null)
 			await Dav.PutAsync(href, updated, "text/calendar", existing.Value.ETag, false, ct)
 				.ConfigureAwait(false);
-		return href;
-	}
-
-	public async Task<string?> GetRawEventAsync(string folderBackendKey, string itemKey, CancellationToken ct)
-	{
-		return (await Dav.GetAsync(itemKey, ct).ConfigureAwait(false))?.Content;
+		return new ItemKey(href);
 	}
 
 	private bool? _serverSchedules;
 
+	/// <summary>
+	///   Whether the gateway should mail iMIP invitations itself: Auto probes the server for
+	///   RFC 6638 implicit scheduling (a scheduling server invites on its own, and double invites
+	///   are worse than none).
+	/// </summary>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
+	/// <returns><c>true</c> when the gateway should send invitation mail itself.</returns>
 	public async Task<bool> ShouldSendInvitationsAsync(CancellationToken ct)
 	{
 		switch (Options.SendInvitations.ToLowerInvariant())
@@ -135,25 +152,28 @@ public sealed class CalDavStore(
 		}
 	}
 
-	protected override IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference)
+	// The stored document IS the payload — identity in both directions (round-trip fidelity).
+	protected override CalendarItem ToItem(string content)
 	{
-		// partStatIdentity is the acting user's mail address, so MeetingStatus can tell
-		// "I am the organizer" apart from "I am an invitee".
-		return CalendarConverter.ToApplicationData(content, bodyPreference, partStatIdentity);
+		return new CalendarItem { ICalendar = content };
 	}
 
-	protected override string FromApplicationData(XElement applicationData, string uid, string? existingContent)
+	protected override string PayloadOf(CalendarItem item)
 	{
-		return CalendarConverter.FromApplicationData(applicationData, uid, existingContent,
-			CalendarAttachmentPolicy.CapBytes(Options.CalendarAttachments), partStatIdentity);
+		return item.ICalendar;
 	}
 
-	/// <summary>ItemOperations fetch of an inline event attachment (calatt:: FileReference).</summary>
+	/// <summary>ItemOperations fetch of an inline event attachment (the Nth ATTACH of the stored event).</summary>
+	/// <param name="folder">The calendar folder holding the event.</param>
+	/// <param name="item">The event holding the attachment.</param>
+	/// <param name="index">The attachment's position among the event's ATTACH properties.</param>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
+	/// <returns>The attachment, or <c>null</c> when the event or attachment no longer exists.</returns>
 	public async Task<BackendAttachment?> GetEventAttachmentAsync(
-		string folderBackendKey, string itemKey, int index, CancellationToken ct)
+		FolderKey folder, ItemKey item, int index, CancellationToken ct)
 	{
-		(string Content, string? ETag)? item = await Dav.GetAsync(itemKey, ct).ConfigureAwait(false);
-		return item is null ? null : CalendarConverter.ExtractAttachment(item.Value.Content, index);
+		(string Content, string? ETag)? fetched = await Dav.GetAsync(item.Value, ct).ConfigureAwait(false);
+		return fetched is null ? null : CalendarConverter.ExtractAttachment(fetched.Value.Content, index);
 	}
 
 	/// <summary>
@@ -163,6 +183,11 @@ public sealed class CalDavStore(
 	///   per-recipient Availability status 163). RFC 6638 scheduling is not implemented —
 	///   neither supported test backend offers a schedule-outbox.
 	/// </summary>
+	/// <param name="targetAddress">The recipient's address to query.</param>
+	/// <param name="start">Start of the queried range.</param>
+	/// <param name="end">End of the queried range.</param>
+	/// <param name="ct">Cancellation token for the backend round-trip.</param>
+	/// <returns>The recipient's busy periods, an empty list if free, or <c>null</c> if no data is available.</returns>
 	public async Task<IReadOnlyList<BusyPeriod>?> GetBusyPeriodsAsync(
 		string targetAddress, DateTimeOffset start, DateTimeOffset end, CancellationToken ct)
 	{
@@ -176,7 +201,7 @@ public sealed class CalDavStore(
 			// report the user busy whenever a colleague's/team calendar shared to them is busy.
 			foreach (BackendFolder folder in await ListFoldersAsync(ct).ConfigureAwait(false))
 			{
-				string href = FromBackendKey(folder.BackendKey);
+				string href = FromBackendKey(folder.Key.Value);
 				if (_sharedCollections.Any(c => SharedHrefEquals(c.Href, href)))
 					continue;
 				collections.Add(href);
@@ -238,6 +263,7 @@ public sealed class CalDavStore(
 							new XElement(DavNs.CalDav + "text-match", uid))))));
 	}
 
+	/// <inheritdoc />
 	public override async Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 	{
 		string home = await GetHomeSetAsync(ct).ConfigureAwait(false);
@@ -273,10 +299,9 @@ public sealed class CalDavStore(
 			bool granted = _sharedCollections.Any(s => SharedHrefEquals(s.Href, resource.Href));
 			folders.Add(new BackendFolder
 			{
-				BackendKey = ToBackendKey(resource.Href),
+				Key = new FolderKey(ToBackendKey(resource.Href)),
 				DisplayName = name,
-				Type = first && !granted ? FolderType.Calendar : FolderType.UserCalendar,
-				EasClass = Protocol.EasClass.Calendar
+				Type = first && !granted ? FolderType.Calendar : FolderType.UserCalendar
 			});
 			if (!granted)
 				first = false;
@@ -290,7 +315,7 @@ public sealed class CalDavStore(
 		if (folders.Count > 0 && folders.TrueForAll(f => f.Type != FolderType.Calendar))
 		{
 			int promoteIndex = folders.FindIndex(f =>
-				!_sharedCollections.Any(s => SharedHrefEquals(s.Href, FromBackendKey(f.BackendKey))));
+				!_sharedCollections.Any(s => SharedHrefEquals(s.Href, FromBackendKey(f.Key.Value))));
 			if (promoteIndex < 0)
 				promoteIndex = 0; // every home-set calendar is a share — fall back to the first anyway
 			folders[promoteIndex] = folders[promoteIndex] with { Type = FolderType.Calendar };
@@ -300,7 +325,7 @@ public sealed class CalDavStore(
 		// SKIPPED on any failure — an unreachable/revoked share must never break folder sync.
 		foreach (SharedCollection shared in _sharedCollections)
 		{
-			if (folders.Any(f => SharedHrefEquals(FromBackendKey(f.BackendKey), shared.Href)))
+			if (folders.Any(f => SharedHrefEquals(FromBackendKey(f.Key.Value), shared.Href)))
 				continue; // already in the user's own home set
 			try
 			{
@@ -329,17 +354,16 @@ public sealed class CalDavStore(
 
 				// Dedupe AGAIN on the server's canonical href: the configured entry and the
 				// home-set listing may spell the same collection differently (encoding, case).
-				if (folders.Any(f => SharedHrefEquals(FromBackendKey(f.BackendKey), resource.Href)))
+				if (folders.Any(f => SharedHrefEquals(FromBackendKey(f.Key.Value), resource.Href)))
 					continue;
 				string? name = resource.Propstat.Descendants(DavNs.D + "displayname").FirstOrDefault()?.Value;
 				if (string.IsNullOrWhiteSpace(name))
 					name = shared.Href.TrimEnd('/').Split('/').LastOrDefault() ?? "Shared";
 				folders.Add(new BackendFolder
 				{
-					BackendKey = ToBackendKey(resource.Href),
+					Key = new FolderKey(ToBackendKey(resource.Href)),
 					DisplayName = name,
-					Type = FolderType.UserCalendar,
-					EasClass = Protocol.EasClass.Calendar
+					Type = FolderType.UserCalendar
 				});
 			}
 			catch (BackendException ex)
@@ -352,10 +376,11 @@ public sealed class CalDavStore(
 		return folders;
 	}
 
-	public override async Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-		string folderBackendKey, ContentFilter filter, CancellationToken ct)
+	/// <inheritdoc />
+	public override async Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+		FolderKey folder, ContentFilter filter, CancellationToken ct)
 	{
-		string collection = FromBackendKey(folderBackendKey);
+		string collection = FromBackendKey(folder.Value);
 		XElement filterElement = new(DavNs.CalDav + "filter",
 			new XElement(DavNs.CalDav + "comp-filter", new XAttribute("name", "VCALENDAR"),
 				BuildEventFilter(filter)));
@@ -364,14 +389,14 @@ public sealed class CalDavStore(
 			filterElement);
 
 		List<DavResource> resources = await Dav.ReportAsync(collection, 1, body, ct).ConfigureAwait(false);
-		Dictionary<string, string> map = new(StringComparer.Ordinal);
+		Dictionary<ItemKey, ItemRevision> map = new();
 		foreach (DavResource resource in resources)
 		{
 			if (PathsEqual(resource.Href, collection))
 				continue;
 			string? etag = resource.Propstat.Descendants(DavNs.D + "getetag").FirstOrDefault()?.Value;
 			if (etag is not null)
-				map[resource.Href] = etag;
+				map[new ItemKey(resource.Href)] = new ItemRevision(etag);
 		}
 
 		return map;

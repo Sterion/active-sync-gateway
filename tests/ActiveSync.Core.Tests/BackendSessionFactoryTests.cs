@@ -657,53 +657,54 @@ public sealed class BackendSessionFactoryTests : IDisposable
 
 	private sealed class FakeSubmit : IMailSubmitOperations
 	{
-		public Task SendAsync(byte[] mime, CancellationToken ct) => Task.CompletedTask;
+		public Task SendAsync(ReadOnlyMemory<byte> rfc822, CancellationToken ct) => Task.CompletedTask;
 	}
 
-	private sealed class FakeMailStore : IContentStore, IMailStoreOperations
+	private sealed class FakeMailStore : IMailStore, IMailboxOperations
 	{
-		public string EasClass => "Email";
-		public bool OwnsBackendKey(string backendKey) => backendKey.StartsWith("fake:", StringComparison.Ordinal);
+		public bool OwnsKey(FolderKey key) => key.Value.StartsWith("fake:", StringComparison.Ordinal);
 
 		public Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-			string folderBackendKey, ContentFilter filter, CancellationToken ct) => throw new NotSupportedException();
+		public Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+			FolderKey folder, ContentFilter filter, CancellationToken ct) => throw new NotSupportedException();
 
-		public Task<BackendItem?> GetItemAsync(
-			string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct) =>
+		public Task<MailItem?> GetItemAsync(
+			FolderKey folder, ItemKey item, MailFetchOptions options, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<(string ItemKey, string Revision)> CreateItemAsync(
-			string folderBackendKey, XElement applicationData, CancellationToken ct) => throw new NotSupportedException();
+		public Task<(ItemKey Key, ItemRevision Revision)> CreateDraftAsync(
+			FolderKey folder, MailItem item, CancellationToken ct) => throw new NotSupportedException();
 
-		public Task<string> UpdateItemAsync(
-			string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct) =>
+		public Task<ItemRevision> UpdateFlagsAsync(
+			FolderKey folder, ItemKey item, MailFlagsPatch patch, ItemRevision? expected, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct) =>
+		public Task<(ItemKey Key, ItemRevision Revision)> ReplaceDraftAsync(
+			FolderKey folder, ItemKey item, MailItem value, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<IReadOnlyList<string>> WaitForChangesAsync(
-			IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct) =>
+		public Task DeleteItemAsync(FolderKey folder, ItemKey item, bool permanent, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task SaveToSentAsync(byte[] mime, CancellationToken ct) => throw new NotSupportedException();
-
-		public Task<byte[]?> GetRawMessageAsync(string folderBackendKey, string itemKey, CancellationToken ct) =>
+		public Task<IReadOnlyList<FolderKey>> WaitForChangesAsync(
+			IReadOnlyList<FolderKey> folders, TimeSpan timeout, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<BackendAttachment?> GetAttachmentAsync(string fileReference, CancellationToken ct) =>
+		public Task SaveToSentAsync(ReadOnlyMemory<byte> rfc822, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task SetAnsweredAsync(string folderBackendKey, string itemKey, bool forwarded, CancellationToken ct) =>
+		public Task<ReadOnlyMemory<byte>?> GetRawMessageAsync(FolderKey folder, ItemKey item, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task<IReadOnlyList<(string FolderBackendKey, string ItemKey)>> SearchAsync(
-			string? folderBackendKey, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct) =>
+		public Task SetAnsweredAsync(FolderKey folder, ItemKey item, bool forwarded, CancellationToken ct) =>
 			throw new NotSupportedException();
 
-		public Task EmptyFolderAsync(string folderBackendKey, CancellationToken ct) => throw new NotSupportedException();
+		public Task<IReadOnlyList<SearchHit>> SearchAsync(
+			FolderKey? folder, string freeText, DateTimeOffset? since, int maxResults, CancellationToken ct) =>
+			throw new NotSupportedException();
+
+		public Task EmptyFolderAsync(FolderKey folder, CancellationToken ct) => throw new NotSupportedException();
 	}
 }

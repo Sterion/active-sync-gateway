@@ -10,16 +10,14 @@
 > scope in § 7, the per-unit converter-split specification in § 7.1, and a batch of signature
 > fixes.*
 >
-> **Implementation progress: Phases 1–2 landed on `plugin-restructure` (contract version 1.5);
-> the Phase 3a checkpoint is committed (contract version 1.6) and awaits the operator's go-ahead
-> for 3b.** The 3a commit is the plan's one deliberately-red intermediate state: Contracts,
-> Protocol, Crypto, Core, Backends.Common, the `imap` and `local` exemplars, WebUi and the
-> Server host layer all build at 0 warnings; `dav`, `jmap`, `sieve` and `smtp` do not compile
-> against the new seam — their compile errors ARE 3b's work list. Recorded deviations:
+> **Implementation progress: Phases 1–3 landed on `plugin-restructure` (contract version 1.6).**
+> Phase 3 is two commits per the § 9 execution model: the 3a checkpoint (exemplars + host seam +
+> the completed contract surface) and the 3b completion (every remaining provider converted —
+> `dav`, `jmap`, `smtp`; `sieve` needed nothing — plus the test-suite port). Recorded deviations:
 > `BodyPreference.Eas16` survived until Phase 3 (§ 5.1 — the whole record is now host-side); the
 > read-only revert marker reaches `CollectionDiff` as a `forceChanged` set rather than through
 > the snapshot entry type, because `ActiveSync.Protocol` cannot see a Contracts type (§ 5.2);
-> plus the 3a notes in § 5.5, § 6.3 and the Phase 3 section. Phases 4–5 are not started.
+> plus the Phase 3a/3b notes in § 5.5, § 6.3 and the Phase 3 section. Phases 4–5 are not started.
 >
 > **Authority rules.** `AGENTS.md` and `docs/plugins.md` describe the contract **as it exists
 > today** — they are the authority on current behaviour only, and nothing more. The moment
@@ -1377,6 +1375,34 @@ this phase are different code: the semantics concentrate in 3a, the tokens in 3b
   generator** (byte-identical output), because `Core.Tests` references the deliberately-red
   provider assemblies and cannot run at the checkpoint; the 3b run's own
   `ContractSurfaceApprovalTests` execution verifies it.
+
+**Phase 3b implementation notes (recorded at completion; § 5's deviation rule):**
+
+- **DAV honours the `expected` precondition as `If-Match`** (§ 6.3's encouraged upgrade): a 412
+  surfaces as the typed `BackendPreconditionFailedException` from `WebDavClient`. The create-PUT
+  replay reinterpretation (If-None-Match:\*) runs BEFORE that mapping, so a replayed create is
+  still absorbed; a replayed update-PUT's 412 now takes the host's re-fetch → re-merge →
+  unconditional-retry path, which converges (an improvement over the old hard failure).
+- **DAV updates no longer GET before the PUT** — the pre-read existed only to feed the
+  converter's merge, which is host-side now. One fewer round trip per update; a vanished item
+  surfaces via the host's own pre-fetch or the 412.
+- **A new DAV resource's href is named from the payload's own UID** (host-embedded) rather than
+  a store-minted guid, keeping the resource name and document in agreement for the
+  canonical-href verification. `DavStoreBase` became generic (`DavStoreBase<TItem>`), with the
+  payload as the identity in both directions.
+- **JMAP calendar/contact honour `expected`** by comparing the revision of the card they already
+  fetch for member preservation — deliberately non-atomic (no per-item JMAP precondition
+  exists); it catches the common race and the host's retry covers the rest. **JMAP mail
+  ignores** `expected`: the only available state token is account-wide and would false-conflict
+  on any busy mailbox (conforming per § 6.3).
+- **`JmapMailStore.ReplaceDraftAsync` reports the real new email id** (the pre-contract code
+  discarded the import result); the host still keys the snapshot on the OLD id per § 5.4.
+- **`JsContactConverter` retargeted to JSContact ⇄ vCard** with the Managed/ClearedOnUpdate
+  patch semantics, anniversary preservation and photo non-touching intact; vCard is written by
+  hand (folded at 75 octets on code-point boundaries, control characters escaped) and read via
+  FolkerKinzel — the same split the shared contact converter keeps.
+- **JMAP GAL** reports the typed `GalPictureStatus.None` when photos are requested (the bridge
+  reads no `media` member), preserving the explicit wire status 173 the old projection emitted.
 
 **Phase 3b — one Opus subagent (spawned by the session) implements, and does NOT commit:**
 

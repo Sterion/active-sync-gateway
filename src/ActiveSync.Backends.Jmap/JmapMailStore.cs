@@ -1,42 +1,31 @@
 using System.Text.Json;
-using System.Xml.Linq;
-using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
-using ActiveSync.Core.Backend;
-using ActiveSync.Protocol;
-using ActiveSync.Protocol.Wbxml;
-using MimeKit;
 
 namespace ActiveSync.Backends.Jmap;
 
 /// <summary>
-///   Email content store + mail-store side-operations over JMAP (RFC 8621). Item keys are
+///   Email content store + mailbox side-operations over JMAP (RFC 8621). Item keys are
 ///   JMAP <c>Email</c> ids (globally stable, so a move keeps the same key); folder keys are
-///   <c>jmap-mail:{mailboxId}</c>. Message bodies are reused through the shared MIME
-///   converters by downloading the raw RFC822 blob (<c>Email.blobId</c>). The JMAP account id
-///   is resolved lazily from the cached session, so construction stays I/O-free.
+///   <c>jmap-mail:{mailboxId}</c>. The store trades in the raw RFC822 blob
+///   (<c>Email.blobId</c>) and typed flags — it neither reads nor writes EAS XML (the host owns
+///   that conversion). The JMAP account id is resolved lazily from the cached session, so
+///   construction stays I/O-free.
 /// </summary>
 /// <remarks>
-///   Split by concern across four partials, mirroring the IMAP precedent
+///   Split by concern across three partials, mirroring the IMAP precedent
 ///   (<c>ImapMailBackend.Watch.cs</c>): this file holds folder/item CRUD + listing; free-text
 ///   search is in <c>JmapMailStore.Search.cs</c>; the Ping/Sync change-wait engine is in
-///   <c>JmapMailStore.Watch.cs</c>; attachment fetch + the file-reference codec are in
-///   <c>JmapMailStore.Attachments.cs</c>. One type, no API change.
+///   <c>JmapMailStore.Watch.cs</c>. One type, no API change.
 /// </remarks>
 public sealed partial class JmapMailStore(
 	JmapClient client,
-	string? mailAddress,
 	int pollSeconds,
 	Func<DateTime, CancellationToken, Task>? waitForPush = null)
-	: IContentStore, IMailStoreOperations, IItemMoveOperations, IFolderOperations
+	: IMailStore, IMailboxOperations, IItemMoveOperations, IFolderOperations
 {
 	public const string KeyPrefix = "jmap-mail:";
 
 	private static readonly string[] CapMail = [JmapCapabilities.Core, JmapCapabilities.Mail];
-
-	private static readonly XNamespace Email = EasNamespaces.Email;
-	private static readonly XNamespace Email2 = EasNamespaces.Email2;
-	private static readonly XNamespace AirSyncBase = EasNamespaces.AirSyncBase;
 
 	private string? _account;
 
@@ -49,15 +38,15 @@ public sealed partial class JmapMailStore(
 	private Dictionary<string, string?>? _mailboxRole;
 	private Dictionary<string, string>? _roleMailbox;
 
-	public string EasClass => Protocol.EasClass.Email;
-
-	public bool OwnsBackendKey(string backendKey)
+	/// <inheritdoc />
+	public bool OwnsKey(FolderKey key)
 	{
-		return backendKey.StartsWith(KeyPrefix, StringComparison.Ordinal);
+		return key.Value.StartsWith(KeyPrefix, StringComparison.Ordinal);
 	}
 
 	// ---------- folders ----------
 
+	/// <inheritdoc />
 	public async Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
@@ -76,23 +65,23 @@ public sealed partial class JmapMailStore(
 			string? role = mailbox.TryGetProperty("role", out JsonElement r) ? r.GetString() : null;
 			result.Add(new BackendFolder
 			{
-				BackendKey = ToKey(id),
+				Key = new FolderKey(ToKey(id)),
 				DisplayName = mailbox.TryGetProperty("name", out JsonElement n) ? n.GetString() ?? id : id,
-				ParentBackendKey = parentId is null ? null : ToKey(parentId),
-				Type = RoleToFolderType(role),
-				EasClass = Protocol.EasClass.Email
+				ParentKey = parentId is null ? null : new FolderKey(ToKey(parentId)),
+				Type = RoleToFolderType(role)
 			});
 		}
 
 		return result;
 	}
 
-	public async Task<string> CreateFolderAsync(string? parentBackendKey, string displayName, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<FolderKey> CreateFolderAsync(FolderKey? parent, string displayName, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		Dictionary<string, object?> create = new() { ["name"] = displayName };
-		if (parentBackendKey is not null)
-			create["parentId"] = FromKey(parentBackendKey);
+		if (parent is { } parentKey)
+			create["parentId"] = FromKey(parentKey.Value);
 		using JmapResponse response = await client.CallAsync(CapMail, "Mailbox/set", new Dictionary<string, object?>
 		{
 			["accountId"] = account,
@@ -102,11 +91,12 @@ public sealed partial class JmapMailStore(
 		if (args.TryGetProperty("created", out JsonElement created) &&
 		    created.TryGetProperty("new", out JsonElement mailbox) &&
 		    mailbox.TryGetProperty("id", out JsonElement id))
-			return ToKey(id.GetString()!);
+			return new FolderKey(ToKey(id.GetString()!));
 		throw new BackendException("JMAP Mailbox/set did not report the created mailbox.");
 	}
 
-	public async Task RenameFolderAsync(string backendKey, string newDisplayName, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task RenameFolderAsync(FolderKey folder, string newDisplayName, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		using JmapResponse response = await client.CallAsync(CapMail, "Mailbox/set", new Dictionary<string, object?>
@@ -114,36 +104,38 @@ public sealed partial class JmapMailStore(
 			["accountId"] = account,
 			["update"] = new Dictionary<string, object?>
 			{
-				[FromKey(backendKey)] = new Dictionary<string, object?> { ["name"] = newDisplayName }
+				[FromKey(folder.Value)] = new Dictionary<string, object?> { ["name"] = newDisplayName }
 			}
 		}, ct).ConfigureAwait(false);
-		EnsureUpdated(response.Arguments("0"), FromKey(backendKey), "Mailbox");
+		EnsureUpdated(response.Arguments("0"), FromKey(folder.Value), "Mailbox");
 	}
 
-	public async Task DeleteFolderAsync(string backendKey, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task DeleteFolderAsync(FolderKey folder, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		using JmapResponse response = await client.CallAsync(CapMail, "Mailbox/set", new Dictionary<string, object?>
 		{
 			["accountId"] = account,
 			["onDestroyRemoveEmails"] = true,
-			["destroy"] = new[] { FromKey(backendKey) }
+			["destroy"] = new[] { FromKey(folder.Value) }
 		}, ct).ConfigureAwait(false);
-		EnsureDestroyed(response.Arguments("0"), FromKey(backendKey), "Mailbox");
+		EnsureDestroyed(response.Arguments("0"), FromKey(folder.Value), "Mailbox");
 	}
 
 	// ---------- items ----------
 
-	public async Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-		string folderBackendKey, ContentFilter filter, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+		FolderKey folder, ContentFilter filter, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		string mailboxId = FromKey(folderBackendKey);
+		string mailboxId = FromKey(folder.Value);
 		// Page at min(500, maxObjectsInGet). The Email/get back-references up to a page of
 		// Email/query ids, so a server advertising a lower maxObjectsInGet would answer
 		// requestTooLarge and fail the whole folder sync if we asked for 500 blindly.
 		int page = PageSize(await client.GetSessionAsync(ct).ConfigureAwait(false));
-		Dictionary<string, string> map = new(StringComparer.Ordinal);
+		Dictionary<ItemKey, ItemRevision> map = new();
 		int position = 0;
 		int previousPosition = -1;
 		string? queryState = null;
@@ -191,7 +183,8 @@ public sealed partial class JmapMailStore(
 
 			queryState = currentState;
 			foreach (JsonElement email in response.Arguments("1").GetProperty("list").EnumerateArray())
-				map[email.GetProperty("id").GetString()!] = RevisionOf(KeywordsOf(email));
+				map[new ItemKey(email.GetProperty("id").GetString()!)] =
+					new ItemRevision(RevisionOf(KeywordsOf(email)));
 
 			int returned = queryArgs.GetProperty("ids").GetArrayLength();
 			// A short page does NOT mean "done" — servers may return fewer than requested. Advance
@@ -219,11 +212,13 @@ public sealed partial class JmapMailStore(
 		return map;
 	}
 
-	public async Task<BackendItem?> GetItemAsync(
-		string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<MailItem?> GetItemAsync(
+		FolderKey folder, ItemKey item, MailFetchOptions options, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		JsonElement? email = await GetEmailAsync(account, itemKey, ["id", "blobId", "keywords", "receivedAt"], ct).ConfigureAwait(false);
+		JsonElement? email = await GetEmailAsync(account, item.Value, ["id", "blobId", "keywords", "receivedAt"], ct)
+			.ConfigureAwait(false);
 		if (email is not { } value || !value.TryGetProperty("blobId", out JsonElement blob) || blob.GetString() is not { } blobId)
 			return null;
 
@@ -233,140 +228,140 @@ public sealed partial class JmapMailStore(
 		                              receivedAtEl.TryGetDateTimeOffset(out DateTimeOffset receivedAtValue)
 			? receivedAtValue
 			: null;
+		// The raw blob is handed over verbatim — the contract's currency is the RFC822 bytes, and
+		// a parse/serialize round trip here could silently normalize them.
 		byte[] raw = await client.DownloadBlobAsync(account, blobId, ct).ConfigureAwait(false);
-		using MemoryStream stream = new(raw);
-		MimeMessage message = await MimeMessage.LoadAsync(stream, ct).ConfigureAwait(false);
-		MailConverter.MessageFlags flags = new(
-			keywords.Contains("$seen"),
-			keywords.Contains("$flagged"),
-			keywords.Contains("$answered"),
-			keywords.Contains("$forwarded"),
-			keywords.Where(k => !k.StartsWith('$')).ToList());
-		List<XElement> data = MailConverter.ToApplicationData(
-			message, flags, bodyPreference, idx => MakeFileReference(folderBackendKey, itemKey, idx), receivedAt);
-		return new BackendItem { ApplicationData = data };
+		return new MailItem
+		{
+			Rfc822 = raw,
+			Flags = FlagsOf(keywords),
+			Categories = CategoriesOf(keywords),
+			Received = receivedAt
+		};
 	}
 
-	public async Task<(string ItemKey, string Revision)> CreateItemAsync(
-		string folderBackendKey, XElement applicationData, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<(ItemKey Key, ItemRevision Revision)> CreateDraftAsync(
+		FolderKey folder, MailItem item, CancellationToken ct)
 	{
-		// EAS 16.x drafts: the only mail a client may create via Sync, and only in Drafts.
+		// EAS 16.x drafts: the only mail a client may create via Sync, and only in Drafts. The
+		// host built the complete MIME already — this only imports the bytes.
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		string mailboxId = FromKey(folderBackendKey);
+		string mailboxId = FromKey(folder.Value);
 		if (!string.Equals(await RoleOfAsync(account, mailboxId, ct).ConfigureAwait(false), "drafts", StringComparison.Ordinal))
 			throw new BackendException("Creating mail items via Sync is only supported in the Drafts folder.");
 
-		MimeMessage draft = DraftMessageBuilder.Build(applicationData, null, mailAddress);
-		string emailId = await ImportAsync(account, draft, mailboxId, ct).ConfigureAwait(false);
-		return (emailId, "000");
+		string emailId = await ImportAsync(account, item.Rfc822, mailboxId, ct).ConfigureAwait(false);
+		return (new ItemKey(emailId), new ItemRevision("000"));
 	}
 
-	public async Task<string> UpdateItemAsync(
-		string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<ItemRevision> UpdateFlagsAsync(
+		FolderKey folder, ItemKey item, MailFlagsPatch patch, ItemRevision? expected, CancellationToken ct)
 	{
+		// `expected` is deliberately ignored: the JMAP keyword patch below is a per-property
+		// PatchObject with no per-item precondition to hang an ifInState on (the account-level
+		// state advances on ANY mail change, so conditioning on it would fail constantly on a busy
+		// mailbox) — which the contract says is conforming.
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		string mailboxId = FromKey(folderBackendKey);
+		Dictionary<string, object?> keywordPatch = new();
+		if (patch.Read.HasValue)
+			keywordPatch["keywords/$seen"] = patch.Read.Value ? true : null;
 
-		// EAS 16.x draft edit: content-bearing changes in Drafts rewrite the message (import
-		// merged draft, destroy the old id). The new id replaces the old — the snapshot diff
-		// turns that into Delete+Add, the standard EAS re-identification flow.
-		if (HasDraftContent(applicationData) &&
-		    string.Equals(await RoleOfAsync(account, mailboxId, ct).ConfigureAwait(false), "drafts", StringComparison.Ordinal))
+		if (patch.Flagged.HasValue)
+			keywordPatch["keywords/$flagged"] = patch.Flagged.Value ? true : null;
+
+		// Presence-guarded like Read/Flagged: only a supplied category list touches the message's
+		// keywords — and only the category-relevant (non-'$') subset, so a client clearing its
+		// categories can never strip $forwarded or another system keyword.
+		if (patch.Categories.HasValue)
 		{
-			JsonElement? existing = await GetEmailAsync(account, itemKey, ["id", "blobId"], ct).ConfigureAwait(false);
-			MimeMessage? original = null;
-			if (existing is { } value && value.TryGetProperty("blobId", out JsonElement blob) && blob.GetString() is { } blobId)
-			{
-				byte[] raw = await client.DownloadBlobAsync(account, blobId, ct).ConfigureAwait(false);
-				using MemoryStream stream = new(raw);
-				original = await MimeMessage.LoadAsync(stream, ct).ConfigureAwait(false);
-			}
-
-			MimeMessage merged = DraftMessageBuilder.Build(applicationData, original, mailAddress);
-			await ImportAsync(account, merged, mailboxId, ct).ConfigureAwait(false);
-			// Dispose the response and surface a per-item destroy failure instead of leaking
-			// the JsonDocument and assuming success — a lingering old draft duplicates the message.
-			using JmapResponse destroyOld = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
-			{
-				["accountId"] = account,
-				["destroy"] = new[] { itemKey }
-			}, ct).ConfigureAwait(false);
-			EnsureDestroyed(destroyOld.Arguments("0"), itemKey, "Email");
-			return "000";
-		}
-
-		Dictionary<string, object?> patch = new();
-		string? read = applicationData.Element(Email + "Read")?.Value;
-		if (read is not null)
-			patch["keywords/$seen"] = read == "1" ? true : null;
-
-		XElement? flag = applicationData.Element(Email + "Flag");
-		if (flag is not null)
-			patch["keywords/$flagged"] = flag.Element(Email + "Status")?.Value == "2" ? true : null;
-
-		XElement? categories = applicationData.Element(Email + "Categories");
-		if (categories is not null)
-		{
-			IReadOnlyList<string> current = await CategoriesOfAsync(account, itemKey, ct).ConfigureAwait(false);
+			IReadOnlyList<string> current = await CategoriesOfAsync(account, item.Value, ct).ConfigureAwait(false);
 			// '/' and '~' ARE legal JMAP keyword characters (RFC 8621 §4.1.1) but PatchObject
 			// keys are JSON Pointers (RFC 8620 §5.3 → RFC 6901), where '/' separates path segments —
 			// a category like "Work/Home" must be pointer-escaped via PointerToken below, not
 			// dropped. A category containing a character the keyword grammar itself forbids IS
 			// dropped, mirroring ImapMailBackend.SanitizeKeyword's drop-don't-mangle rule.
-			HashSet<string> wanted = categories.Elements(Email + "Category")
-				.Select(c => c.Value)
+			HashSet<string> wanted = patch.Categories.Value
 				.Where(v => v.Length > 0 && !v.StartsWith('$') && IsValidJmapKeyword(v))
 				.ToHashSet(StringComparer.OrdinalIgnoreCase);
 			foreach (string add in wanted.Where(w => !current.Contains(w, StringComparer.OrdinalIgnoreCase)))
-				patch[$"keywords/{PointerToken(add)}"] = true;
+				keywordPatch[$"keywords/{PointerToken(add)}"] = true;
 			foreach (string remove in current.Where(c => !wanted.Contains(c)))
-				patch[$"keywords/{PointerToken(remove)}"] = null;
+				keywordPatch[$"keywords/{PointerToken(remove)}"] = null;
 		}
 
-		if (patch.Count > 0)
+		if (keywordPatch.Count > 0)
 		{
 			// Batch the Email/set and the trailing Email/get into ONE request instead of two
 			// sequential round trips. JMAP runs method calls in order, so the get reflects the set;
-			// itemKey is known, so the get uses an explicit id list (no result reference needed).
+			// the item key is known, so the get uses an explicit id list (no result reference needed).
 			IReadOnlyList<JmapCall> calls =
 			[
 				new JmapCall("Email/set", new Dictionary<string, object?>
 				{
 					["accountId"] = account,
-					["update"] = new Dictionary<string, object?> { [itemKey] = patch }
+					["update"] = new Dictionary<string, object?> { [item.Value] = keywordPatch }
 				}, "0"),
 				new JmapCall("Email/get", new Dictionary<string, object?>
 				{
 					["accountId"] = account,
-					["ids"] = new[] { itemKey },
+					["ids"] = new[] { item.Value },
 					["properties"] = new[] { "id", "keywords" }
 				}, "1")
 			];
 			using JmapResponse response = await client.InvokeAsync(CapMail, calls, ct).ConfigureAwait(false);
-			EnsureUpdated(response.Arguments("0"), itemKey, "Email");
+			EnsureUpdated(response.Arguments("0"), item.Value, "Email");
 			JsonElement setList = response.Arguments("1").GetProperty("list");
-			return setList.GetArrayLength() == 0 ? "000" : RevisionOf(KeywordsOf(setList[0]));
+			return new ItemRevision(
+				setList.GetArrayLength() == 0 ? "000" : RevisionOf(KeywordsOf(setList[0])));
 		}
 
-		JsonElement? updated = await GetEmailAsync(account, itemKey, ["id", "keywords"], ct).ConfigureAwait(false);
-		return updated is { } e ? RevisionOf(KeywordsOf(e)) : "000";
+		JsonElement? updated = await GetEmailAsync(account, item.Value, ["id", "keywords"], ct).ConfigureAwait(false);
+		return new ItemRevision(updated is { } e ? RevisionOf(KeywordsOf(e)) : "000");
 	}
 
+	/// <inheritdoc />
+	public async Task<(ItemKey Key, ItemRevision Revision)> ReplaceDraftAsync(
+		FolderKey folder, ItemKey item, MailItem value, CancellationToken ct)
+	{
+		// EAS 16.x draft edit: the host merged the client's partial data into the stored draft and
+		// hands over the complete replacement. The rewrite imports the new message and destroys the
+		// old id — the new id is REPORTED (informational; the host keeps the snapshot on the old
+		// key, so the next diff re-identifies as Delete+Add, the standard EAS flow).
+		string account = await AccountAsync(ct).ConfigureAwait(false);
+		string mailboxId = FromKey(folder.Value);
+		if (!string.Equals(await RoleOfAsync(account, mailboxId, ct).ConfigureAwait(false), "drafts", StringComparison.Ordinal))
+			throw new BackendException("Changing mail content via Sync is only supported in the Drafts folder.");
+
+		string newId = await ImportAsync(account, value.Rfc822, mailboxId, ct).ConfigureAwait(false);
+		// Dispose the response and surface a per-item destroy failure instead of leaking
+		// the JsonDocument and assuming success — a lingering old draft duplicates the message.
+		using JmapResponse destroyOld = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
+		{
+			["accountId"] = account,
+			["destroy"] = new[] { item.Value }
+		}, ct).ConfigureAwait(false);
+		EnsureDestroyed(destroyOld.Arguments("0"), item.Value, "Email");
+		return (new ItemKey(newId), new ItemRevision("000"));
+	}
+
+	/// <inheritdoc />
 	public async Task DeleteItemAsync(
-		string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
+		FolderKey folder, ItemKey item, bool permanent, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string? trashId = permanent ? null : await FindMailboxByRoleAsync(account, "trash", ct).ConfigureAwait(false);
-		if (trashId is null || string.Equals(trashId, FromKey(folderBackendKey), StringComparison.Ordinal))
+		if (trashId is null || string.Equals(trashId, FromKey(folder.Value), StringComparison.Ordinal))
 		{
 			// Dispose the response and check the per-item destroy bucket rather than assuming
 			// success on a leaked document.
 			using JmapResponse destroyResponse = await client.CallAsync(CapMail, "Email/set", new Dictionary<string, object?>
 			{
 				["accountId"] = account,
-				["destroy"] = new[] { itemKey }
+				["destroy"] = new[] { item.Value }
 			}, ct).ConfigureAwait(false);
-			EnsureDestroyed(destroyResponse.Arguments("0"), itemKey, "Email");
+			EnsureDestroyed(destroyResponse.Arguments("0"), item.Value, "Email");
 			return;
 		}
 
@@ -378,22 +373,24 @@ public sealed partial class JmapMailStore(
 			["accountId"] = account,
 			["update"] = new Dictionary<string, object?>
 			{
-				[itemKey] = new Dictionary<string, object?>
+				[item.Value] = new Dictionary<string, object?>
 				{
-					[$"mailboxIds/{FromKey(folderBackendKey)}"] = null,
+					[$"mailboxIds/{FromKey(folder.Value)}"] = null,
 					[$"mailboxIds/{trashId}"] = true
 				}
 			}
 		}, ct).ConfigureAwait(false);
-		EnsureUpdated(response.Arguments("0"), itemKey, "Email");
+		EnsureUpdated(response.Arguments("0"), item.Value, "Email");
 	}
 
-	public async Task<(string ItemKey, string Revision)> MoveItemAsync(
-		string sourceFolderBackendKey, string itemKey, string destinationFolderBackendKey, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<(ItemKey Key, ItemRevision Revision)> MoveItemAsync(
+		FolderKey source, ItemKey item, FolderKey destination, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		string sourceId = FromKey(sourceFolderBackendKey);
-		string destId = FromKey(destinationFolderBackendKey);
+		string itemKey = item.Value;
+		string sourceId = FromKey(source.Value);
+		string destId = FromKey(destination.Value);
 		// Same PatchObject shape as DeleteItemAsync above — drop only the source mailbox
 		// membership, not every mailbox the message happened to be filed under.
 		// Batch the move with a trailing keywords fetch (same shape as UpdateItemAsync) so
@@ -424,18 +421,20 @@ public sealed partial class JmapMailStore(
 		EnsureUpdated(response.Arguments("0"), itemKey, "Email");
 		JsonElement getList = response.Arguments("1").GetProperty("list");
 		string revision = getList.GetArrayLength() == 0 ? "000" : RevisionOf(KeywordsOf(getList[0]));
-		return (itemKey, revision); // JMAP Email ids are stable across mailbox moves
+		return (item, new ItemRevision(revision)); // JMAP Email ids are stable across mailbox moves
 	}
 
-	// ---------- IMailStoreOperations ----------
+	// ---------- IMailboxOperations ----------
 
-	public async Task SaveToSentAsync(byte[] mime, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task SaveToSentAsync(ReadOnlyMemory<byte> rfc822, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string? sentId = await FindMailboxByRoleAsync(account, "sent", ct).ConfigureAwait(false);
 		if (sentId is null)
 			return;
-		string blobId = await client.UploadBlobAsync(account, mime, "message/rfc822", ct).ConfigureAwait(false);
+		string blobId = await client.UploadBlobAsync(account, rfc822.ToArray(), "message/rfc822", ct)
+			.ConfigureAwait(false);
 		// Dispose the response and surface an import failure — a dropped Save-to-Sent leaves
 		// the user's Sent folder missing the message they just sent.
 		// Email/import is a Mail-capability method (RFC 8621 §4.8) — no Blob capability
@@ -457,13 +456,17 @@ public sealed partial class JmapMailStore(
 		EnsureNotIn(response.Arguments("0"), "notCreated", "sent", "Email", "import");
 	}
 
-	public async Task<byte[]?> GetRawMessageAsync(string folderBackendKey, string itemKey, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<ReadOnlyMemory<byte>?> GetRawMessageAsync(
+		FolderKey folder, ItemKey item, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		return await GetRawByIdAsync(account, itemKey, ct).ConfigureAwait(false);
+		byte[]? raw = await GetRawByIdAsync(account, item.Value, ct).ConfigureAwait(false);
+		return raw is null ? null : (ReadOnlyMemory<byte>?)raw;
 	}
 
-	public async Task SetAnsweredAsync(string folderBackendKey, string itemKey, bool forwarded, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task SetAnsweredAsync(FolderKey folder, ItemKey item, bool forwarded, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
 		string keyword = forwarded ? "$forwarded" : "$answered";
@@ -472,16 +475,17 @@ public sealed partial class JmapMailStore(
 			["accountId"] = account,
 			["update"] = new Dictionary<string, object?>
 			{
-				[itemKey] = new Dictionary<string, object?> { [$"keywords/{keyword}"] = true }
+				[item.Value] = new Dictionary<string, object?> { [$"keywords/{keyword}"] = true }
 			}
 		}, ct).ConfigureAwait(false);
-		EnsureUpdated(response.Arguments("0"), itemKey, "Email");
+		EnsureUpdated(response.Arguments("0"), item.Value, "Email");
 	}
 
-	public async Task EmptyFolderAsync(string folderBackendKey, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task EmptyFolderAsync(FolderKey folder, CancellationToken ct)
 	{
 		string account = await AccountAsync(ct).ConfigureAwait(false);
-		string mailboxId = FromKey(folderBackendKey);
+		string mailboxId = FromKey(folder.Value);
 		// Cap the destroy batch at maxObjectsInSet (defaulting to 500) — a batch over the
 		// server's limit is rejected wholesale. The loop re-queries from the top after each destroy
 		// and stops only when a page comes back empty, never on a short page (which does not mean the
@@ -541,11 +545,11 @@ public sealed partial class JmapMailStore(
 		return null;
 	}
 
-	private async Task<string> ImportAsync(string account, MimeMessage message, string mailboxId, CancellationToken ct)
+	private async Task<string> ImportAsync(
+		string account, ReadOnlyMemory<byte> rfc822, string mailboxId, CancellationToken ct)
 	{
-		using MemoryStream stream = new();
-		await message.WriteToAsync(stream, ct).ConfigureAwait(false);
-		string blobId = await client.UploadBlobAsync(account, stream.ToArray(), "message/rfc822", ct).ConfigureAwait(false);
+		string blobId = await client.UploadBlobAsync(account, rfc822.ToArray(), "message/rfc822", ct)
+			.ConfigureAwait(false);
 		// Email/import is a Mail-capability method (RFC 8621 §4.8) — no Blob capability
 		// needed. Requiring urn:ietf:params:jmap:blob (RFC 9404) here rejected the WHOLE request on
 		// any server that does not implement that separate extension.
@@ -585,7 +589,26 @@ public sealed partial class JmapMailStore(
 	private async Task<IReadOnlyList<string>> CategoriesOfAsync(string account, string itemKey, CancellationToken ct)
 	{
 		JsonElement? email = await GetEmailAsync(account, itemKey, ["id", "keywords"], ct).ConfigureAwait(false);
-		return email is { } e ? KeywordsOf(e).Where(k => !k.StartsWith('$')).ToList() : [];
+		return email is { } e ? CategoriesOf(KeywordsOf(e)) : [];
+	}
+
+	/// <summary>The typed contract flags for a message's JMAP keywords.</summary>
+	private static MailFlags FlagsOf(IReadOnlyList<string> keywords)
+	{
+		return new MailFlags
+		{
+			Seen = keywords.Contains("$seen"),
+			Flagged = keywords.Contains("$flagged"),
+			Answered = keywords.Contains("$answered"),
+			Forwarded = keywords.Contains("$forwarded"),
+			Draft = keywords.Contains("$draft")
+		};
+	}
+
+	/// <summary>The user categories: every keyword that is not a system ('$'-prefixed) one.</summary>
+	private static IReadOnlyList<string> CategoriesOf(IReadOnlyList<string> keywords)
+	{
+		return keywords.Where(k => !k.StartsWith('$')).ToList();
 	}
 
 	private async Task<string?> RoleOfAsync(string account, string mailboxId, CancellationToken ct)
@@ -719,16 +742,6 @@ public sealed partial class JmapMailStore(
 			"sent" => FolderType.SentItems,
 			_ => FolderType.UserMail
 		};
-	}
-
-	private static bool HasDraftContent(XElement applicationData)
-	{
-		return applicationData.Element(Email + "To") is not null ||
-		       applicationData.Element(Email + "Cc") is not null ||
-		       applicationData.Element(Email2 + "Bcc") is not null ||
-		       applicationData.Element(Email + "Subject") is not null ||
-		       applicationData.Element(AirSyncBase + "Body") is not null ||
-		       applicationData.Element(AirSyncBase + "Attachments") is not null;
 	}
 
 	private static void EnsureUpdated(JsonElement setResult, string id, string kind)

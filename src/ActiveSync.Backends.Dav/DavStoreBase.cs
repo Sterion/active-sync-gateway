@@ -8,17 +8,19 @@ namespace ActiveSync.Backends.Dav;
 /// <summary>
 ///   Shared implementation for the CalDAV/CardDAV content stores (calendar, contacts, tasks).
 ///   Item keys are server hrefs and revisions are ETags; the pieces that genuinely differ per
-///   content class — folder discovery, the revision listing, the UID query body, and the
-///   iCal/vCard converter — are abstract hooks. The create/update flow (including the canonical
-///   -href resolution that copes with servers rewriting PUT targets) and the throw-stubs for
-///   unsupported folder operations live here once.
+///   content class — folder discovery, the revision listing, the UID query body, and the payload
+///   record the class trades in — are abstract hooks. The store trades in the class's PAYLOAD
+///   (iCalendar/vCard text) verbatim: what the host hands over is exactly what it stores and
+///   exactly what it hands back. The create/update flow (including the canonical-href resolution
+///   that copes with servers rewriting PUT targets) lives here once.
 /// </summary>
-public abstract class DavStoreBase(
+/// <typeparam name="TItem">The content class's payload record.</typeparam>
+public abstract class DavStoreBase<TItem>(
 	WebDavClient dav,
 	DavServerOptions options,
 	BackendCredentials credentials,
 	ILogger logger,
-	int pollSeconds) : IContentStore
+	int pollSeconds) : IContentStore<TItem> where TItem : class
 {
 	private string? _homeSet;
 
@@ -67,60 +69,69 @@ public abstract class DavStoreBase(
 	private string ItemNounCapitalized =>
 		char.ToUpperInvariant(ItemNoun[0]) + ItemNoun[1..];
 
-	public abstract string EasClass { get; }
-
-	public bool OwnsBackendKey(string backendKey)
+	/// <inheritdoc />
+	public bool OwnsKey(FolderKey key)
 	{
-		return backendKey.StartsWith(Prefix, StringComparison.Ordinal);
+		return key.Value.StartsWith(Prefix, StringComparison.Ordinal);
 	}
 
+	/// <inheritdoc />
 	public abstract Task<IReadOnlyList<BackendFolder>> ListFoldersAsync(CancellationToken ct);
 
-	public abstract Task<IReadOnlyDictionary<string, string>> GetItemRevisionsAsync(
-		string folderBackendKey, ContentFilter filter, CancellationToken ct);
+	/// <inheritdoc />
+	public abstract Task<IReadOnlyDictionary<ItemKey, ItemRevision>> GetItemRevisionsAsync(
+		FolderKey folder, ContentFilter filter, CancellationToken ct);
 
-	public async Task<BackendItem?> GetItemAsync(
-		string folderBackendKey, string itemKey, BodyPreference bodyPreference, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<TItem?> GetItemAsync(FolderKey folder, ItemKey item, CancellationToken ct)
 	{
-		(string Content, string? ETag)? result = await dav.GetAsync(itemKey, ct).ConfigureAwait(false);
-		if (result is null)
-			return null;
-		IReadOnlyList<XElement>? elements = ToApplicationData(result.Value.Content, bodyPreference);
-		return elements is null ? null : new BackendItem { ApplicationData = elements };
+		// The stored document IS the payload — round-trip fidelity: what the host handed over is
+		// exactly what it gets back, with no parse/serialize pass in between.
+		(string Content, string? ETag)? result = await dav.GetAsync(item.Value, ct).ConfigureAwait(false);
+		return result is null ? null : ToItem(result.Value.Content);
 	}
 
-	public async Task<(string ItemKey, string Revision)> CreateItemAsync(
-		string folderBackendKey, XElement applicationData, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<(ItemKey Key, ItemRevision Revision)> CreateItemAsync(
+		FolderKey folder, TItem item, CancellationToken ct)
 	{
-		string collection = FromBackendKey(folderBackendKey);
-		string uid = Guid.NewGuid().ToString();
-		string content = FromApplicationData(applicationData, uid, null);
-		string putHref = $"{collection.TrimEnd('/')}/{uid}{FileExtension}";
+		string collection = FromBackendKey(folder.Value);
+		string content = PayloadOf(item);
+		// The href is named after the payload's OWN uid (the host embeds one when it builds the
+		// document), so the resource name and the document agree — which is what FindByUidAsync
+		// below relies on. A payload without a readable uid falls back to a fresh guid.
+		string uid = TryExtractUid(content) ?? Guid.NewGuid().ToString();
+		string putHref = $"{collection.TrimEnd('/')}/{Uri.EscapeDataString(uid)}{FileExtension}";
 		string? putETag = await dav.PutAsync(putHref, content, MediaType, null, true, ct)
 			.ConfigureAwait(false);
 
 		(string href, string? listedETag) = await ResolveStoredHrefAsync(
-			folderBackendKey, collection, putHref, uid, ct).ConfigureAwait(false);
+			folder, collection, putHref, uid, ct).ConfigureAwait(false);
 		// Prefer the etag as the LISTING reports it — that is what future diffs compare.
 		string etag = listedETag
 		              ?? (PathsEqual(href, putHref) ? putETag : null)
 		              ?? await dav.GetPropertyAsync(href, DavNs.D + "getetag", ct).ConfigureAwait(false)
 		              ?? UnknownRevision;
-		return (href, etag);
+		return (new ItemKey(href), new ItemRevision(etag));
 	}
 
-	public async Task<string> UpdateItemAsync(
-		string folderBackendKey, string itemKey, XElement applicationData, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<ItemRevision> UpdateItemAsync(
+		FolderKey folder, ItemKey item, TItem value, ItemRevision? expected, CancellationToken ct)
 	{
-		(string Content, string? ETag) existing = await dav.GetAsync(itemKey, ct).ConfigureAwait(false)
-		                                          ?? throw new BackendItemNotFoundException(
-			                                          $"{ItemNounCapitalized} {itemKey} no longer exists.");
-		string uid = ExtractUid(existing.Content) ?? Guid.NewGuid().ToString();
-		string content = FromApplicationData(applicationData, uid, existing.Content);
-		string? etag = await dav.PutAsync(itemKey, content, MediaType, existing.ETag, false, ct)
+		// The host merged the client's partial data already — `value` is the COMPLETE payload, so
+		// there is nothing to read back first (the pre-contract code fetched the stored document
+		// only to feed the converter's ghosting merge, which now runs host-side).
+		//
+		// `expected` is honoured as an If-Match precondition: DAV can check it, so it does. A 412
+		// surfaces as BackendPreconditionFailedException (WebDavClient maps it), and the host
+		// re-fetches, re-merges and retries once. A null `expected` writes unconditionally.
+		string content = PayloadOf(value);
+		string? etag = await dav.PutAsync(item.Value, content, MediaType, expected?.Value, false, ct)
 			.ConfigureAwait(false);
-		return etag ?? await dav.GetPropertyAsync(itemKey, DavNs.D + "getetag", ct).ConfigureAwait(false)
-			?? UnknownRevision;
+		return new ItemRevision(
+			etag ?? await dav.GetPropertyAsync(item.Value, DavNs.D + "getetag", ct).ConfigureAwait(false)
+			?? UnknownRevision);
 	}
 
 	/// <summary>
@@ -134,30 +145,57 @@ public abstract class DavStoreBase(
 	/// </summary>
 	private const string UnknownRevision = "!etag-unknown";
 
-	public Task DeleteItemAsync(string folderBackendKey, string itemKey, bool permanent, CancellationToken ct)
+	/// <inheritdoc />
+	public Task DeleteItemAsync(FolderKey folder, ItemKey item, bool permanent, CancellationToken ct)
 	{
-		return dav.DeleteAsync(itemKey, ct); // DAV deletes are always permanent
+		return dav.DeleteAsync(item.Value, ct); // DAV deletes are always permanent
 	}
 
 	// DAV stores support neither cross-collection item move nor client folder mutation over
 	// ActiveSync, so they implement neither IItemMoveOperations nor IFolderOperations (rather than
 	// carrying throw-stubs). The host answers MoveItems/Folder* with the unsupported status.
 
-	public Task<IReadOnlyList<string>> WaitForChangesAsync(
-		IReadOnlyList<string> folderBackendKeys, TimeSpan timeout, CancellationToken ct)
+	/// <inheritdoc />
+	public async Task<IReadOnlyList<FolderKey>> WaitForChangesAsync(
+		IReadOnlyList<FolderKey> folders, TimeSpan timeout, CancellationToken ct)
 	{
-		// Hand the operator's Eas:DavPollSeconds to the poller instead of the old hardcoded 60 s.
-		return DavDiscovery.PollCtagsAsync(
-			dav, folderBackendKeys, FromBackendKey, timeout, pollSeconds, logger, CtagLabel,
-			credentials.UserName, ct);
+		// The ctag poller keeps its internal string keys; the typed keys are wrapped here, at the
+		// contract boundary.
+		IReadOnlyList<string> keys = folders.Select(f => f.Value).ToList();
+		IReadOnlyList<string> changed = await DavDiscovery.PollCtagsAsync(
+			dav, keys, FromBackendKey, timeout, pollSeconds, logger, CtagLabel,
+			credentials.UserName, ct).ConfigureAwait(false);
+		return changed.Select(k => new FolderKey(k)).ToList();
 	}
 
-	protected abstract IReadOnlyList<XElement>? ToApplicationData(string content, BodyPreference bodyPreference);
-	protected abstract string FromApplicationData(XElement applicationData, string uid, string? existingContent);
+	/// <summary>The typed payload for a stored document (the payload IS the document).</summary>
+	/// <param name="content">The stored iCalendar/vCard text.</param>
+	protected abstract TItem ToItem(string content);
+
+	/// <summary>The document to store for a complete payload (the payload IS the document).</summary>
+	/// <param name="item">The complete payload the host handed over.</param>
+	protected abstract string PayloadOf(TItem item);
+
+	/// <summary>The payload's own UID, used to name a new resource's href; null when unreadable.</summary>
+	/// <param name="content">The stored iCalendar/vCard text.</param>
 	protected abstract string? ExtractUid(string content);
 
 	/// <summary>The REPORT body that locates an item by UID within a collection.</summary>
+	/// <param name="uid">The payload UID to search for.</param>
 	protected abstract XElement BuildUidQueryBody(string uid);
+
+	/// <summary><see cref="ExtractUid" /> that answers null for an unparsable document.</summary>
+	private string? TryExtractUid(string content)
+	{
+		try
+		{
+			return ExtractUid(content);
+		}
+		catch (Exception)
+		{
+			return null;
+		}
+	}
 
 	protected string ToBackendKey(string href)
 	{
@@ -210,7 +248,7 @@ public abstract class DavStoreBase(
 	///   no listing enumeration, no content fetch.
 	/// </summary>
 	protected async Task<(string Href, string? ETag)> ResolveStoredHrefAsync(
-		string folderBackendKey, string collection, string putHref, string uid, CancellationToken ct)
+		FolderKey folder, string collection, string putHref, string uid, CancellationToken ct)
 	{
 		// Trust the UID query only when it points at the PUT target, or when a fetch of its
 		// content confirms our uid — weak servers ignore the filter and echo back an unrelated
@@ -242,27 +280,27 @@ public abstract class DavStoreBase(
 		if (putVerified)
 			return (putHref, putVerifiedETag);
 
-		IReadOnlyDictionary<string, string> after =
-			await GetItemRevisionsAsync(folderBackendKey, ContentFilter.All, ct).ConfigureAwait(false);
-		string? exact = after.Keys.FirstOrDefault(k => PathsEqual(k, putHref));
-		if (exact is not null)
-			return (exact, after[exact]);
+		IReadOnlyDictionary<ItemKey, ItemRevision> after =
+			await GetItemRevisionsAsync(folder, ContentFilter.All, ct).ConfigureAwait(false);
+		foreach (ItemKey listed in after.Keys)
+			if (PathsEqual(listed.Value, putHref))
+				return (listed.Value, after[listed].Value);
 
 		// Last resort: the UID query missed, the direct PUT-href GET missed (a genuinely rewritten
 		// href, not just index lag), and the naive href isn't in the listing either — the only
 		// remaining way to identify our item is by content, scanning the candidates the post-PUT
 		// listing gave us. Bounded so a large collection cannot turn one create into thousands of
 		// GETs when the server neither honoured the PUT target nor supports a UID query.
-		foreach (string candidate in after.Keys.Take(ContentScanCeiling))
+		foreach (ItemKey candidate in after.Keys.Take(ContentScanCeiling))
 		{
-			(bool verified, string? verifiedETag) = await TryVerifyByContentAsync(candidate, uid, ct)
+			(bool verified, string? verifiedETag) = await TryVerifyByContentAsync(candidate.Value, uid, ct)
 				.ConfigureAwait(false);
 			if (verified)
 			{
 				logger.LogDebug(
 					"{Protocol} stored {PutHref} under canonical href {CanonicalHref} (found via content scan)",
-					ProtocolLabel, putHref, candidate);
-				return (candidate, verifiedETag ?? after[candidate]);
+					ProtocolLabel, putHref, candidate.Value);
+				return (candidate.Value, verifiedETag ?? after[candidate].Value);
 			}
 		}
 
@@ -290,7 +328,7 @@ public abstract class DavStoreBase(
 		string href, string uid, CancellationToken ct)
 	{
 		(string Content, string? ETag)? fetched = await dav.GetAsync(href, ct).ConfigureAwait(false);
-		bool verified = fetched is { } f && string.Equals(ExtractUid(f.Content), uid, StringComparison.Ordinal);
+		bool verified = fetched is { } f && string.Equals(TryExtractUid(f.Content), uid, StringComparison.Ordinal);
 		return (verified, verified ? fetched!.Value.ETag : null);
 	}
 

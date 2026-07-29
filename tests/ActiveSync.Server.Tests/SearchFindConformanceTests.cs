@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using ActiveSync.Backends.Common.Converters;
 using ActiveSync.Contracts;
 using ActiveSync.Core.State;
 using ActiveSync.Protocol;
@@ -24,9 +25,6 @@ public sealed class SearchFindConformanceTests : IDisposable
 
 	public SearchFindConformanceTests()
 	{
-		// An encodable body so a Search/Find hit round-trips through the WBXML codec.
-		_harness.Session.Store.ItemApplicationData = _ =>
-			[new XElement(ASB + "Body", new XElement(ASB + "Type", "1"), new XElement(ASB + "Data", "preview"))];
 	}
 
 	public void Dispose()
@@ -47,7 +45,7 @@ public sealed class SearchFindConformanceTests : IDisposable
 	private async Task<UserFolder> InboxAsync()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email });
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email));
 		return registry.Single();
 	}
 
@@ -169,8 +167,8 @@ public sealed class SearchFindConformanceTests : IDisposable
 	public async Task Find_MailboxWide_ResultsCarryServerIdAndCollectionId_ResolvedPerHit()
 	{
 		List<UserFolder> registry = await _harness.RegisterFoldersAsync(
-			new BackendFolder { BackendKey = "imap:INBOX", DisplayName = "Inbox", Type = FolderType.Inbox, EasClass = EasClass.Email },
-			new BackendFolder { BackendKey = "imap:Archive", DisplayName = "Archive", Type = FolderType.UserMail, EasClass = EasClass.Email });
+			EasHandlerHarness.Folder("imap:INBOX", "Inbox", FolderType.Inbox, EasClass.Email),
+			EasHandlerHarness.Folder("imap:Archive", "Archive", FolderType.UserMail, EasClass.Email));
 		UserFolder inbox = registry.Single(f => f.BackendKey == "imap:INBOX");
 		UserFolder archive = registry.Single(f => f.BackendKey == "imap:Archive");
 
@@ -219,22 +217,17 @@ public sealed class SearchFindConformanceTests : IDisposable
 
 	// A 16.x client's mailbox Search must carry the same version-gated BodyPreference.Eas16
 	// flag Sync computes, not a hard-coded false — otherwise a 16.x-only shape silently disappears
-	// from Search results the same way it would from a bare ItemOperations Fetch.
-	[Fact]
-	public async Task Search_MailboxHit_Eas16Client_ThreadsEas16IntoBodyPreference()
+	// from Search results the same way it would from a bare ItemOperations Fetch. The preference
+	// is HOST-side now (a store never sees one), so the gate is asserted where it is decided.
+	[Theory]
+	[InlineData("16.1", true)]
+	[InlineData("16.0", true)]
+	[InlineData("14.1", false)]
+	public void Search_PreviewBodyPreference_CarriesTheVersionGate(string version, bool expected)
 	{
-		await InboxAsync();
-		SeedHits(1);
+		BodyPreference preview = SearchHandler.PreviewPreference(EasVersion.Parse(version));
 
-		await _harness.RunAsync(NewSearch(), "Search",
-			new XDocument(new XElement(S + "Search",
-				new XElement(S + "Store",
-					new XElement(S + "Name", "Mailbox"),
-					new XElement(S + "Query", new XElement(S + "FreeText", "hello")),
-					new XElement(S + "Options", new XElement(S + "Range", "0-0"))))),
-			protocolVersion: "16.1");
-
-		Assert.True(_harness.Session.Store.FetchedBodyPreferences.Single().Eas16);
+		Assert.Equal(expected, preview.Eas16);
 	}
 
 	// A request whose offset is at/beyond the fetch cap must be refused without hitting the

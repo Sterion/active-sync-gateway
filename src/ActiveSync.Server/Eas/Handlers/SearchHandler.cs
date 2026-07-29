@@ -94,14 +94,7 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 				// Skip the requested offset, then fetch the page's bodies in ONE batched call per
 				// folder instead of a sequential GetItemAsync per hit.
 				List<SearchHit> page = hits.Skip(start).Take(pageSize).ToList();
-				// eas16 must ride the same way it does through Sync/ItemOperations — a
-				// hard-coded false silently drops 16.x-only shapes from Search results too.
-				BodyPreference preview = new()
-				{
-					Type = BodyType.PlainText,
-					TruncationSize = 1024,
-					Eas16 = context.Version >= EasVersion.V160
-				};
+				BodyPreference preview = PreviewPreference(context.Version);
 				Dictionary<(string, string), object?> fetched = new();
 				foreach (IGrouping<FolderKey, SearchHit> group in page.GroupBy(h => h.Folder))
 				{
@@ -144,6 +137,22 @@ public sealed class SearchHandler(FolderService folders, ILogger<SearchHandler> 
 	private const int DefaultPageSize = 100;
 	private const int MaxPageSize = 100;
 	private const int MaxFetch = 500;
+
+	/// <summary>
+	///   The body preference a mailbox Search hit is rendered with: a short plain-text preview,
+	///   and the version gate riding the same way it does through Sync/ItemOperations — a
+	///   hard-coded false would silently drop 16.x-only shapes from Search results too. Named
+	///   (rather than inline) so the gate itself is directly assertable.
+	/// </summary>
+	internal static BodyPreference PreviewPreference(EasVersion version)
+	{
+		return new BodyPreference
+		{
+			Type = BodyType.PlainText,
+			TruncationSize = 1024,
+			Eas16 = version >= EasVersion.V160
+		};
+	}
 
 	private static (int Start, int PageSize) ParseRange(string? range)
 	{
